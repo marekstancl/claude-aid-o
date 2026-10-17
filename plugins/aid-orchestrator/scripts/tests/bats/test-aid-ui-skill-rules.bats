@@ -125,3 +125,23 @@ setup() {
   P="$BATS_TEST_TMPDIR/p"; mkdir -p "$P"; bash "$C/scripts/aid-ui-state.sh" init "$P" >/dev/null
   run bash "$C/scripts/aid-ui-state.sh" method "$P" identity; [ "$status" -ne 0 ]; [[ "$output" == *"logo-postup.md"*"missing"* ]]
 }
+
+@test "local-layer: each place's method reads its procedure and both roles' rubrics; every layered step names its place round; D3 default" {
+  chk() {   # chk <method> <procedure> <place>...
+    local m="$1" pr="$2"; shift 2
+    jq -e --arg m "$m" --arg f "skills/ui-design/references/local/$pr" '.methods[$m].files | index($f) != null' "$SK/sections.json" >/dev/null || { echo "$m: no $pr"; return 1; }
+    for pl in "$@"; do for r in tech owner; do
+      f="skills/ui-design/critic/web-local.$r.$pl.yaml"; [ "$pl" != web ] || f="skills/ui-design/critic/web-local.$r.yaml"
+      jq -e --arg m "$m" --arg f "$f" '.methods[$m].files | index($f) != null' "$SK/sections.json" >/dev/null || { echo "$m: no $f"; return 1; }
+    done; done
+  }
+  chk vision sdeleni-postup.md sdeleni; chk sources sdeleni-postup.md sdeleni; chk product_context sdeleni-postup.md sdeleni
+  chk identity logo-postup.md logo; chk build pohyb-znacky.md pohyb; chk structure struktura-postup.md struktura
+  chk task_map struktura-postup.md struktura; chk content_plan struktura-postup.md struktura; chk direction vzhled-postup.md vzhled
+  chk approve_page kontrola-postup.md web vzhled struktura; chk handover kontrola-postup.md web vzhled struktura
+  for s in 1p-sources 1v-vision 1i-identity 1s-seo 2-structure 3-content-plan 4-references 5-directions 6-build 7-verify 8-quality; do
+    grep -m1 '^\*\*Vrstva dílny (P113):\*\*' "$SK/steps/$s.md" | grep -qE 'aid-ui-quality\.py round <projekt> --place (sdeleni|logo|pohyb|struktura|vzhled|web)' || { echo "$s: no place round"; return 1; }
+  done
+  grep -qF "výchozí doporučení, když klient" "$SK/references/local/struktura-postup.md"
+  ! grep -rniE 'projekční kancel|rýsování|prolínání prostor|po obcích|výkresový list|měřítková řada|postavené domy|naše stavby|kuželkárn|283/2021|ČKAIT|\bTrading\b|název se odkryje' "$SK/references/local"
+}

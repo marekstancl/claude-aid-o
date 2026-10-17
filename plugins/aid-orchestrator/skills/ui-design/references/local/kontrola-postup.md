@@ -60,7 +60,7 @@ Důkaz F7: brána v kole 1 běžela na telefonních šířkách jen na vzorku 30
   v emulaci prohlížeče lže.
 - **Pohyb značky se musí dostat do stavby:** F2 dodá pohyb, krok stavby ho zapojí (`pohyb-znacky.md`), kontrola ověří,
   že na úvodu běží (dílna: stavbař dostal „žádná animace loga“ a pohyb chyběl, dokud si PM nevšiml). Měří se: jméno
-  v logu čitelné od začátku, značka ≤ 1 s, kóta 400–500 ms, po 1 s nic neběží, omezený pohyb = hotový stav.
+  v logu čitelné od začátku, značka ≤ 1 s, detail oboru 400–500 ms, po 1 s nic neběží, omezený pohyb = hotový stav.
   (doplněno F7, neověřeno) Stejné limity jsou nově v `pohyb-znacky.md` a v `critic/web-local.*.pohyb.gates.yaml`
   (`metrics`); v F7 si odporovaly (pohyb schválený v E3 2,2 s × kontrola ≤ 1 s).
   PM pohyb posuzuje na samostatné stránce s „Přehrát znovu“ a „Zpomaleně 4×“ – na webu běží jednou a v 44 px.

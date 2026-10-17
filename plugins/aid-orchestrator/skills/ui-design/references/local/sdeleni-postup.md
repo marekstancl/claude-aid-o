@@ -53,11 +53,10 @@ nemění; pořadí podle dopadu je pohled, ne číslování. Důkaz F7: deník b
    - síla věty = síla důkazu (jedna recenze = „zákazník uvádí“).
    - (doplněno F7, neověřeno) tvrzení o konkurenci do textů pro klienta (čistopis, web) **nejdou** – zůstávají
      v podrobné verzi jako odhad s datem; klient je v F7 odmítl podepsat;
-   - (doplněno F7, neověřeno) odborné pojmy a výklad předpisů podle platného znění (u staveb zákon 283/2021 od
-     1. 7. 2024); pojmy ze starého webu zkontrolovat, výklad předpisu je otázka pro klienta.
+   - (doplněno F7, neověřeno) odborné pojmy a výklad předpisů podle platného znění (předpis v platném znění); pojmy ze starého webu zkontrolovat, výklad předpisu je otázka pro klienta.
 5. **Positioning a teze:** začíná hlavní prací klienta jeho slovy (klient vrátil verzi, kde byla odsunutá); odlišení
    stojí na tom, co klient doloží sám, ne na tom, co konkurence neříká. Teze = jedna myšlenka, opřená o fakt,
-   s napětím; fráze oboru jen s konkrétním důkazem (půdorys, zakázka).
+   s napětím; fráze oboru jen s konkrétním důkazem (ukázka práce, zakázka).
 6. **Slogany** podle bodu 2 výstupu; test dosazení s nejbližšími konkrétními konkurenty z průzkumu.
 7. **Místo rozhodnutí „sdělení“:** odborník a klient podle `critic/web-local.{tech,owner}.sdeleni.yaml`, brány zná
    jen kód; kolo `aid-ui-quality.py round --place sdeleni`, rozhodnutí `aid-ui-critic.py place-verdict`. Od druhého kola oba s pamětí podle `critic/role-briefs/pamet-hodnotitele.md`. Studio dostává jen nálezy
@@ -69,13 +68,13 @@ Opakovaný běh bez paměti dílny: 1. kolo odborník 6,55 (původně 6,10), kli
 přesnosti a sloganech. Pravidla, která chyběla:
 - **Test dosazení = je věta po dosazení konkurenta stále PRAVDIVÁ?** Ne „ukazuje to konkurent na webu?“. „Přes 120
   projektů“ je pravdivé i pro konkurenta s 300 projekty → zaměnitelné. Odlišený slogan nese vlastnost, kterou konkurent
-  nemá (např. dohledatelnost staveb po obcích), ne číslo nebo rozsah, který má i on.
+  nemá (např. dohledatelnost zakázek v okolí), ne číslo nebo rozsah, který má i on.
 - **Údaj z cizího zdroje nebo ze starého webu je pro klienta „Ke kontrole“**, i když je doložený: hodnocení a citace
   z katalogů, kontakty, počty, roky zakázek. V čistopisu se uvádí jako otázka, ne jako hotová věc.
 - **Žádná zobecnění bez doložení** („každý rok“, „nikdo si vás nepředává“, „stejná péče“) – co dělají spolupracovníci
-  (statika, PBŘ, PENB), se nesmí zamlčet větou o jednom člověku.
-- **Hlavní důraz klienta zůstává, i když je to fráze oboru** (u zkušebního podniku dispozice a prolínání prostor): nevyřazuje se,
-  doloží se konkrétním příkladem (půdorys, zakázka). Klient se jinak „nepozná“.
+  (navazující odborné profese), se nesmí zamlčet větou o jednom člověku.
+- **Hlavní důraz klienta zůstává, i když je to fráze oboru** (u zkušebního podniku jeho hlavní řemeslná přednost): nevyřazuje
+  se, doloží se konkrétním příkladem (ukázka práce, zakázka). Klient se jinak „nepozná“.
 - **Jeden seznam otázek pro klienta** – čistopis a Ke kontrole mají stejné body ve stejném pořadí.
 - **Typ podniku:** živnost nebo kancelář s portfoliem zakázek a bez ceníku (projektant, architekt, řemeslník na zakázku)
   se řídí sloupcem „B2B s portfoliem“, i když zákazníci jsou soukromé osoby.
@@ -105,6 +104,6 @@ stavby“, bez zadání a výsledku). Postup:
 | Slogany | 5 směrů | 5 směrů | 5 směrů | bez sloganu (váha se rozdělí) |
 | Důkaz odlišení | zakázky v okolí | zakázka zadání → řešení → výsledek | funkce + výsledek uživatele | úspora proti stávajícímu postupu |
 
-Na papíře: Coufal (B2B s portfoliem) – hlas zákazníka z referencí a zadání, konkurence = studia v regionu; Trading
-(aplikace) – konkurence = stávající postup a jiné nástroje. Obojí v měřítku už je (persona rules), postup to výše
+Na papíře: B2B s portfoliem – hlas zákazníka z referencí a zadání, konkurence = studia v regionu; aplikace –
+konkurence = stávající postup a jiné nástroje. Obojí v měřítku už je (persona rules), postup to výše
 pojmenovává.

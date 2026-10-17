@@ -6,7 +6,7 @@ user_invocable: false
 
 # Krok 6 - Stavba
 
-**Vrstva dílny (P113):** stavba doplňuje živou kostru v `site/` (`aid-ui-serve.sh skeleton`), nezačíná z prázdné složky; pohyb značky zapoj podle `references/local/pohyb-znacky.md` (na webu ≤ 1 s, jméno hned). `build-record` vyžaduje verdikt místa `pohyb` (nebo výjimku PM bez pohybu). Místo: `pohyb`.
+**Vrstva dílny (P113):** stavba doplňuje živou kostru v `site/` (`aid-ui-serve.sh skeleton`), nezačíná z prázdné složky; pohyb značky zapoj podle `references/local/pohyb-znacky.md` (na webu ≤ 1 s, jméno hned). `build-record` vyžaduje verdikt místa `pohyb` (nebo výjimku PM bez pohybu). Místo: `pohyb`. Kolo místa: `aid-ui-quality.py round <projekt> --place pohyb`.
 
 **Last Updated:** 2026-09-30
 

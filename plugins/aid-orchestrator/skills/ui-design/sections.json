@@ -375,7 +375,9 @@
    "files": [
     "skills/ui-design/steps/1p-sources.md",
     "skills/ui-design/references/adopted/marketingskills/customer-research/references/source-guides.md",
-    "skills/ui-design/references/local/sdeleni-postup.md"
+    "skills/ui-design/references/local/sdeleni-postup.md",
+    "skills/ui-design/critic/web-local.tech.sdeleni.yaml",
+    "skills/ui-design/critic/web-local.owner.sdeleni.yaml"
    ],
    "receipt": false
   },
@@ -385,7 +387,9 @@
     "skills/ui-design/references/adopted/marketingskills/customer-research/SKILL.md",
     "skills/ui-design/references/adopted/marketingskills/customer-research/references/interviews-and-surveys.md",
     "skills/ui-design/references/adopted/marketingskills/copy-editing/references/content-refresh.md",
-    "skills/ui-design/references/local/sdeleni-postup.md"
+    "skills/ui-design/references/local/sdeleni-postup.md",
+    "skills/ui-design/critic/web-local.tech.sdeleni.yaml",
+    "skills/ui-design/critic/web-local.owner.sdeleni.yaml"
    ],
    "receipt": true
   },
@@ -467,7 +471,9 @@
   "task_map": {
    "files": [
     "skills/ui-design/steps/2-structure.md",
-    "skills/ui-design/references/local/struktura-postup.md"
+    "skills/ui-design/references/local/struktura-postup.md",
+    "skills/ui-design/critic/web-local.tech.struktura.yaml",
+    "skills/ui-design/critic/web-local.owner.struktura.yaml"
    ],
    "receipt": true
   },
@@ -486,7 +492,9 @@
     "skills/ui-design/references/copy-rules.md",
     "skills/ui-design/references/copy-sk.md",
     "skills/ui-design/references/copy-cs.md",
-    "skills/ui-design/references/local/struktura-postup.md"
+    "skills/ui-design/references/local/struktura-postup.md",
+    "skills/ui-design/critic/web-local.tech.struktura.yaml",
+    "skills/ui-design/critic/web-local.owner.struktura.yaml"
    ],
    "receipt": true
   },
@@ -500,7 +508,9 @@
    "files": [
     "skills/ui-design/steps/4-references.md",
     "skills/ui-design/references/genericity-rubric.md",
-    "skills/ui-design/references/local/vzhled-postup.md"
+    "skills/ui-design/references/local/vzhled-postup.md",
+    "skills/ui-design/critic/web-local.tech.vzhled.yaml",
+    "skills/ui-design/critic/web-local.owner.vzhled.yaml"
    ],
    "receipt": true
   },
@@ -552,7 +562,13 @@
   "approve_page": {
    "files": [
     "skills/ui-design/steps/7-verify.md",
-    "skills/ui-design/references/local/kontrola-postup.md"
+    "skills/ui-design/references/local/kontrola-postup.md",
+    "skills/ui-design/critic/web-local.tech.yaml",
+    "skills/ui-design/critic/web-local.owner.yaml",
+    "skills/ui-design/critic/web-local.tech.vzhled.yaml",
+    "skills/ui-design/critic/web-local.owner.vzhled.yaml",
+    "skills/ui-design/critic/web-local.tech.struktura.yaml",
+    "skills/ui-design/critic/web-local.owner.struktura.yaml"
    ],
    "receipt": false
   },
@@ -560,7 +576,13 @@
    "files": [
     "skills/ui-design/steps/7-verify.md",
     "skills/ui-design/references/local/kontrola-postup.md",
-    "skills/ui-design/references/local/vzory/README.md"
+    "skills/ui-design/references/local/vzory/README.md",
+    "skills/ui-design/critic/web-local.tech.yaml",
+    "skills/ui-design/critic/web-local.owner.yaml",
+    "skills/ui-design/critic/web-local.tech.vzhled.yaml",
+    "skills/ui-design/critic/web-local.owner.vzhled.yaml",
+    "skills/ui-design/critic/web-local.tech.struktura.yaml",
+    "skills/ui-design/critic/web-local.owner.struktura.yaml"
    ],
    "receipt": false
   },

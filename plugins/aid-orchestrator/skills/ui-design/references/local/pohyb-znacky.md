@@ -13,13 +13,14 @@ Rozhodnutí PM (14. 10.): animované logo je součást sady značky (krok loga);
 třech návrzích vzhledu; logo a hero nesou pohyb značky, zbytek stránky smí nést pohyb vzoru (krok 3–5).
 
 ## Pohybový jazyk
-- Odvoď ho z tezí a ze stavby loga (ne z cizího webu): u zkušebního podniku (projekční kancelář) „rýsování“ – tenká konstrukční linka vede tah,
-  tvar se vyplní; pořadí jako na výkrese: nejdřív předmět, pak kóty; název se odkryje spolu s kótou.
+- Odvoď ho z tezí a ze stavby loga (ne z cizího webu): z toho, jak obor podniku pracuje (např. tenká konstrukční linka
+  vede tah a tvar se vyplní; pořadí jako v řemesle: nejdřív předmět, pak detail oboru). Název a podtitul jsou vidět
+  od prvního snímku, kreslí se jen značka a její detail (limity níže).
 - Vlastní detail z oboru (kóta, razítko…) se kreslí i animuje **podle konvencí oboru** (kóta odsazená od předmětu,
-  pomocné čáry z předmětu, kótuje se až nakreslený předmět) – hodnotitelé to sami nepoznají, PM to na zkušebním podniku našel.
+  pomocné čáry z předmětu, kótuje se až nakreslený předmět) – hodnotitelé to sami nepoznají, PM to v dílně našel.
 - Tempo: téměř rovnoměrný tah s krátkým dojezdem, fáze se překrývají, žádné pružení, blikání, otáčení, zvětšování.
 - **Limity (doplněno F7, neověřeno; rozhodnutí PM v F6 „B zkrácený“):**
-  - **na webu** (hlavička, hero, úvodní obrazovka): značka se dokreslí **≤ 1 s** (dílna 0,9 s), detail oboru (kóta)
+  - **na webu** (hlavička, hero, úvodní obrazovka): značka se dokreslí **≤ 1 s** (dílna 0,9 s), detail oboru
     400–500 ms, **jméno a podtitul čitelné od prvního snímku** (nekreslí se, neodkrývají se), po 1 s nic neběží;
   - **samostatné video a prezentace** smí delší verzi 2–3 s (konec drží ≥ 0,9 s, logo čitelné nejpozději v polovině);
     na web se nevkládá;

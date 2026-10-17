@@ -206,7 +206,8 @@ class H(http.server.BaseHTTPRequestHandler):
         open(T + "/answered", "w").close(); self.send(200, {"ok": True})
 http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
 PY
-  mkdir -p "$P/.aid-ui"; python3 "$T/studio.py" "$PORT" "$P" "$T" & SRV=$!
+  mkdir -p "$P/.aid-ui"; echo 0123456789abcdef0123456789abcdef > "$P/.aid-ui/studio.token"   # P113: the client answers with the agent token
+  python3 "$T/studio.py" "$PORT" "$P" "$T" & SRV=$!
   for _ in $(seq 50); do curl -s "http://127.0.0.1:$PORT/state" >/dev/null && break; sleep 0.1; done
   printf '{"answer": {"decision": "choose", "choice": "a", "comment": "teplejší"}, "feedback": {"question_clear": 4}}' > "$T/client.json"
   CODEX_ANS="$T/client.json" run python3 "$CL" answer "$P" --studio "http://127.0.0.1:$PORT" --once; [ "$status" -eq 0 ] || { echo "$output"; return 1; }

@@ -32,14 +32,15 @@ z registru faktů a `structure.json`, čekající bloky podle stavu faktu, nic n
    každá adresa jeden cíl 301, včetně souborů (PDF, obrázky), kategorií a výjimek; vzor pro sérii (projekty);
    technické adresy 410. Nic se nemaže bez nového místa (Google Search Central, přesun webu).
 2a. **Rozsah obsahu – rozhodnutí klienta/PM, ne studia (doplněno F7, neověřeno).** Z inventury vyjde počet položek
-   portfolia (dílna: přes sto zakázek v desítkách obcí). Před stromem se rozhodne a zapíše jako otázka pro klienta s doporučením:
+   portfolia (dílna: přes sto položek). Před stromem se rozhodne a zapíše jako otázka pro klienta s doporučením:
    (a) **všechny položky** jako stránky (detail každé zakázky, filtr; úplnost, zachované adresy, víc práce s fotkami
-   a texty), (b) **výběr** 8–12 vzorových položek s detailem + úplný seznam bez detailů, (c) jen výběr. Volbu dělá
+   a texty), (b) **výběr** 8–12 vzorových položek s detailem + úplný seznam bez detailů - **výchozí doporučení, když klient
+   neurčí jinak (D3, PM 17. 10. 2026)**, (c) jen výběr. Volbu dělá
    klient (v ručním režimu PM); studio uvede dopad na počet stránek, přesměrování a „Co dodáte vy“. Důkaz F7: běh dal
    všechny (přes 150 stránek), dílna výběr (11 stránek s označenými místy); naslepo obě role zvolily úplnost,
    PM vzhled dílny – bez výslovné volby rozhoduje náhoda postupu.
 3. **Strom a menu z úkolů:** hlavní úkoly do jedné volby (položky menu slovy zákazníka, pojem oboru správně –
-   např. „drobné stavby“ podle zákona 283/2021), kontakt v menu, „Poptat“ a telefon v hlavičce na každé stránce.
+   pojem podle platného předpisu oboru), kontakt v menu, „Poptat“ a telefon v hlavičce na každé stránce.
 4. **Sekce každé stránky:** co říká (teze), akce, typ důkazu a zdroj. Na každé stránce služby „jak dostanete cenu“
    (u podniku bez ceníku způsob nacenění). Sekce bez úkolu nebo sdělení se nenavrhuje. B2B: stránka reference
    zadání → řešení → výsledek, portfolio s filtrem typ × místo × rok.
@@ -64,11 +65,11 @@ z registru faktů a `structure.json`, čekající bloky podle stavu faktu, nic n
 - **Obsah, který se slučuje, se nezkracuje bez otázky** (např. seznam podporovaných organizací při sloučení stránek).
 - **Hlavní úkol musí mít odpověď i bez čísla od klienta** (u „jak dlouho“: co dobu ovlivňuje, zákonné lhůty úřadu),
   číslo klienta ji jen zpřesní; odpověď na jednom místě, které štítek slibuje.
-- **Štítky slovy zákazníka i u portfolia** („Postavené domy“, „Naše stavby“, ne „Projekty“ v projekční kanceláři,
-  kde se plete s nabídkou projektu); adresa = štítek; filtr obsahuje všechny obce z karet.
+- **Štítky slovy zákazníka i u portfolia** (ne slovo, které se plete s nabídkou služby); adresa = štítek; filtr
+  obsahuje všechny hodnoty z karet.
 - **Povinné údaje:** zápis s.r.o. v obchodním rejstříku a IČO (§ 435 OZ), cookies jako řádek Ke kontrole, právní
-  stránky; regulovaný titul přesně („autorizovaný inženýr“ s oborem podle ČKAIT).
-- **Úkoly zákazníka i z doplňkových služeb, které lidé hledají** (např. rozpočet pro banku / hypotéku).
+  stránky; regulovaný titul přesně podle profesní komory oboru.
+- **Úkoly zákazníka i z doplňkových služeb, které lidé hledají** (např. podklad pro banku).
 - **Přesměrování ročníků a kategorií na statické adresy**, ne na parametr, který brief kanonizuje jinam.
 - **Seznam „Co dodáte vy“:** u každé položky termín, celkový čas a stejná čísla jako v kostře.
 - Nástroj kostry: telefon a značka z konfigurace (ne natvrdo), čekající bloky podle pole `stav`, ne podle slov v textu,
@@ -82,9 +83,9 @@ z registru faktů a `structure.json`, čekající bloky podle stavu faktu, nic n
 - **Soubory (fotky, PDF) mohou zůstat na stejné adrese** místo 301 1 : 1, když nové místo neexistuje; zapsat jako vzor.
 - **Zrušení služby ze starého webu = otázka pro klienta**, stejně jako slučování (F7: poradenství, klient vrátil).
 - **Výklad předpisu na webu (lhůty, co nepotřebuje povolení) je tvrzení ke kontrole klientem** se zdrojem a datem;
-  pojmy podle platného znění (stavební zákon 283/2021 od 1. 7. 2024), ne podle starého webu.
-- **Štítek portfolia:** rada „Postavené domy / Naše stavby“ neplatí, když klient sám nestaví (F7: „já navrhuji“) –
-  štítek ověřit v odpovědích klienta.
+  pojmy podle platného znění předpisu, ne podle starého webu.
+- **Štítek portfolia:** štítek, který slibuje jinou roli, než klient má (F7: klient službu navrhuje, neprovádí),
+  neplatí - štítek ověřit v odpovědích klienta.
 
 ## Podle typu
 | | místní služba | B2B s portfoliem | webová aplikace | interní aplikace |

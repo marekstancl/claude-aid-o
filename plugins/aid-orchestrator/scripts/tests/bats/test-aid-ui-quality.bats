@@ -54,7 +54,7 @@ a = None if s < 4 else max(x for x in (4, 6, 8, 10) if x <= s)
 print(json.dumps({"criteria": [{"id": c["id"], "score": s, "anchor": a, "evidence": "úvod: nadpis a fotka pece", "missing_for_next": "víc", "to_ten": {"studio": ["úvod: vlastní fotka ordinace přes celou šířku"], "client": []}}
   for c in r["criteria"]], "findings": [
   {"id": "f1", "criterion": c0, "severity": sys.argv[3], "owner": "agent", "kind": "remeslo", "blocking": False, "text": "obecná věta", "fix": "konkrétně", "where": "úvod"},
-  {"id": "f2", "criterion": c0, "severity": "major", "owner": "client", "kind": "volba", "text": "chybí fotky", "fix": "dodat", "where": "o nás"}],
+  {"id": "f2", "criterion": c0, "severity": "major", "owner": "client", "kind": "volba", "blocking": False, "text": "chybí fotky", "fix": "dodat", "where": "o nás"}],
   "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
 PY
   done

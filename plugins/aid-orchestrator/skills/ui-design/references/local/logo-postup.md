@@ -42,8 +42,8 @@ agenta, který je vytvořil (fáze 4b „kurátorství“) – tak prošlo fádn
 - Směr, ze kterého nic neprošlo, se klientovi neukazuje. Neobchází se.
 - (doplněno F7, neověřeno) Na sítu platí z měřítka jen myšlenka, odlišnost, falešná čtení, klišé proti polici
   a čitelnost tvaru v 16 px; typografie, přesné proporce a kontexty až na kartách.
-- (doplněno F7, neověřeno) Když se rada síta bije s polici (F7: kóta přes celou střechu → obrys domu jako
-  u konkurenta), má přednost police; studio odchylku zapíše na kartu s důvodem a odborník ji posoudí.
+- (doplněno F7, neověřeno) Když se rada síta bije s polici (F7: rada síta vedla k obrysu, jaký má
+  konkurent), má přednost police; studio odchylku zapíše na kartu s důvodem a odborník ji posoudí.
 
 ## 4. Čistá kresba v kódu
 
@@ -66,9 +66,9 @@ agenta, který je vytvořil (fáze 4b „kurátorství“) – tak prošlo fádn
   vybraný směr a jeho výtky k ostatním směrům platí jen tam, kde se týkají všech karet; klientova brána „můj podnik“
   pak padá z principu (F7: 6 < 8) – zaznamenat jako rozpor volby, ne jako vadu směru. Paměť klienta je jedna
   přes všechna místa i odpovědi ve studiu (`scripts/lib/aid_ui_memory.py`); rozhodnutí PM v ní stojí zvlášť.
-- (doplněno F7, neověřeno) Karta nese i kontexty, které zadání jmenuje navíc (razítko výkresu, oděv, fólie):
+- (doplněno F7, neověřeno) Karta nese i kontexty, které zadání jmenuje navíc (razítko, oděv, fólie):
   `logo-sheet --cards` je bere ze zadání značky.
-- Malý řez (16 px) smí zkrátit nebo vypustit detail (svah, kótu), poměr hlavních tvarů zavedeného motivu drží.
+- Malý řez (16 px) smí zkrátit nebo vypustit detail oboru, poměr hlavních tvarů zavedeného motivu drží.
 
 ## 6. Hloubkové kolo (vybraný směr)
 

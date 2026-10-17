@@ -17,26 +17,26 @@ směru `vzhled-vzor/`.
 - **Pohyb:** pohyb značky (F2, `pohyb-znacky.md`) má přednost; ze vzoru jen pohyb níž na stránce, měřený nástrojem.
 
 ## Postup
-1. **Tokeny ze značky** (`tokens.css`): barvy z loga s kontrolou kontrastu (zelená loga pro grafiku, tmavší odstín
+1. **Tokeny ze značky** (`tokens.css`): barvy z loga s kontrolou kontrastu (barva loga pro grafiku, tmavší odstín
    pro text a tlačítka – klientovi vysvětlit v podkladech), písmo loga pro nadpisy + čitelné písmo textu s plnou
    češtinou, mono pro popisky a čísla, mřížka 12 sloupců, škála mezer, rohy, pohyb, poměry výřezů obrázků, tokeny
    podle účelu (`--c-*`), `--error` odlišná od „čeká na klienta“. Písma lokálně (žádný cizí server před souhlasem).
-2. **Obrazový materiál klienta**: stáhnout z jeho webu (sitemap → stránky zakázek → `wp-content/uploads`, originály
+2. **Obrazový materiál klienta**: stáhnout z jeho webu (sitemap → stránky zakázek → nahrané soubory, originály
    bez `-WxH`), WebP do 200 kB (výjimka: hlavní obrázek s ≥ 2× hustotou do 300 kB), 200w/800w/plné, srcset a rozměry.
    Žádné fotobanky ani generované stavby. Přiřazení obrázku k zakázce = fakt „Ke kontrole“, pokud není jisté.
 3. **Texty vzorku** (`copy.md`) pro úvod, hlavní službu, portfolio a kontakt – z registru faktů, bloky „ČEKÁ“
    jako označená místa; ostatní stránky jako popsané bloky s podkladem. Celé texty až s fakty klienta.
-4. **Tři směry podle principu odvozeného z tezí** (např. výkresový list / stavby po obcích / měřítková řada staveb),
+4. **Tři směry podle principu odvozeného z tezí** (tři různé principy, každý z jiné teze nebo jiného prvku značky),
    každý na úvodu, službě, portfoliu a telefonu, se společnými tokeny a texty (`zadani-smeru.md`). Vzory z oboru
    i mimo něj jen jako inspirace; rubrika obecnosti platí.
 5. **Místo rozhodnutí „vzhled“ naslepo** (`aid-ui-quality.py round --place vzhled`): směry studia (i případné od dnešního kroku) zamíchané jako karty
    (počítač + telefon), odborník a klient podle `critic/web-local.{tech,owner}.vzhled.yaml`, PM Top / Jakž takž / Ne.
-   Kombinace dvou vítězných směrů je dovolená, když sdílejí jazyk (dílna: výkresový list + měřítková řada).
+   Kombinace dvou vítězných směrů je dovolená, když sdílejí jazyk (dílna spojila dva principy se společným obrazovým jazykem).
 6. **Hloubkové kolo:** vítěz na všechny stránky kostry, kontrola Playwrightem (1440/390/320 px, světlý i tmavý,
    omezený pohyb, fokus, dotykové plochy, žádný posun do strany), odborník a klient s pamětí do brány.
    Pozor na regrese při opravách (dílna: náhledová verze obrázku shodila jinak opravené kritérium).
-7. **Podklady pro klienta:** proč tmavší zelená, co dodat za fotky (typ stavby u každého prázdného místa), jak přidat
-   stavbu nebo vyměnit fotku (návod k údržbě), seznam otázek se stejnými čísly jako na webu.
+7. **Podklady pro klienta:** proč tmavší odstín barvy loga, co dodat za fotky (typ záběru u každého prázdného místa),
+   jak přidat položku nebo vyměnit fotku (návod k údržbě), seznam otázek se stejnými čísly jako na webu.
 
 ## Doplněno F7 (opakovaný běh 16. 10. 2026, neověřeno)
 - **Naslepo doopravdy:** soubory směrů přejmenovat (K1–K3), neutrální `<title>`, z generátoru odstranit názvy směrů;
@@ -56,4 +56,4 @@ směru `vzhled-vzor/`.
 |---|---|---|---|---|
 | Směry na | úvod, služba, kontakt, telefon | úvod, služba, portfolio + detail, telefon | hlavní obrazovka + tok ve stavech | totéž, jen monitor |
 | Obrazy | fotky provozovny klienta | vizualizace, výkresy, fotky zakázek | skutečná vzorová data | skutečná data |
-| Princip směru z | tezí a značky | tezí a značky (obor: výkres, mapa, měřítko) | úloh a stavů | knihovny součástí / existujícího systému |
+| Princip směru z | tezí a značky | tezí a značky (obrazový jazyk oboru) | úloh a stavů | knihovny součástí / existujícího systému |
