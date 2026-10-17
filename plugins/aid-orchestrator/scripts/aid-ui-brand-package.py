@@ -14,8 +14,13 @@ the logo brief docs/design/brief-logo-favicon.md:
     the name in colour (SVG and PNG) for every web, webapp and PWA (a product with a public
     face), on-dark too for a web or PWA; source/ an editable master whose SVG keeps live
     <text> (the logo's name) and beside it a version in outlines (no <text>);
-  - contexts of use (section "Kontexty použití" / "Kde bude značka žít" of the brief, up to the
-    next heading of the same level) only add: print, fax, stamp, business card -> the black
+  - the main colour symbol is the largest colour SVG (P113, not the first by name);
+  - a web (type web) also: og-image.png, site.webmanifest, head-snippet.html whose og:image is an
+    absolute https address of og-image.png, and the logo motion logo-animace.html unless the PM
+    recorded the project without motion (place_verdicts.pohyb.without, P113);
+  - contexts of use (section "Kontexty použití" / "Kde bude značka žít" of the brief: a heading,
+    also numbered, up to the next heading of its level; or a bold or plain label line up to the
+    next heading or bold label) only add: print, fax, stamp, business card -> the black
     logo; PWA or an installation context -> maskable icon and lockup/ light and dark;
   - brand work without the brief or without that section is itself MISSING.
 Variants are told by whole name tokens of the path under the part (lockup/a/dark/x.svg is
@@ -69,6 +74,26 @@ def pick(fs, part, ext, want=None, extra=None):
     return None
 
 
+def main_symbol(fs, root):
+    """P113 (fix 13): the main symbol is the largest colour SVG (viewBox or width area), not the first by name - the
+    alphabet picked the 16 px cut. A file whose size cannot be read counts as 0."""
+    best, area = None, -1.0
+    for f in fs:
+        if not (f.startswith("symbol/") and f.lower().endswith(".svg") and variant_of(f[7:]) == "color"):
+            continue
+        try:
+            head = open(os.path.join(root, f), encoding="utf-8", errors="replace").read(4000)
+        except OSError:
+            continue
+        m = re.search(r'viewBox\s*=\s*"\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)', head)
+        w = re.search(r'<svg[^>]*\swidth\s*=\s*"([\d.]+)', head)
+        h = re.search(r'<svg[^>]*\sheight\s*=\s*"([\d.]+)', head)
+        a = float(w.group(1)) * float(h.group(1)) if w and h else (float(m.group(1)) * float(m.group(2)) if m else 0.0)
+        if a > area:
+            best, area = f, a
+    return best
+
+
 def ico_sizes(path):
     try:
         with open(path, "rb") as fh:
@@ -84,12 +109,16 @@ def contexts(project):
         text = open(os.path.join(project, "docs/design/brief-logo-favicon.md"), encoding="utf-8").read()
     except OSError:
         return None
-    m = re.search(r"^(#+)\s*(Kontexty použití|Kde bude značka žít).*$", text, re.M | re.I)
+    # P113 (fix 12): a heading with a prefix ("## 3. Kontexty použití"), a bold line ("**Kontexty použití:** tisk")
+    # or a plain label ("Kontexty použití: tisk") - a missed section silently dropped the black logo for print.
+    # A heading's section ends at the next heading of its level or higher; a label's at the next heading or bold label.
+    m = re.search(r"^[ \t]*(#*)[ \t]*(?:[\d.)]+[ \t]*)?(?:\*\*)?(?:Kontexty použití|Kde bude značka žít)\b(.*)$", text, re.M | re.I)
     if not m:
         return None
     rest = text[m.end():]
-    end = re.search(r"^#{1,%d}\s" % len(m.group(1)), rest, re.M)
-    return (rest[:end.start()] if end else rest).lower()
+    stop = r"^#{1,%d}\s" % len(m.group(1)) if m.group(1) else r"^(?:#+\s|[ \t]*\*\*[^*\n]+\*\*)"
+    end = re.search(stop, rest, re.M)
+    return (m.group(2) + "\n" + (rest[:end.start()] if end else rest)).lower()
 
 
 def required(project, state, root):
@@ -102,8 +131,8 @@ def required(project, state, root):
     if brand == "none" or (not ident and brand != "existing"):
         return [("icons", "favicon (svg or ico)",
                  lambda fs: pick(fs, "icons", ".svg", extra={"favicon"}) or pick(fs, "icons", ".ico", extra={"favicon"}))]
-    req = [("symbol", f"symbol {v} (SVG)", lambda fs, v=v: pick(fs, "symbol", ".svg", v))
-           for v in ("color", "black", "white", "dark")]
+    req = [("symbol", "symbol color (SVG), the main one = the largest colour variant", lambda fs: main_symbol(fs, root))]
+    req += [("symbol", f"symbol {v} (SVG)", lambda fs, v=v: pick(fs, "symbol", ".svg", v)) for v in ("black", "white", "dark")]
     req.append(("icons", "favicon.svg", lambda fs: pick(fs, "icons", ".svg", extra={"favicon"})))
 
     def ico(fs):
@@ -135,6 +164,26 @@ def required(project, state, root):
         return None
     req.append(("source", "editable master with the name as live <text> (SVG)", lambda fs: live(fs, False)))
     req.append(("source", "the same in outlines, no <text> (SVG, named *outlines*)", lambda fs: live(fs, True)))
+    if vtype == "web":
+        # P113: what a web page links from its <head> (export_variants.py --web-icons) and the social preview with an
+        # absolute address (a relative og:image is not shown by the networks), and the logo motion unless the PM
+        # recorded the project without motion (place pohyb, aid-ui-state.sh place-record --place pohyb --without)
+        req.append(("icons", "og-image.png (social preview)", lambda fs: next((f for f in fs if os.path.basename(f) == "og-image.png"), None)))
+        req.append(("icons", "site.webmanifest", lambda fs: next((f for f in fs if os.path.basename(f) == "site.webmanifest"), None)))
+
+        def snippet(fs):
+            for f in fs:
+                if os.path.basename(f) == "head-snippet.html":
+                    try:
+                        s = open(os.path.join(root, f), encoding="utf-8", errors="replace").read()
+                    except OSError:
+                        return None
+                    return f if re.search(r"""<meta[^>]+property\s*=\s*["']og:image["'][^>]+content\s*=\s*["']https?://[^"'/]+/[^"']*og-image\.png""", s, re.I) else None
+            return None
+        req.append(("icons", "head-snippet.html with og:image as an absolute https address of og-image.png", snippet))
+        if not ((state.get("place_verdicts") or {}).get("pohyb") or {}).get("without"):
+            req.append(("motion", "logo-animace.html (the logo motion, aid-ui-logo-motion.py)",
+                        lambda fs: next((f for f in fs if os.path.basename(f) == "logo-animace.html"), None)))
     if vtype == "pwa" or re.search(PWA_CTX, ctx):
         req.append(("icons", "maskable icon (PNG)", lambda fs: pick(fs, "icons", ".png", extra={"maskable"})))
         for v in ("light", "dark"):

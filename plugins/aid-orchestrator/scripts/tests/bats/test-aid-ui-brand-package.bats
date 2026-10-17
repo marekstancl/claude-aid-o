@@ -26,6 +26,12 @@ full() {   # every part a public web needs
   ico "$B/icons/favicon.ico"
   echo '<svg><text>Pekárna</text></svg>' >"$B/source/logo-master.svg"
   echo '<svg><path d="M0 0"/></svg>' >"$B/source/logo-master-outlines.svg"
+  web_parts
+}
+web_parts() {   # P113: what a web links from its <head>, the social preview with an absolute address, the logo motion
+  mkdir -p "$B/motion"
+  touch "$B/icons/og-image.png" "$B/icons/site.webmanifest" "$B/motion/logo-animace.html"
+  echo '<link rel="manifest" href="/site.webmanifest"><meta property="og:image" content="https://pekarna.cz/og-image.png">' >"$B/icons/head-snippet.html"
 }
 
 @test "an internal tool (brand none) needs a favicon only; brand none with identity work is exit 2" {
@@ -122,4 +128,45 @@ full() {   # every part a public web needs
 @test "no readable state is a usage error (exit 2)" {
   run python3 "$CHECK" "$P"
   [ "$status" -eq 2 ]; [[ "$output" == *"brand-state.json"* ]]
+}
+
+# ---------------------------------------------------------------- P113 step 8
+@test "p113: package - a web needs og-image.png, site.webmanifest and a head snippet whose og:image is an absolute address" {
+  state web new '"new"'; contexts '1. Hlavička webu.'; full
+  run python3 "$CHECK" "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  # a relative og:image is not shown by the networks
+  echo '<meta property="og:image" content="/og-image.png">' >"$B/icons/head-snippet.html"
+  run python3 "$CHECK" "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"MISSING icons head-snippet.html with og:image as an absolute https address"* ]]
+  web_parts; rm "$B/icons/og-image.png" "$B/icons/site.webmanifest"
+  run python3 "$CHECK" "$P"; [ "$status" -eq 1 ]
+  [[ "$output" == *"MISSING icons og-image.png"* ]]; [[ "$output" == *"MISSING icons site.webmanifest"* ]]
+  # a webapp is not asked for them
+  web_parts; rm "$B/icons/og-image.png"; state webapp new '"new"'
+  run python3 "$CHECK" "$P"; ! [[ "$output" == *"og-image"* ]]
+}
+
+@test "p113: package - the logo motion is required for a web, waived only by the PM's place pohyb without record" {
+  state web new '"new"'; contexts '1. Hlavička webu.'; full; rm "$B/motion/logo-animace.html"
+  run python3 "$CHECK" "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"MISSING motion logo-animace.html"* ]]
+  # a pohyb verdict that is not "without" does not waive it
+  state web new '"new"' '"place_verdicts":{"pohyb":{"place":"pohyb","status":"accepted","chosen":"a"}}'
+  run python3 "$CHECK" "$P"; [ "$status" -eq 1 ]
+  state web new '"new"' '"place_verdicts":{"pohyb":{"place":"pohyb","status":"accepted","without":"q-bez","chosen":null}}'
+  run python3 "$CHECK" "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  ! [[ "$output" == *"logo-animace"* ]]
+}
+
+@test "p113: package - contexts as a numbered heading, a bold line or a plain label are read (print asks for the black logo); the main symbol is the largest colour one" {
+  state web new '"new"'; full
+  for brief in $'# Zadání\n## 3. Kontexty použití\n- vizitky\n## 4. Motivy\n' $'**Kontexty použití:** web a razítko\n**Barvy:** modrá\n' $'Kontexty použití: fax\n\n# Další\n'; do
+    printf '%s' "$brief" >"$P/docs/design/brief-logo-favicon.md"
+    run python3 "$CHECK" "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"MISSING logo logo with the name, black"* ]] || { echo "not read: $brief"; return 1; }
+  done
+  # a context after the section is not part of it
+  printf '**Kontexty použití:** web\n**Barvy:** tisk modrou\n' >"$P/docs/design/brief-logo-favicon.md"
+  run python3 "$CHECK" "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  # the 16 px cut first by name, the full mark larger: the main symbol is the full one
+  rm "$B/symbol/s-color.svg"
+  echo '<svg viewBox="0 0 16 16"></svg>' >"$B/symbol/a-color-16.svg"; echo '<svg viewBox="0 0 512 512"></svg>' >"$B/symbol/b-color.svg"
+  run python3 "$CHECK" "$P"; [[ "$output" == *"OK symbol symbol color (SVG), the main one = the largest colour variant: symbol/b-color.svg"* ]]
 }

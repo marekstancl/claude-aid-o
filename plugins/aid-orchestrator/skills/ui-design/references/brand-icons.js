@@ -1,7 +1,12 @@
-// brand-icons.js - /aid-ui step 1i: renders the brand icon set through the Playwright
-// MCP (mcp__plugin_playwright_playwright__browser_run_code_unsafe), no node_modules.
+// brand-icons.js - /aid-ui step 1i: re-renders favicon-32.png and favicon-48.png from the
+// MEDIUM cut of the symbol through the Playwright MCP
+// (mcp__plugin_playwright_playwright__browser_run_code_unsafe), no node_modules.
+// P113: the rest of the web icon set (16 px from the small cut, apple-touch, 192, 512, maskable,
+// site.webmanifest, head-snippet.html) comes from the adopted
+//   export_variants.py <symbol.svg> --web-icons --icon-bg <brand colour> --favicon-source <small.svg>
+// which this snippet does not repeat; it only replaces the two sizes the medium cut is drawn for.
 //
-// Use: copy this file to <project>/.aid-ui/brand-icons.js, fill ONLY the three path
+// Use: copy this file to <project>/.aid-ui/brand-icons.js, fill ONLY the two path
 // constants below, then call browser_run_code_unsafe with `filename` pointing at the
 // copy. The tool calls the function with `page` only.
 // Never paste SVG markup into this file. The MCP sandbox has no Node API (no require,
@@ -18,27 +23,23 @@
 // plain absolute path matching ^/[A-Za-z0-9._/-]+$ (no quotes, backticks, `${`,
 // spaces or newlines); the snippet re-checks and refuses anything else.
 //
-// Writes into OUT: favicon-16/32/48.png, apple-touch-icon.png (180), icon-192.png,
-// icon-512.png, icon-maskable-512.png (mark inset to a 60 % safe zone, 20 % padding
-// each side, on a solid BG - the rule of cockpit/packages/aid-gui/bin/gen-icons.cjs).
-// A non-square or missing viewBox is refused. Then: cp SYMBOL_FILE OUT/favicon.svg,
+// Writes into OUT (the export_variants.py output folder): favicon-32.png and favicon-48.png.
+// A non-square or missing viewBox is refused. Then:
 // python3 aid-ui-ico.py OUT/favicon.ico OUT/favicon-{16,32,48}.png and
 // python3 aid-ui-ico.py --verify OUT.
 async (page) => {
-  const SYMBOL_FILE = '__ABSOLUTE_SYMBOL_SVG__'; // <symbol>.checked.svg, text already as paths
-  const MICRO_FILE = '';                         // optional <micro>.checked.svg for 16/32 px
+  const MEDIUM_FILE = '__ABSOLUTE_MEDIUM_SVG__'; // <medium cut>.checked.svg for 32-48 px, text already as paths
   const OUT = '__ABSOLUTE_ICONS_DIR__';
-  const BG = '#0a0a0f';                          // solid background of the maskable icon
 
   const PLAIN = /^\/[A-Za-z0-9._/-]+$/;
-  for (const p of [SYMBOL_FILE, MICRO_FILE, OUT].filter(Boolean)) {
+  for (const p of [MEDIUM_FILE, OUT]) {
     if (!PLAIN.test(p) || p.includes('..')) throw new Error('refused: not a plain absolute path: ' + JSON.stringify(p));
   }
-  for (const p of [SYMBOL_FILE, MICRO_FILE].filter(Boolean)) {
+  for (const p of [MEDIUM_FILE]) {
     if (!p.endsWith('.checked.svg')) throw new Error('refused: not a .checked.svg from aid-ui-ico.py --check-svg: ' + p);
   }
   // Read as inert text: route, empty same-origin page, fetch(). Never goto the SVG.
-  const FILES = { '/symbol': SYMBOL_FILE, '/micro': MICRO_FILE };
+  const FILES = { '/medium': MEDIUM_FILE };
   const ORIGIN = 'http://svg.local';
   await page.route(ORIGIN + '/**', (route) => {
     const path = route.request().url().slice(ORIGIN.length);
@@ -51,22 +52,20 @@ async (page) => {
     if (!r.ok) throw new Error('refused: could not read ' + u + ' (' + r.status + ')');
     return r.text();
   }), ORIGIN + '/' + name);
-  const SYMBOL_SVG = await read('symbol');
-  const MICRO_SVG = MICRO_FILE ? await read('micro') : '';
+  const MEDIUM_SVG = await read('medium');
 
-  for (const svg of [SYMBOL_SVG, MICRO_SVG].filter(Boolean)) {
+  for (const svg of [MEDIUM_SVG]) {
     const vb = /viewBox\s*=\s*["']\s*([-\d.]+)[\s,]+([-\d.]+)[\s,]+([-\d.]+)[\s,]+([-\d.]+)/.exec(svg);
     if (!vb) throw new Error('refused: the SVG has no viewBox');
     if (Number(vb[3]) !== Number(vb[4])) throw new Error(`refused: viewBox ${vb[3]}x${vb[4]} is not square`);
   }
 
-  // The symbol as an <img> filling a size x size tile; maskable = 60 % mark on BG.
+  // The cut as an <img> filling a size x size tile.
   // Rendering goes through an encoded data URL in <img>, where an SVG runs no script.
-  const render = async (svg, size, file, maskable = false) => {
+  const render = async (svg, size, file) => {
     const src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
-    const inset = maskable ? Math.round(size * 0.2) : 0;
     const html = `<!doctype html><html><body style="margin:0">
-      <div id="t" style="width:${size}px;height:${size}px;${maskable ? `background:${BG};` : ''}box-sizing:border-box;padding:${inset}px">
+      <div id="t" style="width:${size}px;height:${size}px">
       <img src="${src}" style="display:block;width:100%;height:100%"></div></body></html>`;
     await page.setViewportSize({ width: size, height: size });
     await page.setContent(html);
@@ -74,15 +73,9 @@ async (page) => {
     return file;
   };
 
-  const small = MICRO_SVG || SYMBOL_SVG;
   const written = [
-    await render(small, 16, 'favicon-16.png'),
-    await render(small, 32, 'favicon-32.png'),
-    await render(SYMBOL_SVG, 48, 'favicon-48.png'),
-    await render(SYMBOL_SVG, 180, 'apple-touch-icon.png'),
-    await render(SYMBOL_SVG, 192, 'icon-192.png'),
-    await render(SYMBOL_SVG, 512, 'icon-512.png'),
-    await render(SYMBOL_SVG, 512, 'icon-maskable-512.png', true),
+    await render(MEDIUM_SVG, 32, 'favicon-32.png'),
+    await render(MEDIUM_SVG, 48, 'favicon-48.png'),
   ];
   return 'written to ' + OUT + ': ' + written.join(' ');
 }

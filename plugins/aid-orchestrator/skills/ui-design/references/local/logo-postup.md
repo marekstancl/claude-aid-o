@@ -51,7 +51,7 @@ agenta, který je vytvořil (fáze 4b „kurátorství“) – tak prošlo fádn
   operace; oblouky jako `A`, ne mnohoúhelník), ne vektorizací rastru. Model je skicář, kód je ruka.
 - Název skutečným písmem (Google Fonts, OFL, latin-ext, ověřené na všech znacích názvu) převedeným na křivky.
 - Tři řezy značky: **velký**, **střední** (32–48 px, detaily zesílené, koncovky zjednodušené) a **malý** (16 px,
-  bez jemných detailů). ViewBox vždy čtvercový (vyžaduje ho `aid-ui-ico.py --check-svg`).
+  bez jemných detailů). ViewBox symbolu pro ikony čtvercový (vyžaduje ho `brand-icons.js` a favicon); logo s názvem smí být široké, `aid-ui-ico.py --check-svg` ho zkontroluje také.
 
 ## 5. Karty a místo rozhodnutí
 
