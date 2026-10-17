@@ -278,3 +278,45 @@ http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()' "$PO
   python3 "$SRC" "$P" --list --from "$B/h1" --from "$B/h2" --sessions-dir "$S" >/dev/null
   jq -e '[.sources[] | select(.reason | test("procházení zastaveno"))] | length == 1' "$M" >/dev/null
 }
+
+# ---------------------------------------------------------------- P113 step 9
+@test "p113: a folder whose README says NESDÍLET keeps its pages and images out, whatever was requested or approved" {
+  N="$T/klient"; mkdir -p "$N/vstup/fotky" "$N/verejne"
+  printf '# Vstupy od klienta\nNESDILET - jen pro studio, nic z toho nezveřejňovat.\n' > "$N/vstup/README.md"
+  printf '# Rozhovor\nPečeme z kvásku od roku 1998.\n' > "$N/vstup/rozhovor.md"
+  printf 'x' > "$N/vstup/fotky/pec.jpg"
+  printf '# Veřejné\nOtevřeno denně.\n' > "$N/verejne/info.md"
+  printf '# Poznámky\n' > "$N/verejne/poznamky-NESDÍLET.md"
+  printf 'Úvod\n\n\n\n  nesdílet  \nTajné\n' > "$N/verejne/hlava.md"
+  run python3 "$SRC" "$P" --list --from "$N"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  for f in vstup/rozhovor.md vstup/fotky/pec.jpg vstup/README.md verejne/poznamky-NESDÍLET.md verejne/hlava.md; do
+    jq -e --arg f "$f" '.sources[] | select(.path | endswith($f)) | .used == false and .excluded == "nesdilet"' "$M" >/dev/null || { echo "not excluded: $f"; return 1; }
+  done
+  jq -e '.sources[] | select(.path | endswith("verejne/info.md")) | .used == true' "$M" >/dev/null
+  ! grep -rq "kvásku od roku 1998" "$D"/*.txt
+  # a request brings an internal document back, never a NESDÍLET one
+  id="$(idof vstup/rozhovor.md)"
+  run python3 "$SRC" "$P" --list --from "$N" --request "$id"; [ "$status" -eq 1 ]; [[ "$output" == *"no internal document with that id"* ]]
+}
+
+@test "p113: --fetch-site --max-seconds stops at its deadline, keeps what was fetched and says truncated" {
+  PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  python3 - "$PORT" <<'PY' & HP=$!
+import http.server, sys, time
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        if self.path != "/": time.sleep(3)   # every page but the home page is slow
+        b = (b'<html><body>' + b"".join(b'<a href="/p%d/">p</a>' % i for i in range(6)) + b'</body></html>')
+        self.send_response(200); self.send_header("Content-Type", "text/html"); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b)
+http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PY
+  for i in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 0.1; done
+  s=$(date +%s)
+  run python3 "$SRC" "$P" --fetch-site "http://127.0.0.1:$PORT/" --allow-local --max-seconds 2
+  e=$(( $(date +%s) - s )); kill "$HP" 2>/dev/null || true
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$e" -le 5 ] || { echo "took $e s"; return 1; }
+  F="$(ls "$P"/.aid-ui/old-site/*/fetch.json)"
+  jq -e '.truncated == true and .max_seconds == 2 and (.pages[0].file | type) == "string"' "$F" >/dev/null
+}

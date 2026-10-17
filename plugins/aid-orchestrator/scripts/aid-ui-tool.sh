@@ -13,6 +13,9 @@
 #   shot <out-dir> [--cookie <f> --studio <url>] <url>... | shot convert <a.webp>...   aid-ui-shot.mjs (P113a)
 #                                                      aid-ui-webp.mjs; the written file must be
 #                                                      at most <n> kB (default 200), else exit 1
+#   shot <out-dir> --name <n> [--header] <url>...      (P113) free shots with a unique name and a header crop
+#   strip <out-dir> <url> [--every ms] [--until ms] [--width px]   (P113) frames of an animation, machine-independent
+#   video <out-dir> <url> [--until ms] [--width px]    (P113) a recording of an animation (video.webm)
 #   verify <args>                                      aid-ui-verify.mjs (arrives with the gate)
 #   png <src.svg> <out.png> <width>                    aid-ui-png.mjs: an SVG as a PNG (transparent)
 #   measure [--storage-state <f>] [--build <id>] <base url> <out.json> <page>...   aid-ui-measure.mjs: what the built site uses
@@ -42,7 +45,7 @@
 set -euo pipefail
 
 LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib/ui-fidelity" && pwd)"
-usage() { echo "usage: aid-ui-tool.sh glyph|webp|verify|png|measure|motion|shot|logo-sheet|vectorize|wordmark <args>" >&2; exit 2; }
+usage() { echo "usage: aid-ui-tool.sh glyph|webp|verify|png|measure|motion|shot|strip|video|logo-sheet|vectorize|wordmark <args>" >&2; exit 2; }
 (( $# >= 1 )) || usage
 tool="$1"; shift
 if [[ "$tool" == wordmark ]]; then
@@ -86,6 +89,7 @@ case "$tool" in
   measure) js=aid-ui-measure.mjs ;;
   motion) js=aid-ui-motion.mjs ;;
   shot)   js=aid-ui-shot.mjs ;;
+  strip|video) js=aid-ui-shot.mjs; set -- "$tool" "$@" ;;
   *) usage ;;
 esac
 [[ -f "$LIB/$js" ]] || { echo "ERROR: aid-ui-tool.sh: $LIB/$js missing" >&2; exit 1; }
@@ -114,6 +118,9 @@ flock 9
 ensure_installed || exit 1
 flock -u 9; exec 9>&-
 
+if [[ -n "${CHROME:-}" && ! -x "$CHROME" ]]; then   # P113: a CHROME pointing nowhere is refused, never silently replaced
+  echo "ERROR: aid-ui-tool.sh: CHROME=$CHROME is not an executable browser; unset it or point it at a Chromium" >&2; exit 2
+fi
 if [[ -z "${CHROME:-}" ]]; then
   CHROME="$(ls -d "$HOME"/.cache/ms-playwright/chromium-*/chrome-linux*/chrome 2>/dev/null | sort -V | tail -1 || true)"
   export CHROME

@@ -19,6 +19,11 @@
       and every item still missing becomes an open item with its owner, a due date (14 days) and its brief;
       critical ones block publishing (aid-ui-state.sh open-item --critical) but not the quality loop.
       return: nothing changes; the comment says what to fix. An answer is used once.
+  env-check
+      (P113, fix 78) What the studio's browser tools need: node, the Playwright package of lib/ui-fidelity (installed,
+      or npm to install it on first use) and a Chromium ($CHROME when set - it must be executable - else one in the
+      Playwright cache). Prints each piece; a missing one with the command that installs it, exit 3. aid-ui-serve.sh
+      studio runs it before it starts the studio.
   A fact nobody confirmed is never published: it stays an open item, the gate's facts_match keeps the web to
   facts.yaml.
 """
@@ -172,7 +177,40 @@ def confirm(p, qid):
         print("%-8s %-9s %s" % (i["id"], i["status"], i.get("item") or ""))
 
 
+def env_check():
+    import glob, shutil
+    lib = os.path.realpath(os.path.join(HERE, "..", "lib", "ui-fidelity"))
+    miss = []
+    node = shutil.which("node")
+    print("node: %s" % (node or "CHYBÍ"))
+    if not node:
+        miss.append("node (Node.js 20+): nainstalujte balíčkem systému, např. `sudo apt install nodejs npm`")
+    pw = os.path.isdir(os.path.join(lib, "node_modules", "@playwright", "test"))
+    npm = shutil.which("npm")
+    print("playwright: %s" % ("nainstalován" if pw else ("nainstaluje se při prvním použití (npm ci)" if npm else "CHYBÍ")))
+    if not pw and not npm:
+        miss.append("Playwright: `cd %s && npm ci` (potřebuje npm)" % lib)
+    ch = os.environ.get("CHROME")
+    if ch:
+        ok = os.path.isfile(ch) and os.access(ch, os.X_OK)
+        print("chromium: %s (CHROME)%s" % (ch, "" if ok else " - NENÍ SPUSTITELNÝ"))
+        if not ok:
+            miss.append("CHROME=%s není spustitelný prohlížeč: zrušte proměnnou nebo ji nasměrujte na Chromium" % ch)
+    else:
+        cache = os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or os.path.expanduser("~/.cache/ms-playwright")
+        found = sorted(glob.glob(os.path.join(cache, "chromium-*", "chrome-linux*", "chrome")))
+        print("chromium: %s" % (found[-1] if found else "CHYBÍ"))
+        if not found:
+            miss.append("Chromium: `cd %s && npx playwright install chromium` (nebo CHROME=<cesta k Chromiu>)" % lib)
+    if miss:
+        print("CHYBÍ pro nástroje studia:\n- " + "\n- ".join(miss), file=sys.stderr)
+        sys.exit(3)
+    print("env-check: OK")
+
+
 def main(a):
+    if a == ["env-check"]:
+        return env_check()
     opt = lambda k, dflt=None: a[a.index(k) + 1] if k in a and a.index(k) + 1 < len(a) else dflt
     if len(a) >= 2 and a[0] == "card":
         return card(os.path.abspath(a[1]), opt("--type", "web-local"))
@@ -182,7 +220,7 @@ def main(a):
         return question(os.path.abspath(a[1]))
     if len(a) >= 2 and a[0] == "confirm" and opt("--answer"):
         return confirm(os.path.abspath(a[1]), opt("--answer"))
-    die("usage: card <p> [--type t] | record <p> <item> --value v --source s --date d | question <p> | confirm <p> --answer <qid>", 2)
+    die("usage: env-check | card <p> [--type t] | record <p> <item> --value v --source s --date d | question <p> | confirm <p> --answer <qid>", 2)
 
 
 if __name__ == "__main__":

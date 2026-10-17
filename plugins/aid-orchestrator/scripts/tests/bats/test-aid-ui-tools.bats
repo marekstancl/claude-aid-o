@@ -207,3 +207,16 @@ H
          and (.controls[0].height."390" > 0) and (.fields | length) == 1 and .type.h1 and (.breakpoints == ["max-width: 760px"])' "$T/m.json" >/dev/null \
     || { jq -c . "$T/m.json"; return 1; }
 }
+
+@test "p113: shot --name gives unique names and a header crop; strip and video record an animation; CHROME nowhere is refused" {
+  mkdir -p "$T/site"
+  printf '<html><head><style>@keyframes k{from{opacity:0}to{opacity:1}} h1{animation:k 1s linear}</style></head><body><h1>Logo</h1></body></html>' > "$T/site/a.html"
+  serve "$T/site"
+  run bash "$TOOL" shot "$T/n" --name konkurent --header "http://127.0.0.1:$PORT/a.html" "http://127.0.0.1:$PORT/a.html"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  for f in konkurent-1440 konkurent-header-1440 konkurent-390 konkurent-2-1440 konkurent-2-390; do [ -s "$T/n/$f.png" ] || { echo "no $f"; return 1; }; done
+  run bash "$TOOL" strip "$T/s" "http://127.0.0.1:$PORT/a.html" --every 250 --until 1000; [ "$status" -eq 0 ]
+  [ "$(ls "$T/s"/frame-*.png | wc -l)" -eq 5 ]
+  ! cmp -s "$T/s/frame-00000.png" "$T/s/frame-01000.png"   # the animation moved between the first and the last frame
+  run bash "$TOOL" video "$T/v" "http://127.0.0.1:$PORT/a.html" --until 600; [ "$status" -eq 0 ]; [ -s "$T/v/video.webm" ]
+  CHROME=/nikde run bash "$TOOL" shot "$T/x" "http://127.0.0.1:$PORT/a.html"; [ "$status" -eq 2 ]; [[ "$output" == *"CHROME=/nikde is not an executable browser"* ]]
+}

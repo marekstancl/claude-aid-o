@@ -137,6 +137,8 @@ case "$1" in
        && [[ "$(jq -r '.command[1]' "$JOBS/$id/job.json")" == "$(realpath "$STUDIO_PY")" ]]; then
       echo "URL: http://$HOST:$STUDIO_PORT/$LINK_QS"; echo "JOB: $id"; exit 0
     fi
+    # P113 (fix 78): the studio's browser tools need node, Playwright and a Chromium; say what is missing before starting
+    python3 "$(dirname "${BASH_SOURCE[0]}")/aid-ui-launch.py" env-check >&2 || refuse "the studio needs its browser tools (see above for the install command)"
     tok="$dir/.aid-ui/studio.token"
     (umask 077; od -An -tx1 -N16 /dev/urandom | tr -d ' \n' > "$tok")
     start studio python3 "$(realpath "$STUDIO_PY")" --project "$dir" --host "$HOST" --port "$STUDIO_PORT" --token-file "$tok"
