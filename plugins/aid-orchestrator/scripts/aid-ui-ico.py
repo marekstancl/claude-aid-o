@@ -30,6 +30,7 @@ import struct
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
 
 PNG_SIG = b"\x89PNG\r\n\x1a\n"
 # What the adopted export_variants.py --web-icons writes (P113: the web icon set comes from it; references/brand-icons.js
@@ -186,6 +187,16 @@ def pack(out, pngs):
     print(f"wrote {out}: " + ", ".join(f"{w}x{h}" for (w, h), _ in images))
 
 
+class Links(HTMLParser):
+    """every <link> of a snippet with its attributes, whatever their order and quotes"""
+    def __init__(self, s):
+        super().__init__(); self.links = []; self.feed(s)
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "link":
+            self.links.append({k.lower(): (v or "") for k, v in attrs})
+
+
 def verify(d):
     bad = 0
     for name, side in EXPECTED_PNG.items():
@@ -211,11 +222,16 @@ def verify(d):
         if why is None and name == "site.webmanifest":
             try:
                 icons = json.load(open(p, encoding="utf-8")).get("icons") or []
-                why = None if any("maskable" in (i.get("purpose") or "") for i in icons) else "no icon with purpose maskable"
+                why = None if any(isinstance(i, dict) and "maskable" in str(i.get("purpose") or "").split()
+                                  and str(i.get("src") or "").split("?")[0].rsplit("/", 1)[-1] == "maskable-512.png"
+                                  and "512x512" in str(i.get("sizes") or "").split() for i in icons) \
+                    else "no icon with purpose maskable, src maskable-512.png and sizes 512x512"
             except (ValueError, AttributeError, OSError) as e:
                 why = f"not a JSON manifest ({e})"
         if why is None and name == "head-snippet.html":
-            why = None if 'rel="manifest"' in open(p, encoding="utf-8", errors="replace").read() else "no <link rel=\"manifest\">"
+            links = Links(open(p, encoding="utf-8", errors="replace").read()).links
+            why = None if any("manifest" in a.get("rel", "").lower().split() and a.get("href", "").split("?")[0].rsplit("/", 1)[-1] == "site.webmanifest"
+                              for a in links) else "no <link rel=\"manifest\"> to site.webmanifest"
         print(f"OK      {name}" if why is None else f"WRONG   {name} {why}")
         bad += why is not None
     p = os.path.join(d, "favicon.svg")

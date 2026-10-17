@@ -32,6 +32,9 @@ waived, files, per_folder}; exit 0 complete or waived, 1 a required part missing
 an inconsistent state (brand "none" with identity work).
 """
 import argparse, json, os, re, struct, sys
+import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
+from urllib.parse import urlsplit
 
 TOKENS = {"color": {"color", "colour", "barevne", "barevny", "barva", "full"},
           "black": {"black", "cerne", "cerny", "mono"},
@@ -74,24 +77,46 @@ def pick(fs, part, ext, want=None, extra=None):
     return None
 
 
+def svg_area(path):
+    """The positive viewBox area of the root <svg>, else width x height as plain numbers (any quotes, exponents and a
+    px unit); 0 when neither reads."""
+    try:
+        root = ET.parse(path).getroot()
+    except (ET.ParseError, OSError):
+        return 0.0
+    num = r"[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?"
+    vb = re.findall(num, root.get("viewBox") or "")
+    if len(vb) == 4 and float(vb[2]) > 0 and float(vb[3]) > 0:
+        return float(vb[2]) * float(vb[3])
+    wh = [re.fullmatch(r"\s*(%s)\s*(?:px)?\s*" % num, root.get(k) or "") for k in ("width", "height")]
+    return float(wh[0].group(1)) * float(wh[1].group(1)) if all(wh) else 0.0
+
+
 def main_symbol(fs, root):
-    """P113 (fix 13): the main symbol is the largest colour SVG (viewBox or width area), not the first by name - the
-    alphabet picked the 16 px cut. A file whose size cannot be read counts as 0."""
-    best, area = None, -1.0
-    for f in fs:
-        if not (f.startswith("symbol/") and f.lower().endswith(".svg") and variant_of(f[7:]) == "color"):
-            continue
-        try:
-            head = open(os.path.join(root, f), encoding="utf-8", errors="replace").read(4000)
-        except OSError:
-            continue
-        m = re.search(r'viewBox\s*=\s*"\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)', head)
-        w = re.search(r'<svg[^>]*\swidth\s*=\s*"([\d.]+)', head)
-        h = re.search(r'<svg[^>]*\sheight\s*=\s*"([\d.]+)', head)
-        a = float(w.group(1)) * float(h.group(1)) if w and h else (float(m.group(1)) * float(m.group(2)) if m else 0.0)
-        if a > area:
-            best, area = f, a
-    return best
+    """P113 (fix 13): the main symbol is the largest colour SVG by area, not the first by name - the alphabet picked
+    the 16 px cut."""
+    cands = [f for f in fs if f.startswith("symbol/") and f.lower().endswith(".svg") and variant_of(f[7:]) == "color"]
+    return max(cands, key=lambda f: svg_area(os.path.join(root, f)), default=None)
+
+
+class Tags(HTMLParser):
+    """every <meta> and <link> of a snippet with its attributes, whatever their order and quotes"""
+    def __init__(self, s):
+        super().__init__(); self.tags = []; self.feed(s)
+
+    def handle_starttag(self, tag, attrs):
+        if tag in ("meta", "link"):
+            self.tags.append((tag, {k.lower(): (v or "") for k, v in attrs}))
+
+
+def og_image_ok(snippet):
+    """an og:image meta whose content is an absolute http(s) address with a host and a path ending in og-image.png"""
+    for tag, a in Tags(snippet).tags:
+        if tag == "meta" and a.get("property", "").strip().lower() == "og:image":
+            u = urlsplit(a.get("content", "").strip())
+            if u.scheme in ("http", "https") and u.hostname and not re.search(r"\s", u.netloc) and u.path.endswith("/og-image.png"):
+                return True
+    return False
 
 
 def ico_sizes(path):
@@ -178,7 +203,7 @@ def required(project, state, root):
                         s = open(os.path.join(root, f), encoding="utf-8", errors="replace").read()
                     except OSError:
                         return None
-                    return f if re.search(r"""<meta[^>]+property\s*=\s*["']og:image["'][^>]+content\s*=\s*["']https?://[^"'/]+/[^"']*og-image\.png""", s, re.I) else None
+                    return f if og_image_ok(s) else None
             return None
         req.append(("icons", "head-snippet.html with og:image as an absolute https address of og-image.png", snippet))
         if not ((state.get("place_verdicts") or {}).get("pohyb") or {}).get("without"):

@@ -5,6 +5,7 @@
   python3 aid-ui-copy.py run     <run dir> [--stand-in <answer.json> --reason <text>]
   python3 aid-ui-copy.py verdict <run dir>                               prints the verdict JSON
   python3 aid-ui-copy.py record  <project> <run dir>                     (aid-ui-state.sh copy-record)
+  python3 aid-ui-copy.py stale   <project> --subject <subject.json>      pages needing a review; exit 1 when any (P113)
 
 bundle: a new <project>/.aid-ui/copy/runs/<n>/ holding only what the reviewer may read - the
 adopted references/adopted/marketingskills/copy-editing/SKILL.md,
@@ -624,6 +625,35 @@ def rejected_hits(st, subject):
     return hits
 
 
+def stale(a):
+    """P113 (aid-ui-state.sh cycle): which pages of the subject need a copy review now - no record, a failed review,
+    another text, another context, or (facts_used) one of the facts its claims cite changed / (an older record) any
+    change of the register. The gate's copy_review row decides the same way; no model is called."""
+    proj = os.path.abspath(a.project)
+    subject = rj(a.subject)
+    rec = (rj(os.path.join(proj, "docs/design/brand-state.json")).get("copy_review") or {}).get("pages") or {}
+    fpath, cpath = os.path.join(proj, "docs/content/facts.yaml"), os.path.join(proj, "docs/content/product-context.md")
+    facts = yaml_json(fpath) if os.path.isfile(fpath) else None
+    fsha = sha(fpath) if os.path.isfile(fpath) else None
+    csha = sha(cpath) if os.path.isfile(cpath) else None
+    out = []
+    for p, pg in sorted((subject.get("pages") or {}).items()):
+        r = rec.get(p)
+        why = ("no copy review" if not r else "the review failed" if r.get("verdict") != "pass"
+               else "the text changed" if r.get("subject_sha256") != pg.get("sha256")
+               else "the context changed" if r.get("context_sha256") != csha else None)
+        if not why and isinstance(r.get("facts_used"), dict):
+            moved = [k for k, v in r["facts_used"].items() if fact_value(facts, k) != v]
+            why = f"its facts changed: {', '.join(moved[:5])}" if moved else None
+        elif not why and r.get("facts_sha256") != fsha:
+            why = "the facts changed (a record without facts_used)"
+        if why:
+            out.append(p)
+            print(f"STALE {p}: {why}")
+    print(f"copy: {len(out)} of {len(subject.get('pages') or {})} page(s) need a review" if out else "copy: every page reviewed and current")
+    return 1 if out else 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="verb", required=True)
@@ -631,8 +661,9 @@ def main():
     r = sub.add_parser("run"); r.add_argument("dir"); r.add_argument("--stand-in"); r.add_argument("--reason")
     v = sub.add_parser("verdict"); v.add_argument("dir")
     c = sub.add_parser("record"); c.add_argument("project"); c.add_argument("dir")
+    s = sub.add_parser("stale"); s.add_argument("project"); s.add_argument("--subject", required=True)
     a = ap.parse_args()
-    return {"bundle": bundle, "run": run, "verdict": verdict, "record": record}[a.verb](a) or 0
+    return {"bundle": bundle, "run": run, "verdict": verdict, "record": record, "stale": stale}[a.verb](a) or 0
 
 
 if __name__ == "__main__":

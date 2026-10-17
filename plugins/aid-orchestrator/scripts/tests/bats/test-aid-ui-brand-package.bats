@@ -137,6 +137,13 @@ web_parts() {   # P113: what a web links from its <head>, the social preview wit
   # a relative og:image is not shown by the networks
   echo '<meta property="og:image" content="/og-image.png">' >"$B/icons/head-snippet.html"
   run python3 "$CHECK" "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"MISSING icons head-snippet.html with og:image as an absolute https address"* ]]
+  # attribute order and quotes do not matter; an address without a host or with a space in it does not count
+  echo "<meta content='https://pekarna.cz/og-image.png' property='og:image'>" >"$B/icons/head-snippet.html"
+  run python3 "$CHECK" "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  for bad in 'https:///og-image.png' 'https://peka rna.cz/og-image.png' 'https://pekarna.cz/og-image.png.jpg' 'ftp://pekarna.cz/og-image.png'; do
+    echo "<meta property=\"og:image\" content=\"$bad\">" >"$B/icons/head-snippet.html"
+    run python3 "$CHECK" "$P"; [ "$status" -eq 1 ] || { echo "accepted: $bad"; return 1; }
+  done
   web_parts; rm "$B/icons/og-image.png" "$B/icons/site.webmanifest"
   run python3 "$CHECK" "$P"; [ "$status" -eq 1 ]
   [[ "$output" == *"MISSING icons og-image.png"* ]]; [[ "$output" == *"MISSING icons site.webmanifest"* ]]
@@ -167,6 +174,9 @@ web_parts() {   # P113: what a web links from its <head>, the social preview wit
   run python3 "$CHECK" "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   # the 16 px cut first by name, the full mark larger: the main symbol is the full one
   rm "$B/symbol/s-color.svg"
-  echo '<svg viewBox="0 0 16 16"></svg>' >"$B/symbol/a-color-16.svg"; echo '<svg viewBox="0 0 512 512"></svg>' >"$B/symbol/b-color.svg"
+  echo '<svg viewBox="0 0 16 16"></svg>' >"$B/symbol/a-color-16.svg"; echo "<svg viewBox='0 0 5.12e2 512' width='1em'></svg>" >"$B/symbol/b-color.svg"
   run python3 "$CHECK" "$P"; [[ "$output" == *"OK symbol symbol color (SVG), the main one = the largest colour variant: symbol/b-color.svg"* ]]
+  # no viewBox: width x height, with a px unit
+  echo '<svg width="600px" height="600"></svg>' >"$B/symbol/c-color.svg"
+  run python3 "$CHECK" "$P"; [[ "$output" == *"largest colour variant: symbol/c-color.svg"* ]]
 }

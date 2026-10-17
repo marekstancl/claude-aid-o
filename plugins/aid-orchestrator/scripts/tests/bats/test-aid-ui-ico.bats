@@ -75,6 +75,15 @@ complete_set() {
   echo '{"icons":[{"src":"/icon-512.png"}]}' > "$T/site.webmanifest"; echo '<link rel="icon" href="/favicon.ico">' > "$T/head-snippet.html"
   run python3 "$ICO" --verify "$T"; [ "$status" -eq 1 ]
   [[ "$output" == *"WRONG   site.webmanifest no icon with purpose maskable"* ]]; [[ "$output" == *'WRONG   head-snippet.html no <link rel="manifest">'* ]]
+  # a purpose that only contains the word, an icon pointing elsewhere, a link to another manifest: not the set
+  echo '{"icons":[{"src":"/missing.png","sizes":"512x512","purpose":"maskable"},{"src":"/maskable-512.png","sizes":"512x512","purpose":"not-maskable"}]}' > "$T/site.webmanifest"
+  echo '<link rel="manifest" href="/wrong.json">' > "$T/head-snippet.html"
+  run python3 "$ICO" --verify "$T"; [ "$status" -eq 1 ]
+  [[ "$output" == *"WRONG   site.webmanifest no icon with purpose maskable"* ]]; [[ "$output" == *"WRONG   head-snippet.html no <link"* ]]
+  # quotes and attribute order are free; "any maskable" as purpose counts
+  echo '{"icons":[{"src":"/maskable-512.png?v=2","sizes":"512x512","purpose":"any maskable"}]}' > "$T/site.webmanifest"
+  echo "<link href='/site.webmanifest' rel='manifest'>" > "$T/head-snippet.html"
+  run python3 "$ICO" --verify "$T"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   echo 'nejson' > "$T/site.webmanifest"; rm "$T/head-snippet.html"
   run python3 "$ICO" --verify "$T"; [[ "$output" == *"WRONG   site.webmanifest not a JSON manifest"* ]]; [[ "$output" == *"WRONG   head-snippet.html missing"* ]]
 }
