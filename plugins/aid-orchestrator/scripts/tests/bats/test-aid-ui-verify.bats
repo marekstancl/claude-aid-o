@@ -744,10 +744,13 @@ vst() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .pag
 
 @test "p113: the workshop's procedure - a content image with alt=\"\" needs role or aria-hidden, a form needs its notice beside it, touch targets count at 768 px" {
   S="$T/s9"; mkdir -p "$S/img" "$S/ok"; cp "$FX/site/img/modra-1200.webp" "$S/img/m.webp"
-  H='<!doctype html><html lang="cs"><head><meta name="viewport" content="width=device-width"><title>x</title></head><body><h1>x</h1><p>IČO 27074358</p>'
+  H='<!doctype html><html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>x</title></head><body><h1>x</h1><p>IČO 27074358</p>'
   printf '%s<img src="/img/m.webp" alt="" width="300" height="150"><form action="/api"><label>Tel <input name="tel"></label><button style="min-height:44px">Odeslat</button></form><footer><a href="/gdpr/">Ochrana osobních údajů</a></footer><nav><a href="/a/" style="font-size:11px;line-height:1">A</a> <a href="/b/" style="font-size:11px;line-height:1">B</a></nav></body></html>' "$H" > "$S/index.html"
   printf '%s<img src="/img/m.webp" alt="" role="presentation" width="300" height="150"><section><form action="/api"><label>Tel <input name="tel"></label><button style="min-height:44px;min-width:44px">Odeslat</button></form><p>Odesláním souhlasíte se <a href="/gdpr/">zpracováním údajů</a>.</p></section></body></html>' "$H" > "$S/ok/index.html"
+  # a notice written as a sentence, no link anywhere on the page, is enough
+  mkdir -p "$S/ok2"; printf '%s<form action="/api"><label>Tel <input name="tel" style="min-height:44px"></label><button style="min-height:44px;min-width:44px">Odeslat</button><p>Odesláním formuláře zpracujeme vaše osobní údaje jen kvůli odpovědi.</p></form></body></html>' "$H" > "$S/ok2/index.html"
   vrun "$S" a11y_basics,business_minimum,touch_targets 768,1440
+  [ "$(vst business_minimum ok2/index.html)" = pass ] || { jq -c '.rows[] | select(.page == "ok2/index.html")' "$T/vr/result.json"; return 1; }
   jq -e '[.rows[] | select(.check == "a11y_basics" and .page == "index.html") | .detail][0] | contains("content image with an empty alt")' "$T/vr/result.json" >/dev/null
   jq -e '[.rows[] | select(.check == "business_minimum" and .page == "index.html") | .detail][0] | contains("without information about personal data next to it")' "$T/vr/result.json" >/dev/null
   jq -e '[.rows[] | select(.check == "touch_targets" and .page == "index.html" and .viewport == "768") | .status][0] == "fail"' "$T/vr/result.json" >/dev/null

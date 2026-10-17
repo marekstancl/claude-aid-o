@@ -30,6 +30,9 @@ export const COUNT_GROUPS = [
   { words: ['let', 'letech', 'letům', 'letý', 'letá', 'leté', 'letou', 'letého', 'letým', 'letých',
             'rok', 'roku', 'roky', 'roků', 'rokov', 'rokoch', 'rokmi', 'ročné', 'ročný', 'year', 'years'] },
 ];
+const BETWEEN_STOP = new Set(['pro', 'od', 'do', 'na', 'v', 've', 'z', 'ze', 's', 'se', 'k', 'ke', 'o', 'u', 'za', 'po', 'při',
+  'pri', 'a', 'i', 'nebo', 'než', 'mezi', 'přes', 'bez', 'pod', 'nad', 'před', 'and', 'or', 'for', 'from', 'of', 'to', 'in',
+  'dní', 'dnů', 'den', 'dny', 'hodin', 'hodiny', 'minut', 'm', 'km', 'cm', 'metry', 'metrů', 'kg', 'h', 'min', 'days', 'hours']);
 const inGroup = (g, w) => (g.stems || []).some(st => w.startsWith(st)) || (g.words || []).includes(w);
 
 export const norm = s => String(s).replace(/[\s  ]+/g, ' ').trim().toLowerCase();
@@ -68,8 +71,11 @@ export function unknownClaims(text, facts) {
     if (!es.some(e => new RegExp(`(^|[^0-9.,])${esc(n)}\\s?%`).test(e))) out.push(m[0].trim());
   }
   for (const m of text.matchAll(COUNT_RE)) {
-    const ws = [...m[2].matchAll(/[a-zA-Zá-žÁ-Ž]+/g)], hit = ws.find(w => groupOf(w[0].toLowerCase()));
-    if (!hit) continue;
+    const ws = [...m[2].matchAll(/[a-zA-Zá-žÁ-Ž]+/g)], at = ws.findIndex(w => groupOf(w[0].toLowerCase()));
+    // the words between describe the counted one ("dokončených"); a preposition, a conjunction or a unit means the
+    // number counts something else ("7 dní pro klienty", "3 metry od firmy")
+    if (at < 0 || ws.slice(0, at).some(w => BETWEEN_STOP.has(w[0].toLowerCase()))) continue;
+    const hit = ws[at];
     const g = groupOf(hit[0].toLowerCase()), n = numTok(m[1]);
     // the claim as written up to the counted word ("300 dokončených projektů", not the words after it)
     const said = m[0].slice(0, m[0].length - m[2].length + hit.index + hit[0].length);

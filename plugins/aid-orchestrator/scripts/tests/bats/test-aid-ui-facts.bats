@@ -67,4 +67,7 @@ BASE='[{"claim":"telefon","value":"+420 777 123 456"},{"claim":"cena","value":"6
   [ "$output" == "300 dokončených projektů" ] || { echo "$output"; return 1; }
   run claims "přes 300 dokončených projektů" '{"projekty":{"value":"300 projektů"}}'
   [ -z "$output" ]
+  # a preposition, conjunction or unit between: the number counts something else
+  run claims "Otevřeno 7 dní pro klienty. 3 metry od firmy. 5 a 6 projektů." "$BASE"
+  [ "$output" == "6 projektů" ] || { echo "$output"; return 1; }
 }
