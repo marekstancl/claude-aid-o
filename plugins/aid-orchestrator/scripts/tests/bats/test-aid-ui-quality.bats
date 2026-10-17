@@ -53,8 +53,8 @@ r["criteria"] += [dict(c, id=k + "." + c["id"]) for k in ("vzhled", "struktura")
 a = None if s < 4 else max(x for x in (4, 6, 8, 10) if x <= s)
 print(json.dumps({"criteria": [{"id": c["id"], "score": s, "anchor": a, "evidence": "úvod: nadpis a fotka pece", "missing_for_next": "víc", "to_ten": {"studio": ["úvod: vlastní fotka ordinace přes celou šířku"], "client": []}}
   for c in r["criteria"]], "findings": [
-  {"id": "f1", "criterion": c0, "severity": sys.argv[3], "owner": "agent", "text": "obecná věta", "fix": "konkrétně", "where": "úvod"},
-  {"id": "f2", "criterion": c0, "severity": "major", "owner": "client", "text": "chybí fotky", "fix": "dodat", "where": "o nás"}],
+  {"id": "f1", "criterion": c0, "severity": sys.argv[3], "owner": "agent", "kind": "remeslo", "text": "obecná věta", "fix": "konkrétně", "where": "úvod"},
+  {"id": "f2", "criterion": c0, "severity": "major", "owner": "client", "kind": "volba", "text": "chybí fotky", "fix": "dodat", "where": "o nás"}],
   "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
 PY
   done
@@ -169,7 +169,7 @@ work() {   # the agent works: one assistant turn in its transcript, now
   python3 "$Q" reopen "$P" --reason "PM: odstup od čar" >/dev/null; [ "$(dec)" = round ]; ls "$P/.aid-ui/critic/verdicts/"*.json >/dev/null
   echo '<html lang="cs"><body>chleba, znovu</body></html>' > "$P/site/index.html"
   ans 9 9 minor; python3 "$Q" round "$P" --web "$W" >/dev/null
-  jq -e 'length == 0' "$P/.aid-ui/critic/rounds/4/history-owner.json" >/dev/null   # the memory restarts at the reopen
+  jq -e '(.findings | length) == 0 and (.ratings | length) == 0' "$P/.aid-ui/critic/rounds/4/history-owner.json" >/dev/null   # the memory restarts at the reopen
   for r in owner tech; do python3 "$Q" triage "$P" "r4-$r-f1" rejected_with_reason --reason x >/dev/null; done
   python3 "$Q" status "$P" | jq -e '.decision == "audit" and .best.round == 4 and .repair_rounds == 0' >/dev/null
 }

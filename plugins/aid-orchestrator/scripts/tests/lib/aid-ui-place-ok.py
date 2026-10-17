@@ -79,7 +79,8 @@ def place_ok(p, place, done, asked=True):
         s = os.path.join(d, "score.json")
         open(s, "w").write(run(sys.executable, CRITIC, "score", p, os.path.join(d, "answer.json"), "--role", role, "--place", place))
         scores += ["--score", s]
-    json.dump({"n": n, "at": "2026-10-17T00:00:00Z", "place": place, "findings": [], "score": {"accepted": True}},
+    sha = lambda r: __import__("hashlib").sha256(open(os.path.join(rd, str(n), r, "answer.json"), "rb").read()).hexdigest()
+    json.dump({"n": n, "at": "2026-10-17T00:00:00Z", "place": place, "findings": [], "score": {"accepted": True}, "answers": {r: sha(r) for r in ("owner", "tech")}},
               open(os.path.join(rd, str(n), "round.json"), "w"))
     v = os.path.join(rd, str(n), "verdict.json")
     open(v, "w").write(run(sys.executable, CRITIC, "place-verdict", p, "--place", place, *scores))

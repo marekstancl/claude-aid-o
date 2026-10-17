@@ -443,7 +443,7 @@ def score(rec, ans, metrics_dir=None, answer_sha=None):
             "limited_by": sorted({i for d in directions(ans) for c in d["criteria"] for i in c.get("limited_by") or []}),
             "accepted": all(x["status"] != "failed" for x in mine), "status": next((x["status"] for x in mine if x["rubric"] == main_key), None),
             "findings_by_owner": owners, "readiness": [r["item"] for r in ans["readiness"]], "directions": out_dirs,
-            "findings": [{k: f.get(k) for k in ("id", "criterion", "severity", "owner", "kind", "direction", "text")} for f in ans["findings"]],
+            "findings": [{k: f.get(k) for k in ("id", "criterion", "severity", "owner", "kind", "blocking", "direction", "text")} for f in ans["findings"]],
             "choice": ans.get("choice"), "answer_sha256": answer_sha}
 
 
@@ -462,6 +462,9 @@ def scored(proj, place, role, path, metrics_dir=None):
     bad = check(rec, ans)
     if bad:
         die(f"{path}: {bad}" if path else bad)
+    want, got = bundle_directions(proj, place), sorted(d["id"] for d in directions(ans))
+    if got != want:   # every direction of the bundle rated, none made up
+        die(f"{path}: the answer rates the directions {got}, the {place} bundle has {want}")
     return dict(score(rec, ans, metrics_dir or os.path.join(proj, ".aid-ui", "critic"), sha_file(path)), role=role)
 
 
@@ -513,6 +516,14 @@ def place_state(proj):
 def decide(proj, place, scores, pm_choice=None, reason=None, pm_veto=None, supplied=False):
     expect = {(r, k) for r in ROLES for k in (place,) + EXTRA.get(place, ())}
     have = {(s["role"], x["rubric"]) for s in scores for x in s["directions"]}
+    sets = {(s["role"], x["rubric"]): None for s in scores for x in s["directions"]}
+    for s in scores:
+        for k in {x["rubric"] for x in s["directions"]}:
+            sets[(s["role"], k)] = sorted(x["direction"] for x in s["directions"] if x["rubric"] == k)
+    want_dirs = bundle_directions(proj, place)
+    bad = {"%s/%s" % k: v for k, v in sets.items() if v != want_dirs}
+    if bad:
+        die(f"incomplete_place: every role rates every direction of the {place} bundle {want_dirs}; got {bad}")
     if any(s.get("place") != place for s in scores) or len({s["role"] for s in scores}) != len(scores):
         die(f"incomplete_place: one score per role of place {place} (got {[(s.get('role'), s.get('place')) for s in scores]})")
     if have != expect:
@@ -532,7 +543,7 @@ def decide(proj, place, scores, pm_choice=None, reason=None, pm_veto=None, suppl
                 blocked.append({"kind": f["kind"], "role": s["role"], "finding": f["id"], "direction": f.get("direction"), "text": f.get("text")})
                 if f.get("direction"):
                     out.setdefault(f["direction"], "fakt nebo zákon")
-            if s["role"] == "tech" and f.get("kind") == "remeslo" and f.get("severity") == "blocking":
+            if s["role"] == "tech" and f.get("kind") == "remeslo" and f.get("blocking") is True:
                 for d in ([f["direction"]] if f.get("direction") else dirs):
                     out.setdefault(d, "blokující vada řemesla (%s)" % f["id"])
                 blocked.append({"kind": "remeslo", "role": "tech", "finding": f["id"], "direction": f.get("direction"), "text": f.get("text")})
@@ -599,11 +610,14 @@ def place_check(proj, place, vfile):
     if v.get("place") != place:
         die(f"the verdict is of place {v.get('place')}, not {place}")
     rd = last_round(proj, place)
+    rnd = json.load(open(os.path.join(rd, "round.json"), encoding="utf-8"))
     scores = []
     for r in ROLES:
         a = os.path.join(rd, r, "answer.json")
         if not os.path.isfile(a):
             die(f"place_verdict_handmade: the last round {rd} has no answer of {r}")
+        if (rnd.get("answers") or {}).get(r) != sha_file(a):   # the rating the round recorded, not a file edited since
+            die(f"place_verdict_handmade: {r}'s answer of round {rnd.get('n')} is not the one the round recorded")
         scores.append(scored(proj, place, r, a))
     o = v.get("options") or {}
     again = decide(proj, place, scores, o.get("pm_choice"), o.get("reason"), o.get("pm_veto"), o.get("supplied"))

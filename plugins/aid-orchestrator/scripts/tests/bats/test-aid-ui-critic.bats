@@ -29,7 +29,7 @@ except (OSError, KeyError):
 anchor = lambda x: max(a for a in (4, 6, 8, 10) if a <= x) if x >= 4 else None
 print(json.dumps({"criteria": [{"id": c["id"], "score": s, "anchor": anchor(s), "evidence": "úvod: nadpis a fotka pece",
   "missing_for_next": "více obrazu", "to_ten": {"studio": ["úvod: vlastní fotka ordinace přes celou šířku"] if s < 10 else [], "client": []}} for c in r["criteria"]], "findings": [{"id": "f1", "criterion": r["criteria"][0]["id"], "severity": "minor",
-  "owner": "agent", "text": "opakované slovo", "fix": "zkrátit", "where": "úvod, druhý odstavec"}], "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
+  "owner": "agent", "kind": "remeslo", "text": "opakované slovo", "fix": "zkrátit", "where": "úvod, druhý odstavec"}], "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
 PY
   [ -z "${2:-}" ] || { jq "$2" "$BATS_TEST_TMPDIR/a.json" > "$BATS_TEST_TMPDIR/b.json" && mv "$BATS_TEST_TMPDIR/b.json" "$BATS_TEST_TMPDIR/a.json"; }
 }
@@ -177,7 +177,7 @@ verdict_of() {   # verdict_of <place> [args]: both roles' scores of $T/owner.jso
 }
 
 @test "gates: when nove|oziveni|zavedeny_motiv pick the logo gates by the role's own mode; a when gate without the mode fails" {
-  python3 "$C" freeze "$P" --type web-local --place logo >/dev/null
+  python3 "$C" freeze "$P" --type web-local --place logo >/dev/null; logo_inputs a
   DIRS="a" mk logo tech 8 '(.directions[0].criteria[] | select(.id == "myslenka")) |= (.score = 6 | .anchor = 6)'
   run sc logo tech; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(st a <<<"$output")" = failed ]   # a new mark: idea under 7
@@ -191,7 +191,7 @@ verdict_of() {   # verdict_of <place> [args]: both roles' scores of $T/owner.jso
 }
 
 @test "gates: any_of lets a revival through only with its own detail; a 6/6 redraw fails although its weighted mean passes" {
-  python3 "$C" freeze "$P" --type web-local --place logo >/dev/null
+  python3 "$C" freeze "$P" --type web-local --place logo >/dev/null; logo_inputs a
   DIRS="a" REZIM=oziveni mk logo tech 8 '(.directions[0].criteria[] | select(.id == "myslenka" or .id == "odlisnost")) |= (.score = 6 | .anchor = 6)'
   run sc logo tech; [ "$(st a <<<"$output")" = failed ]
   jq -e '[.directions[0].gates[] | select(.ok == false) | .gate] == ["any_of myslenka|odlisnost >= 7 when oziveni"] and .directions[0].weighted >= 7' <<<"$output" >/dev/null
@@ -203,14 +203,14 @@ verdict_of() {   # verdict_of <place> [args]: both roles' scores of $T/owner.jso
 }
 
 @test "gates: weighted_min holds a direction whose every criterion passes its own gate" {
-  python3 "$C" freeze "$P" --type web-local --place struktura >/dev/null
+  python3 "$C" freeze "$P" --type web-local --place struktura >/dev/null; mkdir -p "$P/.aid-ui"; echo '{"pages": []}' > "$P/.aid-ui/structure.json"
   mk struktura tech 7; run sc struktura tech; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.directions[0].status == "failed" and ([.directions[0].gates[] | select(.ok == false) | .gate] == ["weighted >= 7.5"])' <<<"$output" >/dev/null
   mk struktura tech 8; run sc struktura tech; jq -e '.directions[0].status == "accepted" and .accepted == true' <<<"$output" >/dev/null
 }
 
 @test "gates: motion metrics - a missing measurement fails, an animation over the limit fails, a measured one within passes" {
-  python3 "$C" freeze "$P" --type web-local --place pohyb >/dev/null
+  python3 "$C" freeze "$P" --type web-local --place pohyb >/dev/null; mkdir -p "$P/.aid-ui/motion/v1"; echo '<html></html>' > "$P/.aid-ui/motion/v1/logo-animace.html"
   M="$BATS_TEST_TMPDIR/m"; mkdir -p "$M"
   DIRS="v1" mk pohyb tech 8; run sc pohyb tech "$M"; [ "$(st v1 <<<"$output")" = failed ]; [[ "$output" == *"nezměřeno"* ]]
   echo '{"web_logo_draw_ms": 2060, "web_logo_name_visible_ms": 0, "web_motion_running_after_ms": 400, "final_frame_diff_px": 0}' > "$M/metrics-pohyb-v1.json"
@@ -223,7 +223,7 @@ verdict_of() {   # verdict_of <place> [args]: both roles' scores of $T/owner.jso
 }
 
 @test "gates: a reservation only when the client's part holds the gate (studio_score + to_ten.client); a volba finding is no reservation" {
-  python3 "$C" freeze "$P" --type web-local --place vzhled >/dev/null
+  python3 "$C" freeze "$P" --type web-local --place vzhled >/dev/null; mkdir -p "$P/.aid-ui/directions/a"; echo '<html></html>' > "$P/.aid-ui/directions/a/index.html"
   hold='(.directions[0].criteria[] | select(.id == "moje_obrazky_a_zakazky")) |= (.score = 5 | .anchor = 4 | .studio_score = 8 | .studio_anchor = 8 | .limited_by = ["oi-1"] | .to_ten.client = ["vlastní fotky provozovny a lidí"])'
   DIRS="a" mk vzhled owner 8 "$hold"; run sc vzhled owner; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.directions[0].status == "reservation" and .directions[0].reservation == ["moje_obrazky_a_zakazky"] and .accepted == true' <<<"$output" >/dev/null
@@ -242,7 +242,7 @@ verdict_of() {   # verdict_of <place> [args]: both roles' scores of $T/owner.jso
   run verdict_of logo; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.status == "accepted" and .chosen == "a" and .chosen_by == "client" and (.target | length) == 64' <<<"$output" >/dev/null
   # the expert's blocking craft defect on a: a is out, the client's choice of a is refused (exit 3), b remains
-  DIRS="a b" mk logo tech 8 '.findings = [{"id": "t1", "criterion": "remeslo_tvaru", "severity": "blocking", "owner": "agent", "kind": "remeslo", "direction": "a", "text": "kóta přes obrys", "fix": "odsadit", "where": "značka 512"}]'
+  DIRS="a b" mk logo tech 8 '.findings = [{"id": "t1", "criterion": "remeslo_tvaru", "severity": "blocking", "owner": "agent", "kind": "remeslo", "blocking": true, "direction": "a", "text": "kóta přes obrys", "fix": "odsadit", "where": "značka 512"}]'
   run verdict_of logo; [ "$status" -eq 3 ]; jq -e '.error == "client_choice_failed" and .passing == ["b"]' <<<"$output" >/dev/null
   DIRS="a b" mk logo owner 8 '.choice = "b"'; run verdict_of logo; jq -e '.status == "accepted" and .chosen == "b"' <<<"$output" >/dev/null
   # a fact without a direction (the whole place): returned whatever the scores
@@ -251,6 +251,19 @@ verdict_of() {   # verdict_of <place> [args]: both roles' scores of $T/owner.jso
   # both roles report the same fact: listed once
   DIRS="a b" mk logo owner 8 '.choice = "b" | .findings = [{"id": "o2", "criterion": "muj_podnik", "severity": "major", "owner": "agent", "kind": "fakt", "text": "rok založení na značce nesedí", "fix": "opravit", "where": "logo"}]'
   run verdict_of logo; [ "$(jq '[.blocked_by[] | select(.kind == "fakt")] | length' <<<"$output")" -eq 1 ]
+}
+
+@test "gates: every role rates every direction of the bundle - a missing or made-up direction is refused" {
+  python3 "$C" freeze "$P" --type web-local --place logo >/dev/null; logo_inputs a b
+  DIRS="a" mk logo tech 8; run sc logo tech; [ "$status" -eq 1 ]; [[ "$output" == *"bundle has ['a', 'b']"* ]]
+  DIRS="a b x" mk logo tech 8; run sc logo tech; [ "$status" -eq 1 ]
+  # a craft finding without blocking: true does not take the direction out
+  DIRS="a b" mk logo owner 8 '.choice = "a"'
+  DIRS="a b" mk logo tech 8 '.findings = [{"id": "t1", "criterion": "remeslo_tvaru", "severity": "blocking", "owner": "agent", "kind": "remeslo", "direction": "a", "text": "drobná nerovnost", "fix": "srovnat", "where": "značka 512"}]'
+  run verdict_of logo; [ "$status" -eq 0 ]; jq -e '.chosen == "a" and .status == "accepted"' <<<"$output" >/dev/null
+  # a finding without kind is not a valid answer
+  DIRS="a b" mk logo tech 8 '.findings = [{"id": "t1", "criterion": "remeslo_tvaru", "severity": "major", "owner": "agent", "direction": "a", "text": "x", "fix": "srovnat", "where": "značka 512"}]'
+  run sc logo tech; [ "$status" -eq 1 ]; [[ "$output" == *"kind"* ]]
 }
 
 @test "gates: the client cannot pick a direction that failed the client's own gate" {

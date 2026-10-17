@@ -189,7 +189,8 @@
           "owner",
           "text",
           "fix",
-          "where"
+          "where",
+          "kind"
         ],
         "additionalProperties": false,
         "properties": {
@@ -242,6 +243,10 @@
             "type": "string",
             "minLength": 1,
             "description": "směr, kterého se nález týká (u víc směrů)"
+          },
+          "blocking": {
+            "type": "boolean",
+            "description": "odborník: vada, se kterou směr ke klientovi nesmí (kind remeslo); jinak false nebo chybí"
           }
         }
       }

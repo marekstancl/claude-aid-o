@@ -1,0 +1,4 @@
+{"by": "pm", "question": {"id": "v0", "kind": "vision", "title": "Vize (starý záznam, jen PM)"}, "cards": [], "step": "Vize", "answer": {"decision": "approve", "choice": null, "comment": "vize sedí", "at": "2026-10-10T08:00:00.000Z"}}
+{"by": "client", "question": {"id": "i1", "kind": "identity", "title": "Logo"}, "cards": [], "step": "Logo", "answer": {"decision": "choose", "choice": "b", "comment": "nechci dům, chci kótu", "at": "2026-10-11T08:00:00.000Z"}}
+{"by": "agent", "step": "Logo", "event": {"title": "rozhodnuto", "outcome": "x", "why": "y"}, "cards": [], "answer": {"decision": "decided", "at": "2026-10-11T09:00:00.000Z"}}
+{"by": "pm", "question": {"id": "i2", "kind": "identity", "title": "Logo - veto"}, "cards": [], "step": "Logo", "answer": {"decision": "return", "choice": null, "comment": "PM: kóta musí být odsazená", "at": "2026-10-11T10:00:00.000Z"}}

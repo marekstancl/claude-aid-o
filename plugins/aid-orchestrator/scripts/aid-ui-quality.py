@@ -38,7 +38,7 @@ rounds/<n>/{owner,tech}/ (the ratings), rounds/<n>/history-<role>.json (the memo
       {accepted = both roles accepted, roles}. A failed rating decides nothing (exit 1). Not accepted: the auditors'
       findings become an audit round to triage (not counted as a repair round). Exit 0 accepted, 3 not, 1 refused.
 """
-import json, os, re, subprocess, sys, time
+import hashlib, json, os, re, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CLIENT, CRITIC = (os.path.join(HERE, x) for x in ("aid-ui-client.py", "aid-ui-critic.py"))
@@ -49,6 +49,7 @@ PLACE = "web"   # P113: the decision place this run works on (--place); the P113
 PLACES = ("sdeleni", "logo", "pohyb", "struktura", "vzhled", "web")
 sys.path.insert(0, os.path.join(HERE, "lib"))
 import aid_ui_costs as costs   # noqa: E402
+import aid_ui_memory as memory   # noqa: E402
 LABEL_URL = {"web": "finished web", "struktura": "structure"}
 STATES = ("accepted", "rejected_with_reason", "duplicate", "blocked", "superseded")
 
@@ -277,19 +278,13 @@ def mark_client(f):
 
 
 def history(p, role):
-    """The role's memory at this place (pamet-hodnotitele.md): its own findings of this loop (since a reopen) and what
-    the studio did with them, and its previous rating - scores per criterion and the path to 10 of each round."""
-    since = reopened_at(p)
-    rs = [r for r in rounds(p) if r["at"] >= since and not r.get("audit")]
-    finds = [{"id": f["id"], "round": r["n"], "criterion": f["criterion"], "where": f.get("where"), "text": f["text"],
-              "state": "fixed" if f.get("state") == "accepted" and f.get("evidence") else f.get("state"),
-              "reason": f.get("reason"), "evidence": f.get("evidence")}
-             for r in rs for f in r["findings"] if f.get("role") == role]
-    if not rs:
-        return finds
-    return {"place": PLACE, "findings": finds,
-            "ratings": [{"round": r["n"], "scores": {k.split(".", 1)[1]: v for k, v in (r["score"].get("criteria") or {}).items() if k.startswith(role + ".")},
-                         "to_ten": (r.get("to_ten") or {}).get(role) or {}} for r in rs]}
+    """The role's memory at this place (lib/aid_ui_memory.py, pamet-hodnotitele.md): its findings since the place's
+    reopen and what the studio did with them, its previous scores and path to 10; the client also every other place
+    it rated, its studio answers and the PM's decisions."""
+    try:
+        return memory.role_memory(p, role, PLACE)
+    except ValueError as e:
+        die(str(e))
 
 
 def rate(p, web, d, audit=False, hist=None):
@@ -370,7 +365,8 @@ def do_round(p, web):
         ans = json.load(open(os.path.join(out, "answer.json"), encoding="utf-8"))
         finds += [mark_client(dict(f, id="r%d-%s-%s" % (n, role, bare(f["id"], [x["id"] for x in ans["findings"]])), role=role, state=None)) for f in ans["findings"]]
     score = merge(runs)
-    rec = {"n": n, "at": at, "place": PLACE, "web": web, "site_sha": runs["owner"]["site_sha"], "frozen_sha": runs["owner"]["frozen_sha"],
+    shas = {role: hashlib.sha256(open(os.path.join(out, "answer.json"), "rb").read()).hexdigest() for role, (_, out) in res.items()}
+    rec = {"n": n, "at": at, "place": PLACE, "answers": shas, "web": web, "site_sha": runs["owner"]["site_sha"], "frozen_sha": runs["owner"]["frozen_sha"],
            "provider": {r: runs[r].get("provider") for r in ROLES}, "score": score, "findings": finds, "readiness": score["readiness"],
            "task_test": task_row(p), "usd_equiv": usd_since(p, at)}
     save_round(p, rec)
