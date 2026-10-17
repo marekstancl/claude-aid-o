@@ -4,7 +4,7 @@
   python3 aid-ui-logo-motion.py <spec.json> <out-dir>
 
 Input (JSON): {viewBox: "0 0 256 256", parts: [{id, d, fill?, strokes: [{d, width, delay, dur}]}],
-name: {text, x, y, size?, family?, fill?, paths?, transform?}, web_ms?: 900, video_ms?: 2500, overlap?: 14, ease?}.
+name: {text, x, y, size?, family?, fill?, paths?, transform?}, lang?: "cs", title?, web_ms?: 900, video_ms?: 2500, overlap?: 14, ease?}.
 The short form of the plan is accepted too: parts [{id, d, stroke_order}] (the part drawn along its own outline, in
 that order, pen_width default 24) and name_text (the name at the bottom left). The name is required; a name set in
 outlines gives `paths` (path data) and `transform`, the text then only labels the mark.
@@ -19,7 +19,8 @@ pen strokes (a CSS mask: a stroke drawn along `d` with stroke-dasharray), in the
 Seamless end (fix 63): every mask stroke is `overlap` units wider than its stroke and has square caps, so the masks
 overrun the straight ends of the shape; when a version ends every mask is switched off (`mask: none`), leaving
 exactly the approved paths. Without JavaScript or with prefers-reduced-motion the final state shows at once (the
-animation runs only under html.anim, which an inline script sets). No browser needed; no absolute paths written.
+animation runs only under html.anim, which an inline script sets; the web version sets it once per visit, so a second
+page of the same visit shows the mark drawn). No browser needed; no absolute paths written.
 Exit 0 written, 1 invalid spec, 2 usage.
 """
 import html, json, os, re, sys
@@ -134,10 +135,15 @@ html.anim .mark .part{animation:aid-unmask 0s linear var(--end) forwards}
 
 
 def page(spec, ver, times, end):
-    return ("<!doctype html>\n<html lang=\"cs\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
-            f"<title>Logo - {'web' if ver == 'web' else 'video'}</title><link rel=\"stylesheet\" href=\"logo-motion.css\">"
+    # P113 (Coufal): the page's language and title from the spec (a Slovak web is not lang="cs"); on the web the mark
+    # draws once per visit - a second page of the same visit shows it drawn (sessionStorage), the video version always
+    lang, title = html.escape(spec.get("lang", "cs")), html.escape(spec.get("title", "Logo"))
+    once = ("try{if(sessionStorage.getItem('aid-logo-drawn')){throw 0}sessionStorage.setItem('aid-logo-drawn','1')}catch(e){if(e===0)return}"
+            if ver == "web" else "")
+    return (f"<!doctype html>\n<html lang=\"{lang}\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            f"<title>{title} - {'web' if ver == 'web' else 'video'}</title><link rel=\"stylesheet\" href=\"logo-motion.css\">"
             f"<style>body{{margin:0;display:grid;place-items:center;min-height:100vh}}.mark{{width:min(80vw,640px);--end:{end}ms}}</style>"
-            "<script>document.documentElement.classList.add('anim')</script></head>\n"
+            f"<script>(function(){{{once}document.documentElement.classList.add('anim')}})()</script></head>\n"
             f"<body>{svg(spec, ver, times)}</body></html>\n")
 
 

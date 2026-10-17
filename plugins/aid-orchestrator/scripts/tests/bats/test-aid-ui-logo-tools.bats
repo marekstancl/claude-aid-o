@@ -126,3 +126,12 @@ PY
   jq '.name.transform = "url(javascript:1)"' "$T/m2.json" > "$T/m4.json"
   run python3 "$MOT" "$T/m4.json" "$T/o4"; [ "$status" -eq 1 ]; [[ "$output" == *"name.transform"* ]]
 }
+
+@test "logo-tools: the page's language and title come from the spec; the web version draws once per visit, the video always" {
+  jq '.lang = "sk" | .title = "Pekáreň"' "$T/motion.json" > "$T/m5.json"
+  python3 "$MOT" "$T/m5.json" "$T/o5" >/dev/null
+  grep -q '<html lang="sk">' "$T/o5/logo-animace.html"; grep -q '<title>Pekáreň - web</title>' "$T/o5/logo-animace.html"
+  grep -q "sessionStorage.getItem('aid-logo-drawn')" "$T/o5/logo-animace.html"
+  ! grep -q "sessionStorage" "$T/o5/logo-animace-video.html"
+  python3 "$MOT" "$T/motion.json" "$T/o6" >/dev/null; grep -q '<html lang="cs">' "$T/o6/logo-animace.html"
+}
