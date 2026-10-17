@@ -109,6 +109,11 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; [[ -z "${WE
   CODEX_ANS="$T/ans-reg.json" python3 "$CL" critic "$P" --role owner --web "$W" --history "$T/hist.json" --out "$T/r1m" >/dev/null
   cmp -s "$T/hist.json" <(jq . "$T/r1m/bundle/podklady/historie.json" | jq -c . | jq .) || jq -e '.[0].id == "r1-owner-f9"' "$T/r1m/bundle/podklady/historie.json" >/dev/null
   grep -q "podklady/historie.json" "$T/r1m/prompt.md"; jq -e '.history == 1 and .provider == "codex"' "$T/r1m/run.json" >/dev/null
+  # P113 (Coufal round 2): a finding folded into another as its duplicate may come back as a regression too
+  echo '[{"id":"r1-owner-f9","round":1,"criterion":"x","text":"stará vada","state":"fixed","evidence":"opraveno"},{"id":"r1-owner-f8","round":1,"criterion":"x","text":"tá istá","state":"duplicate"}]' > "$T/hist-dup.json"
+  jq '.findings[0].regression_of = "r1-owner-f8"' "$ANS" > "$T/ans-dup.json"
+  CODEX_ANS="$T/ans-dup.json" python3 "$CL" critic "$P" --role owner --web "$W" --history "$T/hist-dup.json" --out "$T/r1d" >/dev/null
+  jq -e '.provider == "codex"' "$T/r1d/run.json" >/dev/null
   jq '.findings[0].regression_of = "r9-owner-nic"' "$ANS" > "$T/ans-bad.json"
   CODEX_ANS="$T/ans-bad.json" CLAUDE_ANS="$ANS" python3 "$CL" critic "$P" --role owner --web "$W" --history "$T/hist.json" --out "$T/r1n" >/dev/null
   jq -e '.provider == "claude" and ([.attempts[] | select(.error != null and (.error | contains("regression_of")))] | length) == 2' "$T/r1n/run.json" >/dev/null

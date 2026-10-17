@@ -23,7 +23,7 @@ cesta k 10) a co s nálezy studio udělalo (`fixed` + co změnilo, `rejected_wit
    (styl, volba slova, „šlo by lépe“) jsou drobnost (`severity: minor`): zapiš je, ale drobnost skóre nesnižuje.
 3. Známka kritéria = předchozí známka ± změny podle bodů 1 a 2; každé zvýšení i snížení zdůvodni v důkazu.
 4. Kotvy a stropy platí dál beze změny - paměť neznamená shovívavost.
-5. Vyřešený nebo zamítnutý nález neopakuj. Vidíš-li, že se vada vrátila, nebo máš proti zamítnutí nový argument,
+5. Vyřešený, zamítnutý nebo jako duplicitní sloučený nález neopakuj. Vidíš-li, že se vada vrátila, nebo máš proti zamítnutí nový argument,
    napiš ho jako nový nález s `regression_of` = jeho id a v textu uveď nový důkaz. Zablokovaný nález (čeká na
    majitele nebo na rozhodnutí) neopakuj; patří-li do readiness, uveď ho tam.
 6. Nálezy seřaď podle dopadu na tvou roli: první tři jsou to, co by výsledek posunulo nejvíc, ne drobnosti.

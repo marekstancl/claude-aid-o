@@ -20,7 +20,8 @@
 // <cards_dir>/<id>.png (default .aid-ui/logo/cards, the logo place's bundle): the lockup, the mark enlarged, the cuts
 // 48/32/16 px and each enlarged x4 (`mid` = the 32-48 px cut, `small` = the 16 px cut, both falling back to `symbol`),
 // black on white, inverted, and every context the brand brief names (`contexts`: ["záložka prohlížeče", "vizitka",
-// "cedule", ...]) in a neutral frame. No reasoning, no scores of the studio on a card. A non-square viewBox is
+// "cedule", ...]) in a neutral frame. `inverse` (and `inverse_small`) name the brand's light variant for the inverted
+// panel; without them the panel turns black to white. No reasoning, no scores of the studio on a card. A non-square viewBox is
 // accepted (the card fits it).
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
@@ -178,7 +179,10 @@ function overview() {
 
 function roleCard(d) {   // P113: what the expert and the client rate - the mark in every size and context, nothing else
   const L = inlineSvg(d.lockup, 'lk'), S = uri(d.symbol, false, true), M = uri(d.mid || d.symbol, false, true);
-  const Sm = uri(d.small || d.symbol, false, true), Si = uri(d.symbol, true, true), Smi = uri(d.small || d.symbol, true, true);
+  const Sm = uri(d.small || d.symbol, false, true), Si = d.inverse ? uri(d.inverse, false, true) : uri(d.symbol, true, true),
+    Smi = d.inverse_small ? uri(d.inverse_small, false, true) : d.inverse ? uri(d.inverse, false, true) : uri(d.small || d.symbol, true, true);
+  // P113 (Coufal): a colour mark on black is not its inverse - `inverse` / `inverse_small` name the light variant the
+  // brand supplies; without them only black is turned white, as before
   const cut = (src, px, lab) => `<figure><img src="${src}" style="width:${px}px;height:${px}px"><img src="${src}" style="width:${px * 4}px;height:${px * 4}px;image-rendering:pixelated"><figcaption>${lab}</figcaption></figure>`;
   const ctx = (spec.contexts || []).map((c) => `<div class="ctxn"><div class="slot"><img src="${S}"><span>${esc(spec.name)}</span></div><figcaption>${esc(c)}</figcaption></div>`).join('');
   return `<!doctype html><html><head>${head}<style>.rc{width:1400px;padding:24px;box-sizing:border-box;display:grid;grid-template-columns:1fr 1fr;gap:18px}

@@ -40,6 +40,16 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; }
   ! grep -rq "VNITŘNÍ ÚVAHA" "$P/.aid-ui/logo/cards"
 }
 
+@test "logo-tools: the inverted panel shows the brand's light variant when named (a colour mark on black is not its inverse)" {
+  printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path fill="#17463A" d="M40 200 L128 40 L216 200 Z"/></svg>' > "$P/marks/c-symbol.svg"
+  printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path fill="#ffffff" d="M40 200 L128 40 L216 200 Z"/></svg>' > "$P/marks/c-white.svg"
+  echo '{"name": "X", "directions": [{"id": "c", "title": "C", "lockup": "marks/a-lockup.svg", "symbol": "marks/c-symbol.svg"}]}' > "$P/s0.json"
+  bash "$TOOL" logo-sheet --cards "$P/s0.json" --root "$P" >/dev/null; cp "$P/.aid-ui/logo/cards/c.png" "$T/without.png"
+  echo '{"name": "X", "directions": [{"id": "c", "title": "C", "lockup": "marks/a-lockup.svg", "symbol": "marks/c-symbol.svg", "inverse": "marks/c-white.svg"}]}' > "$P/s1.json"
+  bash "$TOOL" logo-sheet --cards "$P/s1.json" --root "$P" >/dev/null
+  ! cmp -s "$T/without.png" "$P/.aid-ui/logo/cards/c.png"
+}
+
 @test "logo-tools: a direction without lockup or symbol, or with a raster symbol, is refused" {
   echo '{"name": "X", "directions": [{"id": "a", "title": "A", "lockup": "marks/a-lockup.svg"}]}' > "$P/s1.json"
   run bash "$TOOL" logo-sheet --cards "$P/s1.json" --root "$P"; [ "$status" -eq 2 ]

@@ -61,6 +61,10 @@ REFUSED = re.compile(r"usage limit|quota|rate limit|\b429\b|exceeded|insufficien
 MAX_IMAGES, MAX_PAGES, MAX_ROUNDS_HINT = 12, 8, 4
 
 
+# P113 (Coufal round 2): a finding may come back as a regression when it was fixed, rejected, superseded or folded into
+# another finding as its duplicate (the expert named r1-tech-f4, a duplicate of a fixed finding, and the answer was refused)
+REGRESSABLE = ("fixed", "rejected_with_reason", "superseded", "duplicate")
+
 def now():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
@@ -361,7 +365,7 @@ def critic_place(project, web, audit, out, role, history, place, role_text, froz
     hist_ids, h = set(), None
     if history and not audit:   # an audit is blind: no memory
         h = json.load(open(history, encoding="utf-8"))
-        hist_ids = {f["id"] for f in (h.get("findings") if isinstance(h, dict) else h) if f.get("state") in ("fixed", "rejected_with_reason", "superseded")}
+        hist_ids = {f["id"] for f in (h.get("findings") if isinstance(h, dict) else h) if f.get("state") in REGRESSABLE}
         os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
         wj(os.path.join(bundle, "podklady", "historie.json"), h)
     images = [os.path.join(bundle, "podklady", rel.replace(".aid-ui/", "").replace("docs/", "")) for rel in files if rel.endswith(".png")][:MAX_IMAGES]
@@ -390,7 +394,7 @@ def critic_place(project, web, audit, out, role, history, place, role_text, froz
             return None, (s.stderr or s.stdout).strip().replace("ERROR: aid-ui-critic.py: ", "")[:300]
         bad = [x["regression_of"] for x in a.get("findings") or [] if x.get("regression_of") and x["regression_of"] not in hist_ids]
         if bad:
-            return None, "regression_of %s: no fixed or rejected finding with that id in podklady/historie.json" % ", ".join(bad)
+            return None, "regression_of %s: no fixed, rejected, superseded or duplicate finding with that id in podklady/historie.json" % ", ".join(bad)
         return {"answer": a, "score": json.loads(s.stdout)}, None
 
     got, rec = ask(project, prompt, images, bundle, out, valid, "critic:%s:%s:%s" % (place, kind, role), role=True)
@@ -452,7 +456,7 @@ def critic(project, web, audit, out, role, history=None, place="web"):
     if history and not audit:   # an audit is blind: no memory
         h = json.load(open(history, encoding="utf-8"))
         hist_ids = {f["id"] for f in (h.get("findings") if isinstance(h, dict) else h)
-                    if f.get("state") in ("fixed", "rejected_with_reason", "superseded")}   # what may come back as a regression
+                    if f.get("state") in REGRESSABLE}   # what may come back as a regression
         os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
         wj(os.path.join(bundle, "podklady", "historie.json"), h)
     for f in comp:
@@ -514,7 +518,7 @@ def critic(project, web, audit, out, role, history=None, place="web"):
             return None, (s.stderr or s.stdout).strip().replace("ERROR: aid-ui-critic.py: ", "")[:300]
         bad = [x["regression_of"] for x in a.get("findings") or [] if x.get("regression_of") and x["regression_of"] not in hist_ids]
         if bad:
-            return None, "regression_of %s: no fixed or rejected finding with that id in podklady/historie.json" % ", ".join(bad)
+            return None, "regression_of %s: no fixed, rejected, superseded or duplicate finding with that id in podklady/historie.json" % ", ".join(bad)
         lim = sorted({i for c in a.get("criteria") or [] for i in c.get("limited_by") or [] if i not in client_items})
         if lim:   # a second score only where an open item of the client holds the web down
             return None, "limited_by %s: no open item of the client with that id in podklady/overenie.json" % ", ".join(lim)
