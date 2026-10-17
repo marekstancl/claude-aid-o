@@ -177,8 +177,11 @@ case "$1" in
   skeleton)
     dir="$(realpath -e "$2" 2>/dev/null || true)"
     [[ -d "$dir" && -f "$dir/.aid-ui/structure.json" ]] || refuse "$2 has no .aid-ui/structure.json; the skeleton is built from the approved structure"
+    [[ ! -L "$dir/site" ]] || refuse "$dir/site is a symlink; the skeleton serves and writes only inside the project"
     PROJECT="$dir"; JOBS="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}"
-    python3 "$SKELETON_PY" build "$dir" >/dev/null || die "the skeleton could not be built (see above)"
+    rc=0; python3 "$SKELETON_PY" build "$dir" >/dev/null || rc=$?
+    (( rc != 2 )) || exit 2   # a refused target (symlink, colliding urls, bad structure): refused, nothing written
+    (( rc == 0 )) || die "the skeleton could not be built (see above)"
     site="$dir/site"
     l="$(find "$site" -mindepth 1 -type l -printf '%P' -quit)"
     [[ -z "$l" ]] || refuse "$site/$l is a symlink; the skeleton serves no symlinks"

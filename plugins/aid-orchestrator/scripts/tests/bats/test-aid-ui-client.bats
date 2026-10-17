@@ -390,3 +390,8 @@ PY
   jq -e '.model == "sonnet"' "$T/o3/run.json" >/dev/null
   grep -n 'AID_UI_ROLE_MODEL' "$CL" >/dev/null
 }
+
+@test "one-client: a test never reaches a real model - a provider found outside the test's folder stops the call" {
+  unset AID_UI_ROLE_FIRST; rm "$T/bin/claude"
+  run python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/g1"; [ "$status" -eq 3 ]; [[ "$output" == *"a test reached the real claude"* ]]
+}

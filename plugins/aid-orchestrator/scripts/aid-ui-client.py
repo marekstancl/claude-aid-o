@@ -176,6 +176,12 @@ def ask(project, prompt, images, cwd, out, valid, purpose, role=False):
     first, second = (opus, codex) if role and os.environ.get("AID_UI_ROLE_FIRST", "claude") != "codex" else (codex, claude)
 
     def run(fn, p):
+        test = os.environ.get("BATS_TEST_TMPDIR")
+        exe = shutil.which("codex" if fn is codex else "claude") or ""
+        if test and not os.path.realpath(exe).startswith(os.path.realpath(test) + os.sep):
+            # llm-test-cost-control: a test never reaches a real model (P113: a stub of one provider let 67 role calls
+            # fall through to the real Opus once the role order changed)
+            die("a test reached the real %s (%s): stub it under $BATS_TEST_TMPDIR" % ("codex" if fn is codex else "claude", exe or "not found"), 3)
         r = fn(p, images, cwd, out)
         costs.tokens(project, r["provider"], r.get("model"), r["usage"], purpose, r.get("usd"))
         a, err = valid(r["text"]) if (r["text"] and not r["rc"]) else (None, None)

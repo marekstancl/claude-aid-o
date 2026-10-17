@@ -310,3 +310,19 @@ PY
   s=$(date +%s); python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$Q" >/dev/null; e=$(( $(date +%s) - s ))
   [ "$(find "$Q/site" -name index.html | wc -l)" -eq 160 ]; [ "$e" -lt 10 ]
 }
+
+@test "skeleton: a page the skeleton never wrote is never moved; a symlink or two urls on one file stop the build before any write" {
+  P="$BATS_TEST_TMPDIR/sk"; skel_project "$P"; mkdir -p "$P/site/vlastni"; echo '<html><h1>Ruční</h1></html>' > "$P/site/vlastni/index.html"
+  python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$P" >/dev/null
+  [ -f "$P/site/vlastni/index.html" ]; [ ! -e "$P/.aid-ui/skeleton/removed/vlastni" ]   # foreign: stays
+  O="$BATS_TEST_TMPDIR/outside"; mkdir -p "$O"; echo puvodni > "$O/index.html"
+  rm -r "$P/site/sluzby"; ln -s "$O" "$P/site/sluzby"
+  run python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$P"; [ "$status" -eq 2 ]; [[ "$output" == *"is a symlink"* ]]
+  [ "$(cat "$O/index.html")" = puvodni ]
+  run "$SERVE" skeleton "$P"; [ "$status" -eq 2 ]
+  rm "$P/site/sluzby"; Q="$BATS_TEST_TMPDIR/sk2"; skel_project "$Q"
+  python3 - "$Q" <<'PY'
+import json, sys; p = sys.argv[1] + "/.aid-ui/structure.json"; s = json.load(open(p)); s["pages"].append(dict(s["pages"][1], id="dup", url="/sluzby/")); json.dump(s, open(p, "w"))
+PY
+  run python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$Q"; [ "$status" -eq 2 ]; [[ "$output" == *"both become sluzby/index.html"* ]]; [ ! -e "$Q/site" ]
+}
