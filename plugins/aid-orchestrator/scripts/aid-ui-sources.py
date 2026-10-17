@@ -229,16 +229,20 @@ def nesdilet(path, root):
     if "nesdilet" in _fold(os.path.basename(path)):
         return "název souboru"
     try:
-        with open(path, "rb") as fh:
-            head = fh.read(4096).decode("utf-8", errors="replace")
-        if "nesdilet" in _fold("\n".join(head.splitlines()[:5])):
+        with open(path, "rb") as fh:   # the first 5 lines, read as lines (a long first line cannot hide the rest)
+            head = [fh.readline(65536).decode("utf-8", errors="replace") for _ in range(5)]
+        if "nesdilet" in _fold("".join(head)):
             return "prvních 5 řádků"
     except OSError:
         pass
     root = os.path.realpath(root if os.path.isdir(root) else os.path.dirname(root))
     d = os.path.realpath(os.path.dirname(path))
     while True:
-        for rd in sorted(glob.glob(os.path.join(d, "README*")) + glob.glob(os.path.join(d, "readme*"))):
+        try:   # README in any case (Readme.md, README.TXT, readme)
+            readmes = sorted(os.path.join(d, n) for n in os.listdir(d) if _fold(n).startswith("readme") and os.path.isfile(os.path.join(d, n)))
+        except OSError:
+            readmes = []
+        for rd in readmes:
             try:
                 with open(rd, "rb") as fh:
                     if "nesdilet" in _fold("\n".join(fh.read(8192).decode("utf-8", errors="replace").splitlines()[:10])):
@@ -275,11 +279,13 @@ def canonical_sha(man):
 def document(proj, kind, path, reason, requested, used_n, outdir, root=None):
     rel = os.path.relpath(path, proj) if kind != "from" else path
     it = {"id": item_id(kind, path), "kind": kind, "path": rel, "used": False, "reason": reason or ""}
-    if reason:
-        return it
-    no = nesdilet(path, root or proj)
-    if no:   # a hard rule: no request and no approval brings it back
+    if kind == "from" and root:
+        it["root"] = os.path.abspath(root)   # where the README rule stops; kept so the approved load checks it again
+    no = nesdilet(path, root or proj) if path and os.path.isfile(path) and not os.path.islink(path) else None
+    if no:   # a hard rule, before any other reason: no request and no approval brings it back
         it.update(excluded="nesdilet", reason=f"NESDÍLET ({no})")
+        return it
+    if reason:
         return it
     if not path.endswith(TEXT_EXT + PDF_EXT):
         it["reason"] = "tento formát skript nečte"
@@ -309,6 +315,9 @@ def document(proj, kind, path, reason, requested, used_n, outdir, root=None):
             return it
     else:
         text = raw.decode("utf-8", errors="replace")
+    if path.endswith((".html", ".htm", ".pdf")) and "nesdilet" in _fold("\n".join((visible_text(text) if path.endswith((".html", ".htm")) else text).strip().splitlines()[:5])):
+        it.update(excluded="nesdilet", reason="NESDÍLET (prvních 5 řádků textu)")   # the text the agent would read, not only the raw bytes
+        return it
     why = internal(rel, text[:4096])
     if why:
         it["excluded"] = "internal"
@@ -395,6 +404,11 @@ class Deadline:
         import time as _t
         self.t, self.end, self.hit = _t, _t.monotonic() + seconds, False
 
+    def over(self):
+        if self.t.monotonic() >= self.end:
+            self.hit = True
+        return self.hit
+
     def timeout(self):
         left = self.end - self.t.monotonic()
         if left <= 0.05:
@@ -425,7 +439,14 @@ def fetch_images(outdir, found, allow_local, dl=None):
                 ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
                 if not ctype.startswith("image/") or ctype == "image/svg+xml":
                     out.append(rec | {"status": "skipped (%s)" % (ctype or "unknown type")}); continue
-                data = r.read(MAX_IMAGE_BYTES + 1)
+                data = b""
+                while len(data) <= MAX_IMAGE_BYTES:
+                    if dl and dl.over():
+                        raise TimeoutError("nedoměřeno: strop času")
+                    chunk = r.read1(65536) if hasattr(r, "read1") else r.read(65536)   # what has arrived, so the deadline is checked between chunks
+                    if not chunk:
+                        break
+                    data += chunk
             if len(data) > MAX_IMAGE_BYTES:
                 out.append(rec | {"status": "over 8 MB"}); continue
             size = image_size(data)
@@ -512,8 +533,9 @@ class _SameSite(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def fetch_page(url, key, allow_local, timeout=30):
-    """(status, content type, bytes, final url) of one page; the body is read in chunks up to MAX_BYTES."""
+def fetch_page(url, key, allow_local, timeout=30, dl=None):
+    """(status, content type, bytes, final url) of one page; the body is read in chunks up to MAX_BYTES, and the
+    deadline is checked between chunks (a server dripping bytes cannot hold the read past it)."""
     handler = _SameSite(key, allow_local)
     opener = urllib.request.build_opener(handler)
     with opener.open(urllib.request.Request(url, headers={"User-Agent": "aid-ui-sources"}), timeout=timeout) as r:
@@ -522,7 +544,9 @@ def fetch_page(url, key, allow_local, timeout=30):
             return r.status, ctype, b"", r.geturl()
         chunks, total = [], 0
         while True:
-            chunk = r.read(65536)
+            if dl and dl.over():
+                raise TimeoutError("nedoměřeno: strop času")
+            chunk = r.read1(65536) if hasattr(r, "read1") else r.read(65536)   # what has arrived, so the deadline is checked between chunks
             if not chunk:
                 break
             total += len(chunk)
@@ -575,7 +599,7 @@ def fetch_site(proj, url, allow_local=False, max_seconds=180):
             break
         try:
             site_key(u, allow_local)
-            status, ctype, raw, final = fetch_page(u, key, allow_local, to)
+            status, ctype, raw, final = fetch_page(u, key, allow_local, to, dl)
         except Exception as e:  # noqa: BLE001 - every failure is a listed page, not a crash
             pages.append({"url": u, "status": str(e)[:160], "file": None})
             continue
@@ -621,7 +645,7 @@ def fetch_site(proj, url, allow_local=False, max_seconds=180):
         die(f"--fetch-site {url}: the home page was not fetched as HTML ({pages[0]['status'] if pages else 'no response'})", 1)
     rec = {"version": 1, "url": url, "final_url": home, "fetched_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"), "pages": pages,
            "images": fetch_images(outdir, found, allow_local, dl), "max_seconds": max_seconds}
-    rec["truncated"] = dl.hit
+    rec["truncated"] = dl.over()
     with _open_new(os.path.join(outdir, "fetch.json")) as fh:
         fh.write(json.dumps(rec, ensure_ascii=False, indent=1).encode("utf-8"))
     return outdir
@@ -722,6 +746,11 @@ def approved(proj, a, outdir):
     for d in man["sources"]:
         if d["used"] and d["id"] in bez:
             d = dict(d, used=False, reason="PM: bez")
+        if d["used"]:   # NESDÍLET again at the load: a manifest approved before the rule (or the README added since) never lets it in
+            src = d["path"] if os.path.isabs(d["path"]) else os.path.join(proj, d["path"])
+            no = nesdilet(src, d.get("root") or (proj if not os.path.isabs(d["path"]) else os.path.dirname(src)))
+            if no:
+                d = dict(d, used=False, excluded="nesdilet", reason=f"NESDÍLET ({no})")
         if d["used"]:
             tp = os.path.join(proj, d["text"])
             if not os.path.isfile(tp) or os.path.islink(tp) or sha(tp) != d["text_sha256"]:

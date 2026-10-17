@@ -185,11 +185,13 @@ def env_check():
     print("node: %s" % (node or "CHYBÍ"))
     if not node:
         miss.append("node (Node.js 20+): nainstalujte balíčkem systému, např. `sudo apt install nodejs npm`")
-    pw = os.path.isdir(os.path.join(lib, "node_modules", "@playwright", "test"))
     npm = shutil.which("npm")
-    print("playwright: %s" % ("nainstalován" if pw else ("nainstaluje se při prvním použití (npm ci)" if npm else "CHYBÍ")))
-    if not pw and not npm:
-        miss.append("Playwright: `cd %s && npm ci` (potřebuje npm)" % lib)
+    installed = os.path.isdir(os.path.join(lib, "node_modules"))
+    ok = bool(node) and installed and subprocess.run([node, "-e", "require.resolve('@playwright/test')"], cwd=lib, capture_output=True).returncode == 0
+    # a fresh plugin ships without node_modules: aid-ui-tool.sh runs `npm ci` on first use (lockfile pinned)
+    print("playwright: %s" % ("nainstalován" if ok else ("nainstaluje se při prvním použití (npm ci)" if (not installed and npm) else "CHYBÍ nebo rozbitý")))
+    if not ok and not (not installed and npm):
+        miss.append("Playwright: `cd %s && rm -rf node_modules && npm ci`" % lib)
     ch = os.environ.get("CHROME")
     if ch:
         ok = os.path.isfile(ch) and os.access(ch, os.X_OK)
@@ -198,7 +200,7 @@ def env_check():
             miss.append("CHROME=%s není spustitelný prohlížeč: zrušte proměnnou nebo ji nasměrujte na Chromium" % ch)
     else:
         cache = os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or os.path.expanduser("~/.cache/ms-playwright")
-        found = sorted(glob.glob(os.path.join(cache, "chromium-*", "chrome-linux*", "chrome")))
+        found = sorted(x for x in glob.glob(os.path.join(cache, "chromium-*", "chrome-linux*", "chrome")) if os.path.isfile(x) and os.access(x, os.X_OK))
         print("chromium: %s" % (found[-1] if found else "CHYBÍ"))
         if not found:
             miss.append("Chromium: `cd %s && npx playwright install chromium` (nebo CHROME=<cesta k Chromiu>)" % lib)

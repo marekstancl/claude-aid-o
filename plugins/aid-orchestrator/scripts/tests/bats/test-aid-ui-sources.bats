@@ -320,3 +320,35 @@ PY
   F="$(ls "$P"/.aid-ui/old-site/*/fetch.json)"
   jq -e '.truncated == true and .max_seconds == 2 and (.pages[0].file | type) == "string"' "$F" >/dev/null
 }
+
+@test "p113: NESDÍLET holds in a Readme of any case, in an HTML page's visible text, at the approved load, and a dripping server cannot outlast the ceiling" {
+  N="$T/k2"; mkdir -p "$N/a" "$N/b"
+  printf 'Interní složka\nnesdílet\n' > "$N/a/Readme.TXT"; printf '# A\nText A.\n' > "$N/a/x.md"
+  printf '<html><head><title>t</title></head><body><p>&#78;ESDÍLET</p><p>obsah</p></body></html>' > "$N/b/p.html"
+  printf '# B\nText B.\n' > "$N/b/ok.md"
+  run python3 "$SRC" "$P" --list --from "$N"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.sources[] | select(.path | endswith("a/x.md")) | .excluded == "nesdilet"' "$M" >/dev/null
+  jq -e '.sources[] | select(.path | endswith("b/p.html")) | .excluded == "nesdilet"' "$M" >/dev/null
+  # a manifest approved before a README said NESDÍLET: the approved load drops the file
+  h="$(jq -r .manifest_sha256 "$M")"; approve "$h"
+  printf 'NESDÍLET\n' > "$N/b/README"
+  run python3 "$SRC" "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '[.sources[] | select(.used and (.path | endswith("b/ok.md")))] | length == 0' "$M" >/dev/null
+  jq -e '.sources[] | select(.path | endswith("b/ok.md")) | .excluded == "nesdilet"' "$M" >/dev/null
+  # a server that drips one byte a second: the read stops at the deadline, truncated
+  PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  python3 - "$PORT" <<'PY' & HP=$!
+import http.server, sys, time
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        self.send_response(200); self.send_header("Content-Type", "text/html"); self.send_header("Content-Length", "100000"); self.end_headers()
+        for _ in range(100000):
+            self.wfile.write(b"<"); self.wfile.flush(); time.sleep(0.5)
+http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PY
+  for i in $(seq 1 50); do (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null && break; sleep 0.1; done
+  s=$(date +%s); run python3 "$SRC" "$P" --fetch-site "http://127.0.0.1:$PORT/" --allow-local --max-seconds 2; e=$(( $(date +%s) - s ))
+  kill "$HP" 2>/dev/null || true
+  [ "$e" -le 5 ] || { echo "took $e s"; return 1; }
+}

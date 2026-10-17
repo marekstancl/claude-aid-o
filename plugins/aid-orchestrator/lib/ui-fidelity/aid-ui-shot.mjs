@@ -22,8 +22,8 @@ const optOf = (args, k, d) => { const i = args.indexOf(k); if (i < 0) return d; 
 if (argv[0] === 'strip' || argv[0] === 'video') {
   const mode = argv.shift();
   const every = Number(optOf(argv, '--every', 40)), until = Number(optOf(argv, '--until', 3000)), width = Number(optOf(argv, '--width', 1440));
-  const [dir, url] = argv;
-  if (!dir || !url || !(every > 0) || !(until > 0)) { console.error(`usage: aid-ui-shot.mjs ${mode} <out-dir> <url> [--every ms] [--until ms] [--width px]`); process.exit(2); }
+  const [dir, url, ...extra] = argv;
+  if (!dir || !url || extra.length || !(every > 0) || !(until > 0) || !(width >= 200 && width <= 4000)) { console.error(`usage: aid-ui-shot.mjs ${mode} <out-dir> <url> [--every ms] [--until ms] [--width px]`); process.exit(2); }
   fs.mkdirSync(dir, { recursive: true });
   const b = await launch(); const files = [];
   if (mode === 'video') {
@@ -56,7 +56,7 @@ while (argv.length) {
   const a = argv.shift();
   if (a === '--cookie') cookie = fs.readFileSync(argv.shift(), 'utf8').trim();
   else if (a === '--studio') studio = argv.shift();
-  else if (a === '--name') fixed = argv.shift().replace(/[^a-z0-9_-]+/gi, '-');
+  else if (a === '--name') { const v = argv.shift(); if (!v || v.startsWith('--')) { console.error('usage: --name <name>'); process.exit(2); } fixed = v.replace(/[^a-z0-9_-]+/gi, '-'); }
   else if (a === '--header') header = true;
   else urls.push(a);
 }
@@ -89,7 +89,14 @@ async function shot(url, name, width, c = ctx) {
   await p.close();
 }
 if (studio) await shot(studio, 'studio', 1440, sctx);
-const free = n => { if (!fs.existsSync(`${out}/${n}-1440.png`)) return n; let k = 2; while (fs.existsSync(`${out}/${n}-${k}-1440.png`)) k++; return `${n}-${k}`; };
+// a name is reserved atomically (a .reserve file created exclusively) and only when none of its shots exists yet
+const free = n => {
+  for (let k = 1; ; k++) {
+    const b = k === 1 ? n : `${n}-${k}`;
+    if ([`${b}-1440.png`, `${b}-390.png`, `${b}-header-1440.png`].some(x => fs.existsSync(`${out}/${x}`))) continue;
+    try { fs.closeSync(fs.openSync(`${out}/.${b}.reserve`, 'wx')); return b; } catch { /* taken by a parallel run */ }
+  }
+};
 for (const u of urls) {
   const name = fixed ? free(fixed) : (new URL(u).pathname.replace(/^\/+|\/+$/g, '').replace(/\/index\.html$/, '').replace(/[^a-z0-9]+/gi, '-') || 'index');
   await shot(u, name, 1440); await shot(u, name, 390);
