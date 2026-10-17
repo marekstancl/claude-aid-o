@@ -15,6 +15,7 @@
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 export default async function measure(args) {
   const opt = (k) => { const i = args.indexOf(k); if (i < 0) return undefined; const v = args[i + 1]; args.splice(i, 2); return v; };
@@ -32,6 +33,8 @@ export default async function measure(args) {
     return { n: anims.length, mark: Math.max(0, ...anims.filter(inMark).map(end)), all: Math.max(0, ...anims.map(end)),
              name: !!document.querySelector('svg.mark .name, .mark .name, [data-aid-logo-name], svg.mark text, [data-aid-logo] text') };
   });
+  // the measured file's sha binds the numbers to it (a later edit of the animation voids them in the gate)
+  const pageSha = /^https?:\/\//.test(target) ? null : crypto.createHash('sha256').update(fs.readFileSync(target)).digest('hex');
   let rec;
   // P113 (Coufal: the PM's logo moved by requestAnimationFrame and read as no motion at all): without browser animations
   // the page is watched for 4 s - attributes a script keeps changing are motion too. Its end is measured; when the name
@@ -78,6 +81,7 @@ export default async function measure(args) {
     }, [a.toString('base64'), bshot.toString('base64')]);
     rec = { web_logo_draw_ms: Math.round(info.mark || info.all), web_logo_name_visible_ms: nameMs, web_motion_running_after_ms: Math.round(info.all),
             final_frame_diff_px: diff, measured_at: new Date().toISOString(), page: target };
+    if (pageSha) rec.page_sha256 = pageSha;
   }
   await b.close();
   fs.mkdirSync(outDir, { recursive: true });

@@ -340,8 +340,8 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
   await scrollAll(page);
   // reveals fire while scrolling: settle again before anything is measured or photographed
   const settled2 = settled.ok ? await settleMotion(page) : settled;
-  // script motion rarely depends on the width: watched once per page and browser (3 s each), the result stands for every width
-  const smKey = `${url}@${page.context().browser()?.browserType().name()}`;
+  // script motion watched once per page, width and browser (3 s each)
+  const smKey = `${url}@${page.viewportSize()?.width}@${page.context().browser()?.browserType().name()}`;   // per width (whole review: a phone-only loop)
   const scripted = !settled2.ok ? null : SCRIPTED.has(smKey) ? SCRIPTED.get(smKey) : SCRIPTED.set(smKey, await scriptMotion(page)).get(smKey);
   res.motion_settled = !settled2.ok ? ['fail', settled2.why] : scripted ? ['fail', `skriptová animace běží dál: ${scripted}`]
     : ['pass', `settled after ${settled.ms} ms, ${settled2.ms} ms after scrolling, no script motion`];

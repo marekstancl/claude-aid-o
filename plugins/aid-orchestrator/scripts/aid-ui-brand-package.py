@@ -114,7 +114,7 @@ def og_image_ok(snippet):
     for tag, a in Tags(snippet).tags:
         if tag == "meta" and a.get("property", "").strip().lower() == "og:image":
             u = urlsplit(a.get("content", "").strip())
-            if u.scheme in ("http", "https") and u.hostname and not re.search(r"\s", u.netloc) and u.path.endswith("/og-image.png"):
+            if u.scheme == "https" and u.hostname and not re.search(r"\s", u.netloc) and u.path.endswith("/og-image.png"):
                 return True
     return False
 

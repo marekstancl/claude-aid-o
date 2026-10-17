@@ -367,7 +367,9 @@ def apply_gates(g, crits, d, findings, metrics):
         if not have:
             if x.get("any_of"):
                 rows.append({"gate": name, "ok": False, "value": None, "why": "žádné kritérium nešlo posoudit"})
-            continue   # a criterion that does not apply (not_assessable) does not hold its gate
+            # ponytail: a criterion the role marks not_assessable does not hold its gate (by design: no photos yet);
+            # a fact or law gate that must never be skipped needs a per-gate flag (backlog, P113 whole review)
+            continue
         ok = any(now[k] >= x["min"] for k in have)
         row = {"gate": name, "ok": ok, "value": max(now[k] for k in have)}
         if not ok:
@@ -421,6 +423,10 @@ def score(rec, ans, metrics_dir=None, answer_sha=None):
             try:
                 mets = json.load(open(mf, encoding="utf-8"))
             except (OSError, ValueError):
+                mets = None
+            # P113 whole review: a measurement of another file than the direction's animation now is no measurement
+            page = os.path.join(os.path.dirname(os.path.abspath(metrics_dir or ".")), "motion", d["id"], "logo-animace.html")   # .aid-ui/critic -> .aid-ui/motion
+            if isinstance(mets, dict) and mets.get("page_sha256") and os.path.isfile(page) and mets["page_sha256"] != sha_file(page):
                 mets = None
         for e in rec["rubrics"]:
             pre = "" if e["key"] == place else e["key"] + "."
@@ -481,7 +487,9 @@ def bundle_files(proj, place, need=True):
             return [".aid-ui/critic/pohyb-without.json"] if os.path.isfile(os.path.join(proj, ".aid-ui/critic/pohyb-without.json")) else []
     out = []
     for pat, req in PLACE_FILES[place]:
-        hits = sorted(os.path.relpath(f, proj) for f in glob.glob(os.path.join(proj, pat), recursive=True) if os.path.isfile(f) and not os.path.islink(f))
+        root = os.path.realpath(proj)   # P113 whole review: no file reached through a symlink anywhere on its path
+        hits = sorted(os.path.relpath(f, proj) for f in glob.glob(os.path.join(proj, pat), recursive=True)
+                      if os.path.isfile(f) and os.path.realpath(f) == os.path.join(root, os.path.relpath(f, proj)))
         if req and not hits and need:
             die(f"{place}: missing input {pat} (the place's roles rate it; it is not replaced by site/)")
         out += hits
