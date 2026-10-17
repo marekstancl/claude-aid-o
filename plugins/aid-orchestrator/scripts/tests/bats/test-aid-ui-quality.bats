@@ -279,3 +279,18 @@ SH
   [ "$(python3 "$Q" status "$P" | jq -r '.decision + " " + (.rounds | tostring)')" = "triage 1" ]
   run python3 "$Q" audit "$P" --place sdeleni --web "$W"; [ "$status" -eq 2 ]
 }
+
+@test "gates: place loop - the path to 10 of a place with directions is read per direction (the logo round crashed on it)" {
+  run python3 -c '
+import importlib.util as u, sys
+s = u.spec_from_file_location("q", sys.argv[1]); m = u.module_from_spec(s); s.loader.exec_module(m)
+t = {"studio": ["x"], "client": []}; e = {"studio": [], "client": []}
+one = {"directions": [{"id": "pm", "criteria": [{"id": "myslenka", "to_ten": t}, {"id": "typografie", "to_ten": e}]}]}
+two = {"directions": [{"id": "a", "criteria": [{"id": "myslenka", "to_ten": t}]}, {"id": "b", "criteria": [{"id": "myslenka", "to_ten": t}]}]}
+flat = {"criteria": [{"id": "poznam_se", "to_ten": t}]}
+assert m.criteria_to_ten(one) == {"myslenka": t}, m.criteria_to_ten(one)
+assert sorted(m.criteria_to_ten(two)) == ["a:myslenka", "b:myslenka"]
+assert m.criteria_to_ten(flat) == {"poznam_se": t}
+print("ok")' "$BATS_TEST_DIRNAME/../../aid-ui-quality.py"
+  [ "$status" -eq 0 ] && [ "$output" = ok ] || { echo "$output"; return 1; }
+}

@@ -54,6 +54,15 @@ LABEL_URL = {"web": "finished web", "struktura": "structure"}
 STATES = ("accepted", "rejected_with_reason", "duplicate", "blocked", "superseded")
 
 
+
+def criteria_to_ten(a):
+    """{criterion: to_ten} of one answer; a place with directions (logo, vzhled) carries its criteria per direction -
+    then keyed <direction>:<criterion> when there is more than one (P113, Coufal: the logo round crashed on it)."""
+    dirs = a.get("directions") or []
+    crits = a.get("criteria") or [dict(c, id=c["id"] if len(dirs) == 1 else "%s:%s" % (d.get("id"), c["id"]))
+                                  for d in dirs for c in d.get("criteria") or []]
+    return {c["id"]: c["to_ten"] for c in crits if c.get("to_ten") and (c["to_ten"].get("studio") or c["to_ten"].get("client"))}
+
 def die(msg, code=1):
     print("ERROR: aid-ui-quality.py: " + msg, file=sys.stderr)
     sys.exit(code)
@@ -375,7 +384,7 @@ def do_round(p, web):
     to_ten = {}
     for role, (_, out) in res.items():
         a = json.load(open(os.path.join(out, "answer.json"), encoding="utf-8"))
-        to_ten[role] = {c["id"]: c["to_ten"] for c in a["criteria"] if c.get("to_ten") and (c["to_ten"]["studio"] or c["to_ten"]["client"])}
+        to_ten[role] = criteria_to_ten(a)
     prev = [r for r in rounds(p) if r["n"] < n]
     done = [{k: f.get(k) for k in ("id", "text", "evidence", "method")} for f in (prev[-1]["findings"] if prev else []) if f.get("evidence")]
     rec["to_ten"] = to_ten
