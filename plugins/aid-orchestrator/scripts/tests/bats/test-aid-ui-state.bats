@@ -31,6 +31,21 @@ setup() {
   printf 'standards:\n  map_path: %s\n' "$SPECS/standards-map.md" > "$PROJ/.aid-o/config/project.yaml"
   cp "$FX/map.yaml" "$FX/checks.yaml" "$T/cov/"
   export AID_UI_COVERAGE_MAP="$T/cov/map.yaml" AID_UI_COVERAGE_SOURCES="$FX/sources.yaml"
+  # P113: gate-record makes the customer page itself; the fixture has no web to describe, so a python3 shim on this
+  # test's PATH answers for aid-ui-customer-page.py (AID_UI_TEST_CP_RC=1: the gate is not green, nothing made)
+  mkdir -p "$BATS_TEST_TMPDIR/cpbin"
+  cat > "$BATS_TEST_TMPDIR/cpbin/customer-page.py" <<'PY'
+import os, sys
+a = sys.argv[1:]
+out = a[a.index("--out") + 1] if "--out" in a else os.path.join(a[0], "docs/zakaznik")
+if os.environ.get("AID_UI_TEST_CP_RC") == "1": sys.exit("ERROR: the gate is not green")
+if "--check" in a: sys.exit(0 if os.path.isfile(os.path.join(out, "index.html")) else 3)
+os.makedirs(out, exist_ok=True); open(os.path.join(out, "index.html"), "w").write(os.environ.get("AID_UI_TEST_CP_TEXT", "<p>zakaznik</p>") + "\n")
+PY
+  real="$(command -v python3)"
+  printf '#!/usr/bin/env bash\ncase "$1" in */aid-ui-customer-page.py) shift; exec "%s" "%s" "$@";; esac\nexec "%s" "$@"\n' \
+    "$real" "$BATS_TEST_TMPDIR/cpbin/customer-page.py" "$real" > "$BATS_TEST_TMPDIR/cpbin/python3"
+  chmod +x "$BATS_TEST_TMPDIR/cpbin/python3"; export PATH="$BATS_TEST_TMPDIR/cpbin:$PATH"
   # a two-page site
   SITE="$T/site"
   mkdir -p "$SITE"
@@ -1036,9 +1051,17 @@ PY
   jq '.gate_run_at = "2020-01-01T00:00:00Z"' "$PROJ/docs/design/soulad-summary.json" > "$PROJ/s.t" && mv "$PROJ/s.t" "$PROJ/docs/design/soulad-summary.json"
   run "$SCRIPT" chapter-all-target "$PROJ"
   [ "$status" -eq 1 ]; [[ "$output" == *"not from the recorded gate"* ]]
-  result '.rows |= map(if .check == "customer_page" then .status = "not_covered" else . end)'; "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null; end_order
+  # P113: a customer_page pass row the result brings is not trusted - gate-record writes the row itself
+  # a refused record (a row missing) leaves the page of the recorded gate in place; nothing new is moved over it
+  before="$(cat "$PROJ/docs/zakaznik/index.html")"
+  result '.rows |= .[1:]'; AID_UI_TEST_CP_TEXT='<p>nová</p>' run "$SCRIPT" gate-record "$PROJ" "$RES"
+  [ "$status" -eq 1 ]; [ "$(cat "$PROJ/docs/zakaznik/index.html")" == "$before" ]; [ ! -e "$PROJ/.aid-ui/customer-page.new" ]
+  result; AID_UI_TEST_CP_RC=1 "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  jq -e '.gate.customer_page == "not_covered"' "$STATE" >/dev/null
+  jq -e '[.rows[] | select(.check == "customer_page")] | length == 1 and .[0].status == "not_covered" and (.[0].detail | contains("not made: the gate is not green"))' "$RES" >/dev/null
+  end_order
   run "$SCRIPT" chapter-all-target "$PROJ"
-  [ "$status" -eq 1 ]; [[ "$output" == *"did not pass the customer page"* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"has no checked customer page"* ]]
   result; "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null; end_order
   [ ! -f "$PROJ/.aid-ui/finish.json" ]
   run "$SCRIPT" chapter-all-target "$PROJ"

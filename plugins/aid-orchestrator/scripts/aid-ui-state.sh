@@ -235,7 +235,7 @@ BRAND="$PROJECT/docs/brand"
 HTML="$BRAND/index.html"
 STATE="$PROJECT/docs/design/brand-state.json"
 OLD="$BRAND/state.json"   # P101 location, migrated by init
-if [[ "$VERB" != build-id ]]; then   # one mutation at a time: the answer check and the write are one step
+if [[ "$VERB" != build-id && "$VERB" != exception-covered ]]; then   # one mutation at a time (exception-covered only reads: gate-record's customer page calls it under the lock)
   [[ "$VERB" != init ]] || mkdir -p "${STATE%/*}"
   if [[ -d "${STATE%/*}" ]]; then
     exec 9<"${STATE%/*}"   # read-only fd of the directory: a project symlink cannot make us write
@@ -824,8 +824,8 @@ end_in_order() {
   jq -e '.gate.result_file' "$STATE" >/dev/null || die "$VERB refused: no gate recorded; the handover comes after the final gate (step 7)"
   local res; res="$(jq -r '.gate.result_file' "$STATE")"
   [[ -f "$res" ]] || die "$VERB refused: the recorded gate result $res is gone"
-  jq -e '[.rows[] | select(.check == "customer_page")] | length > 0 and all(.[]; .status == "pass")' "$res" >/dev/null ||
-    die "$VERB refused: the recorded gate did not pass the customer page (row customer_page); make the page, run the gate, gate-record, then the handover"
+  jq -e '.gate.customer_page == "pass"' "$STATE" >/dev/null ||
+    die "$VERB refused: the recorded gate has no checked customer page (gate.customer_page); a green gate's gate-record makes and checks it, then the handover"
   local page="$PROJECT/docs/zakaznik/index.html"
   [[ -f "$page" && "$(sha256sum "$page" | cut -d' ' -f1)" == "$(jq -r '.gate.customer_page_sha256 // ""' "$STATE")" ]] ||
     die "$VERB refused: docs/zakaznik/index.html is missing or not the page the recorded gate ran over (sha); the gate must run over the page the PM gets, then gate-record, then the handover"
@@ -1184,19 +1184,50 @@ case "$VERB" in
     # the same run recorded twice = the gate did not run (9. 10.: --copy-subject mistaken for a gate run)
     [[ "$(jq -r '.run_at // ""' "$res")" != "$(jq -r '.gate.run_at // ""' "$STATE")" ]] ||
       die "gate-record refused: this result (run_at $(jq -r .run_at "$res")) is already the recorded gate; the gate did not run again (aid-ui-verify.sh without --copy-subject)"
+    # P113 (IMP-697): the customer page is made from THIS result and checked before anything is recorded, so one gate
+    # pass suffices; the row customer_page is written here (the gate no longer computes it). Not green: the page is not
+    # made, the row is not_covered with the generator's reason; a made page failing its check: nothing recorded.
+    # A customer_page row already in the result is dropped - only gate-record writes it (none of the gate's rows vouch for it).
+    ckj="$(checks_json)"
+    cpo="$(tmpfile customer-page.out)"
+    cps=not_covered
+    # made into a staging folder and moved over docs/zakaznik only once the gate is recorded: a refused record keeps the
+    # page the recorded gate ran over (and the one the PM may already have)
+    cpn="$PROJECT/.aid-ui/customer-page.new"; rm -rf "$cpn"
+    if python3 "$HERE/aid-ui-customer-page.py" "$PROJECT" --result "$res" --out "$cpn" >"$cpo" 2>&1; then
+      python3 "$HERE/aid-ui-customer-page.py" "$PROJECT" --check --out "$cpn" >"$cpo" 2>&1 ||
+        { rm -rf "$ckj" "$cpn"; die "gate-record refused (nothing recorded): the customer page made from this gate fails its check: $(head -c 300 "$cpo")"; }
+      cps=pass
+    fi
+    cpd="$(tr '\n' ' ' <"$cpo" | sed 's/ERROR: //' | head -c 300)"; rm -f "$cpo"
+    tmp="$(tmpfile result.json)"
+    jq --arg s "$cps" --arg d "$([[ $cps == pass ]] && echo "made from this gate and checked by gate-record" || echo "not made: $cpd")" --slurpfile ck "$ckj" '
+      ((.fingerprints | keys | map(select(. != "_site"))) as $p | ($p | index("index.html")) as $h
+       | {check: "customer_page", page: (if $h then "index.html" else ($p[0] // "") end),
+          viewport: ($ck[0].viewports[-1] | tostring), browser: $ck[0].browsers[0], role: "", state: "", status: $s, detail: $d}) as $row
+      | .rows = [.rows[] | select(.check != "customer_page")] + [$row]' "$res" > "$tmp" && mv "$tmp" "$res" || { rm -f "$tmp" "$ckj"; die "gate-record refused: could not write the customer_page row into $res"; }
+    rm -f "$ckj"
     ck="$(checks_json)"
     rc=0; resolve="$(bpy gate "$STATE" "$ck" "$res")" || rc=$?
     mig="{}"; [[ "$rc" -ne 0 ]] || mig="$(bpy migrate "$STATE" "$ck" "$res")"
     rm -f "$ck"
-    [[ "$rc" -eq 0 ]] || exit 1
+    [[ "$rc" -eq 0 ]] || { rm -rf "$cpn"; exit 1; }
     if [[ "$mig" != "{}" ]]; then   # once per old exception, visibly: from now on it holds while its reason holds
       jq_write --argjson m "$mig" 'reduce ($m | to_entries[]) as $x (.; .exceptions[($x.key | tonumber)].reasons = $x.value
         | .exceptions[($x.key | tonumber)].reasons_migrated = true)'
       echo "MIGRATED page-* exception(s) to their reasons: $(jq -c . <<<"$mig")"
     fi
     jq_write --arg f "$res" --arg sha "$(sha256sum "$res" | cut -d' ' -f1)" --argjson r "$(jq -c '{run_at, build_id}' "$res")" \
-      --argjson idx "$resolve" '.gate = {run_at: $r.run_at, result_file: $f, result_sha256: $sha, build_id: $r.build_id}
+      --arg cps "$(jq -r 'first(.rows[] | select(.check == "customer_page") | .status) // "not_covered"' "$res")" \
+      --argjson idx "$resolve" '.gate = {run_at: $r.run_at, result_file: $f, result_sha256: $sha, build_id: $r.build_id, customer_page: $cps}
       | reduce $idx[] as $i (.; .exceptions[$i].resolved = $r.run_at) | .finished = null'
+    # the gate is recorded: its customer page replaces the previous one (index.html and www/, nothing else of the folder)
+    if [[ "$cps" == pass ]]; then
+      mkdir -p "$PROJECT/docs/zakaznik"; rm -rf "$PROJECT/docs/zakaznik/www"
+      [[ ! -d "$cpn/www" ]] || mv "$cpn/www" "$PROJECT/docs/zakaznik/www"
+      mv -f "$cpn/index.html" "$PROJECT/docs/zakaznik/index.html"
+    fi
+    rm -rf "$cpn"
     # the customer page the gate ran over, by sha (end_in_order compares); a new gate forgets finish.json
     cp_sha=""; [[ ! -f "$PROJECT/docs/zakaznik/index.html" ]] || cp_sha="$(sha256sum "$PROJECT/docs/zakaznik/index.html" | cut -d' ' -f1)"
     jq_write --arg s "$cp_sha" '.gate.customer_page_sha256 = (if $s == "" then null else $s end)'

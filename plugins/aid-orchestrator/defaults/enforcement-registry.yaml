@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 672 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 673 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
   # ── Plan amendments recorded here because this file is the TRACKED authority ──
   # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
   # `git check-ignore`; `docs/extending-aid.md` is the tracked exception), so an
@@ -4655,3 +4655,18 @@ enforcements:
     recovery: "Repair or remove the named line of .aid-ui/studio/history.jsonl, then rate or answer again."
     test_covers: "the client's answer recorded by: client and seen by its next rating, earlier places in the first rating of a new place, the PM's decisions labelled, --fresh without memory, a corrupt line naming its number (test-aid-ui-client.bats one-client: cases)."
     test: "scripts/tests/bats/test-aid-ui-client.bats"
+  - id: aid_ui_all_pages_check
+    type: 1
+    source: "lib/ui-fidelity/aid-ui-verify.mjs"
+    instruction: "skills/ui-design/coverage/checks.yaml"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "That the pages on disk are the pages the customer reaches; a page linked from outside the site directory is not seen."
+    description: "P113 Step 7 (fix 64: a sample let 11 overflows through) - the gate visits every page of the build at every width of the matrix (320, 390, 768, 1024, 1440) and the all_pages row fails naming each page that was not loaded and each .html on disk that the build does not list. The same pass reads the real width of every file a 2x screen can load for an image (srcset descriptors are not believed), watches script-driven motion, requires the viewport meta, one h1 and touch targets at every width; gate-record then makes the customer page from this very gate into a staging folder, checks it and moves it over docs/zakaznik only once the gate is recorded (customer_page row, gate.customer_page) - no second run, and only gate-record writes that row."
+    recovery: "Record the build again (aid-ui-state.sh build-record) so it lists every page, or remove the stray .html; fix the named rows and run the gate."
+    test_covers: "every page x width visited, a page missing from the build, density from the file a 2x screen gets, rAF motion, metrics per motion variant, the workshop's planted set 13/13, one pass with the customer page (test-aid-ui-verify.bats all-pages: cases)."
+    test: "scripts/tests/bats/test-aid-ui-verify.bats"

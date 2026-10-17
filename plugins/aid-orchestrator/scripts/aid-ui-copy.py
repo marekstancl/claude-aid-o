@@ -143,6 +143,15 @@ def fact_keys(facts):
     return set()
 
 
+def fact_value(facts, k):
+    """The register's entry for key k: a dict's value, or a list's whole entry whose claim is k (None when absent)."""
+    if isinstance(facts, dict):
+        return facts.get(k)
+    if isinstance(facts, list):
+        return next((e for e in facts if isinstance(e, dict) and str(e.get("claim")) == k), None)
+    return None
+
+
 # ---- bundle -----------------------------------------------------------------------------
 def bundle(a):
     proj = os.path.abspath(a.project)
@@ -561,12 +570,12 @@ def record(a):
     fsha, csha = man["facts.yaml"], man["product-context.md"]
     bsha = sha(os.path.join(d, "MANIFEST"))
     new = {}
-    facts_now = yaml_json(os.path.join(proj, "docs/content/facts.yaml")) or {}
+    facts_now = yaml_json(os.path.join(proj, "docs/content/facts.yaml"))
     for p, v in out.items():
         old = prev.get(p) or {}
         keys = sorted({str(k) for c in ((answer.get("pages") or {}).get(p) or {}).get("claims") or []
                        for k in (c.get("fact_key") if isinstance(c.get("fact_key"), list) else [c.get("fact_key")]) if k})
-        used = {k: facts_now.get(k) for k in keys} if isinstance(facts_now, dict) else {}
+        used = {k: fact_value(facts_now, k) for k in keys}
         same = (old.get("facts_used") == used if "facts_used" in old else old.get("facts_sha256") == fsha) and old.get("context_sha256") == csha
         failed = old.get("failed_reviews", 0) if same else 0
         if v["verdict"] == "fail":

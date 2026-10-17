@@ -60,6 +60,13 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
   jq -e '.copy_review.pages["index.html"] | .verdict == "pass" and .provider == "codex" and .subject_sha256 == "aaa"
          and (.facts_sha256 | length) == 64 and (.context_sha256 | length) == 64 and .failed_reviews == 0' "$ST" >/dev/null
   jq -e '.provider == "codex" and .codex_attempt.rc == 0' "$RUN/run.json" >/dev/null
+  # P113 (IMP-696): the fact keys the page's claims cite and their register entries then - the gate voids on those only
+  jq -e --argjson k "$(yq -o=json '.' "$P/docs/content/facts.yaml" | jq -c 'if type == "array" then (.[] | select(.claim == "klienti")) else .klienti end')" \
+    '.copy_review.pages["index.html"] | .facts_keys == ["klienti"] and .facts_used.klienti == $k and $k != null' "$ST" >/dev/null
+  # the register as a list of claims (the shape most projects have): the whole entry of that claim
+  python3 -c 'import importlib.util as u, sys; s = u.spec_from_file_location("c", sys.argv[1]); m = u.module_from_spec(s); s.loader.exec_module(m)
+r = [{"claim": "klienti", "value": "200"}, {"claim": "telefon", "value": "1"}]
+assert m.fact_value(r, "klienti") == r[0] and m.fact_value(r, "x") is None and m.fact_value({"a": 1}, "a") == 1' "$COPY"
   # its tokens are in the project's cost book (Coufal: 33 reviews were missing from it)
   jq -se 'map(select(.purpose == "copy:review")) | length == 1 and .[0].units.input == 1000 and .[0].usd > 0' "$P/.aid-ui/costs.jsonl" >/dev/null
   # the bundle holds only what the reviewer may read
@@ -234,7 +241,7 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
   [ ! -s "$RUN4/answer.json" ]
 }
 
-@test "failed reviews: a pass consumes nothing, the fourth fail in a series is refused, new facts start a new series" {
+@test "failed reviews: a pass consumes nothing, the fourth fail in a series is refused, a change of a fact the page cites starts a new series" {
   bad='.pages["index.html"].personas[0].score = 3'
   review "$bad"; "$STATE_SH" copy-record "$P" "$RUN" >/dev/null
   review;        "$STATE_SH" copy-record "$P" "$RUN" >/dev/null       # a pass: the count stays
@@ -244,7 +251,38 @@ review() { answer "${1:-.}"; RUN="$(bundle)"; CODEX_ANSWER="$T/answer.json" pyth
   [ "$(jq '.copy_review.pages["index.html"].failed_reviews' "$ST")" -eq 3 ]
   review "$bad"; run "$STATE_SH" copy-record "$P" "$RUN"
   [ "$status" -eq 1 ]; [[ "$output" == *"fourth failed review"* ]]
+  # P113 (IMP-696): a fact the page does not cite continues the series; a change of a fact it cites starts a new one
   printf 'novy:\n  value: "1"\n  source: PM\n' >> "$P/docs/content/facts.yaml"
+  review "$bad"; run "$STATE_SH" copy-record "$P" "$RUN"
+  [ "$status" -eq 1 ]; [[ "$output" == *"fourth failed review"* ]]
+  sed -i 's/value: "200"/value: "210"/' "$P/docs/content/facts.yaml"
+  review "$bad"; "$STATE_SH" copy-record "$P" "$RUN" >/dev/null
+  [ "$(jq '.copy_review.pages["index.html"].failed_reviews' "$ST")" -eq 1 ]
+}
+
+@test "copy-stable: a 3.4.0 record without facts_used is judged by the whole register once, then fingerprinted by the facts its claims cite" {
+  bad='.pages["index.html"].personas[0].score = 3'
+  review "$bad"; "$STATE_SH" copy-record "$P" "$RUN" >/dev/null
+  # as 3.4.0 wrote it: no facts_keys / facts_used
+  jq '.copy_review.pages |= map_values(del(.facts_keys, .facts_used))' "$ST" > "$T/s" && mv "$T/s" "$ST"
+  # a fact the page does not cite changes: the old record only knows the whole register, so a new series starts
+  printf 'novy:\n  value: "1"\n  source: PM\n' >> "$P/docs/content/facts.yaml"
+  review "$bad"; "$STATE_SH" copy-record "$P" "$RUN" >/dev/null
+  jq -e '.copy_review.pages["index.html"] | .failed_reviews == 1 and .facts_keys == ["klienti"] and (.facts_used | keys) == ["klienti"]' "$ST" >/dev/null
+  # fingerprinted now: another uncited fact continues the series
+  printf 'dalsi:\n  value: "2"\n  source: PM\n' >> "$P/docs/content/facts.yaml"
+  review "$bad"; "$STATE_SH" copy-record "$P" "$RUN" >/dev/null
+  [ "$(jq '.copy_review.pages["index.html"].failed_reviews' "$ST")" -eq 2 ]
+}
+
+@test "copy-stable: a sentence citing several facts is fingerprinted by all of them; a change of any one starts a new series, of none continues it" {
+  bad='.pages["index.html"].personas[0].score = 3 | .pages["index.html"].claims[0].fact_key = ["klienti", "telefon"]'
+  review "$bad"; "$STATE_SH" copy-record "$P" "$RUN" >/dev/null
+  jq -e '.copy_review.pages["index.html"] | .facts_keys == ["klienti", "telefon"] and .facts_used.telefon.value == "+420 777 123 456"' "$ST" >/dev/null
+  # no fact changed: the series continues
+  review "$bad"; "$STATE_SH" copy-record "$P" "$RUN" >/dev/null
+  [ "$(jq '.copy_review.pages["index.html"].failed_reviews' "$ST")" -eq 2 ]
+  sed -i 's/+420 777 123 456/+420 777 123 457/' "$P/docs/content/facts.yaml"
   review "$bad"; "$STATE_SH" copy-record "$P" "$RUN" >/dev/null
   [ "$(jq '.copy_review.pages["index.html"].failed_reviews' "$ST")" -eq 1 ]
 }

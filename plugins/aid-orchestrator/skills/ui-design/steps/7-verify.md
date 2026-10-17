@@ -72,8 +72,8 @@ a `references/standards/frontend-build-standard.md` (kopie v pluginu).
    `aid-ui-state.sh brand-waive <project> --answer <id>` (platí jen pro přesně tyto chybějící
    části).
 2. Otevřený řádek (fail, not_covered, warn mimo `warn_only`) → oprav kód,
-   kromě `design_standard_doc` a `customer_page`: ty jsou při prvním běhu otevřené
-   záměrně a řeší je body 4 a 7b;
+   kromě `design_standard_doc` (při prvním běhu otevřený záměrně, řeší ho bod 4) a `customer_page`
+   (píše ho `gate-record`, bod 7b);
    znovu `aid-ui-state.sh build-record` a bránu (bod 1). Opakuj, dokud
    zbývají jen řádky, které oprava neřeší.
 3. Zbylý řádek, který PM přijme: otázka `exception` ve studiu (`target` =
@@ -138,18 +138,17 @@ a `references/standards/frontend-build-standard.md` (kopie v pluginu).
    `seo_brief` znovu, politiku AI robotů rozhoduje PM; nikdy ji nedopisuj sám). Souhrn do
    kapitoly `seo` přes `aid-ui-state.sh body <project> seo --file <soubor>`.
 7b. Stránka pro zákazníka (co všechno dostal: web, značka, viditelnost, pravidla rozvoje,
-   obsah; marketing „připravujeme"): až je brána zelená a zapsaná (`gate-record`) a jediný
-   otevřený řádek je `customer_page` (při prvním běhu `not_covered`, stránka ještě není),
-   `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-customer-page.py" <project>` →
-   `docs/zakaznik/index.html` + `www/` (`docs/zakaznik/index.html` ručně needituj, vždy znovu generátorem). Každé číslo bere ze stavu, výsledku brány, SEO
-   souhrnu brány, `DESIGN.md`, registru faktů, textů, SEO zadání, design standardu
-   a balíčku značky; nic se nepíše ručně. Odmítne (brána není zelená, jiný build) → bod 1.
-   Pak bránu znovu (bod 1, `gate-record`): řádek `customer_page` hlídá, že stránka je
-   z tohoto buildu a nemá interní slova. Odkaz na stránku pošli PM s náhledem.
+   obsah; marketing „připravujeme"): **vyrobí ji `gate-record` sám z právě zapisované brány** (P113, IMP-697;
+   brána běží jedním průchodem). Zelená brána → `aid-ui-customer-page.py <project> --result <result.json>` →
+   `docs/zakaznik/index.html` + `www/`, hned `--check`; neprojde-li kontrola, nezapíše se nic. Brána není zelená →
+   stránka se nevyrobí a řádek `customer_page` je `not_covered` s důvodem. Řádek píše jen `gate-record`
+   (řádek, který přinese výsledek brány, se zahodí). `docs/zakaznik/index.html` ručně needituj. Každé číslo
+   bere ze stavu, výsledku brány, SEO souhrnu brány, `DESIGN.md`, registru faktů, textů, SEO zadání, design
+   standardu a balíčku značky; nic se nepíše ručně. Odkaz na stránku pošli PM s náhledem.
 7c. Pořadí konce je natvrdo (P108; 9. 10. PM přebíral dvakrát, protože poslední brána změnila čísla
    po jeho odpovědi): **poslední brána → `gate-record` → `aid-ui-coverage.sh report` → kapitoly
    `kvalita` a `schvaleni` → otázka `handover`.** `chapter-all-target` i `chapter-all` odmítnou,
-   když zapsaná brána neprošla řádek `customer_page`, stránka `docs/zakaznik/index.html` není ta,
+   když zapsaná brána nemá zkontrolovanou stránku pro zákazníka (`gate.customer_page`), stránka `docs/zakaznik/index.html` není ta,
    nad kterou brána běžela (otisk zapsaný při `gate-record`), nebo zpráva souladu není z této brány
    (`gate_run_at`).
 7d. Otevřené body a odkazy (P108): co po běhu zůstává otevřené, zapiš

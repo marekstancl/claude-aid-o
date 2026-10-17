@@ -4,7 +4,7 @@
 # Rules FB-1..FB-15 and FB-21..FB-24 of /ecosystem/specs/frontend-build-standard, plus checks
 # beyond the FB rules that implement other ecosystem standards (named with their source below;
 # P103 extension, rules not yet numbered in the frontend-build standard).
-viewports: [390, 768, 1440]
+viewports: [320, 390, 768, 1024, 1440]   # P113: every page at every width the workshop measured (fix 64)
 browsers: [chromium, webkit]
 warn_only: [lighthouse_mobile, coverage]   # measured and reported, never blocks (FB-13); coverage: only its "no standards map" warn (P113), a gap is still a fail
 # where a check applies (default: every page, viewport, browser and flow state); a
@@ -20,7 +20,8 @@ applies:
   design_standard_doc: {scope: project}
   vision_doc: {scope: project}
   coverage: {scope: project}
-  customer_page: {scope: project}
+  customer_page: {scope: project}   # written by gate-record (P113)
+  all_pages: {scope: project}
   copy_review: {browsers: [chromium], viewports: [1440], flows: false}
   motion_fidelity: {scope: project}   # the gate observes the home page's motion itself (aid-ui-motion.mjs) and checks it against .aid-ui/motion.json
   safe_area: {browsers: [chromium], viewports: [390], flows: false}
@@ -62,7 +63,7 @@ checks:
   form_states: a form never posts to mailto:; sent by script it locks the submit button while sending, shows an error with a clickable phone or e-mail when the endpoint fails and a message of its own when it succeeds (FB-28)
   form_delivery: "the form sent for real through the preview's receiver (.aid-ui/form.json) at 390 px lands in .aid-ui/inbox and the page says so; the receiver refuses an incomplete message (422), drops a filled spam trap, delivers a repeat once; the preview log holds no sent value (P113a AC8; frontend-build-standard FB-28)"
   mobile_native: "hover styles only inside @media (hover: hover), zoom never disabled, form fields at least 16 px (adopted emil-skills/mobile-native; frontend-build-standard FB-33)"
-  a11y_basics: "a page with a navigation starts with a skip link to the content, headings never skip a level, the focus ring has at least 3:1 against what is behind the control, one link text never leads to two places, and at 320 px (400 % zoom) nothing scrolls sideways (PM 13. 10. 2026, Coufal critic; frontend-build-standard FB-32)"
+  a11y_basics: "a page with a navigation starts with a skip link to the content, it has exactly one h1, headings never skip a level, the focus ring has at least 3:1 against what is behind the control, one link text never leads to two places, and at 320 px (400 % zoom) nothing scrolls sideways (PM 13. 10. 2026, Coufal critic; frontend-build-standard FB-32)"
   text_clearance: "text beside a vertical divider line (a one-sided border of a block, not a control) keeps at least 12 px from it on every page and viewport (PM 13. 10. 2026, Coufal; frontend-build-standard FB-31)"
   photo_slots: "a photo the client still owes has a slot of its exact shape and ratio (docs/content/photos.yaml, data-aid-photo): empty it is aria-hidden with a camera icon, no text, nothing focusable; a test photo put in keeps the slot and the page height (P113a, PM 1A; frontend-build-standard FB-30)"
   task_test: "what a customer comes for (docs/content/tasks.yaml: a price, the opening hours, the booking form; every searched text from the facts register; the critic rubric's task ids all present) is found within two steps from the home page at 1440 and 390 px (P113a; frontend-build-standard FB-29)"
@@ -78,7 +79,8 @@ checks:
   page_weight: a page transfers at most 1 MB, no render-blocking script in head, large raster images have srcset (FB-23)
   business_minimum: the seller is identified (IČO) on every page and a form links to how personal data are processed (FB-24)
   screenshots_reviewed: the PM has reviewed a full-page screenshot of every page at every viewport (FB-15)
-  customer_page: the customer page (docs/zakaznik, aid-ui-customer-page.py) exists, is made from this build and holds no internal word; not_covered until it is generated after a green gate
+  customer_page: the customer page (docs/zakaznik, aid-ui-customer-page.py) is made from the recorded gate's own result and holds no internal word; written by aid-ui-state.sh gate-record (P113, IMP-697 - one gate pass), not by the gate run; not_covered while the gate is not green
+  all_pages: every page of the site (every .html but 404.html) at every width and browser of the matrix was visited, none sampled; a page missing from the build or a page x width not visited fails (P113, fix 64 - a sample of 30 of 152 pages let 11 overflows through)
   copy_review: the page's copy passed the independent copy review (aid-ui-copy.py, recorded by aid-ui-state.sh copy-record) for its current text, facts and approved product context; not_covered until reviewed; a PM exception does not make it pass (finish and the customer page read the exception)
   motion_settled: every finite animation of the page ended, nothing new started for 500 ms and the intro overlay (data-aid-intro, the one contract for an intro) is gone within 10 s; the page is measured and photographed at that moment (P108; design-system-standard "Tokeny - Pohyb")
   motion_fidelity: the built home page carries the reference's motion as the PM saw it listed with the directions - every adopt/replace item of .aid-ui/motion.json was observed to run (load, second load, scroll, hover, page) by aid-ui-motion.mjs over the site itself; no picked reference = N/A (P108)
