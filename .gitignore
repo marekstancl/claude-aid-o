@@ -120,3 +120,6 @@ CLAUDE.MD
 # FSM transition artifact (created by aid-fsm.sh during state transitions; never tracked)
 /transition
 graphify-out/
+
+# Private apps of the AID family (marekstancl/aidlab-apps, symlink to /opt/eco/projects/aidlab-apps) — never published from here
+/apps
