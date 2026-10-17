@@ -6,6 +6,8 @@ user_invocable: false
 
 # Krok 1v - Vize, tón a slogan
 
+**Vrstva dílny (P113):** `references/local/sdeleni-postup.md` má přednost před generováním sloganů (pět směrů, test dosazení); ostatní platí. Otázku `vision` v autonomním běhu rozhoduje klient-role výběrem (`choose`) z karet, ne holým schválením (oprava 29). Místo: `sdeleni`; schválit vizi jde jen s verdiktem místa (`aid-ui-state.sh place-record --place sdeleni`). Kolo místa: `aid-ui-quality.py round <projekt> --place sdeleni`.
+
 **Last Updated:** 2026-09-28
 
 ## Cíl
@@ -18,8 +20,8 @@ kapitoly `vize`.
 ## Vstupy
 
 `PRODUCT.md`, existující vize (`docs/product-vision.md` nebo stránka
-v Docusauru), šablona `/opt/eco/docs/docs/ecosystem/templates/product-vision-prompt.md`
-(čti živě), brand brief `docs/design/brand-package/brand-brief.md`, je-li.
+v Docusauru), šablona `references/standards/product-vision-prompt.md`
+(kopie v pluginu, zdroj v `references/standards/SOURCES`), brand brief `docs/design/brand-package/brand-brief.md`, je-li.
 
 ## Postup
 

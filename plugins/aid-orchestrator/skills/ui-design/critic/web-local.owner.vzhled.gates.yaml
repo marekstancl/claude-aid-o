@@ -1,0 +1,25 @@
+role: owner
+place: vzhled
+gates:
+  - criterion: nic_ciziho_ani_vymysleneho
+    min: 8
+    why: "Majitel nepodepíše vzhled, ve kterém je číslo, hodnocení, odznak, logo partnera nebo citace, kterou nezná, podaná jinak než jako „Ke kontrole“; vymyšlený údaj na webu je jeho reputační i právní riziko."
+  - criterion: moje_obrazky_a_zakazky
+    min: 7
+    why: "Fotobanka, obrázek z AI nebo cizí zakázka vydávaná za jeho práci, tým či provozovnu klame jeho zákazníky; obrázky, ke kterým podnik nemá práva (fotky z recenzí a map od jiných autorů) nebo lidé bez souhlasu, jsou právní riziko; obrázky, které nezná jako své, majitel neschvaluje. U aplikace bez fotek platí pro skutečná data a názvy."
+  - criterion: poznam_svoji_znacku
+    min: 7
+    why: "Když majitel na webu nepozná své logo a své barvy, nepoznají ho ani jeho zákazníci; vrací se tokeny vzhledu, na kterých stojí všechny směry. Podnik bez vlastního loga a barev bránu splní potvrzeným a jako návrh označeným návrhem značky."
+  - criterion: prectu_na_telefonu
+    min: 7
+    why: "Zákazníci místních služeb web otevírají hlavně na telefonu; co majitel nepřečte bez brýlí nebo netrefí palcem, ztrácí poptávky. U interní desktopové aplikace se brána použije na obrazovku, na které se pracuje (1280–1440 px); je-li kritérium `netyka_se`, brána se nepoužije."
+  - criterion: duveryhodne_pro_zakazniky
+    min: 7
+    why: "Vzhled je první, podle čeho lidé webu věří; web, který působí jako něco jiného, než podnik je, nebo skrývá kontakt, nesplnil účel."
+  - criterion: chci_to_ukazat
+    min: 6
+    why: "Bez proklikatelných stránek a skutečné volby mezi směry majitel nerozhodne; drobné výhrady kolo nezastaví."
+  - criterion: dam_to_udrzovat
+    min: 6
+    why: "Vzhled, který se rozpadne s jinou fotkou nebo který majitel neumí aktualizovat, za pár měsíců zastará; drobné nedostatky návodu kolo nezastaví."
+weighted_min: 7.5

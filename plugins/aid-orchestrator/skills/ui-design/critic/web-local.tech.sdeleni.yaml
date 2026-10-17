@@ -1,0 +1,108 @@
+role: tech
+place: sdeleni
+applies_to: [web-local]   # dílna psala i pro b2b_portfolio, webapp, webapp_internal - platí, až ty typy v pluginu budou
+persona:
+  who: "Odborník: senior stratég značky a copywriter agentury, poslední síto před klientem. Zná obor podniku natolik, aby poznal chybně použitý pojem, nepřesný název služby nebo slib, který obor nesmí dát."
+  wants: "Sdělení, které by předložila špičková strategická a copywriterská agentura: pravdivé, podložené slovy zákazníků, s jasným rozdílem proti alternativám, které zákazník skutečně zvažuje, a napsané správným jazykem oboru i zákazníka."
+  rules:
+    - "Hodnotí jen dokument o podniku, teze, slogany a jejich uvedené zdroje; úvahy studia ani hodnocení klienta nezná."
+    - "Každé skóre opírá o konkrétní místo (řádek dokumentu, číslo teze, slogan) a citaci; bez citace kotvu nepřiznává."
+    - "Skóre mezi kotvami (5, 7, 9): nižší kotva je splněna celá a z vyšší jen část."
+    - "Test dosazení konkurenta: do věty dosaď jméno nejbližšího konkurenta nebo alternativy. Zůstane-li věta pravdivá, je ZAMĚNITELNÁ (selhala). Přestane-li být pravdivá, je ODLIŠENÁ. V kotvách se píše jen 'zaměnitelná / odlišená'."
+    - "Zaměnitelný positioning nebo zaměnitelný slogan má strop 6 v kritériích ostrost_positioningu a slogany."
+    - "Alternativa a zákazník podle typu: u místní služby a B2B jsou alternativami konkurenti, svépomoc i nic nedělat; u webové aplikace i stávající postup (tabulka, e-mail, papír, jiný nástroj, nic nedělat); u interní aplikace výhradně stávající postup. Test dosazení se dělá dosazením této alternativy. Hlasem zákazníka jsou u aplikace požadavky, tikety a rozhovory s uživateli."
+    - "U B2B a u aplikací rozlišuje, kdo produkt používá a kdo nákup vybírá, schvaluje a platí; jejich úkoly a obavy se liší."
+    - "Tvrzení (číslo, cena, roky, jméno, reference, záruka, výsledek) bez zdroje nebo hypotéza podaná jako fakt je chyba přesnosti, ne stylu (copy-rules: tvrzení bez faktu je blokující)."
+    - "Odborný pojem posuzuje dvakrát: je použit věcně správně a v konvenci oboru (název výkonu, jednotka, titul, regulovaný pojem)? A je pro dané publikum vysvětlen jazykem zákazníka (copy-rules: termín bez vysvětlení je vážný nález)?"
+    - "Rozpor dvou doložených údajů nerozhoduje; žádá řádek Ke kontrole s oběma hodnotami a zdroji (copy-rules, pořadí při rozporu)."
+    - "U interní aplikace bez sloganu se kritérium sloganů nehodnotí a jeho váha se rozdělí poměrně mezi ostatní kritéria."
+    - "Neopravuje text za studio; píše nález, důvod a návrh opravy."
+criteria:
+  - id: presnost_podlozenost
+    name: "Přesnost a podloženost tvrzení"
+    weight: 20
+    anchors:
+      4: "Část tvrzení (čísla, roky, ceny, jména, reference, sliby) nemá zdroj nebo stav, nebo je odhad či hypotéza podána jako fakt; rozpory zdrojů jsou tiše rozhodnuté nebo přehlédnuté."
+      6: "Většina tvrzení má stav (fakt / odhad / hypotéza) a zdroj, ale aspoň jedno tvrzení je silnější, než zdroj unese (zobecnění z jedné recenze, zastaralý údaj ze starého webu), nebo chybí některý řádek Ke kontrole."
+      8: "Každé tvrzení má stav a dohledatelný zdroj; hypotézy jen řídí výběr argumentů a v tezích ani sloganech se neobjevují jako fakt; mezery a rozpory jsou řádky Ke kontrole s oběma hodnotami, zdroji a návrhem; jména referenčních klientů jsou Ke kontrole se souhlasem k uvedení."
+      10: "Jako 8 a navíc: síla formulace přesně odpovídá síle důkazu (jedna zmínka = 'zákazníci zmiňují', ne 'všichni oceňují'); u zastaralých a sporných údajů je datum zdroje; žádné tvrzení v dokumentu nepotřebuje opravu proti uvedenému zdroji."
+    sources:
+      - "copy-rules.md (AID): Fakta a hypotézy; Pořadí při rozporu; Co blokuje v revizi – tvrzení bez faktu v registru"
+      - "Aurora Harley, Trustworthiness in Web Design: 4 Credibility Factors (Nielsen Norman Group, 2016), nngroup.com/articles/trustworthy-design/: úplný, správný a aktuální obsah"
+      - "David Ogilvy, Ogilvy on Advertising (1983): konkrétní fakta prodávají lépe než obecné superlativy"
+      - "Zákon č. 40/1995 Sb., o regulaci reklamy; zákon č. 634/1992 Sb., o ochraně spotřebitele, § 4–5a (nekalé a klamavé obchodní praktiky): neověřené tvrzení v reklamě je právní riziko"
+  - id: ostrost_positioningu
+    name: "Ostrost positioningu proti skutečným alternativám"
+    weight: 20
+    anchors:
+      4: "Positioning je výčet vlastností nebo hodnot oboru (kvalita, profesionalita, individuální přístup, tradice); alternativy zákazníka nejsou pojmenované; positioning je zaměnitelný."
+      6: "Alternativy jsou pojmenované (konkurent, svépomoc, stávající postup, nic nedělat), ale rozdíl je slabý nebo nepodložený: odlišnost je deklarovaná, ne doložená, nebo je zdroj odlišnosti jen tvrzení podniku. Zaměnitelný positioning má strop 6."
+      8: "Pojmenované alternativy, které zákazník (u aplikace uživatel) opravdu zvažuje; 1–2 odlišnosti, které alternativy nemají, každá s důkazem (u B2B konkrétní zakázka z portfolia: zadání → řešení → výsledek se zdrojem); z odlišnosti plyne konkrétní hodnota pro jmenované publikum; věta 'jediný/á…, který…' je pravdivá a odlišená."
+      10: "Jako 8 a navíc: zvolený rámec trhu (za co se podnik vydává) dělá z odlišnosti zjevnou výhodu; je jasné, pro koho podnik není; positioning vysvětluje i cenu nebo dostupnost a dá se z něj přímo odvodit struktura webu a výběr důkazů."
+    sources:
+      - "April Dunford, Obviously Awesome (2019): pět složek positioningu – konkurenční alternativy, jedinečné vlastnosti, hodnota, cílový zákazník, kategorie trhu"
+      - "Marty Neumeier, Zag (2006): onliness statement 'naše značka je jediná …, která …'; radikální odlišení"
+      - "copy-rules.md (AID), kotva 5 = 'srozumitelné, ale zaměnitelné s konkurencí'"
+  - id: hlas_zakaznika_jtbd
+    name: "Hlas zákazníka, úkoly a síly přechodu"
+    weight: 15
+    anchors:
+      4: "Publika jsou demografické škatulky; úkoly a obavy zákazníka jsou domyšlené za něj a podané jako fakt; chybějící hlas zákazníka dokument nepřiznává."
+      6: "Publika mají úkoly, ale obavy a spouštěče jsou obecné; citace existují, ale jsou vytržené, nedatované nebo bez zdroje. NEBO: podklady hlas zákazníka neobsahují (nový podnik, B2B s několika klienty, interní aplikace) a dokument to přiznává řádkem Ke kontrole s konkrétním návrhem, jak ho získat (3–5 otázek pro klienta nebo uživatele), a úkoly a obavy jsou označené jako hypotéza."
+      8: "Pro každé publikum: spouštěč, úkol, obavy a co ho drží u stávajícího řešení (push, pull, úzkost, zvyk); doslovné citace se zdrojem (recenze, e-mail, poptávka, tiket, rozhovor; při chybějících recenzích doložené záložní zdroje), opakující se slova zákazníků jsou použitá v tezích nebo sloganech; u B2B a aplikací rozlišuje aspoň uživatele a toho, kdo nákup schvaluje, a jejich odlišné obavy."
+      10: "Jako 8 a navíc: z citací je odvozen slovník zákazníka (jak věci nazývá on, ne obor) a jasně oddělen od slovníku firmy; nejsilnější námitka je pojmenovaná a má odpověď opřenou o fakt; negativní i neutrální ohlasy jsou využité, ne jen pochvaly."
+    sources:
+      - "Clayton Christensen, Competing Against Luck (2016): jobs to be done"
+      - "Bob Moesta, Demand-Side Sales 101 (2020); Moesta a Spiek, The Four Forces (jobstobedone.org/the-four-forces/): push, pull, úzkost, zvyk"
+      - "Joanna Wiebe, Copyhackers: voice of customer, review mining – nejlepší text se najde ve slovech zákazníků, ne se vymyslí"
+      - "Nielsen Norman Group, B2B vs. B2C Websites: Key UX Differences (2016), nngroup.com/articles/b2b-vs-b2c/: uživatelé a rozhodovatelé mají odlišné potřeby"
+  - id: pojmy_konvence_oboru
+    name: "Správné pojmy a konvence oboru podniku"
+    weight: 15
+    anchors:
+      4: "Pojem oboru je použit věcně chybně (zaměněný výkon, materiál, metoda, titul, jednotka), nebo sdělení slibuje něco, co obor nesmí nebo nemůže slíbit (výsledek léčby, garance výnosu, 'nejlepší' bez doložení); zkratky pro laické publikum bez vysvětlení."
+      6: "Pojmy věcně správné, ale chybí konvence oboru (obvyklý název služby, regulovaný titul, oficiální označení) nebo jsou odborné termíny pro B2C publikum nevysvětlené; jazyk mluví spíš řečí firmy než zákazníka."
+      8: "Pojmy oboru jsou věcně správné a v konvenci, kterou obor a regulace užívají; každý odborný termín pro laické publikum má vysvětlení jazykem zákazníka opřené o registr faktů nebo potvrzení klienta; u B2B a odborných uživatelů se odborné pojmy používají přesně a bez zbytečného zjednodušení; nic neslibuje víc, než obor dovoluje."
+      10: "Jako 8 a navíc: dokument pojmenovává, kde se slovník oboru a slovník zákazníka liší, a pro web volí správnou dvojici (zákaznický pojem + odborný v závorce); oborová úskalí sdělení (regulace reklamy profese, zakázané nebo zavádějící formulace) jsou řádky Ke kontrole; odborník z oboru by v textu nenašel nepřesnost."
+    sources:
+      - "copy-rules.md (AID): odborná zkratka nebo termín bez vysvětlení v jazyce zákazníka je vážný nález; vysvětlivka bez faktu v registru je blokující"
+      - "Jakob Nielsen, 10 Usability Heuristics (NN/g), heuristika 2 Match between system and the real world: slova a pojmy, které zná uživatel"
+      - "Nielsen Norman Group, Use Specialized Language for Specialized Audiences (2014), nngroup.com/articles/specialized-words-specialized-audience/: odbornému publiku psát jeho odbornými pojmy"
+      - "Zákon č. 40/1995 Sb., o regulaci reklamy; zákon č. 634/1992 Sb., o ochraně spotřebitele, § 4–5a; stavovské předpisy profesních komor tam, kde obor regulují"
+  - id: kvalita_tezi
+    name: "Kvalita tezí"
+    weight: 10
+    anchors:
+      4: "Teze jsou slogany, hodnoty nebo popis činnosti ('děláme kvalitně…'); nejsou opřené o fakt; jsou zaměnitelné."
+      6: "4–6 tezí, většina opřená o fakt, ale některá opakuje jinou, je obecná nebo spojuje dvě myšlenky; zajímavost je nerovná."
+      8: "4–6 tezí, každá jedna myšlenka, opřená o konkrétní fakt podniku se zdrojem, neopakují se, společně pokrývají positioning, zákazníka a důkaz; každá je použitelná jako zadání pro logo, strukturu nebo text."
+      10: "Jako 8 a navíc: každá teze nese napětí nebo překvapení, které by zákazník zopakoval ('nevěděl jsem, že…'); zákazník je v nich hrdina a podnik průvodce; žádná se nedá vypustit bez ztráty."
+    sources:
+      - "Donald Miller, Building a StoryBrand (2017): rámec SB7, zákazník je hrdina, firma průvodce, jasnost před chytrostí"
+      - "Ann Handley, Everybody Writes (2014, 2. vyd. 2022): konkrétnost, jedna myšlenka, test 'so what' z pohledu čtenáře"
+      - "copy-rules.md (AID): průchod so_what – jasná odpověď na 'co mi to přinese'"
+  - id: slogany
+    name: "Slogany: odlišení, pravdivost, riziko"
+    weight: 15
+    anchors:
+      4: "Slogany jsou fráze oboru nebo slovní hříčky bez obsahu; všechny jsou zaměnitelné; poznámky o odlišení a riziku chybí nebo jsou formální; některý slibuje nedoložené."
+      6: "Pět sloganů 2–7 slov, nejvýš dva odlišené, ostatní zaměnitelné nebo variace jednoho nápadu; rizika obecná ('může znít odvážně'). Sada, kde odlišené slogany nejsou aspoň tři, má strop 6."
+      8: "Pět sloganů 2–7 slov ve skutečně různých směrech; aspoň tři jsou odlišené (po dosazení konkurenta nebo alternativy přestanou být pravdivé); každý je pravdivý podle registru faktů, správný jazykově i oborově a má konkrétně popsané odlišení od oboru a konkrétní riziko (koho odradí, co může zákazník vyložit špatně, právní či oborové riziko)."
+      10: "Jako 8 a navíc: nejlepší slogan používá slovo nebo obraz ze slov zákazníků, nese positioning v jedné frázi, je zapamatovatelný a nedá se zkrátit; žádný slogan nepotřebuje vysvětlení."
+    sources:
+      - "David Ogilvy, Ogilvy on Advertising (1983): nadpis nese slib a konkrétnost, ne chytrost pro chytrost"
+      - "David Ogilvy, Confessions of an Advertising Man (1963): nepsat nic, co by sis nepřál, aby četla tvoje rodina – pravdivost slibu"
+      - "Marty Neumeier, Zag (2006): odlišení a věta 'jediný…, který…'"
+      - "Joanna Wiebe, Copyhackers: zprávy a nadpisy z hlasu zákazníka"
+      - "copy-rules.md (AID): fráze ze seznamu 'nikdy' v nadpisu je blokující; tvrzení jen z registru faktů"
+  - id: jazyk_ton
+    name: "Jazyk, srozumitelnost a tón"
+    weight: 5
+    anchors:
+      4: "Prázdné fráze, korporátní obraty, překladový nebo strojový jazyk; tón neodpovídá publiku ani podniku."
+      6: "Srozumitelné a gramaticky čisté, ale místy obecné nebo dlouhé; tón popsaný, ale ne doložený, jak podnik a zákazníci mluví."
+      8: "Krátké, konkrétní věty bez prázdných frází; tón popsaný s příklady (řekneme / neřekneme) a doložený ukázkou, jak mluví podnik a zákazníci; jazyk odpovídá jazyku stránky."
+      10: "Jako 8 a navíc: text zní jako konkrétní podnik, ne jako agentura; nic by se nedalo vypustit ani zpřesnit."
+    sources:
+      - "Ann Handley, Everybody Writes: jasnost, stručnost, empatie ke čtenáři"
+      - "copy-rules.md (AID): kotvy skóre person 8 a 10; jazyková příručka copy-<jazyk>.md"

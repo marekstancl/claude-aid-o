@@ -1,9 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "Hodnocení kritika (P113a)",
+  "title": "Hodnocení role na místě rozhodnutí (P113a, místa P113)",
   "type": "object",
   "required": [
-    "criteria",
     "findings",
     "readiness",
     "summary"
@@ -190,7 +189,8 @@
           "owner",
           "text",
           "fix",
-          "where"
+          "where",
+          "kind"
         ],
         "additionalProperties": false,
         "properties": {
@@ -229,6 +229,24 @@
             "type": "string",
             "minLength": 1,
             "description": "id nálezu z historie (podklady/historie.json), který byl vyřešen nebo zamítnut a znovu ho vidíš; jen s novým důkazem v text"
+          },
+          "kind": {
+            "enum": [
+              "fakt",
+              "zakon",
+              "remeslo",
+              "volba"
+            ],
+            "description": "fakt = nepravdivé/nedoložené tvrzení, zakon = právní riziko, remeslo = vada řemesla, volba = vkus nebo volba klienta"
+          },
+          "direction": {
+            "type": "string",
+            "minLength": 1,
+            "description": "směr, kterého se nález týká (u víc směrů)"
+          },
+          "blocking": {
+            "type": "boolean",
+            "description": "odborník: vada, se kterou směr ke klientovi nesmí (kind remeslo); jinak false nebo chybí"
           }
         }
       }
@@ -254,6 +272,254 @@
     "summary": {
       "type": "string",
       "minLength": 10
+    },
+    "place": {
+      "enum": [
+        "sdeleni",
+        "logo",
+        "pohyb",
+        "struktura",
+        "vzhled",
+        "web"
+      ]
+    },
+    "directions": {
+      "type": "array",
+      "minItems": 1,
+      "description": "víc směrů (varianty loga, pohybu, vzhledu): každý všemi kritérii",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "criteria"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "rezim": {
+            "enum": [
+              "nove",
+              "oziveni"
+            ],
+            "description": "logo: staví směr na zavedeném motivu (oziveni), nebo ne (nove)"
+          },
+          "zavedeny_motiv": {
+            "enum": [
+              "ano",
+              "ne"
+            ],
+            "description": "logo: má dnešní logo podniku zavedený motiv"
+          },
+          "criteria": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "score",
+                "anchor",
+                "evidence",
+                "missing_for_next",
+                "to_ten"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "score": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1,
+                  "maximum": 10
+                },
+                "anchor": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "enum": [
+                    4,
+                    6,
+                    8,
+                    10,
+                    null
+                  ]
+                },
+                "evidence": {
+                  "type": "string",
+                  "minLength": 10
+                },
+                "missing_for_next": {
+                  "type": "string",
+                  "minLength": 3
+                },
+                "not_assessable": {
+                  "type": "string"
+                },
+                "to_ten": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "studio",
+                    "client"
+                  ],
+                  "description": "konkrétní kroky k 10: co, kde a jak to bude vypadat; studio = co udělá studio, client = co dodá jen podnik",
+                  "properties": {
+                    "studio": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 15
+                      }
+                    },
+                    "client": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 10
+                      }
+                    }
+                  }
+                },
+                "studio_score": {
+                  "type": [
+                    "integer"
+                  ],
+                  "minimum": 1,
+                  "maximum": 10,
+                  "description": "jen když kritérium brzdí otevřený bod klienta (limited_by): jak dobře studio naložilo s tím, co mělo"
+                },
+                "studio_anchor": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "enum": [
+                    4,
+                    6,
+                    8,
+                    10,
+                    null
+                  ]
+                },
+                "limited_by": {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "type": "string",
+                    "pattern": "^oi-[0-9]+$"
+                  },
+                  "description": "id otevřených bodů klienta z podklady/overenie.json, které známku teď drží dole"
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "score": {
+                        "type": "null"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "not_assessable"
+                    ],
+                    "properties": {
+                      "anchor": {
+                        "type": "null"
+                      },
+                      "not_assessable": {
+                        "type": "string",
+                        "minLength": 5
+                      }
+                    }
+                  },
+                  "else": {
+                    "not": {
+                      "required": [
+                        "not_assessable"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "required": [
+                      "studio_score"
+                    ]
+                  },
+                  "then": {
+                    "required": [
+                      "studio_anchor",
+                      "limited_by"
+                    ]
+                  },
+                  "else": {
+                    "not": {
+                      "anyOf": [
+                        {
+                          "required": [
+                            "studio_anchor"
+                          ]
+                        },
+                        {
+                          "required": [
+                            "limited_by"
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "choice": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "klient: id směru, který by zaplatil a použil"
+    },
+    "previous": {
+      "type": "array",
+      "description": "paměť: stav každého předchozího nálezu",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "where"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "opraveno",
+              "castecne",
+              "neopraveno"
+            ]
+          },
+          "where": {
+            "type": "string",
+            "minLength": 3
+          }
+        }
+      }
     }
   }
 }

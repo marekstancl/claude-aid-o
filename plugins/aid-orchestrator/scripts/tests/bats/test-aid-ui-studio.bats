@@ -20,7 +20,11 @@ setup() {
   start_server
 }
 
-teardown() { kill "$SPID" 2>/dev/null || true; wait 2>/dev/null || true; }
+teardown() {
+  kill "$SPID" 2>/dev/null || true; wait 2>/dev/null || true
+  # P113: a studio started through aid-ui-serve.sh - only this case's project (the pointer names it)
+  AID_UI_PROJECT="$P" bash "$BATS_TEST_DIRNAME/../../aid-ui-serve.sh" stop studio >/dev/null 2>&1 || true
+}
 
 start_server() {
   python3 "$SERVER" --project "$P" --host 127.0.0.1 --port "$PORT" \
@@ -66,6 +70,12 @@ answer() {   # <json> [extra curl args]
   code -H "X-AID-Token: $TOKEN" -H 'Content-Type: application/json' -d "$b" "$@" "$URL/answer"
 }
 choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"choose","choice":"a"}'
+# pm_answer <json>: the PM's page answers with its session cookie (P113: only that is by pm; a token answer is an agent's)
+pm_answer() {
+  echo 0a1b2c3d4e5f60718293a4b5c6d7e8f9 > "$P/.aid-ui/studio.code"
+  curl -s -o /dev/null -c "$BATS_TEST_TMPDIR/pmjar" "$URL/?k=0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+  code -b "$BATS_TEST_TMPDIR/pmjar" -H "Referer: $URL/" -H 'Content-Type: application/json' -d "$1" "$URL/answer"
+}
 
 @test "token missing or wrong: POST and GET /answer and /state answer 403" {
   [ "$(code -d "$choose_a" "$URL/answer")" = 403 ]
@@ -390,7 +400,7 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
 
 @test "P106: an accepted answer's history line carries by: pm and the question's outcome" {
   jq '.questions[0].outcome = "Vzhled Zásady: klidný, věcný."' "$P/.aid-ui/studio/payload.json" > "$P/p.json" && mv "$P/p.json" "$P/.aid-ui/studio/payload.json"
-  [ "$(answer "$choose_a")" = 200 ]
+  [ "$(pm_answer "$choose_a")" = 200 ]
   jq -e 'select(.question.id == "q1") | .by == "pm" and .question.outcome == "Vzhled Zásady: klidný, věcný."' \
     "$P/.aid-ui/studio/history.jsonl" >/dev/null
 }
@@ -410,7 +420,7 @@ choose_a='{"question":"q1","kind":"direction","target":"home@abc","decision":"ch
   STATE_SH="$BATS_TEST_DIRNAME/../../aid-ui-state.sh"
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
   [ "$(jq -r .history_lines "$BATS_TEST_TMPDIR/body")" = 0 ]
-  [ "$(answer "$choose_a")" = 200 ]
+  [ "$(pm_answer "$choose_a")" = 200 ]
   "$STATE_SH" decide "$P" --step s1 --title "Doba odpovědi" --outcome "Do dvou dnů" --why "PM řekl vyber ty" >/dev/null
   [ "$(code -H "X-AID-Token: $TOKEN" "$URL/state")" = 200 ]
   [ "$(jq -r .history_lines "$BATS_TEST_TMPDIR/body")" = 2 ]

@@ -6,6 +6,8 @@ user_invocable: false
 
 # Krok 2 - Struktura
 
+**Vrstva dílny (P113):** `references/local/struktura-postup.md` má přednost před postupem stromu a sekcí (úkoly zákazníka první, rozsah obsahu je volba klienta - výchozí výběr 8–12 s detailem + úplný seznam). Ze `structure.json` staví živou kostru `aid-ui-serve.sh skeleton <projekt>` na stálé adrese. Místo: `struktura`, kolo `aid-ui-quality.py round <projekt> --place struktura --web <adresa kostry>`.
+
 **Last Updated:** 2026-09-28
 
 ## Cíl
@@ -16,8 +18,8 @@ zapsal; kapitola `struktura` ji ukazuje.
 ## Vstupy
 
 `PRODUCT.md`, `variant`, potvrzený seznam stránek z `docs/seo/brief.md`
-(je-li), `/opt/eco/docs/docs/ecosystem/specs/webapp-tasks-states-standard.md`
-a `frontend-build-standard.md` (čti živě).
+(je-li), `references/standards/webapp-tasks-states-standard.md`
+a `references/standards/frontend-build-standard.md` (kopie v pluginu, zdroj v `references/standards/SOURCES`).
 
 ## Postup
 

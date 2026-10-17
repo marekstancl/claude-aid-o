@@ -22,6 +22,8 @@ The generator runs only after a green gate: no fail and no not_covered except th
 row, and the result's build id equals the state's build.id. Otherwise exit 1, nothing written.
 The data the page was made from is embedded as <script type="application/json" id="customer-data">.
 
+--result <result.json> (P113, IMP-697): aid-ui-state.sh gate-record makes the page from the result it is about to
+record (the gate no longer computes the customer_page row; gate-record writes it after --check).
 --check (the gate row customer_page): the page exists, its build_id is the gate's build and the
 visible text holds no internal word (whole words, case-sensitive). Output `OK|MISSING|FAIL ...`;
 exit 0 pass, 1 fail, 3 no page yet (the gate reports not_covered), 2 usage.
@@ -72,9 +74,11 @@ def fact(facts, key):
     return str(v.get("value") if isinstance(v, dict) else v) if v not in (None, "") else ""
 
 
-def gather(proj):
+def gather(proj, result=None):
     st = rj(os.path.join(proj, "docs/design/brand-state.json"))
     gate = st.get("gate") or {}
+    if result:   # P113 (IMP-697): gate-record makes the page from the result it is about to record
+        gate = {"result_file": os.path.abspath(result)}
     res_file = gate.get("result_file") or ""
     if not res_file or not os.path.exists(res_file):
         die("no gate result yet: the page is made after the gate (step 7)")
@@ -286,7 +290,7 @@ CHECK_WORDS = {"http_200": "dostupnost stránek", "glyph_coverage": "písmo a di
                "brand_consistency": "jednotný vzhled značky", "page_weight": "velikost stránky", "business_minimum": "povinné údaje firmy",
                "ai_search": "AI vyhledávače", "brand_package": "balíček značky", "design_standard_doc": "pravidla vzhledu webu",
                "token_usage": "barvy a písma podle návrhu", "sticky_panels": "přilepené panely", "keyboard": "ovládání klávesnicí",
-               "reduced_motion": "omezení pohybu", "touch_targets": "velikost ovládacích prvků na mobilu",
+               "reduced_motion": "omezení pohybu", "all_pages": "kontrola všech stránek", "touch_targets": "velikost ovládacích prvků na mobilu",
                "safe_area": "okraje displeje telefonu", "privacy_before_consent": "soukromí před souhlasem",
                "vision_doc": "vize produktu", "coverage": "soulad se standardy", "customer_page": "stránka pro zákazníka",
                "copy_review": "kontrola textů", "motion_settled": "doběhnutí animací před měřením", "motion_fidelity": "pohyb podle vzoru",
@@ -614,6 +618,7 @@ def main():
     ap.add_argument("project")
     ap.add_argument("--out")
     ap.add_argument("--check", action="store_true")
+    ap.add_argument("--result", help="the gate result to make the page from (aid-ui-state.sh gate-record, before it records it)")
     a = ap.parse_args()
     proj = os.path.abspath(a.project)
     out = os.path.abspath(a.out or os.path.join(proj, "docs/zakaznik"))
@@ -623,7 +628,7 @@ def main():
     site = os.path.join(proj, (st.get("build") or {}).get("site") or "site")   # a relative site is the project's
     if os.path.commonpath([out, os.path.abspath(site)]) == os.path.abspath(site):
         die("--out points into the website folder: the page would change the build", 2)
-    D, res_file = gather(proj)
+    D, res_file = gather(proj, a.result)
     page = render(D)
     www = os.path.join(out, "www")
     os.makedirs(www, exist_ok=True)

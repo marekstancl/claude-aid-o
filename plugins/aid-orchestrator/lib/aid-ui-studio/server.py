@@ -57,7 +57,7 @@ the link from another app, whose Referer is foreign):
   GET  /report                <project>/docs/design/soulad-se-standardy.md, escaped
   GET  /licence               Impeccable NOTICE (the page pattern's source)
   GET  /history               [auth] the lines of <project>/.aid-ui/studio/history.jsonl in file order:
-                              every answered question as the studio showed it ({by: "pm", question,
+                              every answered question as the studio showed it ({by: "pm"|"client", question,
                               cards (previews copied aside), step, answer}) and every decision the
                               agent recorded with `aid-ui-state.sh decide` ({by: "agent", step,
                               event, cards: [], answer: {decision: "decided", at}}); a line that is
@@ -79,11 +79,13 @@ the link from another app, whose Referer is foreign):
                               and `items_sha256`.
   POST /answer                [auth] JSON {question, kind, target, decision,
                               choice, comment}; kind and target must be the open
-                              question's own (a stale page gets 409).
+                              question's own; by = "pm" only for the PM's page (session cookie, no
+                              token); a token answer is "client" (X-AID-Role: client, P113) or "agent".
+                              (a stale page gets 409).
                               200 recorded; 409 = question closed, superseded
                               (not in the payload), not yet open (opened_at in the
                               future) or already answered; 422 = malformed answer.
-  GET  /answer?question=<id>  [auth] {question, kind, target, decision,
+  GET  /answer?question=<id>  [auth] {question, kind, target, decision, by,
                               choice, comment, at, cards, cards_sha256}, only for an answer given after
                               the question's current opened_at with its current
                               kind and target; a re-roll adds `next_question`.
@@ -116,7 +118,6 @@ CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "preview2", "preview2_
 PRIOR = {"direction": "references"}
 STEP_METHODS = {"build"}   # P108: the build has a method and a receipt (aid-ui-state.sh build-record), no question
 RECEIPT_AGE = 12 * 3600   # a method receipt serves questions opened within this many seconds after it
-STANDARDS = "/opt/eco/docs/docs/ecosystem/"   # the only place a method file may live outside the plugin (read live)
 WAIVERS = ("pm", "without")   # no_method card values that let the kind be asked without a method
 DECISIONS = {"approve", "choose", "return", "reroll", "reroll_safer", "reroll_bolder"}
 # Previews are raster images only: an .html/.svg preview would run script on this origin.
@@ -250,10 +251,7 @@ def load_sections():
         if len(set(v["files"])) != len(v["files"]):
             raise ValueError("methods.%s names a file twice" % k)
         for x in v["files"]:
-            if x.startswith(STANDARDS):   # a standard read live: checked when read, not here
-                if os.path.normpath(x) != x or os.path.islink(x) or (os.path.exists(x) and not os.path.isfile(x)):
-                    raise ValueError("methods.%s: %s is not a plain file path" % (k, x))
-                continue
+            # P113: standards are the plugin's copies (references/standards/); no method file lives outside the plugin
             full = os.path.join(PLUGIN, x)
             if os.path.isabs(x) or os.path.normpath(x) != x or x.startswith("..") \
                     or os.path.islink(full) or not os.path.isfile(full) or not os.path.realpath(full).startswith(PLUGIN + os.sep):
@@ -891,7 +889,7 @@ def answer_from_history(qid):
                     e = json.loads(line)
                 except ValueError:
                     continue
-                if not (isinstance(e, dict) and e.get("by") == "pm" and isinstance(e.get("question"), dict)
+                if not (isinstance(e, dict) and e.get("by") in ("pm", "client", "agent") and isinstance(e.get("question"), dict)
                         and e["question"].get("id") == qid and isinstance(e.get("answer"), dict)):
                     continue
                 migrated = False
@@ -908,7 +906,7 @@ def answer_from_history(qid):
                     continue
                 if found and str(an.get("at")) <= str(found["at"]):
                     continue
-                found = {"question": qid, "kind": qq.get("kind"), "target": qq.get("target"), "decision": an.get("decision"),
+                found = {"question": qid, "kind": qq.get("kind"), "target": qq.get("target"), "decision": an.get("decision"), "by": e.get("by"),
                          "choice": an.get("choice"), "comment": an.get("comment"), "at": an.get("at"),
                          "cards": e.get("cards") or [], "cards_sha256": e["cards_sha256"], "migrated": migrated}
     except OSError:
@@ -951,7 +949,7 @@ def keep_history(q, cards, answer, steps):
             c["preview"] = None
         kept.append(c)
     cur = next((x for x in steps or [] if isinstance(x, dict) and x.get("status") == "current"), None)
-    entry = {"by": "pm", "question": {k: v for k, v in q.items() if k not in ("answered", "answer")},
+    entry = {"by": answer.get("by") or "pm", "question": {k: v for k, v in q.items() if k not in ("answered", "answer")},
              "cards": kept, "cards_sha256": answer.get("cards_sha256"), "step": (cur or {}).get("title"),
              "answer": {k: answer.get(k) for k in ("decision", "choice", "comment", "at")}}
     # One line, appended under the same exclusive lock `aid-ui-state.sh decide` takes (flock on
@@ -1330,7 +1328,13 @@ class Studio(BaseHTTPRequestHandler):
             # later payload.json edit cannot change what the PM's choice refers to.
             cards = sorted((dict({k: c.get(k) for k in CARD_FIELDS}, preview_sha256=preview_sha(c))
                             for c in p["cards"] if c.get("question") == qid), key=lambda c: c["id"])
-            a = {"question": qid, "kind": cur["kind"], "target": cur["target"], "decision": d,
+            # P113: who answered, positively - the PM only through the PM's page (its session cookie, no agent token);
+            # any token-authenticated answer is the client agent's (X-AID-Role: client) or another agent's, never the PM's
+            if hmac.compare_digest(self.headers.get("X-AID-Token") or "", TOKEN):
+                by = "client" if self.headers.get("X-AID-Role") == "client" else "agent"
+            else:
+                by = "pm"
+            a = {"question": qid, "kind": cur["kind"], "target": cur["target"], "decision": d, "by": by,
                  "choice": choice if d == "choose" else None, "comment": comment, "at": iso(t),
                  "cards": cards, "cards_sha256": hashlib.sha256(json.dumps(
                      cards, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()}

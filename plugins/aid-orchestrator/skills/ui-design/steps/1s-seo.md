@@ -6,6 +6,8 @@ user_invocable: false
 
 # Krok 1s - SEO zadání
 
+**Vrstva dílny (P113):** `references/local/struktura-postup.md` má přednost před inventurou starého webu a přesměrováním (ze sitemap, cíl musí ve stromu existovat). Místo: `struktura`. Kolo místa: `aid-ui-quality.py round <projekt> --place struktura --web <adresa kostry>`.
+
 **Last Updated:** 2026-10-03
 
 ## Cíl
@@ -17,8 +19,8 @@ a stavba (krok 6) z něj vycházejí. Kapitola `seo` to nese.
 ## Vstupy
 
 `PRODUCT.md`, `docs/product-vision.md` (je-li), `variant`, standard
-`/opt/eco/docs/docs/ecosystem/specs/seo-audit-agent-standard.md` a složka
-`/opt/eco/docs/docs/ecosystem/specs/seo/` (čti živě, nekopíruj).
+`references/standards/seo-audit-agent-standard.md` a složka
+`references/standards/seo/` (kopie v pluginu, zdroj v `references/standards/SOURCES`).
 
 ## Postup
 

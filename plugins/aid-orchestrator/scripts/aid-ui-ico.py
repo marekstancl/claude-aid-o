@@ -3,14 +3,19 @@
 
   python3 aid-ui-ico.py <out.ico> <png>...   packs PNG images into an ICO (PNG-in-ICO
                                              entries); a non-PNG or a side above 256 -> exit 1
-  python3 aid-ui-ico.py --verify <dir>       reports every expected icon file with its
-                                             pixel size; exit 1 when one is missing or wrong.
+  python3 aid-ui-ico.py --verify <dir>       reports every file export_variants.py --web-icons
+                                             writes (PNG sides, favicon.ico 16/32/48, a JSON
+                                             site.webmanifest with a maskable icon, head-snippet.html
+                                             linking it); exit 1 when one is missing or wrong.
                                              favicon.svg must use only allowed shape elements and
                                              attributes (SVG_ELEMENTS / SVG_ATTRS below) and have
                                              a square viewBox; no DOCTYPE or PI, UTF-8, at most
                                              512 KB and 64 levels deep
   python3 aid-ui-ico.py --check-svg <in.svg> <out.checked.svg>
-                                             the same SVG check on <in>; pass -> writes the
+                                             the same SVG check on <in>, any viewBox ratio
+                                             (a logo with the name is wide; P113, fix 14 - the
+                                             icon renderer brand-icons.js still wants a square
+                                             one); pass -> writes the
                                              checked bytes to <out> (name must end in
                                              .checked.svg, the only name brand-icons.js
                                              opens), exit 0; fail -> WRONG <reason>, nothing
@@ -18,20 +23,25 @@
 
 Exit: 0 ok, 1 refused / check failed, 2 usage. Python stdlib only.
 """
+import json
 import os
 import re
 import struct
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
+from html.parser import HTMLParser
 
 PNG_SIG = b"\x89PNG\r\n\x1a\n"
-# What references/brand-icons.js writes, with the exact side in pixels.
+# What the adopted export_variants.py --web-icons writes (P113: the web icon set comes from it; references/brand-icons.js
+# only re-renders favicon-32/48 from a medium cut), with the exact side in pixels.
 EXPECTED_PNG = {
     "favicon-16.png": 16, "favicon-32.png": 32, "favicon-48.png": 48,
     "apple-touch-icon.png": 180, "icon-192.png": 192, "icon-512.png": 512,
-    "icon-maskable-512.png": 512,
+    "maskable-512.png": 512,
 }
+# ... and the two text files a web links: the manifest (JSON naming its icons) and the <head> snippet
+EXPECTED_TEXT = ("site.webmanifest", "head-snippet.html")
 EXPECTED_ICO = [16, 32, 48]
 
 
@@ -103,8 +113,8 @@ def svg_problem(path):
     return why or svg_bytes_problem(raw)
 
 
-def svg_bytes_problem(raw):
-    """Why the SVG bytes are unsafe or not square, or None when they are fine."""
+def svg_bytes_problem(raw, square=True):
+    """Why the SVG bytes are unsafe or (square=True) not square, or None when they are fine."""
     if len(raw) > SVG_MAX_BYTES:
         return f"larger than {SVG_MAX_BYTES // 1024} KB"
     try:
@@ -151,7 +161,9 @@ def svg_bytes_problem(raw):
         w, h = float(vb[2]), float(vb[3])
     except (IndexError, ValueError):
         return "no viewBox"
-    return None if len(vb) == 4 and w == h > 0 else f"viewBox {' '.join(vb)} is not square"
+    if len(vb) != 4 or w <= 0 or h <= 0:
+        return f"viewBox {' '.join(vb)} is not a positive width and height"
+    return None if w == h or not square else f"viewBox {' '.join(vb)} is not square"
 
 
 def pack(out, pngs):
@@ -175,6 +187,16 @@ def pack(out, pngs):
     print(f"wrote {out}: " + ", ".join(f"{w}x{h}" for (w, h), _ in images))
 
 
+class Links(HTMLParser):
+    """every <link> of a snippet with its attributes, whatever their order and quotes"""
+    def __init__(self, s):
+        super().__init__(); self.links = []; self.feed(s)
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "link":
+            self.links.append({k.lower(): (v or "") for k, v in attrs})
+
+
 def verify(d):
     bad = 0
     for name, side in EXPECTED_PNG.items():
@@ -194,6 +216,24 @@ def verify(d):
         print(f"WRONG   favicon.ico expected {'/'.join(map(str, EXPECTED_ICO))}, got "
               + ("missing" if not os.path.isfile(p) else "not an ICO" if sizes is None else "/".join(map(str, sizes))))
         bad += 1
+    for name in EXPECTED_TEXT:
+        p = os.path.join(d, name)
+        why = "missing" if not os.path.isfile(p) else None
+        if why is None and name == "site.webmanifest":
+            try:
+                icons = json.load(open(p, encoding="utf-8")).get("icons") or []
+                why = None if any(isinstance(i, dict) and "maskable" in str(i.get("purpose") or "").split()
+                                  and str(i.get("src") or "").split("?")[0].rsplit("/", 1)[-1] == "maskable-512.png"
+                                  and "512x512" in str(i.get("sizes") or "").split() for i in icons) \
+                    else "no icon with purpose maskable, src maskable-512.png and sizes 512x512"
+            except (ValueError, AttributeError, OSError) as e:
+                why = f"not a JSON manifest ({e})"
+        if why is None and name == "head-snippet.html":
+            links = Links(open(p, encoding="utf-8", errors="replace").read()).links
+            why = None if any("manifest" in a.get("rel", "").lower().split() and a.get("href", "").split("?")[0].rsplit("/", 1)[-1] == "site.webmanifest"
+                              for a in links) else "no <link rel=\"manifest\"> to site.webmanifest"
+        print(f"OK      {name}" if why is None else f"WRONG   {name} {why}")
+        bad += why is not None
     p = os.path.join(d, "favicon.svg")
     problem = svg_problem(p) if os.path.isfile(p) else "missing"
     if problem is None:
@@ -208,7 +248,7 @@ def check_svg(src, out):
     """Write out only with the very bytes that passed; the temp file is mkstemp (0600,
     O_EXCL, random name), so no existing file or symlink is ever followed."""
     raw, problem = read_svg(src)
-    problem = problem or svg_bytes_problem(raw)
+    problem = problem or svg_bytes_problem(raw, square=False)   # P113 (fix 14): a wide logo is checked too
     if problem is not None:
         print(f"WRONG   {src} {problem}")
         return 1

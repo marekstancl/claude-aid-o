@@ -46,3 +46,15 @@ answer() {   # answer <qid> <decision> [target]
   [ "$(jq '.open_items | length' "$ST")" -eq $((n + 1)) ]   # only the item without its id was made again
   jq -e '.used_answers | index("a2") != null' "$P/.aid-ui/launch.json" >/dev/null
 }
+
+@test "p113: env-check names node, Playwright and Chromium; a CHROME pointing nowhere stops it with the fix" {
+  run python3 "$L" env-check
+  if [[ "$status" -eq 0 ]]; then [[ "$output" == *"env-check: OK"* ]]; else [ "$status" -eq 3 ]; [[ "$output" == *"CHYBÍ"* ]]; fi
+  CHROME=/nikde/chrome run python3 "$L" env-check; [ "$status" -eq 3 ]; [[ "$output" == *"CHROME=/nikde/chrome není spustitelný"* ]]
+}
+
+@test "p113: env - the studio does not start without its browser tools and names the install command" {
+  export AID_UI_HOST=127.0.0.1 AID_UI_STUDIO_PORT=39913 AID_UI_JOBS_DIR="$BATS_TEST_TMPDIR/jobs" AID_UI_PROJECT="$P"
+  CHROME=/nikde/chrome run bash "$SC/aid-ui-serve.sh" studio "$P"; [ "$status" -eq 2 ]
+  [[ "$output" == *"CHROME=/nikde/chrome"* ]]; [[ "$output" == *"browser tools"* ]]; [ ! -e "$P/.aid-ui/studio.token" ]
+}

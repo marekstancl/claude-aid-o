@@ -1,0 +1,22 @@
+role: tech
+place: struktura
+gates:
+  - criterion: strom_navigace_nalezitelnost
+    min: 7
+    why: "NENALEZENO u hlavního nebo doloženě častého úkolu z testovací sady, kterou sestavuje hodnotitel, má strop 6, takže ho brána spolehlivě zastaví; hluboký, ale čitelný katalog (NALEZENO S VÁHÁNÍM) bránu projde. Zadání PM žádá strukturu vyzkoušenou před stavbou."
+  - criterion: ukoly_zakaznika
+    min: 6
+    why: "Struktura bez úkolů zákazníka je organigram podniku. Nový podnik nebo interní aplikace bez dat bránu splní, když úkoly přizná jako hypotézu s plánem ověření (kotva 6), takže brána měří práci studia, ne bohatost podkladů."
+  - criterion: sekce_ramce_stavy
+    min: 7
+    why: "Stránka bez dalšího kroku, bez určeného důkazu nebo bez potřebné právní stránky a hlavní tok aplikace s víc než dvěma chybějícími stavy (strop 6) se nedají postavit bez domýšlení. Prvky, které podnik nemá, jsou `netyka_se`, takže brána netlačí k šabloně ani k vymyšleným faktům."
+  - criterion: inventura_presun
+    min: 7
+    why: "Ztracená stránka, adresa bez přesměrování nebo vypuštěná úloha stávajícího postupu je nevratná ztráta obsahu, pozic ve vyhledávání nebo práce uživatelů (Google Search Central o přesunu webu); klient ji ve struktuře nepozná. Nehodnotí se jen bez předchůdce."
+  - criterion: pojmy_konvence_oboru
+    min: 6
+    why: "Chybný název služby nebo regulovaný pojem ve štítku či adrese je věcná chyba a právní riziko; nevysvětlený termín je podle copy-rules vážný nález."
+  - criterion: plan_obsahu_kostra
+    min: 6
+    why: "Zástupný text nebo fakt mimo registr je podle copy-rules blokující; bez živé kostry na stálé adrese nejde test nalezitelnosti ani zveřejnění po částech, které PM žádá."
+weighted_min: 7.5

@@ -6,6 +6,8 @@ user_invocable: false
 
 # Krok 4 - Vzory
 
+**Vrstva dílny (P113):** `references/local/vzhled-postup.md` má přednost: vzhled vychází ze značky a sdělení, cizí weby jsou jen inspirace (dílna našla opsaný cizí web). Místo: `vzhled`. Kolo místa: `aid-ui-quality.py round <projekt> --place vzhled`.
+
 **Last Updated:** 2026-09-28
 
 ## Cíl

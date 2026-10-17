@@ -1,0 +1,15 @@
+# Where each copy came from (P113 step 5): <relpath in this folder> <path in the ecosystem docs (/opt/eco/docs/docs/)>
+# Copied byte for byte on 2026-10-17 from docs main 438add3; MANIFEST holds each copy's git blob id. A refresh is a
+# deliberate edit (copy again, new MANIFEST line); nothing reads the docs tree at run time.
+brand-brief-prompt.md ecosystem/templates/brand-brief-prompt.md
+product-vision-prompt.md ecosystem/templates/product-vision-prompt.md
+product-vision.md ecosystem/specs/product-vision.md
+seo-audit-agent-standard.md ecosystem/specs/seo-audit-agent-standard.md
+frontend-build-standard.md ecosystem/specs/frontend-build-standard.md
+design-system-standard.md ecosystem/specs/design-system-standard.md
+webapp-tasks-states-standard.md ecosystem/specs/webapp-tasks-states-standard.md
+pwa-notifications-standard.md ecosystem/specs/pwa-notifications-standard.md
+seo/index.md ecosystem/specs/seo/index.md
+seo/technicke-seo.md ecosystem/specs/seo/technicke-seo.md
+seo/lokalni-seo.md ecosystem/specs/seo/lokalni-seo.md
+seo/checklist-spusteni-prevzeti-webu.md ecosystem/specs/seo/checklist-spusteni-prevzeti-webu.md

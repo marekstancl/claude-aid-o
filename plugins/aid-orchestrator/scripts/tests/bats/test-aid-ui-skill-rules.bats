@@ -76,3 +76,72 @@ setup() {
   done
   tr '\n' ' ' < "$SK/steps/6-build.md" | grep -qE -- '--step "Stavba" +--title "Web postaven" +--outcome "Postaveno <N> stránek[^"]*" +--why "[^"]+" +--source \.aid-ui/build\.json'
 }
+
+# P113 step 4: the workshop's procedures as a layer that wins over the part of a step it names
+@test "local-layer: every procedure and template under references/local is required reading of some method in sections.json" {
+  for f in $(cd "$SK" && find references/local -type f | sort); do
+    jq -e --arg f "skills/ui-design/$f" '[.methods[] | select(type == "object") | .files[]] | index($f) != null' "$SK/sections.json" >/dev/null ||
+      { echo "no method reads $f"; return 1; }
+  done
+  [ "$(ls "$SK"/references/local/*.md | wc -l)" -eq 6 ]
+  jq -e '.methods.identity.files | index("skills/ui-design/references/local/logo-postup.md") != null' "$SK/sections.json" >/dev/null
+}
+
+@test "local-layer: every step a procedure names in its Nahrazuje line links back to that procedure; SKILL.md states the precedence" {
+  for p in "$SK"/references/local/*.md; do
+    line="$(grep -m1 '^\*\*Nahrazuje:\*\*' "$p")" || { echo "$(basename "$p"): no Nahrazuje line"; return 1; }
+    grep -q '^\*\*Platí dál:\*\*' "$p" || { echo "$(basename "$p"): no Platí dál line"; return 1; }
+    steps="$(grep -oE 'steps/[0-9a-z-]+\.md' <<<"$line" | sort -u)"; [ -n "$steps" ]
+    for s in $steps; do
+      grep -qF "references/local/$(basename "$p")" "$SK/$s" || { echo "$s does not link $(basename "$p")"; return 1; }
+    done
+  done
+  grep -qF "Postup má přednost před tou částí kroku, kterou jmenuje" "$SK/SKILL.md"
+  grep -qF "accepted_with_reservation" "$SK/SKILL.md"; grep -qF "fakta a zákon > vada" "$SK/SKILL.md"
+}
+
+@test "local-layer: nothing of the trial business or the workshop under skills/ui-design; the templates carry no contact data" {
+  ! grep -rliw -e hirt "$SK"
+  ! grep -rl -e '/home/claude' -e 'skilly/' -e 'reference/hirt' "$SK"
+  ! grep -rnE '(\+420 ?)?[0-9]{3} ?[0-9]{3} ?[0-9]{3}\b' "$SK/references/local/vzory" "$SK/references/local/vzhled-vzor"
+  ! grep -rniE 'IČO: ?[0-9]|@[a-z0-9-]+\.(cz|sk|com)' "$SK/references/local"
+}
+
+@test "local-layer: every file a procedure names resolves inside the plugin; a method receipt for a missing procedure is refused" {
+  root="$(cd "$SK/../.." && pwd)"
+  for p in "$SK"/references/local/*.md "$SK"/references/local/vzhled-vzor/*.md; do
+    for ref in $(grep -oE '`[A-Za-z0-9_./{},-]+\.(md|yaml|json|css|html)`' "$p" | tr -d '`' | grep -v '[{}<]' | sort -u); do
+      [[ "$ref" == */* || "$ref" == *.md ]] || continue
+      case "$ref" in docs/*|.aid-ui/*|podklady/*|../*|*/brief.md|product-context.md|redesign.md|route.json|gen.json|otazky-klientovi.md|copy.md|tokens.css|zadani-smeru.md|pro-role.md|karta.md|structure.json|wp-sitemap.xml|sitemap.xml) continue;; esac
+      for base in "$root/skills/ui-design" "$SK/references/local" "$root" "$root/skills/ui-design/references" "$SK/references/adopted/logo-design/references"; do
+        [ -e "$base/$ref" ] && continue 2
+      done
+      echo "$(basename "$p"): $ref does not resolve"; return 1
+    done
+  done
+  # the method receipt reads every file of the method: a procedure missing from a copy of the plugin is refused
+  C="$BATS_TEST_TMPDIR/plugin"; mkdir -p "$C"; cp -r "$root/scripts" "$root/skills" "$C/"
+  rm "$C/skills/ui-design/references/local/logo-postup.md"
+  P="$BATS_TEST_TMPDIR/p"; mkdir -p "$P"; bash "$C/scripts/aid-ui-state.sh" init "$P" >/dev/null
+  run bash "$C/scripts/aid-ui-state.sh" method "$P" identity; [ "$status" -ne 0 ]; [[ "$output" == *"logo-postup.md"*"missing"* ]]
+}
+
+@test "local-layer: each place's method reads its procedure and both roles' rubrics; every layered step names its place round; D3 default" {
+  chk() {   # chk <method> <procedure> <place>...
+    local m="$1" pr="$2"; shift 2
+    jq -e --arg m "$m" --arg f "skills/ui-design/references/local/$pr" '.methods[$m].files | index($f) != null' "$SK/sections.json" >/dev/null || { echo "$m: no $pr"; return 1; }
+    for pl in "$@"; do for r in tech owner; do
+      f="skills/ui-design/critic/web-local.$r.$pl.yaml"; [ "$pl" != web ] || f="skills/ui-design/critic/web-local.$r.yaml"
+      jq -e --arg m "$m" --arg f "$f" '.methods[$m].files | index($f) != null' "$SK/sections.json" >/dev/null || { echo "$m: no $f"; return 1; }
+    done; done
+  }
+  chk vision sdeleni-postup.md sdeleni; chk sources sdeleni-postup.md sdeleni; chk product_context sdeleni-postup.md sdeleni
+  chk identity logo-postup.md logo; chk build pohyb-znacky.md pohyb; chk structure struktura-postup.md struktura
+  chk task_map struktura-postup.md struktura; chk content_plan struktura-postup.md struktura; chk direction vzhled-postup.md vzhled
+  chk approve_page kontrola-postup.md web vzhled struktura; chk handover kontrola-postup.md web vzhled struktura
+  for s in 1p-sources 1v-vision 1i-identity 1s-seo 2-structure 3-content-plan 4-references 5-directions 6-build 7-verify 8-quality; do
+    grep -m1 '^\*\*Vrstva dílny (P113):\*\*' "$SK/steps/$s.md" | grep -qE 'aid-ui-quality\.py round <projekt> --place (sdeleni|logo|pohyb|struktura|vzhled|web)' || { echo "$s: no place round"; return 1; }
+  done
+  grep -qF "výchozí doporučení, když klient" "$SK/references/local/struktura-postup.md"
+  ! grep -rniE 'projekční kancel|rýsování|prolínání prostor|po obcích|výkresový list|měřítková řada|postavené domy|naše stavby|kuželkárn|283/2021|ČKAIT|\bTrading\b|název se odkryje' "$SK/references/local"
+}

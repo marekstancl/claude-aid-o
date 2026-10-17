@@ -90,3 +90,8 @@ uvádí `MIT` a v distribuci chybí soubor LICENSE i NOTICE. Používáme přís
 | `adopted/logo-design/templates/presentation-spec.example.json` | kaankiziltug/logo-design-skill (github.com/kaankiziltug/logo-design-skill), skill logo-design, šablona, presentation-spec.example.json | `0ecf52e` | žádné, doslovná kopie (otisk v `MANIFEST`) | MIT | `LICENSES/MIT-logo-design.txt` | `skills/ui-design/steps/1i-identity.md` |
 | `adopted/logo-design/MANIFEST` | vlastní: git blob id každého převzatého souboru z commitu `0ecf52e` | `0ecf52e` | vlastní soubor | MIT | `LICENSES/MIT-logo-design.txt` | `scripts/tests/bats/test-aid-ui-adopted-sources.bats` |
 | nepřevzato: logo-design `assets/library/` (1 432 SVG log, `catalog.json`, `gallery.html`), `scripts/search_library.py`, `scripts/build_catalog.py`, `docs/`, `evals/`, `tools/` | kaankiziltug/logo-design-skill | `0ecf52e` | nepřevzato: knihovna jsou ochranné známky cizích firem (MIT se na ně nevztahuje, `TRADEMARKS.md`), 17 MB; bez ní nefungují oba skripty knihovny; fáze skillu, které knihovnu čtou, krok 1i vynechává a říká to | MIT | `LICENSES/MIT-logo-design.txt` | — |
+
+Doplněno místním postupem (P113, 17. 10. 2026): **logo-design** fáze 2–4b doplňuje a vede `references/local/logo-postup.md`
+(skici přes obrazový model, síto odborníka, čistá kresba v kódu, karty, místo rozhodnutí); **customer-research**
+doplňuje a vede `references/local/sdeleni-postup.md` (hlas zákazníka povinně, průzkum konkurence před positioningem).
+Snímky převzatého materiálu se nemění; místní postup má přednost jen v tom, co jmenuje v řádku „Nahrazuje“.

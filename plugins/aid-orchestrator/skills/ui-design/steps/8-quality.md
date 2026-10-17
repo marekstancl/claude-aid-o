@@ -6,6 +6,8 @@ user_invocable: false
 
 # Po předání - smyčka kvality
 
+**Vrstva dílny (P113):** `references/local/kontrola-postup.md` má přednost: hotový web hodnotí každá role i měřítky vzhledu a struktury (šest známek). Kolo: `aid-ui-quality.py round <projekt> --place web --web <url>`, rozhodnutí `aid-ui-critic.py place-verdict --place web`.
+
 **Last Updated:** 2026-10-13 (P113a, dva kritici)
 
 ## Cíl
@@ -81,8 +83,12 @@ a čas každého kola. Zprávu dostane jen při zastavení (rozpor nálezů, nic
    - `superseded --reason`.
 
    Nálezy vlastníka `client` (fotky, právník, IČO) jsou rovnou `blocked` a patří do připravenosti, ne do známky.
-5. **Oprav přijaté** podle `to_ten` a `fix` kritika stejnou cestou jako v kroku 6 a 7: zdroj webu, přestavba, `build-record`, brána,
-   `gate-record`, při změně textů kontrola textů. Každou opravu zapiš:
+5. **Oprav přijaté** podle `to_ten` a `fix` kritika ve zdroji webu a přestav ho. Strojovou část pak dělá jeden příkaz
+   `aid-ui-state.sh cycle <project> <složka buildu>` (P113, IMP-695): záznam pohybu (jen s vybraným vzorem), `build-record`,
+   kontrola textů (vypíše stránky, které potřebují novou kontrolu textů, a zastaví; tu udělej podle kroku 7 bodu 1a
+   a `cycle` pusť znovu), měření a design standard, brána s `gate-record` (i se stránkou pro zákazníka) a `gate-check`.
+   Zastaví se na prvním neúspěchu: `cycle: FAIL <krok> <důvod>`; hotovo je `cycle: OK`. Role nevolá: hodnocení je
+   další kolo (bod 3). Každou opravu zapiš:
    `aid-ui-quality.py fixed <project> <id> --evidence "<co se změnilo a kde>" --method "<krok nebo dovednost | z hlavy: proč postup nebyl>"`.
    Důkaz uvidí příští kolo autor nálezu.
    **Po každém kole zastav a pošli PM hlášení** (PM 13. 10. 2026). Obsahuje:

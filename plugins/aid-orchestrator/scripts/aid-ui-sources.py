@@ -20,6 +20,10 @@ internal/interni/interní/pricing/cenik/ceník/private, or the first 4 KB holdin
 dokument, pro interní potřebu, důvěrné, do not share, internal only or confidential; the reason names
 the rule and the line, never the line's text. A helper, not a security boundary: --request <id> brings
 an internal document back as requested:true, and only the PM's approval of THAT manifest uses it.
+NESDÍLET is no helper but a hard rule (P113, fix 22): a file whose name or first 5 lines say NESDÍLET (case and
+diacritics ignored), or that lies under a folder whose README* says it in its first 10 lines (up to the root it was
+listed from, never above the project), is listed `excluded: nesdilet` and never used, whatever was requested or
+approved - pages and images alike.
 
 --list also lists the Claude Code sessions of the project (~/.claude/projects/<project path with / and .
 as ->/*.jsonl, or --sessions-dir) as candidates: date range, number of the human's own records, up to
@@ -215,6 +219,41 @@ def visible_text(raw):
     return "\n".join(p.out)
 
 
+def _fold(s):
+    import unicodedata
+    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
+
+
+def nesdilet(path, root):
+    """Why the file is NESDÍLET (its name, its first 5 lines, a README up the path to root), or None."""
+    if "nesdilet" in _fold(os.path.basename(path)):
+        return "název souboru"
+    try:
+        with open(path, "rb") as fh:   # the first 5 lines, read as lines (a long first line cannot hide the rest)
+            head = [fh.readline(65536).decode("utf-8", errors="replace") for _ in range(5)]
+        if "nesdilet" in _fold("".join(head)):
+            return "prvních 5 řádků"
+    except OSError:
+        pass
+    root = os.path.realpath(root if os.path.isdir(root) else os.path.dirname(root))
+    d = os.path.realpath(os.path.dirname(path))
+    while True:
+        try:   # README in any case (Readme.md, README.TXT, readme)
+            readmes = sorted(os.path.join(d, n) for n in os.listdir(d) if _fold(n).startswith("readme") and os.path.isfile(os.path.join(d, n)))
+        except OSError:
+            readmes = []
+        for rd in readmes:
+            try:
+                with open(rd, "rb") as fh:
+                    if "nesdilet" in _fold("\n".join(fh.read(8192).decode("utf-8", errors="replace").splitlines()[:10])):
+                        return f"README složky {os.path.relpath(rd, root) if rd.startswith(root) else os.path.basename(rd)}"
+            except OSError:
+                continue
+        if d == root or not d.startswith(root + os.sep):
+            return None
+        d = os.path.dirname(d)
+
+
 def internal(path, head):
     parts = [x.lower() for x in re.split(r"[/\\._-]+", path) if x]
     for x in parts:
@@ -237,9 +276,15 @@ def canonical_sha(man):
     return hashlib.sha256(json.dumps(m, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
 
 
-def document(proj, kind, path, reason, requested, used_n, outdir):
+def document(proj, kind, path, reason, requested, used_n, outdir, root=None):
     rel = os.path.relpath(path, proj) if kind != "from" else path
     it = {"id": item_id(kind, path), "kind": kind, "path": rel, "used": False, "reason": reason or ""}
+    if kind == "from" and root:
+        it["root"] = os.path.abspath(root)   # where the README rule stops; kept so the approved load checks it again
+    no = nesdilet(path, root or proj) if path and os.path.isfile(path) and not os.path.islink(path) else None
+    if no:   # a hard rule, before any other reason: no request and no approval brings it back
+        it.update(excluded="nesdilet", reason=f"NESDÍLET ({no})")
+        return it
     if reason:
         return it
     if not path.endswith(TEXT_EXT + PDF_EXT):
@@ -270,6 +315,9 @@ def document(proj, kind, path, reason, requested, used_n, outdir):
             return it
     else:
         text = raw.decode("utf-8", errors="replace")
+    if path.endswith((".html", ".htm", ".pdf")) and "nesdilet" in _fold("\n".join((visible_text(text) if path.endswith((".html", ".htm")) else text).strip().splitlines()[:5])):
+        it.update(excluded="nesdilet", reason="NESDÍLET (prvních 5 řádků textu)")   # the text the agent would read, not only the raw bytes
+        return it
     why = internal(rel, text[:4096])
     if why:
         it["excluded"] = "internal"
@@ -349,7 +397,27 @@ def image_size(data):
     return None
 
 
-def fetch_images(outdir, found, allow_local):
+class Deadline:
+    """--max-seconds: one monotonic deadline for the whole fetch, pages and images alike; a request gets at most
+    30 s and never more than what is left, and none starts after the deadline."""
+    def __init__(self, seconds):
+        import time as _t
+        self.t, self.end, self.hit = _t, _t.monotonic() + seconds, False
+
+    def over(self):
+        if self.t.monotonic() >= self.end:
+            self.hit = True
+        return self.hit
+
+    def timeout(self):
+        left = self.end - self.t.monotonic()
+        if left <= 0.05:
+            self.hit = True
+            return None
+        return min(30.0, left)
+
+
+def fetch_images(outdir, found, allow_local, dl=None):
     """The old site's images (any public host - photos often sit on a CDN), each at most 8 MB, image/* only, no
     redirect into a private network; kept when at least MIN_IMAGE_PX on the longer side. Saved as img/<sha8>.<ext>.
     Returns the list for fetch.json: url, page, alt, file, bytes, width, height (or status when not kept)."""
@@ -360,15 +428,25 @@ def fetch_images(outdir, found, allow_local):
         if url in done or len([x for x in out if x.get("file")]) >= MAX_IMAGES:
             continue
         done.add(url)
-        rec = {"url": url, "page": page, "alt": alt}
+        rec = {"url": url, "page": page, "alt": alt, "description": alt or ""}   # fix 23: the agent describes what alt does not
+        to = dl.timeout() if dl else 30
+        if to is None:
+            out.append(rec | {"status": "nedoměřeno: strop času"}); continue
         try:
             k = site_key(url, allow_local)
             opener = urllib.request.build_opener(_SameSite(k, allow_local))
-            with opener.open(urllib.request.Request(url, headers={"User-Agent": "aid-ui-sources"}), timeout=30) as r:
+            with opener.open(urllib.request.Request(url, headers={"User-Agent": "aid-ui-sources"}), timeout=to) as r:
                 ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
                 if not ctype.startswith("image/") or ctype == "image/svg+xml":
                     out.append(rec | {"status": "skipped (%s)" % (ctype or "unknown type")}); continue
-                data = r.read(MAX_IMAGE_BYTES + 1)
+                data = b""
+                while len(data) <= MAX_IMAGE_BYTES:
+                    if dl and dl.over():
+                        raise TimeoutError("nedoměřeno: strop času")
+                    chunk = r.read1(65536) if hasattr(r, "read1") else r.read(65536)   # what has arrived, so the deadline is checked between chunks
+                    if not chunk:
+                        break
+                    data += chunk
             if len(data) > MAX_IMAGE_BYTES:
                 out.append(rec | {"status": "over 8 MB"}); continue
             size = image_size(data)
@@ -455,17 +533,20 @@ class _SameSite(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
-def fetch_page(url, key, allow_local):
-    """(status, content type, bytes, final url) of one page; the body is read in chunks up to MAX_BYTES."""
+def fetch_page(url, key, allow_local, timeout=30, dl=None):
+    """(status, content type, bytes, final url) of one page; the body is read in chunks up to MAX_BYTES, and the
+    deadline is checked between chunks (a server dripping bytes cannot hold the read past it)."""
     handler = _SameSite(key, allow_local)
     opener = urllib.request.build_opener(handler)
-    with opener.open(urllib.request.Request(url, headers={"User-Agent": "aid-ui-sources"}), timeout=30) as r:
+    with opener.open(urllib.request.Request(url, headers={"User-Agent": "aid-ui-sources"}), timeout=timeout) as r:
         ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if ctype not in ("text/html", "application/xhtml+xml"):
             return r.status, ctype, b"", r.geturl()
         chunks, total = [], 0
         while True:
-            chunk = r.read(65536)
+            if dl and dl.over():
+                raise TimeoutError("nedoměřeno: strop času")
+            chunk = r.read1(65536) if hasattr(r, "read1") else r.read(65536)   # what has arrived, so the deadline is checked between chunks
             if not chunk:
                 break
             total += len(chunk)
@@ -480,7 +561,7 @@ def _open_new(path):
     return os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), "wb")
 
 
-def fetch_site(proj, url, allow_local=False):
+def fetch_site(proj, url, allow_local=False, max_seconds=180):
     """--fetch-site <url>: the home page and the same-site pages it links to (one level, up to MAX_PAGES)
     into .aid-ui/old-site/<host>/, with fetch.json (url, final url, fetched_at, pages) - the record that
     the old site was read live, when, and what exactly. Fails when the home page is not an HTML page."""
@@ -506,14 +587,19 @@ def fetch_site(proj, url, allow_local=False):
                 os.remove(f)
     seen, queue, pages, names, found = set(), [url], [], set(), []
     home = None
+    dl = Deadline(max_seconds)
     while queue and len(pages) < MAX_PAGES:
         u = queue.pop(0).split("#")[0]
         if u in seen:
             continue
         seen.add(u)
+        to = dl.timeout()
+        if to is None:   # the deadline: what was fetched stays, the rest is listed as not fetched
+            pages.append({"url": u, "status": "nedoměřeno: strop času", "file": None})
+            break
         try:
             site_key(u, allow_local)
-            status, ctype, raw, final = fetch_page(u, key, allow_local)
+            status, ctype, raw, final = fetch_page(u, key, allow_local, to, dl)
         except Exception as e:  # noqa: BLE001 - every failure is a listed page, not a crash
             pages.append({"url": u, "status": str(e)[:160], "file": None})
             continue
@@ -558,7 +644,8 @@ def fetch_site(proj, url, allow_local=False):
     if home is None:
         die(f"--fetch-site {url}: the home page was not fetched as HTML ({pages[0]['status'] if pages else 'no response'})", 1)
     rec = {"version": 1, "url": url, "final_url": home, "fetched_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"), "pages": pages,
-           "images": fetch_images(outdir, found, allow_local)}
+           "images": fetch_images(outdir, found, allow_local, dl), "max_seconds": max_seconds}
+    rec["truncated"] = dl.over()
     with _open_new(os.path.join(outdir, "fetch.json")) as fh:
         fh.write(json.dumps(rec, ensure_ascii=False, indent=1).encode("utf-8"))
     return outdir
@@ -585,22 +672,22 @@ def site_origin(dirpath):
 def listing(proj, a, outdir):
     requested = set(a.request)
     budget = [MAX_WALK]
-    entries = [("project", p, None) for p in project_files(proj)]
+    entries = [("project", p, None, proj) for p in project_files(proj)]
     if a.old_site:
         root_rec = os.path.realpath(os.path.join(a.old_site, "fetch.json"))
         imgdir = os.path.realpath(os.path.join(a.old_site, "img")) + os.sep   # photos: fetch.json lists them, they are no text
-        entries += [("old_site", p, r) for p, r in walk(a.old_site, budget)
+        entries += [("old_site", p, r, a.old_site) for p, r in walk(a.old_site, budget)
                     if not (p and (os.path.realpath(p) == root_rec or os.path.realpath(p).startswith(imgdir)))]
         origin = site_origin(a.old_site)
     for f in a.from_:
-        entries += [("from", p, r) for p, r in walk(f, budget)]
+        entries += [("from", p, r, f) for p, r in walk(f, budget)]
     docs, used_n, stopped = [], 0, 0
-    for kind, p, r in entries:
+    for kind, p, r, root in entries:
         if not p:
             stopped += 1
             docs.append({"id": f"stop{stopped}", "kind": kind, "path": "", "used": False, "reason": r} | ({"origin": origin} if kind == "old_site" else {}))
             continue
-        it = document(proj, kind, p, r, requested, used_n, outdir)
+        it = document(proj, kind, p, r, requested, used_n, outdir, root)
         if kind == "old_site":
             it["origin"] = origin   # live download (when, from where) or a backup - the PM sees which
         used_n += it["used"]
@@ -659,6 +746,11 @@ def approved(proj, a, outdir):
     for d in man["sources"]:
         if d["used"] and d["id"] in bez:
             d = dict(d, used=False, reason="PM: bez")
+        if d["used"]:   # NESDÍLET again at the load: a manifest approved before the rule (or the README added since) never lets it in
+            src = d["path"] if os.path.isabs(d["path"]) else os.path.join(proj, d["path"])
+            no = nesdilet(src, d.get("root") or (proj if not os.path.isabs(d["path"]) else os.path.dirname(src)))
+            if no:
+                d = dict(d, used=False, excluded="nesdilet", reason=f"NESDÍLET ({no})")
         if d["used"]:
             tp = os.path.join(proj, d["text"])
             if not os.path.isfile(tp) or os.path.islink(tp) or sha(tp) != d["text_sha256"]:
@@ -702,13 +794,14 @@ def main():
     ap.add_argument("--sessions-from", action="append", default=[])
     ap.add_argument("--old-site")
     ap.add_argument("--fetch-site", metavar="URL")
+    ap.add_argument("--max-seconds", type=float, default=180, help="--fetch-site: total time ceiling, pages and images (P113)")
     ap.add_argument("--allow-local", action="store_true", help="--fetch-site may read a loopback or private address (tests, intranet)")
     a = ap.parse_args()
     proj = os.path.abspath(a.project)
     if not os.path.isdir(proj):
         die(f"no project directory {proj}", 2)
     if a.fetch_site:
-        d = fetch_site(proj, a.fetch_site, a.allow_local)
+        d = fetch_site(proj, a.fetch_site, a.allow_local, a.max_seconds)
         rec = json.load(open(os.path.join(d, "fetch.json"), encoding="utf-8"))
         print(d)
         print("pages=%d ok=%d" % (len(rec["pages"]), sum(1 for x in rec["pages"] if x.get("file"))))

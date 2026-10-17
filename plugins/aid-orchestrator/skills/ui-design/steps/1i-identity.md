@@ -6,6 +6,8 @@ user_invocable: false
 
 # Krok 1i - Identita a brand balíček
 
+**Vrstva dílny (P113):** `references/local/logo-postup.md` má přednost před fázemi 2–4b (koncepty, generování, kurátorství) a `references/local/pohyb-znacky.md` doplňuje bod 5 o animované logo. **Obrazový model kreslí skici, výslednou značku stav geometricky v kódu** (pravidlo fáze 4 „celé logo kreslí obrazový model“ platí pro skici, ne pro výslednou značku). Karty směrů: `aid-ui-tool.sh logo-sheet --cards`. Místa: `logo` (otázka `identity`) a `pohyb` (guard na `build-record`), kola `aid-ui-quality.py round <projekt> --place logo|pohyb`.
+
 **Last Updated:** 2026-10-07
 
 ## Cíl
@@ -19,7 +21,7 @@ balíček, který prošel kontrolou výstupu šablony; kapitola `logo` to nese.
 ## Vstupy
 
 `PRODUCT.md`, `docs/product-vision.md`, šablona
-`/opt/eco/docs/docs/ecosystem/templates/brand-brief-prompt.md` (čti živě),
+`references/standards/brand-brief-prompt.md` (kopie v pluginu),
 `references/brand-icons.js`, `scripts/aid-ui-ico.py`, existující balíček
 z inventury kroku 0.
 
@@ -236,22 +238,25 @@ Pravidla, která route.json nese:
    (seznam se odvozuje z varianty, `options.identity` a oddílu „Kontexty použití"
    zadání; exit 1 = co chybí). Rozšířená sada (sociální sítě, tiskoviny, e-mailový
    podpis jako hotový soubor) se nevyrábí, dokud ji PM po schválení značky nechce.
-6. Ikony: každé SVG pro skript nejdřív projde kontrolou
-   `python3 scripts/aid-ui-ico.py --check-svg <symbol.svg> .aid-ui/logo/symbol.checked.svg`
-   (mikrovarianta stejně do `micro.checked.svg`). Exit 1 → `WRONG` s důvodem;
-   SVG oprav a zkontroluj znovu. `references/brand-icons.js` zkopíruj do
-   `.aid-ui/brand-icons.js` a vyplň jen cesty: absolutní cesty ke
-   `*.checked.svg` a k `docs/design/brand-package/icons/`, každá odpovídá
-   `^/[A-Za-z0-9._/-]+$`. SVG do skriptu nevkládej, skript si ho přečte sám.
-   Spusť přes `mcp__plugin_playwright_playwright__browser_run_code_unsafe`
-   s `filename` (zapíše PNG). Pak
-   `cp .aid-ui/logo/symbol.checked.svg <icons>/favicon.svg`,
-   `python3 scripts/aid-ui-ico.py <icons>/favicon.ico <icons>/favicon-16.png <icons>/favicon-32.png <icons>/favicon-48.png`
-   a `python3 scripts/aid-ui-ico.py --verify <icons>` (exit 0 = kompletní).
-   Varianta `pwa`: ikony pro instalaci (192, 512, maskable) jsou povinné.
+6. Ikony (P113): celou sadu pro web dělá převzatý `export_variants.py`:
+   `python3 references/adopted/logo-design/scripts/export_variants.py <symbol.svg> --web-icons --icon-bg "<barva značky>" --favicon-source <malý řez.svg> --out-dir docs/design/brand-package/icons`
+   (favicon.ico 16/32/48, favicon-16/32/48.png, apple-touch-icon 180, icon-192, icon-512, maskable-512 na barvě
+   značky, `site.webmanifest`, `head-snippet.html`; favicon z malého řezu). Do `head-snippet.html` přidej řádek
+   `<meta property="og:image" content="https://<doména>/og-image.png">` s **absolutní** adresou (relativní sítě
+   nezobrazí) a vyrob `icons/og-image.png` (1200×630, náhled pro sdílení). Má-li značka střední řez pro 32-48 px,
+   SVG nejdřív projde `python3 scripts/aid-ui-ico.py --check-svg <střední.svg> .aid-ui/logo/medium.checked.svg`
+   (exit 1 → `WRONG` s důvodem; oprav a zkontroluj znovu), pak `references/brand-icons.js` zkopíruj do
+   `.aid-ui/brand-icons.js`, vyplň jen dvě cesty (absolutní cesta k `medium.checked.svg` a ke složce ikon, každá
+   odpovídá `^/[A-Za-z0-9._/-]+$`; SVG do skriptu nevkládej) a spusť přes
+   `mcp__plugin_playwright_playwright__browser_run_code_unsafe` s `filename`: přepíše jen favicon-32/48.png.
+   Pak `python3 scripts/aid-ui-ico.py <icons>/favicon.ico <icons>/favicon-16.png <icons>/favicon-32.png <icons>/favicon-48.png`.
+   Nakonec `python3 scripts/aid-ui-ico.py --verify <icons>` (exit 0 = kompletní) a `favicon.svg` = zkontrolovaný
+   symbol. `--check-svg` projde i široké logo s názvem; `brand-icons.js` a `favicon.svg` chtějí čtvercové plátno.
+   Web navíc potřebuje pohyb loga `logo-animace.html` (`aid-ui-logo-motion.py`, místo `pohyb`), pokud PM
+   nezapsal projekt bez pohybu; úplnost hlídá `aid-ui-brand-package.py`.
 7. Kontrola výstupu podle šablony (oddíl „Kontrola výstupu"): čitelnost
-   v 16 px na světlém i tmavém (nečitelné → zesílená mikrovarianta pro
-   16/32 px, znovu bod 6), validní SVG 1:1 bez rastrových vložek, jen
+   v 16 px na světlém i tmavém (nečitelné → zesílený malý řez pro 16 px jako
+   `--favicon-source`, případně střední řez pro 32-48 px, znovu bod 6), validní SVG 1:1 bez rastrových vložek, jen
    bezpečné tvary (to hlídá `--check-svg`), licence fontu, odlišnost od
    značek v oboru (obrazové vyhledání je ruční úkol PM - napiš mu to),
    úplnost vůči kontextům použití.

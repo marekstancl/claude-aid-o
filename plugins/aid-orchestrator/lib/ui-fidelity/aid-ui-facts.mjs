@@ -5,8 +5,9 @@
 //   - phone numbers, prices and times (P103): covered when a register value contains the text,
 //     or, for a number of 7+ digits, the same digits;
 //   - a percentage ("40 %"): covered when one register entry holds the same number followed by %;
-//   - a counted number ("200 klientům", "15 let", "15leté", "200-klientská", "3 projekty"): a number
-//     followed (with a space, a hyphen or nothing) by a word of a COUNT_GROUPS group. Covered only
+//   - a counted number ("200 klientům", "15 let", "15leté", "200-klientská", "3 projekty", "přes 300 dokončených
+//     projektů"): a number followed (with a space, a hyphen or nothing, and up to two words between) by a word of a
+//     COUNT_GROUPS group. Covered only
 //     when ONE register entry holds the same number as a whole token (no adjacent digit; "2008" does
 //     not cover "200"; "2,5" is not "2") AND that entry's key or text holds a word of the same group
 //     ("klienti: 200" covers "200 klientům"; "tymy: 200" does not). Years match whole words (let,
@@ -18,7 +19,8 @@
 export const FACT_RE = /(\+?\d[\d ]{7,}\d)|(\d[\d  ]*(?:[.,]\d+)?\s?(?:Kč|CZK|€|EUR))|(\b\d{1,2}[:.]\d{2}\b)/g;
 const PERCENT_RE = /(\d+(?:[.,]\d+)?)\s?%/g;
 const EMAIL_RE = /[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g;
-const COUNT_RE = /(\d[\d  ]*\d|\d)\s*\+?\s*[-‑–]?\s*([a-zA-Zá-žÁ-Ž]+)/g;
+// P113 (the workshop's V3, "přes 300 dokončených projektů"): up to two words may stand between the number and the counted one
+const COUNT_RE = /(\d[\d  ]*\d|\d)\s*\+?\s*[-‑–]?\s*([a-zA-Zá-žÁ-Ž]+(?:[\s  ]+[a-zA-Zá-žÁ-Ž]+){0,2})/g;
 // groups by meaning (Czech, Slovak, English): {stems} match a word's start, {words} the whole word
 export const COUNT_GROUPS = [
   { stems: ['klient', 'zákazn', 'zakazn', 'client', 'customer'] },   // zákazník, zákazníci, zákazníkům
@@ -28,6 +30,9 @@ export const COUNT_GROUPS = [
   { words: ['let', 'letech', 'letům', 'letý', 'letá', 'leté', 'letou', 'letého', 'letým', 'letých',
             'rok', 'roku', 'roky', 'roků', 'rokov', 'rokoch', 'rokmi', 'ročné', 'ročný', 'year', 'years'] },
 ];
+const BETWEEN_STOP = new Set(['pro', 'od', 'do', 'na', 'v', 've', 'z', 'ze', 's', 'se', 'k', 'ke', 'o', 'u', 'za', 'po', 'při',
+  'pri', 'a', 'i', 'nebo', 'než', 'mezi', 'přes', 'bez', 'pod', 'nad', 'před', 'and', 'or', 'for', 'from', 'of', 'to', 'in',
+  'dní', 'dnů', 'den', 'dny', 'hodin', 'hodiny', 'minut', 'm', 'km', 'cm', 'metry', 'metrů', 'kg', 'h', 'min', 'days', 'hours']);
 const inGroup = (g, w) => (g.stems || []).some(st => w.startsWith(st)) || (g.words || []).includes(w);
 
 export const norm = s => String(s).replace(/[\s  ]+/g, ' ').trim().toLowerCase();
@@ -66,10 +71,15 @@ export function unknownClaims(text, facts) {
     if (!es.some(e => new RegExp(`(^|[^0-9.,])${esc(n)}\\s?%`).test(e))) out.push(m[0].trim());
   }
   for (const m of text.matchAll(COUNT_RE)) {
-    const word = m[2].toLowerCase(), g = groupOf(word);
-    if (!g) continue;
-    const n = numTok(m[1]);
-    if (!es.some(e => hasNumber(e, n) && e.split(/[^a-zá-ž]+/).some(w => inGroup(g, w)))) out.push(m[0].trim());
+    const ws = [...m[2].matchAll(/[a-zA-Zá-žÁ-Ž]+/g)], at = ws.findIndex(w => groupOf(w[0].toLowerCase()));
+    // the words between describe the counted one ("dokončených"); a preposition, a conjunction or a unit means the
+    // number counts something else ("7 dní pro klienty", "3 metry od firmy")
+    if (at < 0 || ws.slice(0, at).some(w => BETWEEN_STOP.has(w[0].toLowerCase()))) continue;
+    const hit = ws[at];
+    const g = groupOf(hit[0].toLowerCase()), n = numTok(m[1]);
+    // the claim as written up to the counted word ("300 dokončených projektů", not the words after it)
+    const said = m[0].slice(0, m[0].length - m[2].length + hit.index + hit[0].length);
+    if (!es.some(e => hasNumber(e, n) && e.split(/[^a-zá-ž]+/).some(w => inGroup(g, w)))) out.push(said.trim());
   }
   for (const m of text.matchAll(EMAIL_RE)) {
     const e = m[0].toLowerCase();

@@ -7,6 +7,9 @@
 # P102 Step 1 (kept): state in docs/design/brand-state.json, chapter bodies, fonts,
 # migration from docs/brand/state.json.
 
+load aid-ui-places
+setup_file() { places_template; }
+
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../aid-ui-state.sh"
   PAGE="$BATS_TEST_DIRNAME/../../../skills/ui-design/brand-page"
@@ -16,6 +19,7 @@ setup() {
   mkdir -p "$PROJ/docs/brand"
   cp "$PAGE/index.html" "$PROJ/docs/brand/"
   "$SCRIPT" init "$PROJ" >/dev/null
+  places_copy "$PROJ"   # P113: the place verdicts a build and the place questions stand on
   "$SCRIPT" method "$PROJ" build >/dev/null   # P108: build-record wants the build method receipt
   STATE="$PROJ/docs/design/brand-state.json"
   HTML="$PROJ/docs/brand/index.html"
@@ -27,6 +31,21 @@ setup() {
   printf 'standards:\n  map_path: %s\n' "$SPECS/standards-map.md" > "$PROJ/.aid-o/config/project.yaml"
   cp "$FX/map.yaml" "$FX/checks.yaml" "$T/cov/"
   export AID_UI_COVERAGE_MAP="$T/cov/map.yaml" AID_UI_COVERAGE_SOURCES="$FX/sources.yaml"
+  # P113: gate-record makes the customer page itself; the fixture has no web to describe, so a python3 shim on this
+  # test's PATH answers for aid-ui-customer-page.py (AID_UI_TEST_CP_RC=1: the gate is not green, nothing made)
+  mkdir -p "$BATS_TEST_TMPDIR/cpbin"
+  cat > "$BATS_TEST_TMPDIR/cpbin/customer-page.py" <<'PY'
+import os, sys
+a = sys.argv[1:]
+out = a[a.index("--out") + 1] if "--out" in a else os.path.join(a[0], "docs/zakaznik")
+if os.environ.get("AID_UI_TEST_CP_RC") == "1": sys.exit("ERROR: the gate is not green")
+if "--check" in a: sys.exit(0 if os.path.isfile(os.path.join(out, "index.html")) else 3)
+os.makedirs(out, exist_ok=True); open(os.path.join(out, "index.html"), "w").write(os.environ.get("AID_UI_TEST_CP_TEXT", "<p>zakaznik</p>") + "\n")
+PY
+  real="$(command -v python3)"
+  printf '#!/usr/bin/env bash\ncase "$1" in */aid-ui-customer-page.py) shift; exec "%s" "%s" "$@";; esac\nexec "%s" "$@"\n' \
+    "$real" "$BATS_TEST_TMPDIR/cpbin/customer-page.py" "$real" > "$BATS_TEST_TMPDIR/cpbin/python3"
+  chmod +x "$BATS_TEST_TMPDIR/cpbin/python3"; export PATH="$BATS_TEST_TMPDIR/cpbin:$PATH"
   # a two-page site
   SITE="$T/site"
   mkdir -p "$SITE"
@@ -42,6 +61,9 @@ teardown() {
   [[ -z "${CUST_PID:-}" ]] || kill "$CUST_PID" 2>/dev/null || true
   [[ -z "${SPID:-}" ]] || kill "$SPID" 2>/dev/null || true
   [[ -z "${STUDIO_PID:-}" ]] || kill "$STUDIO_PID" 2>/dev/null || true
+  [[ ! -f "$T/studio.pids" ]] || while read -r p; do kill "$p" 2>/dev/null || true; done < "$T/studio.pids"
+  # P113: a studio a command started through aid-ui-serve.sh - only this case's project (the pointer names it)
+  AID_UI_PROJECT="$PROJ" bash "$BATS_TEST_DIRNAME/../../aid-ui-serve.sh" stop studio >/dev/null 2>&1 || true
 }
 
 jqw() { jq "$@" "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"; }
@@ -63,8 +85,12 @@ studio() {
   python3 "$BATS_TEST_DIRNAME/../../../lib/aid-ui-studio/server.py" --project "$PROJ" --host 127.0.0.1 --port "$port" \
     --token-file "$PROJ/.aid-ui/studio.token" >"$T/studio.log" 2>&1 3>&- &
   STUDIO_PID=$!
-  local i; for i in $(seq 1 50); do curl -s -o /dev/null "$AID_UI_STUDIO_URL/" && return 0; sleep 0.1; done
-  return 1
+  echo "$STUDIO_PID" >> "$T/studio.pids"   # P113: `run ans` starts it in a subshell, whose STUDIO_PID teardown never sees
+  local i; for i in $(seq 1 50); do curl -s -o /dev/null "$AID_UI_STUDIO_URL/" && break; sleep 0.1; done
+  # the PM's page session (P113: only an answer through it is the PM's; the token is an agent's)
+  echo pmcode0123456789abcdef > "$PROJ/.aid-ui/studio.code"
+  PCOOKIE="$(curl -s -o /dev/null -D - "$AID_UI_STUDIO_URL/?k=pmcode0123456789abcdef" | sed -n 's/^[Ss]et-[Cc]ookie: \([^;]*\).*/\1/p' | head -1)"
+  [[ -n "$PCOOKIE" ]]
 }
 
 # ans <id> <kind> <target> [decision] [cards] — the PM answers question <id> on the real
@@ -83,9 +109,13 @@ ans() {
   jq --arg q "$1" --arg k "$2" --arg t "$3" --argjson c "$c" --argjson hb "$hb" --arg o "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" \
     '.questions += [{id: $q, kind: $k, target: $t, opened_at: $o} + (if $k == "facts" then {part: "obsah"} elif $k == "handover" then {body: $hb} else {} end)]
     | .cards += [$c[] | .question = $q | .method = (.method // "SKILL.md, 4-references.md") | (if $k == "identity" then .slot = "W" else . end)]' "$p" > "$p.t" && mv "$p.t" "$p"
-  curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H 'Content-Type: application/json' \
+  curl -sf -o /dev/null -H "Cookie: $PCOOKIE" -H "Referer: $AID_UI_STUDIO_URL/" -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg q "$1" --arg k "$2" --arg t "$3" --arg d "$d" \
           '{question: $q, kind: $k, target: $t, decision: $d, choice: "x", comment: "PM"}')" "$AID_UI_STUDIO_URL/answer"
+  # P113: an accepting answer of a place's question needs the place's verdict (the gates' own cases are below)
+  if [[ "$d" == approve || "$d" == choose ]] && [[ -z "${NO_PLACE_OK:-}" ]]; then
+    case "$2" in handover) place_ok "$PROJ" web ;; identity|vision) place_ok "$PROJ" sdeleni ;; esac
+  fi
   "$SCRIPT" record-answer "$PROJ" --question "$1" >/dev/null
 }
 
@@ -1025,9 +1055,17 @@ PY
   jq '.gate_run_at = "2020-01-01T00:00:00Z"' "$PROJ/docs/design/soulad-summary.json" > "$PROJ/s.t" && mv "$PROJ/s.t" "$PROJ/docs/design/soulad-summary.json"
   run "$SCRIPT" chapter-all-target "$PROJ"
   [ "$status" -eq 1 ]; [[ "$output" == *"not from the recorded gate"* ]]
-  result '.rows |= map(if .check == "customer_page" then .status = "not_covered" else . end)'; "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null; end_order
+  # P113: a customer_page pass row the result brings is not trusted - gate-record writes the row itself
+  # a refused record (a row missing) leaves the page of the recorded gate in place; nothing new is moved over it
+  before="$(cat "$PROJ/docs/zakaznik/index.html")"
+  result '.rows |= .[1:]'; AID_UI_TEST_CP_TEXT='<p>nová</p>' run "$SCRIPT" gate-record "$PROJ" "$RES"
+  [ "$status" -eq 1 ]; [ "$(cat "$PROJ/docs/zakaznik/index.html")" == "$before" ]; [ ! -e "$PROJ/.aid-ui/customer-page.new" ]
+  result; AID_UI_TEST_CP_RC=1 "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  jq -e '.gate.customer_page == "not_covered"' "$STATE" >/dev/null
+  jq -e '[.rows[] | select(.check == "customer_page")] | length == 1 and .[0].status == "not_covered" and (.[0].detail | contains("not made: the gate is not green"))' "$RES" >/dev/null
+  end_order
   run "$SCRIPT" chapter-all-target "$PROJ"
-  [ "$status" -eq 1 ]; [[ "$output" == *"did not pass the customer page"* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"has no checked customer page"* ]]
   result; "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null; end_order
   [ ! -f "$PROJ/.aid-ui/finish.json" ]
   run "$SCRIPT" chapter-all-target "$PROJ"
@@ -1683,11 +1721,12 @@ decide_payload() {
 
 @test "P108 method: prints the method files, writes the receipt; the live studio and payload-check refuse a question opened before it" {
   run "$SCRIPT" method "$PROJ" identity; [ "$status" -eq 0 ]
-  [ "$(grep -c '^===== ' <<<"$output")" -eq 15 ]   # P113a: critique, principles and the rest of logo-design are required reading too
+  n="$(jq '.methods.identity.files | length' "$BATS_TEST_DIRNAME/../../../skills/ui-design/sections.json")"; [ "$n" -ge 15 ]   # P113a + P113: the logo procedure and rubrics too
+  [ "$(grep -c '^===== ' <<<"$output")" -eq "$n" ]
   grep -q '^===== skills/ui-design/references/adopted/logo-design/SKILL.md' <<<"$output"
   grep -q 'Phase 3 — Concepts' <<<"$output"                    # the text itself was printed, not just named
   R="$PROJ/.aid-ui/method/identity.json"
-  [ "$(jq -r '.files | length' "$R")" -eq 15 ]
+  [ "$(jq -r '.files | length' "$R")" -eq "$n" ]
   [ "$(jq -r '.files[0].sha256' "$R")" = "$(sha256sum "$BATS_TEST_DIRNAME/../../../skills/ui-design/references/adopted/logo-design/SKILL.md" | cut -d' ' -f1)" ]
   run "$SCRIPT" method "$PROJ" nonsense; [ "$status" -eq 2 ]
   studio   # fresh receipts now
@@ -1695,8 +1734,10 @@ decide_payload() {
     "$PROJ/.aid-ui/studio/payload.json" > "$T/p.t" && mv "$T/p.t" "$PROJ/.aid-ui/studio/payload.json"
   run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"not from the 12 hours"* ]]
   run "$SCRIPT" record-answer "$PROJ" --question i1; [ "$status" -eq 1 ]; [[ "$output" == *"HTTP 422"* ]]   # the studio refuses the payload
-  jq '.questions[-1].opened_at = (now | todate)' "$PROJ/.aid-ui/studio/payload.json" > "$T/p.t" && mv "$T/p.t" "$PROJ/.aid-ui/studio/payload.json"
-  run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 0 ]
+  # opened at the receipt's own moment, never by the clock (P113: `now | todate` drops the milliseconds, so within the
+  # same second the question opened "before" its receipt and the case failed on a fast machine)
+  jq --arg at "$(jq -r .at "$PROJ/.aid-ui/method/identity.json")" '.questions[-1].opened_at = $at' "$PROJ/.aid-ui/studio/payload.json" > "$T/p.t" && mv "$T/p.t" "$PROJ/.aid-ui/studio/payload.json"
+  run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
 @test "P108 method: a kind with null in the map refuses until the PM's no_method answer, then writes the waiver with its mode" {
@@ -1741,4 +1782,124 @@ decide_payload() {
   # a returned item turned into an approval in the state is refused against the studio (the decisions are compared, not only the sha)
   jq '.answers.m1.items[1].decision = "approve"' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
   run "$SCRIPT" approve-page "$PROJ" kontakt.html --answer m1 --answer-item kontakt.html; [ "$status" -eq 1 ]; [[ "$output" == *"differs from the recorded one"* ]]
+}
+
+# ---------------------------------------------------------------- P113 step 2: the place verdict guards the decisions
+@test "gates: decision without verdict - no verdict of the place refuses the accepting answer; a reroll passes" {
+  jqw 'del(.place_verdicts.struktura)'
+  NO_PLACE_OK=1 run ans s1 structure "sha256:abc"; [ "$status" -ne 0 ]; [[ "$output" == *"place_verdict_missing"* ]]
+  jq -e '.answers.s1 == null' "$STATE" >/dev/null
+  NO_PLACE_OK=1 run ans s2 structure "sha256:abc" reroll; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  NO_PLACE_OK=1 run ans s3 structure "sha256:abc" return; [ "$status" -eq 0 ]
+}
+
+@test "gates: decision without verdict - a verdict over an older target refuses (the structure changed after it)" {
+  echo '{"pages": [{"slug": "nova"}]}' > "$PROJ/.aid-ui/structure.json"
+  NO_PLACE_OK=1 run ans s1 structure "sha256:abc"; [ "$status" -ne 0 ]; [[ "$output" == *"decided over another bundle"* ]]
+}
+
+@test "gates: decision without verdict - an upstream file changed after its verdict refuses the places standing on it" {
+  echo zmena >> "$PROJ/.aid-ui/logo/cards/a.png"
+  studio; "$SCRIPT" method "$PROJ" direction >/dev/null
+  NO_PLACE_OK=1 run ans d1 direction "smer:abc" choose; [ "$status" -ne 0 ]; [[ "$output" == *"logo changed after its verdict"* ]]
+  run "$SCRIPT" build-record "$PROJ" "$SITE"; [ "$status" -ne 0 ]; [[ "$output" == *"logo changed after its verdict"* ]]
+}
+
+@test "gates: decision without verdict - a hand-made verdict is refused by place-record" {
+  V="$PROJ/.aid-ui/critic/rounds/struktura/1/verdict.json"; [ -f "$V" ]
+  run "$SCRIPT" place-record "$PROJ" --place struktura "$V"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }   # the real one records
+  jq '.chosen = "jiny"' "$V" > "$T/v1.json"
+  run "$SCRIPT" place-record "$PROJ" --place struktura "$T/v1.json"; [ "$status" -ne 0 ]; [[ "$output" == *"place_verdict_handmade"* ]]
+  jq '.target = "0000"' "$V" > "$T/v2.json"
+  run "$SCRIPT" place-record "$PROJ" --place struktura "$T/v2.json"; [ "$status" -ne 0 ]; [[ "$output" == *"older bundle"* ]]
+  # a returned place made "accepted" by hand
+  jq '.findings = [{"id":"x","criterion":"ukoly_zakaznika","severity":"major","owner":"agent","kind":"fakt","text":"vymyšlená služba","fix":"smazat","where":"strom"}]' \
+    "$PROJ/.aid-ui/critic/rounds/struktura/1/tech/answer.json" > "$T/a.json" && mv "$T/a.json" "$PROJ/.aid-ui/critic/rounds/struktura/1/tech/answer.json"
+  run "$SCRIPT" place-record "$PROJ" --place struktura "$V"; [ "$status" -ne 0 ]; [[ "$output" == *"place_verdict_handmade"* ]]
+}
+
+@test "gates: decision without verdict - build-record without the motion verdict refuses" {
+  jqw 'del(.place_verdicts.pohyb)'
+  run "$SCRIPT" build-record "$PROJ" "$SITE"; [ "$status" -ne 0 ]; [[ "$output" == *"place_verdict_missing"* ]]; [[ "$output" == *"pohyb"* ]]
+  jq -e '.build == null or .build.id == null' "$STATE" >/dev/null
+}
+
+@test "gates: without - the PM's exception answer for pohyb@without lets build-record and the later places pass" {
+  jqw 'del(.place_verdicts.pohyb)'; rm -rf "$PROJ/.aid-ui/motion"
+  ans m1 exception "pohyb@without"
+  run "$SCRIPT" place-record "$PROJ" --place pohyb --without m1; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.place_verdicts.pohyb.without == "m1" and .place_verdicts.pohyb.status == "accepted" and (.consumed | index("m1")) != null' "$STATE" >/dev/null
+  [ -f "$PROJ/.aid-ui/critic/pohyb-without.json" ]
+  run "$SCRIPT" build-record "$PROJ" "$SITE"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  place_ok "$PROJ" vzhled   # the look is decided over the without record
+  "$SCRIPT" method "$PROJ" direction >/dev/null
+  NO_PLACE_OK=1 run ans d1 direction "smer:abc" choose; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "gates: without - a bare flag or an unknown answer is refused" {
+  run "$SCRIPT" place-record "$PROJ" --place pohyb --without; [ "$status" -ne 0 ]
+  run "$SCRIPT" place-record "$PROJ" --place pohyb --without nope; [ "$status" -ne 0 ]; [[ "$output" == *"not one"* ]]
+  ans x1 exception '{"check":"motion_settled","page":"*","viewport":"*","browser":"*","role":"*","state":"*"}'
+  run "$SCRIPT" place-record "$PROJ" --place pohyb --without x1; [ "$status" -ne 0 ]   # another exception
+  run "$SCRIPT" place-record "$PROJ" --place logo --without x1; [ "$status" -eq 2 ]
+}
+
+@test "gates: without - an answer the client agent gave is refused" {
+  studio
+  local p="$PROJ/.aid-ui/studio/payload.json"
+  jq --arg o "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" '.questions += [{id: "c1", kind: "exception", target: "pohyb@without", opened_at: $o}] | .cards += [{id: "x", question: "c1", method: "SKILL.md"}]' "$p" > "$p.t" && mv "$p.t" "$p"
+  curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H "X-AID-Role: client" -H 'Content-Type: application/json' \
+    -d '{"question":"c1","kind":"exception","target":"pohyb@without","decision":"approve","comment":"klient"}' "$AID_UI_STUDIO_URL/answer"
+  "$SCRIPT" record-answer "$PROJ" --question c1 >/dev/null
+  jq -e '.answers.c1.by == "client"' "$STATE" >/dev/null
+  run "$SCRIPT" place-record "$PROJ" --place pohyb --without c1; [ "$status" -ne 0 ]; [[ "$output" == *"by pm"* ]]
+  # the agent token without the role header is an agent's answer, never the PM's (positive attribution)
+  jq --arg o "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" '.questions += [{id: "c2", kind: "exception", target: "pohyb@without", opened_at: $o}] | .cards += [{id: "x", question: "c2", method: "SKILL.md"}]' "$p" > "$p.t" && mv "$p.t" "$p"
+  curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H 'Content-Type: application/json' \
+    -d '{"question":"c2","kind":"exception","target":"pohyb@without","decision":"approve","comment":"agent"}' "$AID_UI_STUDIO_URL/answer"
+  "$SCRIPT" record-answer "$PROJ" --question c2 >/dev/null
+  jq -e '.answers.c2.by == "agent"' "$STATE" >/dev/null
+  run "$SCRIPT" place-record "$PROJ" --place pohyb --without c2; [ "$status" -ne 0 ]
+}
+
+@test "gates: without - a return decision is refused" {
+  ans r1 exception "pohyb@without" return
+  run "$SCRIPT" place-record "$PROJ" --place pohyb --without r1; [ "$status" -ne 0 ]; [[ "$output" == *"not one"* ]]
+}
+
+# ---------------------------------------------------------------- P113 step 10: the machine part of a repair cycle
+@test "cycle: stops at the first failing stage and names it, nothing after it runs; the site defaults to the recorded build" {
+  run "$SCRIPT" cycle "$PROJ"
+  [ "$status" -eq 2 ]; [[ "$output" == *"cycle needs <site dir> (or a recorded build"* ]]
+  rm "$PROJ/.aid-ui/method/build.json"   # build-record wants the build method receipt
+  run "$SCRIPT" cycle "$PROJ" "$SITE"
+  [ "$status" -eq 1 ]; [[ "$output" == *"cycle: FAIL build-record build-record refused: no method receipt for build"* ]] || { echo "$output"; return 1; }
+  [ ! -e "$PROJ/.aid-ui/copy/subject.json" ]; jq -e '.build == null and .gate == null' "$STATE" >/dev/null
+  # no motion stage without a picked reference; with one, the built site's motion is recorded first, then build-record
+  ! [[ "$output" == *"motion"* ]]
+  "$SCRIPT" method "$PROJ" build >/dev/null; "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  jqw '.refs = [{"id":"r1","url":"http://127.0.0.1:9/","picked":true}]'
+  export AID_UI_HOST=127.0.0.1 AID_UI_PREVIEW_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+  run "$SCRIPT" cycle "$PROJ"   # the recorded build's folder
+  [ "$status" -eq 1 ]; [[ "$output" == *"cycle: $(realpath "$SITE")"$'\n'"cycle: motion recorded"$'\n'"cycle: FAIL build-record build-record refused: a reference is picked but there is no .aid-ui/motion.json"* ]] || { echo "$output"; return 1; }
+  [ -f "$PROJ/.aid-ui/build.motion.json" ]
+}
+
+@test "cycle: the copy stage names every page that needs a review and stops before the measurement and the gate" {
+  # the cycle serves the site: on this test's own free port and the loopback, never a real preview's 3917
+  export AID_UI_HOST=127.0.0.1 AID_UI_PREVIEW_PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+  run "$SCRIPT" cycle "$PROJ" "$SITE"
+  [ "$status" -eq 1 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"cycle: BUILD:"* ]]
+  [[ "$output" == *"cycle: FAIL copy STALE index.html: no copy review STALE kontakt.html: no copy review copy: 2 of 2 page(s) need a review"* ]]
+  [ -f "$PROJ/.aid-ui/copy/subject.json" ]; [ ! -e "$PROJ/.aid-ui/measure.json" ]; jq -e '.gate == null' "$STATE" >/dev/null
+  # the reviewed pages pass the stage; the next one (measurement) runs
+  jq --slurpfile s "$PROJ/.aid-ui/copy/subject.json" --arg c "$(sha256sum "$PROJ/docs/content/product-context.md" 2>/dev/null | cut -d' ' -f1)" \
+    '.copy_review.pages = ($s[0].pages | map_values({subject_sha256: .sha256, verdict: "pass", facts_used: {}, context_sha256: (if $c == "" then null else $c end)}))' \
+    "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
+  run "$SCRIPT" cycle "$PROJ" "$SITE"
+  [[ "$output" == *"cycle: copy: every page reviewed and current"* ]] || { echo "$output"; return 1; }
+  [[ "$output" != *"FAIL copy"* ]]
+  # no preview of the cycle is left running
+  [ -z "$(ss -ltnH "sport = :$AID_UI_PREVIEW_PORT")" ]
 }

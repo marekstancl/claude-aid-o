@@ -2,11 +2,11 @@
 # aid-tier: t2
 # test-aid-ui-serve.bats — aid-ui-serve.sh (P101 Step 2, P103 Step 3): the
 # studio page and the brand page run as aid-job.sh jobs and stop independently.
-# t2: it starts processes and binds ports 39915-39917.
+# t2: it starts processes and binds ports 39915-39918 (39918: the P113 skeleton).
 
 setup() {
   SERVE="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)/aid-ui-serve.sh"
-  export AID_UI_HOST=127.0.0.1 AID_UI_STUDIO_PORT=39915 AID_UI_BRAND_PORT=39916
+  export AID_UI_HOST=127.0.0.1 AID_UI_STUDIO_PORT=39915 AID_UI_BRAND_PORT=39916 AID_UI_SKELETON_PORT=39918
   export AID_UI_JOBS_DIR="$BATS_TEST_TMPDIR/jobs" AID_UI_PROJECT="$BATS_TEST_TMPDIR"
   export AID_UI_STATE_DIR="$BATS_TEST_TMPDIR/state"
   FOREIGN_PIDS=()
@@ -21,6 +21,7 @@ setup() {
 teardown() {
   "$SERVE" stop studio || true
   "$SERVE" stop brand || true
+  "$SERVE" stop skeleton 2>/dev/null || true
   local p; for p in "${FOREIGN_PIDS[@]}"; do kill "$p" 2>/dev/null || true; done
   wait 2>/dev/null || true
 }
@@ -218,4 +219,110 @@ get() { curl -sf --max-time 3 "http://127.0.0.1:$1/"; }
 @test "stop without a role exits 2" {
   run "$SERVE" stop
   [ "$status" -eq 2 ]
+}
+
+# ---------------------------------------------------------------- P113 step 6: the live skeleton at a fixed address
+skel_project() {   # skel_project <dir>: a structure of two pages, the facts register with one open fact
+  local p="$1"; mkdir -p "$p/.aid-ui" "$p/docs/content"
+  cat > "$p/.aid-ui/structure.json" <<'J'
+{"lang": "cs", "pages": [
+  {"id": "home", "url": "/", "h1": "Pekárna v Brně", "title": "Úvod", "sections": [{"id": "hero", "says": "Hlavní sdělení", "action": "Objednat", "facts": ["since"]}]},
+  {"id": "sluzby", "url": "/služby/", "h1": "Služby", "title": "Služby", "sections": [{"id": "seznam", "says": "Seznam služeb", "facts": ["cena_chleba"]}]}],
+ "nav": ["home", "sluzby"], "header": {"phone_key": "telephone", "cta": {"label": "Objednat", "url": "/sluzby/"}}, "footer": {"legal_keys": ["company"]},
+ "redirects": [{"from": "/stare-sluzby/", "to": "/sluzby/"}]}
+J
+  cat > "$p/docs/content/facts.yaml" <<'Y'
+brand: {value: "Pekárna U Mlýna", source: PM}
+telephone: {value: "+420 777 123 456", source: PM}
+company: {value: "Pekárna U Mlýna s.r.o.", source: PM}
+since: {value: "peče od roku 1998", source: PM}
+otevrene:
+  cena_chleba: {value: "45 Kč", source: starý web}
+Y
+}
+
+@test "skeleton: builds every page of the structure with navigation, header and footer, each marked and with meta viewport" {
+  P="$BATS_TEST_TMPDIR/sk"; skel_project "$P"
+  run "$SERVE" skeleton "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"URL: http://127.0.0.1:39918/"* ]]
+  for f in "$P/site/index.html" "$P/site/sluzby/index.html"; do   # the slug with diacritics normalised
+    grep -q 'data-aid-skeleton' "$f"; grep -q 'name="viewport"' "$f"
+    grep -q 'href="/sluzby/"' "$f"; grep -q 'href="tel:+420777123456"' "$f"; grep -q 'Pekárna U Mlýna s.r.o.' "$f"
+  done
+  [ "$(curl -sf --max-time 3 http://127.0.0.1:39918/sluzby/ | grep -c '<h1>Služby</h1>')" -eq 1 ]
+  "$SERVE" stop skeleton
+}
+
+@test "skeleton: facts come only from the register - an open or missing fact waits for the client, a stray claim fails the check" {
+  P="$BATS_TEST_TMPDIR/sk"; skel_project "$P"
+  python3 - "$P" <<'PY'
+import json, sys; p = sys.argv[1] + "/.aid-ui/structure.json"; s = json.load(open(p)); s["pages"][1]["sections"][0]["facts"].append("nikde"); json.dump(s, open(p, "w"))
+PY
+  run python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$P"; [ "$status" -eq 0 ]; [[ "$output" == *"fact nikde is not in docs/content/facts.yaml"* ]]
+  ! grep -q '45 Kč' "$P/site/sluzby/index.html"   # the open price is not shown
+  [ "$(grep -o 'čeká na klienta' "$P/site/sluzby/index.html" | wc -l)" -eq 2 ]
+  grep -q 'peče od roku 1998' "$P/site/index.html"
+  run "$SERVE" skeleton-check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  sed -i 's#<h1>Služby</h1>#<h1>Služby</h1><p>Volejte 602 111 222</p>#' "$P/site/sluzby/index.html"
+  run "$SERVE" skeleton-check "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"not in facts.yaml: 602 111 222"* ]]
+}
+
+@test "skeleton: a rebuild keeps built pages and moves a page whose entry left the structure aside" {
+  P="$BATS_TEST_TMPDIR/sk"; skel_project "$P"
+  python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$P" >/dev/null
+  echo '<!doctype html><html lang="cs"><head><meta name="viewport" content="width=device-width"><title>Úvod</title></head><body><h1>Postaveno</h1></body></html>' > "$P/site/index.html"
+  python3 - "$P" <<'PY'
+import json, sys; p = sys.argv[1] + "/.aid-ui/structure.json"; s = json.load(open(p)); s["pages"] = s["pages"][:1]; s["nav"] = ["home"]; s["redirects"] = []; json.dump(s, open(p, "w"))
+PY
+  run python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q 'Postaveno' "$P/site/index.html"; jq -e '.kept == ["index.html"] and .removed == ["sluzby/index.html"]' <<<"${lines[-1]}" >/dev/null
+  [ -f "$P/.aid-ui/skeleton/removed/sluzby/index.html" ]; [ ! -e "$P/site/sluzby/index.html" ]
+  [ ! -e "$P/.aid-ui/skeleton/redirects.csv" ]
+  run "$SERVE" skeleton-check "$P"; [[ "$output" == *"bez starého webu"* ]]
+}
+
+@test "skeleton: the address survives a gate preview start and stop" {
+  P="$BATS_TEST_TMPDIR/sk"; skel_project "$P"
+  "$SERVE" skeleton "$P" >/dev/null
+  get 39918 | grep -q 'data-aid-skeleton'
+  export AID_UI_PREVIEW_PORT=39919   # not 39917: the Coufal pilot's preview may hold it on this host
+  "$SERVE" preview "$BATS_TEST_TMPDIR/page" >/dev/null; get 39919 | grep -q page-ok
+  "$SERVE" stop preview
+  get 39918 | grep -q 'data-aid-skeleton'   # still there
+  run "$SERVE" skeleton "$P"; [ "$status" -eq 0 ]; [[ "$output" == *"JOB: aid-ui-skeleton-39918"* ]]   # idempotent
+  "$SERVE" stop skeleton
+  ! get 39918
+}
+
+@test "skeleton: a redirect target outside the tree is refused; 160 pages build in under 10 s" {
+  P="$BATS_TEST_TMPDIR/sk"; skel_project "$P"
+  python3 - "$P" <<'PY'
+import json, sys; p = sys.argv[1] + "/.aid-ui/structure.json"; s = json.load(open(p)); s["redirects"].append({"from": "/x/", "to": "/neni/"}); json.dump(s, open(p, "w"))
+PY
+  python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$P" >/dev/null
+  run "$SERVE" skeleton-check "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"redirect /x/ -> /neni/: target is not a page of the tree"* ]]
+  Q="$BATS_TEST_TMPDIR/big"; skel_project "$Q"
+  python3 - "$Q" <<'PY'
+import json, sys; p = sys.argv[1] + "/.aid-ui/structure.json"; s = json.load(open(p))
+s["pages"] += [{"id": "z%d" % i, "url": "/zakazky/z-%d/" % i, "h1": "Zakázka %d" % i, "title": "Zakázka", "sections": [{"id": "a", "says": "Popis zakázky"}]} for i in range(158)]
+json.dump(s, open(p, "w"))
+PY
+  s=$(date +%s); python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$Q" >/dev/null; e=$(( $(date +%s) - s ))
+  [ "$(find "$Q/site" -name index.html | wc -l)" -eq 160 ]; [ "$e" -lt 10 ]
+}
+
+@test "skeleton: a page the skeleton never wrote is never moved; a symlink or two urls on one file stop the build before any write" {
+  P="$BATS_TEST_TMPDIR/sk"; skel_project "$P"; mkdir -p "$P/site/vlastni"; echo '<html><h1>Ruční</h1></html>' > "$P/site/vlastni/index.html"
+  python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$P" >/dev/null
+  [ -f "$P/site/vlastni/index.html" ]; [ ! -e "$P/.aid-ui/skeleton/removed/vlastni" ]   # foreign: stays
+  O="$BATS_TEST_TMPDIR/outside"; mkdir -p "$O"; echo puvodni > "$O/index.html"
+  rm -r "$P/site/sluzby"; ln -s "$O" "$P/site/sluzby"
+  run python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$P"; [ "$status" -eq 2 ]; [[ "$output" == *"is a symlink"* ]]
+  [ "$(cat "$O/index.html")" = puvodni ]
+  run "$SERVE" skeleton "$P"; [ "$status" -eq 2 ]
+  rm "$P/site/sluzby"; Q="$BATS_TEST_TMPDIR/sk2"; skel_project "$Q"
+  python3 - "$Q" <<'PY'
+import json, sys; p = sys.argv[1] + "/.aid-ui/structure.json"; s = json.load(open(p)); s["pages"].append(dict(s["pages"][1], id="dup", url="/sluzby/")); json.dump(s, open(p, "w"))
+PY
+  run python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$Q"; [ "$status" -eq 2 ]; [[ "$output" == *"both become sluzby/index.html"* ]]; [ ! -e "$Q/site" ]
 }

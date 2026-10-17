@@ -25,11 +25,23 @@
   costs <project>
       The project's cost book in one JSON line (aid_ui_costs.summary).
 
-Providers (H2, PM 12. 10. 2026): Codex on the subscription first (OPENAI_API_KEY, ANTHROPIC_API_KEY and
-ANTHROPIC_AUTH_TOKEN removed from every text process: text never goes over a paid API); a refusal (usage/rate limit, failed run, no answer) or an invalid answer
-twice hands the same prompt and images, in the same working directory, to an independent Claude Code (clean
-context, read-only tools, AID_UI_STANDIN_MODEL, default sonnet). Both failing: answer writes
-.aid-ui/client/stop and stops; critic exits 1. AID_UI_STANDIN=off disables the stand-in. Every call is
+  critic <project> --place <p> --role owner|tech [--web <url>] [--history <json>] [--audit|--fresh] [--out <dir>]
+      (P113) One rating of a decision place: the bundle is the place's files (aid-ui-critic.py bundle-files; a missing
+      input stops naming it) under podklady/, their png files as images, the live address where the place has one
+      (the skeleton at struktura); run.json site_sha = the bundle sha.
+
+The client is one role (P113, PM 14. 10. 2026): it answers the studio's questions and rates the places, with one
+memory (lib/aid_ui_memory.py): its ratings at every place, its own studio answers (history.jsonl by: client - its
+answers go with the agent token and X-AID-Role: client) and the PM's decisions apart (by: pm). --audit/--fresh: none.
+
+Providers (H2, PM 12. 10. 2026; D4 17. 10. 2026): a ROLE call (the client's answers, every rating) goes to Claude
+Code on AID_UI_ROLE_MODEL (default opus) first and to Codex as its stand-in; other calls Codex first and the Claude
+stand-in (AID_UI_STANDIN_MODEL, default sonnet) second (AID_UI_ROLE_FIRST=codex gives role calls that order too, e.g.
+while Opus is out; a role call answered by the stand-in is recorded as such). OPENAI_API_KEY, ANTHROPIC_API_KEY and ANTHROPIC_AUTH_TOKEN are
+removed from every text process: text never goes over a paid API. A refusal (usage/rate limit, failed run, no answer)
+or an invalid answer twice hands the same prompt and images, in the same working directory, to the stand-in (clean
+context, read-only tools). Both failing: answer writes .aid-ui/client/stop and stops; critic exits 1.
+AID_UI_STANDIN=off disables the stand-in. Every call (provider and model in run.json/turn.json attempts) is
 written to the cost book (.aid-ui/costs.jsonl) at its list-price equivalent.
 """
 import hashlib, http.cookiejar, json, os, re, secrets, shutil, subprocess, sys, tempfile, time
@@ -40,6 +52,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL = os.path.join(HERE, "..", "skills", "ui-design")
 sys.path.insert(0, os.path.join(HERE, "lib"))
 import aid_ui_costs as costs   # noqa: E402
+import aid_ui_memory as memory   # noqa: E402
 
 CRITIC = os.path.join(HERE, "aid-ui-critic.py")
 TOOL = os.environ.get("AID_UI_TOOL") or os.path.join(HERE, "aid-ui-tool.sh")
@@ -47,6 +60,10 @@ TIMEOUT = int(os.environ.get("AID_UI_CLIENT_TIMEOUT", "1800"))
 REFUSED = re.compile(r"usage limit|quota|rate limit|\b429\b|exceeded|insufficient_quota", re.I)
 MAX_IMAGES, MAX_PAGES, MAX_ROUNDS_HINT = 12, 8, 4
 
+
+# P113 (Coufal round 2): a finding may come back as a regression when it was fixed, rejected, superseded or folded into
+# another finding as its duplicate (the expert named r1-tech-f4, a duplicate of a fixed finding, and the answer was refused)
+REGRESSABLE = ("fixed", "rejected_with_reason", "superseded", "duplicate")
 
 def now():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -128,8 +145,8 @@ def codex(prompt, images, cwd, out):
             "usage": {"input": usage.get("input_tokens"), "cached": usage.get("cached_input_tokens"), "output": usage.get("output_tokens")}}
 
 
-def claude(prompt, images, cwd, out):
-    model = os.environ.get("AID_UI_STANDIN_MODEL", "sonnet")
+def claude(prompt, images, cwd, out, model=None):
+    model = model or os.environ.get("AID_UI_STANDIN_MODEL", "sonnet")
     p = prompt + ("\n\n# Obrázky\nPřiložené obrázky si přečti nástrojem Read, každý zvlášť:\n" + "\n".join("- " + i for i in images) if images else "")
     cmd = ["claude", "-p", "--output-format", "json", "--model", model, "--allowedTools", "Read", "Glob", "Grep",
            "--add-dir", cwd, "--add-dir", out]
@@ -148,13 +165,27 @@ def claude(prompt, images, cwd, out):
                       "cached": usage.get("cache_read_input_tokens"), "output": usage.get("output_tokens")}}
 
 
-def ask(project, prompt, images, cwd, out, valid, purpose):
-    """Codex first; an invalid answer once more with the reason; then the Claude stand-in on the same bundle, which
-    gets the same second chance.
-    valid(text) -> (answer, error). Returns (answer or None, record)."""
-    rec = {"prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(), "attempts": []}
+ROLE_MODEL = lambda: os.environ.get("AID_UI_ROLE_MODEL", "opus")   # D4 (PM 17. 10. 2026): the roles on Claude Opus
+
+
+def opus(prompt, images, cwd, out):
+    return claude(prompt, images, cwd, out, ROLE_MODEL())
+
+
+def ask(project, prompt, images, cwd, out, valid, purpose, role=False):
+    """A role call (the client and the expert, D4): Claude on AID_UI_ROLE_MODEL (default opus) first, Codex its
+    stand-in; any other call: Codex first, the Claude stand-in (AID_UI_STANDIN_MODEL) second. Each provider gets an
+    invalid answer back once with the reason. valid(text) -> (answer, error). Returns (answer or None, record)."""
+    rec = {"prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(), "attempts": [], "role_call": role}
+    first, second = (opus, codex) if role and os.environ.get("AID_UI_ROLE_FIRST", "claude") != "codex" else (codex, claude)
 
     def run(fn, p):
+        test = os.environ.get("BATS_TEST_TMPDIR")
+        exe = shutil.which("codex" if fn is codex else "claude") or ""
+        if test and not os.path.realpath(exe).startswith(os.path.realpath(test) + os.sep):
+            # llm-test-cost-control: a test never reaches a real model (P113: a stub of one provider let 67 role calls
+            # fall through to the real Opus once the role order changed)
+            die("a test reached the real %s (%s): stub it under $BATS_TEST_TMPDIR" % ("codex" if fn is codex else "claude", exe or "not found"), 3)
         r = fn(p, images, cwd, out)
         costs.tokens(project, r["provider"], r.get("model"), r["usage"], purpose, r.get("usd"))
         a, err = valid(r["text"]) if (r["text"] and not r["rc"]) else (None, None)
@@ -164,12 +195,12 @@ def ask(project, prompt, images, cwd, out, valid, purpose):
 
     p, why = prompt, None
     for n in (1, 2):
-        r, a, err = run(codex, p)
+        r, a, err = run(first, p)
         if a is not None:
-            rec.update(provider="codex", model=r.get("model") or "default", commands=r.get("commands", []))
+            rec.update(provider=r["provider"], model=r.get("model") or "default", commands=r.get("commands", []))
             return a, rec
-        if r["refused"] or r["rc"] or not r["text"]:
-            why = "limit" if r["refused"] else ("rc %d" % r["rc"] if r["rc"] else "no answer")
+        if r.get("refused") or r["rc"] or not r["text"]:
+            why = "limit" if r.get("refused") else ("rc %d" % r["rc"] if r["rc"] else "no answer")
             break
         why = "invalid answer twice: " + str(err)
         p = prompt + "\n\nPředchozí odpověď nebyla platná (%s). Vrať jen JSON podle zadání." % err
@@ -177,14 +208,14 @@ def ask(project, prompt, images, cwd, out, valid, purpose):
     if os.environ.get("AID_UI_STANDIN", "on") == "off":
         rec["provider"] = None
         return None, rec
-    log("Codex refused (%s); the Claude stand-in takes the same bundle" % why)
+    log("%s refused (%s); the stand-in takes the same bundle" % ("Claude " + ROLE_MODEL() if role else "Codex", why))
     p = prompt
-    for n in (1, 2):   # the stand-in gets the same second chance with the reason as Codex (Coufal 13. 10.: a wrong anchor)
-        r, a, err = run(claude, p)
+    for n in (1, 2):   # the stand-in gets the same second chance with the reason (Coufal 13. 10.: a wrong anchor)
+        r, a, err = run(second, p)
         if a is not None or r["rc"] or not r["text"]:
             break
         p = prompt + "\n\nPředchozí odpověď nebyla platná (%s). Vrať jen JSON podle zadání." % err
-    rec["provider"] = "claude" if a is not None else None
+    rec["provider"] = r["provider"] if a is not None else None
     rec["model"] = r.get("model") if a is not None else None
     return a, rec
 
@@ -307,12 +338,92 @@ def comp_shots(project):
     return man, [os.path.join(d, f) for c in man["competitors"] for f in c["shots"] if os.path.isfile(os.path.join(d, f))]
 
 
-def critic(project, web, audit, out, role, history=None):
-    r = subprocess.run([sys.executable, CRITIC, "prompt", project, "--role", role], capture_output=True, text=True)
+def place_bundle(project, place):
+    """The files a place's roles rate (aid-ui-critic.py bundle-files): dies naming the first missing input."""
+    r = subprocess.run([sys.executable, CRITIC, "bundle-files", project, "--place", place], capture_output=True, text=True)
+    if r.returncode:
+        die((r.stderr or r.stdout).strip().replace("ERROR: aid-ui-critic.py: ", ""))
+    s = subprocess.run([sys.executable, CRITIC, "bundle-sha", project, "--place", place], capture_output=True, text=True)
+    return [x for x in r.stdout.splitlines() if x.strip()], s.stdout.strip()
+
+
+def critic_place(project, web, audit, out, role, history, place, role_text, frozen):
+    """One rating of a decision place other than the finished web (P113): the role gets the place's bundle under
+    podklady/ (and the skeleton address at the structure), the png files of it as images."""
+    files, bsha = place_bundle(project, place)
+    kind = "audit" if audit else "critic"
+    out = out or os.path.join(project, ".aid-ui", "critic", "runs", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-%s-%s-%s" % (place, kind, role))
+    bundle = os.path.join(out, "bundle")
+    for rel in files:
+        dst = os.path.join(bundle, "podklady", rel.replace(".aid-ui/", "").replace("docs/", ""))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(os.path.join(project, rel), dst)
+    facts = os.path.join(project, "docs", "content", "facts.yaml")
+    if os.path.isfile(facts):
+        os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
+        shutil.copyfile(facts, os.path.join(bundle, "podklady", "facts.yaml"))
+    hist_ids, h = set(), None
+    if history and not audit:   # an audit is blind: no memory
+        h = json.load(open(history, encoding="utf-8"))
+        hist_ids = {f["id"] for f in (h.get("findings") if isinstance(h, dict) else h) if f.get("state") in REGRESSABLE}
+        os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
+        wj(os.path.join(bundle, "podklady", "historie.json"), h)
+    images = [os.path.join(bundle, "podklady", rel.replace(".aid-ui/", "").replace("docs/", "")) for rel in files if rel.endswith(".png")][:MAX_IMAGES]
+    if web:
+        pages = site_pages(os.path.join(project, "site")) if os.path.isdir(os.path.join(project, "site")) else [""]
+        images += shots(os.path.join(out, "shots"), [web.rstrip("/") + "/" + pg for pg in pages[:MAX_PAGES]])[:MAX_IMAGES]
+    prompt = (role_text + "\n\n# Podklady místa\n\nV pracovním adresáři v `podklady/` (jen ke čtení, nic mimo něj nečti):\n"
+              + "\n".join("- podklady/" + rel.replace(".aid-ui/", "").replace("docs/", "") for rel in files)
+              + ("\n\nŽivá adresa: " + web if web else "")
+              + ("\n\nRegistr faktů, které podnik potvrdil, je v `podklady/facts.yaml`." if os.path.isfile(facts) else "")
+              + ("\n\nTvé předchozí hodnocení a co studio udělalo: `podklady/historie.json` (pravidla v části Paměť hodnotitele)." if h is not None else "")
+              + ("\n\n# Přiložené obrázky\n" + "\n".join("- " + os.path.basename(i) for i in images) if images else ""))
+    os.makedirs(out, exist_ok=True)
+    with open(os.path.join(out, "prompt.md"), "w", encoding="utf-8") as fh:
+        fh.write(prompt)
+
+    def valid(text):
+        a = parse_json(text)
+        if not isinstance(a, dict):
+            return None, "not JSON"
+        with tempfile.NamedTemporaryFile("w", suffix=".json", dir=out, delete=False, encoding="utf-8") as fh:
+            json.dump(a, fh, ensure_ascii=False)
+        s = subprocess.run([sys.executable, CRITIC, "score", project, fh.name, "--role", role, "--place", place], capture_output=True, text=True)
+        os.unlink(fh.name)
+        if s.returncode:
+            return None, (s.stderr or s.stdout).strip().replace("ERROR: aid-ui-critic.py: ", "")[:300]
+        bad = [x["regression_of"] for x in a.get("findings") or [] if x.get("regression_of") and x["regression_of"] not in hist_ids]
+        if bad:
+            return None, "regression_of %s: no fixed, rejected, superseded or duplicate finding with that id in podklady/historie.json" % ", ".join(bad)
+        return {"answer": a, "score": json.loads(s.stdout)}, None
+
+    got, rec = ask(project, prompt, images, bundle, out, valid, "critic:%s:%s:%s" % (place, kind, role), role=True)
+    _, after = place_bundle(project, place)
+    if after != bsha:
+        die("the %s inputs changed during the rating; rate again" % place)
+    run = {"kind": kind, "place": place, "role": role, "web": web, "site_sha": bsha, "frozen_sha": frozen["sha256"],
+           "role_sha": frozen["roles"][role]["sha256"], "bundle_sha": site_sha(bundle),
+           "history": (len(h.get("findings") or []) if isinstance(h, dict) else len(h)) if h is not None else None,
+           "images": image_meta(images), "at": now(), **rec}
+    if got:
+        wj(os.path.join(out, "answer.json"), got["answer"])
+        run["score"] = got["score"]
+    wj(os.path.join(out, "run.json"), run)
+    if not got:
+        die(f"no valid rating from any provider ({rec.get('stand_in_reason')}); record in {out}/run.json")
+    print(json.dumps({"out": out, "provider": rec["provider"], **{k: v for k, v in got["score"].items() if k != "findings"}}, ensure_ascii=False))
+
+
+def critic(project, web, audit, out, role, history=None, place="web"):
+    r = subprocess.run([sys.executable, CRITIC, "prompt", project, "--role", role, "--place", place], capture_output=True, text=True)
     if r.returncode:
         die("no usable frozen critic: " + (r.stderr or r.stdout).strip())
     role_text = r.stdout
-    frozen = json.load(open(os.path.join(project, ".aid-ui", "critic", "frozen.json"), encoding="utf-8"))
+    frozen = json.load(open(os.path.join(project, ".aid-ui", "critic", "frozen.json" if place == "web" else os.path.join("frozen", place + ".json")), encoding="utf-8"))
+    if place != "web":
+        return critic_place(project, web, audit, out, role, history, place, role_text, frozen)
+    if not web:
+        die("--web <url>: the finished web is rated live", 2)
     site = os.path.join(project, "site")
     if not os.path.isdir(site):
         die(f"no site directory {site}")
@@ -344,7 +455,8 @@ def critic(project, web, audit, out, role, history=None):
     hist_ids = set()
     if history and not audit:   # an audit is blind: no memory
         h = json.load(open(history, encoding="utf-8"))
-        hist_ids = {f["id"] for f in h if f.get("state") in ("fixed", "rejected_with_reason", "superseded")}   # what may come back as a regression
+        hist_ids = {f["id"] for f in (h.get("findings") if isinstance(h, dict) else h)
+                    if f.get("state") in REGRESSABLE}   # what may come back as a regression
         os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
         wj(os.path.join(bundle, "podklady", "historie.json"), h)
     for f in comp:
@@ -406,17 +518,17 @@ def critic(project, web, audit, out, role, history=None):
             return None, (s.stderr or s.stdout).strip().replace("ERROR: aid-ui-critic.py: ", "")[:300]
         bad = [x["regression_of"] for x in a.get("findings") or [] if x.get("regression_of") and x["regression_of"] not in hist_ids]
         if bad:
-            return None, "regression_of %s: no fixed or rejected finding with that id in podklady/historie.json" % ", ".join(bad)
+            return None, "regression_of %s: no fixed, rejected, superseded or duplicate finding with that id in podklady/historie.json" % ", ".join(bad)
         lim = sorted({i for c in a.get("criteria") or [] for i in c.get("limited_by") or [] if i not in client_items})
         if lim:   # a second score only where an open item of the client holds the web down
             return None, "limited_by %s: no open item of the client with that id in podklady/overenie.json" % ", ".join(lim)
         return {"answer": a, "score": json.loads(s.stdout)}, None
 
-    got, rec = ask(project, prompt, images + comp, bundle, out, valid, "critic:%s:%s" % (kind, role))
+    got, rec = ask(project, prompt, images + comp, bundle, out, valid, "critic:%s:%s" % (kind, role), role=True)
     if site_sha(site) != rated_sha:   # the site changed while the critic was rating: the rating belongs to no build
         die("the site changed during the rating (site/ differs from the copy the critic read); rate again")
     run = {"kind": kind, "role": role, "web": base, "site_sha": rated_sha, "frozen_sha": frozen["sha256"],
-           "role_sha": frozen["roles"][role]["sha256"], "bundle_sha": site_sha(bundle), "history": len(json.load(open(history, encoding="utf-8"))) if history and not audit else None, "facts_sha": facts_sha, "images": image_meta(images),
+           "role_sha": frozen["roles"][role]["sha256"], "bundle_sha": site_sha(bundle), "history": (lambda h: len(h.get("findings") or []) if isinstance(h, dict) else len(h))(json.load(open(history, encoding="utf-8"))) if history and not audit else None, "facts_sha": facts_sha, "images": image_meta(images),
            "pages": urls, "at": now(), **rec}
     if got:
         wj(os.path.join(out, "answer.json"), got["answer"])
@@ -424,7 +536,7 @@ def critic(project, web, audit, out, role, history=None):
     wj(os.path.join(out, "run.json"), run)
     if not got:
         die(f"no valid rating from any provider ({rec.get('stand_in_reason')}); record in {out}/run.json")
-    print(json.dumps({"out": out, "provider": rec["provider"], **got["score"]}, ensure_ascii=False))
+    print(json.dumps({"out": out, "provider": rec["provider"], **{k: v for k, v in got["score"].items() if k != "findings"}}, ensure_ascii=False))
 
 
 # ---------------------------------------------------------------- studio answers
@@ -440,9 +552,14 @@ class Studio:
         return open(self.cookie_f).read().strip() if os.path.exists(self.cookie_f) else ""
 
     def req(self, path, body=None, raw=False):
+        h = {"Cookie": self.cookie(), "Content-Type": "application/json", "Referer": self.url + "/"}
+        tf = os.path.join(self.project, ".aid-ui", "studio.token")
+        if body is not None:   # P113: the client's answers say who gave them (by: client); never the PM's session alone
+            if not os.path.isfile(tf):
+                die(f"no studio token {tf}: the client answers with the agent token, never as the PM (start the studio with aid-ui-serve.sh studio)")
+            h.update({"X-AID-Token": open(tf).read().strip(), "X-AID-Role": "client"})
         r = urllib.request.Request(self.url + path, data=json.dumps(body).encode() if body is not None else None,
-                                   headers={"Cookie": self.cookie(), "Content-Type": "application/json", "Referer": self.url + "/"},
-                                   method="POST" if body is not None else "GET")
+                                   headers=h, method="POST" if body is not None else "GET")
         try:
             with urllib.request.urlopen(r, timeout=30) as resp:
                 data = resp.read()
@@ -584,7 +701,16 @@ def answer_one(s, role, dry):
     images = [i for i in to_png(images) if i and os.path.exists(i)][:MAX_IMAGES]
     qtext = {k: q.get(k) for k in ("id", "kind", "part", "title", "body", "prompt", "eyebrow", "next", "outcome") if q.get(k)}
     links = d.get("links") or {}
-    prompt = (role + "\n\n# Otázka ze studia\n\n" + json.dumps(qtext, ensure_ascii=False, indent=1)
+    try:
+        mem = memory.role_memory(s.project, "owner", "web")   # the client is one role: every place it rated, its answers, the PM's
+    except ValueError as e:
+        die(str(e))
+    mine = {k: mem[k] for k in ("findings", "ratings") if mem.get(k)}
+    rated = dict(mem.get("other_places") or {}, **({"web": mine} if mine else {}))
+    prompt = (role + ("\n\n# Tvoje paměť: co jsi řekl/a na místech rozhodnutí\n" + json.dumps(rated, ensure_ascii=False, indent=1) if rated else "")
+              + ("\n\n# Tvoje dřívější odpovědi ve studiu\n" + json.dumps(mem["my_studio_answers"][-30:], ensure_ascii=False, indent=1) if mem.get("my_studio_answers") else "")
+              + ("\n\n# Rozhodnutí PM (ne tvoje slova; platí přednostně)\n" + json.dumps(mem["pm_decisions"][-30:], ensure_ascii=False, indent=1) if mem.get("pm_decisions") else "")
+              + "\n\n# Otázka ze studia\n\n" + json.dumps(qtext, ensure_ascii=False, indent=1)
               + ("\n\n# Tvoje dřívější volba, na kterou otázka navazuje\n" + json.dumps(q["prior"], ensure_ascii=False) if q.get("prior") else "")
               + diff_text(q)
               + ("\n\n# Položky (jedna odpověď pro všechny; approve = všechny schváleny, return = jen položky, které vrátíš"
@@ -615,7 +741,7 @@ def answer_one(s, role, dry):
 
     p = prompt
     for attempt in (1, 2):
-        a, mrec = ask(s.project, p, images, s.project, out, valid, "client")
+        a, mrec = ask(s.project, p, images, s.project, out, valid, "client", role=True)
         rec.update(model=mrec, attempt=attempt)
         if a is None:
             wj(os.path.join(out, "turn.json"), rec)
@@ -670,8 +796,8 @@ def main(a):
         print(json.dumps(costs.summary(os.path.abspath(a[1])), ensure_ascii=False))
         return
     opt = lambda k: a[a.index(k) + 1] if k in a and a.index(k) + 1 < len(a) else None
-    if len(a) >= 2 and a[0] == "critic" and opt("--web") and opt("--role"):
-        return critic(os.path.abspath(a[1]), opt("--web"), "--audit" in a, opt("--out"), opt("--role"), opt("--history"))
+    if len(a) >= 2 and a[0] == "critic" and opt("--role"):
+        return critic(os.path.abspath(a[1]), opt("--web"), "--audit" in a or "--fresh" in a, opt("--out"), opt("--role"), opt("--history"), opt("--place") or "web")
     if len(a) == 2 and a[0] == "competitors":
         return competitors(os.path.abspath(a[1]))
     if len(a) >= 2 and a[0] == "answer" and opt("--studio"):

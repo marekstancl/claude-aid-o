@@ -116,3 +116,20 @@ JSON
   jq '.directions[0].id = "A B"' "$P/.aid-ui/logo/sheet.json" > "$P/.aid-ui/logo/bad.json"
   run bash "$PLUGIN/scripts/aid-ui-tool.sh" logo-sheet --spec .aid-ui/logo/bad.json --root "$P"; [ "$status" -eq 2 ]
 }
+
+@test "p113: rok_jmena is read plain or as {value:}; an established mark gets three revivals and two new directions" {
+  state '{"type":"web","brand":"existing"}' '"new"'; old_site
+  mkdir -p "$P/.aid-ui/logo" "$P/docs/content"; printf '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"/>' > "$P/.aid-ui/logo/dnesni-logo.svg"
+  echo 'rok_jmena: 2015' > "$P/docs/content/facts.yaml"
+  r="$(python3 "$ROUTE" "$P")"
+  jq -e '.inputs.facts.rok_jmena == 2015 and .situation == "established" and ([.slots[].id] == ["R","RD","RB","WC","WP"])' <<<"$r" >/dev/null
+  jq -e '[.slots[].kind] | length == (unique | length)' <<<"$r" >/dev/null   # every construction its own
+  echo 'rok_jmena: {value: 2025, source: rejstřík}' > "$P/docs/content/facts.yaml"   # one year: no continuity, a plain redesign
+  r="$(python3 "$ROUTE" "$P")"; jq -e '.inputs.facts.rok_jmena == 2025 and .situation == "redesign" and .direction_count == 5' <<<"$r" >/dev/null
+}
+
+@test "p113: without a usable current logo even an old name stays a redesign (no revival without the mark)" {
+  state '{"type":"web","brand":"existing"}' '"new"'; old_site
+  mkdir -p "$P/docs/content"; echo 'recenzie_pocet: {value: 31, source: google}' > "$P/docs/content/facts.yaml"
+  r="$(python3 "$ROUTE" "$P")"; jq -e '.situation == "redesign" and (.slots[0].kind == "wordmark-continuity")' <<<"$r" >/dev/null
+}

@@ -16,3 +16,181 @@ web-local.tech.yaml:
   review_applied_by: author
   date: 2026-10-13
   sha256: "3e36f2bd90ec4a9c544a7770422b536d7ed2fb3373f654f664d7e8794e42bd8b"
+
+# P113 (17. 10. 2026): měřítka pěti míst rozhodnutí z dílny PM + cowork agenta (14.-17. 10. 2026,
+# .aid-o/work/P113-podklady/, mimo veřejné repo). Při vložení se změnilo jen applies_to (typy pluginu);
+# sha256 je otisk souboru po vložení. Recenze měřítek zůstaly v předávce, autoři je zapracovali.
+web-local.tech.sdeleni.yaml:
+  author: "Claude Opus subagent, clean context (read only the role brief) - dílna P113"
+  brief: "role-briefs/sdeleni-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "c41334f8fc352bc6597d8981f9285fa1898b467791bda264adf0f41d2c7447d6"
+  reviewer: "another Claude subagent, clean context (role-briefs/sdeleni-review.md v předávce)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "357149df2d52e009d97e327e70b2d4d2246db978014c41e78b603ab56fb05721"
+web-local.owner.sdeleni.yaml:
+  author: "Claude Opus subagent, clean context (read only the role brief) - dílna P113"
+  brief: "role-briefs/sdeleni-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "c41334f8fc352bc6597d8981f9285fa1898b467791bda264adf0f41d2c7447d6"
+  reviewer: "another Claude subagent, clean context (role-briefs/sdeleni-review.md v předávce)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "1c8c3ef253ca807cbb4c552b1f904aad85280dd47e01fc9cda32c9f6cd7515a1"
+web-local.tech.logo.yaml:
+  author: "Claude Opus subagent, clean context (read only the role brief) - dílna P113"
+  brief: "role-briefs/logo-tech.md + role-briefs/logo-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "9eb42f0974b2788b6145178333e96b39952c8e1f4ff733324789bddd1bb32105"
+  reviewer: "another Claude subagent, clean context (dvě kola, kalibrace 14. 10. podle slepého testu PM)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "74faca4145b7c43763aa436efd90d97a661d05d14332942258f16cd30e5c5c72"
+web-local.owner.logo.yaml:
+  author: "Claude Opus subagent, clean context (read only the role brief) - dílna P113"
+  brief: "role-briefs/logo-owner.md + role-briefs/logo-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "96711040df1d770e251e404016e9e9061a7ee084b2489816ee66134525c343ca"
+  reviewer: "another Claude subagent, clean context (dvě kola, kalibrace 14. 10. podle slepého testu PM)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "3e61d4c2c409fbff405f670e832094fe9311b1203446697dc9690a4138f34ba8"
+web-local.tech.pohyb.yaml:
+  author: "Claude Opus subagent, clean context (read only the role brief) - dílna P113"
+  brief: "role-briefs/pohyb-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "f14f96748f0b617f62ff862176e08144de89acd3a5c6aa543a7bc83772f164f0"
+  reviewer: "another Claude subagent, clean context (recenze 14. 10.)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "cd78380a7c52b521941a055cc4067361771be4819375cec898fdc7258c817526"
+web-local.owner.pohyb.yaml:
+  author: "Claude Opus subagent, clean context (read only the role brief) - dílna P113"
+  brief: "role-briefs/pohyb-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "f14f96748f0b617f62ff862176e08144de89acd3a5c6aa543a7bc83772f164f0"
+  reviewer: "another Claude subagent, clean context (recenze 14. 10.)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "d1dfab9259421436f19993a20ef9930618ac602e621db6517cc3f7b990718dc7"
+web-local.tech.struktura.yaml:
+  author: "Claude Opus subagent, clean context (read only the role brief) - dílna P113"
+  brief: "role-briefs/struktura-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "8e9035f4ea59453ffde27e82251f0b6c3782f56f95d216c1345affaf72fbc2ad"
+  reviewer: "another Claude subagent, clean context (role-briefs/struktura-review.md v předávce (17 nálezů))"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "98d9c8282c4a6b703f92a53e2dc129249b87e7350e2e73c74a9f2f65cde3cda7"
+web-local.owner.struktura.yaml:
+  author: "Claude Opus subagent, clean context (read only the role brief) - dílna P113"
+  brief: "role-briefs/struktura-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "8e9035f4ea59453ffde27e82251f0b6c3782f56f95d216c1345affaf72fbc2ad"
+  reviewer: "another Claude subagent, clean context (role-briefs/struktura-review.md v předávce (17 nálezů))"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "4e81db70932b0328e98158618cddceafed4c1f983c078feae76c0dbf9a2e4315"
+web-local.tech.vzhled.yaml:
+  author: "Claude Opus subagent, clean context (read only the role brief) - dílna P113"
+  brief: "role-briefs/vzhled-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "20b54265daa83dcd2c18082118e41e7f1daa0a0805d165f3fb7f1cd54a4454a5"
+  reviewer: "another Claude subagent, clean context (role-briefs/vzhled-review.md v předávce)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "18149e11faca491b832aa76acd513a7453eca185b96654610c65d226a768d3dc"
+web-local.owner.vzhled.yaml:
+  author: "Claude Opus subagent, clean context (read only the role brief) - dílna P113"
+  brief: "role-briefs/vzhled-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "20b54265daa83dcd2c18082118e41e7f1daa0a0805d165f3fb7f1cd54a4454a5"
+  reviewer: "another Claude subagent, clean context (role-briefs/vzhled-review.md v předávce)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "89176017b9ccfcd0f8231de7f118215534e8aec2a2516118c9ecb8f33d41a372"
+web-local.tech.sdeleni.gates.yaml:
+  author: "dílna P113 (PM + cowork agent), from the rubric and the PM's blind tests"
+  brief: "role-briefs/sdeleni-common.md"
+  brief_sha256: "c41334f8fc352bc6597d8981f9285fa1898b467791bda264adf0f41d2c7447d6"
+  reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "45b294084287166e43cbdf7dae6454c7221232a82751b0595e660c4dff53f941"
+web-local.owner.sdeleni.gates.yaml:
+  author: "dílna P113 (PM + cowork agent), from the rubric and the PM's blind tests"
+  brief: "role-briefs/sdeleni-common.md"
+  brief_sha256: "c41334f8fc352bc6597d8981f9285fa1898b467791bda264adf0f41d2c7447d6"
+  reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "9f323a29a9caafe98dc151d6d88d63992c7f2b7984daf237e40a19a34fff9b57"
+web-local.tech.logo.gates.yaml:
+  author: "dílna P113 (PM + cowork agent), from the rubric and the PM's blind tests"
+  brief: "role-briefs/logo-tech.md + role-briefs/logo-common.md"
+  brief_sha256: "9eb42f0974b2788b6145178333e96b39952c8e1f4ff733324789bddd1bb32105"
+  reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "0fd8f86a117c00826f7d571923296072c135b889ecd84567b5e177770c6e17a7"
+web-local.owner.logo.gates.yaml:
+  author: "dílna P113 (PM + cowork agent), from the rubric and the PM's blind tests"
+  brief: "role-briefs/logo-owner.md + role-briefs/logo-common.md"
+  brief_sha256: "96711040df1d770e251e404016e9e9061a7ee084b2489816ee66134525c343ca"
+  reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
+  review_applied_by: author
+  date: 2026-10-17
+  sha256: "da44e23d68c8ced290ab6605f3ae08d9a169ae4ed791835c4806f6aec0958b66"
+web-local.tech.pohyb.gates.yaml:
+  author: "dílna P113 (PM + cowork agent), from the rubric and the PM's blind tests"
+  brief: "role-briefs/pohyb-common.md"
+  brief_sha256: "f14f96748f0b617f62ff862176e08144de89acd3a5c6aa543a7bc83772f164f0"
+  reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
+  review_applied_by: author
+  date: 2026-10-17
+  sha256: "9aaf8577a7ae5ed59e1b7818f10914633d83e2adf2080f5c40a27062ab1413d8"
+web-local.owner.pohyb.gates.yaml:
+  author: "dílna P113 (PM + cowork agent), from the rubric and the PM's blind tests"
+  brief: "role-briefs/pohyb-common.md"
+  brief_sha256: "f14f96748f0b617f62ff862176e08144de89acd3a5c6aa543a7bc83772f164f0"
+  reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
+  review_applied_by: author
+  date: 2026-10-17
+  sha256: "7a673eadb2f8aa121706f266b8b28fb98d41c67d1d3e6c9a6a3bd837b7538ecd"
+web-local.tech.struktura.gates.yaml:
+  author: "dílna P113 (PM + cowork agent), from the rubric and the PM's blind tests"
+  brief: "role-briefs/struktura-common.md"
+  brief_sha256: "8e9035f4ea59453ffde27e82251f0b6c3782f56f95d216c1345affaf72fbc2ad"
+  reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "f0287dfe919aceb44f0b3281dd0634be5da86da670327e92d241dd64328feecc"
+web-local.owner.struktura.gates.yaml:
+  author: "dílna P113 (PM + cowork agent), from the rubric and the PM's blind tests"
+  brief: "role-briefs/struktura-common.md"
+  brief_sha256: "8e9035f4ea59453ffde27e82251f0b6c3782f56f95d216c1345affaf72fbc2ad"
+  reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "733ced4ec5273c35929bdea9ff507a5727aed6566c6650609f621d2148d3772e"
+web-local.tech.vzhled.gates.yaml:
+  author: "dílna P113 (PM + cowork agent), from the rubric and the PM's blind tests"
+  brief: "role-briefs/vzhled-common.md"
+  brief_sha256: "20b54265daa83dcd2c18082118e41e7f1daa0a0805d165f3fb7f1cd54a4454a5"
+  reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "6a59b3899b4f38834d9e2d3c6b1c6d35c82d6b741c7291e925305da7cc4539b2"
+web-local.owner.vzhled.gates.yaml:
+  author: "dílna P113 (PM + cowork agent), from the rubric and the PM's blind tests"
+  brief: "role-briefs/vzhled-common.md"
+  brief_sha256: "20b54265daa83dcd2c18082118e41e7f1daa0a0805d165f3fb7f1cd54a4454a5"
+  reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
+  review_applied_by: author
+  date: 2026-10-16
+  sha256: "46f3e7f4980e61939bf2b8b7260def619c960e52e666d14c55065a670028dde8"
+web-local.tech.web.gates.yaml:
+  author: "Claude Opus (P113 build): the P113a thresholds 8.5 / 8.0 / 7.0, formerly constants of aid-ui-critic.py"
+  brief: "PM 13. 10. 2026 (owner and technician each 8.5, no criterion under 7)"
+  reviewer: "codex exec, step review of P113 step 1"
+  review_applied_by: author
+  date: 2026-10-17
+  sha256: "1675dc915a662c2928cd4f6fa25d30d40539bf9e6097a61a249d4228076a9cc2"
+web-local.owner.web.gates.yaml:
+  author: "Claude Opus (P113 build): the P113a thresholds 8.5 / 8.0 / 7.0, formerly constants of aid-ui-critic.py"
+  brief: "PM 13. 10. 2026 (owner and technician each 8.5, no criterion under 7)"
+  reviewer: "codex exec, step review of P113 step 1"
+  review_applied_by: author
+  date: 2026-10-17
+  sha256: "dc9682bcef03cefddd74869dadae5f7bfb5a0ceca48a9934c1e8d78d28d17f04"

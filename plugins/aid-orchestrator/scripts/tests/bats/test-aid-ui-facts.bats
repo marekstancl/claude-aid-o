@@ -61,3 +61,13 @@ BASE='[{"claim":"telefon","value":"+420 777 123 456"},{"claim":"cena","value":"6
   run claims "Pište na info@fake.cz" '{"e":{"value":"info@fake.cz.invalid"}}';  [ "$output" = "info@fake.cz" ]
   run claims "Pište na info@fake.cz" '{"e":{"value":"info@fake.cz"}}';          [ -z "$output" ]
 }
+
+@test "p113: up to two words between the number and the counted word (the workshop's \"přes 300 dokončených projektů\"); a third word or no counted word is not a claim" {
+  run claims "Autorizovaný inženýr · přes 300 dokončených projektů. 120 velmi spokojených rodin projektů. 3 m od plotu." "$BASE"
+  [ "$output" == "300 dokončených projektů" ] || { echo "$output"; return 1; }
+  run claims "přes 300 dokončených projektů" '{"projekty":{"value":"300 projektů"}}'
+  [ -z "$output" ]
+  # a preposition, conjunction or unit between: the number counts something else
+  run claims "Otevřeno 7 dní pro klienty. 3 metry od firmy. 5 a 6 projektů." "$BASE"
+  [ "$output" == "6 projektů" ] || { echo "$output"; return 1; }
+}

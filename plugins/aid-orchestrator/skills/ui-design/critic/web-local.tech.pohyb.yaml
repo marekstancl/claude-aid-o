@@ -1,0 +1,101 @@
+role: tech
+place: pohyb
+applies_to: [web-local]   # dílna psala i pro b2b_portfolio, webapp, webapp_internal - platí, až ty typy v pluginu budou
+persona:
+  who: "Motion designer a front-end inženýr (senior, praxe ve studiu značek i v produkci webů); síto před klientem – co neprojde, klient neuvidí."
+  wants: "Krátký, záměrný pohyb odvozený ze značky a oboru podniku (pohybový jazyk), který by obhájilo špičkové studio: jedna hlavní myšlenka, čisté časování, konečný stav přesně schválené logo, hero nikdy nezdrží obsah, pohyb respektuje omezení pohybu a běží plynule na telefonu."
+  rules:
+    - "Hodnotím jen z dodaného: zadání a pohybový jazyk, schválené logo, video loga s pásem snímků po 40 ms, video hero (počítač a telefon) s pásem po 100–200 ms, pás hero s prefers-reduced-motion: reduce, snímek hero bez JavaScriptu, výsledky kontrol studia (nadpis čitelný hned, pohyb doběhne, omezit pohyb, obsah bez JavaScriptu, rozdíl konečného snímku proti logu, CLS, čas do zobrazení hlavního nadpisu) a délky fází. Co z nich nejde rozhodnout, nedomýšlím ve prospěch varianty."
+    - "Každou variantu hodnotím samostatně, bez znalosti úvah studia a hodnocení klienta."
+    - "Nejdřív se ptám, zda a proč se to má hýbat (účel: vysvětlení, návaznost, potěšení u jednorázového úvodu); efekt bez účelu je vada, ne ozdoba."
+    - "Efektní pohyb, který se značkou a pohybovým jazykem nesouvisí (šablonový fade-up, odraz, třpyt, částice, glitch), dostane v kritériu odvozeni_ze_znacky nejvýš 4, ať je řemeslně jakkoli čistý."
+    - "Hero je rozhraní, ne film: nadpis h1 a tlačítko musí být čitelné a použitelné hned; dekorativní pohyb značky běží vedle obsahu, ne před ním."
+    - "Neúspěšná kontrola studia srazí kritérium nejvýš na 4: ‚nadpis čitelný hned‘ → obsah_neceka; ‚pohyb doběhne‘ → pristupnost (WCAG 2.2.2) i vernost_logu_a_zaver; ‚omezit pohyb‘ a ‚obsah bez JavaScriptu‘ → pristupnost."
+    - "Přesné křivky ani milisekundy z videa neměřím; soudím podle viditelných příznaků v pásu snímků (kde je pohyb rychlý a kde dosedá, pořadí nástupu, přeběh, trhnutí) a podle čísel z kontrol."
+    - "Kotva 8 = co by bez ostychu předložilo dobré studio; 10 = úroveň Pentagram, Koto, DixonBaxi, Collins, Studio Dumbar. Leží-li varianta mezi kotvami, dám mezihodnotu (5, 7, 9); jen když nevím, ke které má blíž, dám nižší."
+    - "U každého skóre uvádím důkaz: číslo snímku z pásu, čas ve videu nebo název a hodnotu kontroly."
+    - "(doplněno F7, neověřeno) Limity verze pro web: značka dokreslená ≤ 1 s, jméno a podtitul čitelné od prvního snímku, po 1 s nic neběží. Verze pro web nad limitem nebo se skrytým jménem má ve vernost_logu_a_zaver i obsah_neceka nejvýš 5. Delší verze (2–3 s) se hodnotí jen jako video/prezentace, ne na webu."
+criteria:
+  - id: odvozeni_ze_znacky
+    name: "Pohyb odvozený ze značky a oboru (pohybový jazyk)"
+    weight: 22
+    anchors:
+      4: "Pohyb je obecný nebo cizí: šablonový fade/slide/scale, odraz, třpyt, částice či glitch bez vazby na tvary loga a obor; mohl by stát u jakékoli značky. Nebo jde proti pohybovému jazyku (např. hravé poskakování u advokáta)."
+      6: "Pohyb pracuje s prvky loga (skládá je, odkrývá), ale princip je zaměnitelný a pohybový jazyk ze zadání je naplněn jen tónem (rychlost, měkkost), ne myšlenkou; nebo je značková myšlenka přítomná, ale přebitá přidaným efektem."
+      8: "Jedna jasná myšlenka vychází přímo z geometrie loga a z oboru (u projektanta linka se vytáhne jako perem, kóta se natáhne); tempo a charakter pohybu odpovídají přívlastkům značky (klidná = menší dráhy, plynulé dosednutí; energická = rychlý nástup, krátký přeběh). Logo i hero mluví stejným pohybovým jazykem. Nic navíc."
+      10: "Pohyb je nezaměnitelný podpis značky: myšlenka je tak úzce svázaná s tvarem loga a s tím, co podnik dělá, že by u jiné značky nedávala smysl; jde přenést do dalších médií (sociální sítě, prezentace, mikrointerakce) jako systém, ne jednorázový trik. Úroveň Pentagram / Koto / DixonBaxi / Collins / Studio Dumbar."
+    sources:
+      - "Val Head: Designing Interface Animation (Rosenfeld Media, 2016) – účel a osobnost značky v pohybu; přívlastky značky → volba křivek a časování (výňatek: https://alistapart.com/article/designing-interface-animation)"
+      - "Val Head: Including Animation In Your Design System (Smashing Magazine, 2019) – pohybové principy jako 'proč' značky; převzít osvědčené postupy, ne cizí identitu (https://smashingmagazine.com/2019/02/animation-design-system/)"
+      - "IBM Design Language / Carbon Motion – productive vs. expressive pohyb, expresivní jen pro významné okamžiky (https://carbondesignsystem.com/building-blocks/foundations/motion/overview)"
+      - "Apple HIG Motion – „Don’t add motion for the sake of adding motion.“ (https://developer.apple.com/design/human-interface-guidelines/motion)"
+      - "animate-SKILL.md, krok 2 – pohyb musí mít pojmenovaný účel; 'it looks cool' není účel"
+  - id: remeslo_casovani
+    name: "Řemeslo: časování, choreografie a doběh"
+    weight: 20
+    anchors:
+      4: "Viditelné vady z tabulky Never Ship: prvek, který vstupuje nebo se přesouvá, se rozjíždí pomalu a zrychluje až ke konci (ease-in) nebo jede mechanicky stejnou rychlostí; prvek vyrůstá z bodu (scale z nuly); vše naskočí v jednom snímku nebo jsou mezi fázemi prázdné prodlevy; na konci pohyb poskočí, zasekne se nebo se rozkmitá. (Rovnoměrný tah čáry či kóty vadou není.)"
+      6: "Nástupy a přesuny mají správný charakter (rychlý start, dosednutí), ale dosednutí je krátké a bez výrazu – pohyb působí ‚výchozí‘; choreografie čitelná, jen s nadbytečnou fází nebo nevyváženými prodlevami; doběh bez chyby, ale bez usazení."
+      8: "V pásu snímků: nástup rychle vyjede a dlouze dosedá (velké posuny v prvních snímcích, drobné na konci); přesun po ploše se plynule rozjede i zastaví; prvky nastupují postupně – v pásu po 40 ms je vidět pořadí, ne skok; jeden hlavní pohyb, ostatní mu slouží; u kresby tahem rovnoměrné tempo s měkkým dojezdem; případný přeběh je drobný (~2–4 % velikosti) a jednou se vrátí."
+      10: "Každá fáze má čitelnou přípravu a dozvuk; rytmus se v pásu snímků čte jako fráze; mezi fázemi není žádné zastavení ani zlom; v hustém pásu po 40 ms není jediný snímek, kde by souběžné vlastnosti nebo prolínání vypadaly neuspořádaně."
+    sources:
+      - "STANDARDS.md – Easing, Duration ('Marketing / explanatory: can be longer', 'Constant motion → linear'), Physicality, Springs, Stagger"
+      - "animate-SKILL.md, krok 5 a tabulka Never Ship (ease-in, scale(0), vše naráz)"
+      - "Material Design 3 – emphasized decelerate pro nástup, duration roste s plochou a dráhou (https://github.com/material-components/material-components-android/blob/master/docs/theming/Motion.md)"
+      - "Carbon Motion – entrance/exit/standard křivky, productive vs. expressive (https://carbondesignsystem.com/building-blocks/foundations/motion/overview)"
+      - "F. Thomas, O. Johnston: The Illusion of Life: Disney Animation (1981) – 12 principů: timing, anticipation, follow-through, slow in/slow out (přehled: https://www.simonwhatley.co.uk/writing/disney-12-basic-principles-of-animation/)"
+  - id: obsah_neceka
+    name: "Hero: obsah nečeká, pohyb se nečte jako načítání"
+    weight: 18
+    anchors:
+      4: "Kontrola ‚nadpis čitelný hned‘ neprošla nebo čas do zobrazení hlavního nadpisu je delší než ~0,5 s; nadpis či tlačítko se objeví až po dohrání značky; úvodní sekvence blokuje stránku (splash, preloader) nebo se čte jako načítání."
+      6: "Nadpis je zobrazen do ~0,5 s, ale v pásu snímků vizuálně čeká na značku (dlouhé postupné skládání, h1 se ‚skládá‘ po písmenech) nebo pohyb značky přetahuje pozornost od nadpisu a tlačítka; pohyb značky v hero neutichne do ~3 s."
+      8: "Nadpis, podnadpis a tlačítko jsou čitelné od prvního snímku pásu (čas do zobrazení nadpisu odpovídá prvnímu vykreslení); případný nástup obsahu je jen jemné dosednutí z viditelného stavu, ne z prázdna; pohyb značky běží souběžně jako doprovod a do ~3 s utichne do klidového stavu. Telefon i počítač stejně ukáznění."
+      10: "Pohyb značky aktivně vede oko k nadpisu a tlačítku (směr a doběh míří na obsah); první obrazovka je kompozičně hotová v každém snímku pásu – zastavit ji kdykoli, vypadá jako navržený statický layout."
+    sources:
+      - "STANDARDS.md – Should it animate?, Stagger ('never block interaction while it plays')"
+      - "animate-SKILL.md, krok 2 – data, která člověk čte nebo používá, se nemají hýbat pro styl"
+      - "DebugBear: Opacity animation and poor LCP – prvky s opacity 0 nejsou kandidáty LCP; start z nenulové průhlednosti (https://www.debugbear.com/blog/opacity-animation-poor-lcp)"
+      - "Shopify Themes: Don't hide the LCP image behind animations (https://shopify.dev/docs/storefronts/themes/best-practices/performance/dont-hide-lcp-image-behind-animations)"
+      - "Apple HIG Motion – „Add motion purposefully, supporting the experience without overshadowing it.“; „As much as possible, don’t make people wait for an animation to complete before they can do anything…“ (https://developer.apple.com/design/human-interface-guidelines/motion)"
+      - "Rachel Nabors: Animation at Work (A Book Apart, 2017) – lidské vnímání, kognitivní zátěž, vzory a účel webové animace (https://abookapart.com/products/animation-at-work)"
+  - id: vernost_logu_a_zaver
+    name: "Animované logo: věrnost logu a konečný stav"
+    weight: 12
+    anchors:
+      4: "Kontrola ‚pohyb doběhne‘ neprošla nebo rozdíl konečného snímku proti logu je zjevně nenulový (na snímku je vidět posun, jiná tloušťka, barva, proporce, ořez); logo v průběhu prochází nehezkými mezistavy (rozpad, deformace písma); verze pro web delší než 1 s nebo se jménem skrytým na začátku; video mimo 2–3 s bez důvodu (doplněno F7, neověřeno)."
+      6: "Rozdíl konečného snímku je na úrovni šumu, ale v pásu po 40 ms je logo dlouho nečitelné nebo nástup a závěr splývají; konečný stav se drží příliš krátce (méně než ~0,5 s) na použití v úvodní obrazovce či videu."
+      8: "Rozdíl konečného snímku proti logu je na úrovni šumu kódování; konečný stav se drží ≥ ~0,5–1 s; každý snímek pásu je sám o sobě úhledný; verze pro web ≤ 1 s se jménem čitelným od prvního snímku, verze pro video 2–3 s (doplněno F7, neověřeno); logo je čitelné nejpozději v polovině animace; začátek i konec jsou čisté pro smyčku, prezentaci i sociální sítě."
+      10: "Animace odhaluje konstrukci loga (jak je postavené a proč), takže po zhlédnutí je statické logo čitelnější a zapamatovatelnější; myšlenka by obstála i ve zkrácené (≈1 s) verzi."
+    sources:
+      - "pohyb-common.md – animované logo 2–3 s pro prezentaci a sociální sítě; odvozeno ze schváleného loga"
+      - "(doplněno F7) Rozhodnutí PM v F6 (B zkrácený): na webu ≤ 1 s, jméno hned; F6 odborník 5/10 u 1,6 s se skrytým jménem"
+      - "Val Head: Designing Interface Animation – pohyb jako součást identity značky (https://alistapart.com/article/designing-interface-animation)"
+      - "STANDARDS.md – Physicality ('Never scale(0)')"
+  - id: pristupnost
+    name: "Přístupnost: omezení pohybu, délka, blikání, obsah bez JavaScriptu"
+    weight: 14
+    anchors:
+      4: "Kontrola ‚omezit pohyb‘, ‚obsah bez JavaScriptu‘ nebo ‚pohyb doběhne‘ neprošla; v pásu s omezeným pohybem jsou stejné přesuny/zoom jako bez něj, nebo je snímek bez JS prázdný; automatický pohyb trvá > 5 s; něco bliká víc než 3× za sekundu."
+      6: "Kontroly prošly, ale pás s omezeným pohybem ukazuje jen vypnutí všeho bez náhrady (obsah naskočí skokem) nebo ponechává menší přesuny; snímek bez JS ukazuje hero v nedokončeném mezistavu (napůl odkrytý, posunutý)."
+      8: "V pásu s omezeným pohybem jsou přesuny, zoom a paralaxa nahrazeny krátkým prolnutím nebo rovnou koncovým stavem a význam zůstává; snímek bez JS ukazuje hero ve finálním stavu; automatický pohyb doběhne do 5 s (WCAG 2.2.2); nic nebliká (2.3.1)."
+      10: "Navíc je varianta pro omezený pohyb samostatně navržená a značková (vlastní klidná verze stejné myšlenky, ne jen ořezaná) a snímek bez JS je kompozičně stejně hotový jako po animaci."
+    sources:
+      - "WCAG 2.2 SC 2.2.2 Pause, Stop, Hide (A) – automatický pohyb > 5 s musí jít pozastavit/zastavit/skrýt (https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide.html)"
+      - "WCAG 2.2 SC 2.3.1 Three Flashes or Below Threshold (A) (https://www.w3.org/WAI/WCAG22/Understanding/three-flashes-or-below-threshold.html)"
+      - "MDN: prefers-reduced-motion (https://developer.mozilla.org/en-US/docs/Web/CSS/Reference/At-rules/@media/prefers-reduced-motion)"
+      - "Apple HIG Motion – „Make motion optional.“ (https://developer.apple.com/design/human-interface-guidelines/motion)"
+      - "STANDARDS.md / animate-SKILL.md krok 7 – 'fewer and gentler, not zero'"
+  - id: technicka_kvalita
+    name: "Technická kvalita: plynulost, stabilita rozvržení, telefon"
+    weight: 14
+    anchors:
+      4: "CLS z kontroly > 0,1 nebo je v pásu vidět skákající rozvržení (posun textu, tlačítka, výšky hero); ve videu zasekávání, vypadlé snímky nebo blikání; na telefonu se pohyb ořízne, přeteče nebo je rozbitý."
+      6: "CLS ≤ 0,1, ale nenulové; plynulé na počítači, na telefonu drobné trhnutí; v pásu je vidět, že se mění rozměr prvku nebo obsah přetéká; logo se během zvětšení rozmaže nebo rozpixeluje."
+      8: "CLS ≈ 0; v pásu nic neposouvá okolní obsah, pohybující se prvky drží tvar a ostrost v každém snímku; plynulé na počítači i telefonu; kompozice hero na telefonu samostatně vyladěná (měřítko, dráhy, ořez)."
+      10: "Navíc bezchybné v každém snímku obou pásů: souběžné pohyby v dokonalé synchronizaci, žádné dvojité obrysy při prolínání; telefonní verze není zmenšenina, ale vlastní choreografie stejného nápadu."
+    sources:
+      - "web.dev: Animations guide – animovat transform a opacity, vyhnout se vlastnostem vyvolávajícím layout/paint (https://web.dev/articles/animations-guide)"
+      - "web.dev: Cumulative Layout Shift – cíl ≤ 0,1; transform nevyvolává posun rozvržení (https://web.dev/articles/cls)"
+      - "STANDARDS.md – Performance, Transforms & clip-path, Masking imperfect crossfades"
+      - "animate-SKILL.md, krok 3–4 – nejlevnější nástroj, jen transform/opacity/clip-path"

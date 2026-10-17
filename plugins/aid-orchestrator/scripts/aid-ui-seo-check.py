@@ -616,7 +616,9 @@ def check_brief(out, brief, found):
         if pg is None:
             out.append(("BLOCKER", url, "brief-page", "confirmed page not built"))
             continue
-        ok = h1 in pg.h1
+        # P113 (the workshop's V12): every H1 of the page is the brief's - a second H1 that promises something else
+        # ("rychle a levně") is not covered by the right one beside it
+        ok = bool(pg.h1) and all(x == h1 for x in pg.h1)
         out.append(("OK" if ok else "BLOCKER", url, "brief-h1", h1 if ok else f"expected '{h1}', got {pg.h1}"))
         cell = lambda c: cells[col[c]] if col[c] is not None and col[c] < len(cells) else ""
         for check, got in (("brief-title", pg.title), ("brief-description", pg.desc)):

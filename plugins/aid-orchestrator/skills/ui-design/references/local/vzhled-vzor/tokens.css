@@ -1,0 +1,48 @@
+/* Vzor tokenů vzhledu (vrstva vzhled-postup.md, dílna P113 F5) - šablona: hodnoty v <...> nahraď hodnotami ze značky
+   projektu. Tokeny se odvozují ze značky (barvy a písmo loga) a ze sdělení (teze), ne z cizího webu.
+   Kontrast (WCAG 2.2) zapiš u každé barvy textu: text ≥ 4,5:1 na pozadí, grafika a velké prvky ≥ 3:1.
+   Barva loga bývá pro text slabá: pak --accent-text = tmavší odstín téže barvy (a klientovi to vysvětli). */
+@import url(fonts/fonts.css);   /* písma lokálně, žádný cizí server před souhlasem */
+:root{
+  /* barvy */
+  --paper:<pozadí>;          /* světlé pozadí odvozené z charakteru značky */
+  --surface:#FFFFFF;
+  --ink:<inkoust>;           /* tmavá barva loga nebo jí blízká */
+  --muted:<tlumený text>;    /* ≥ 4,5:1 na --paper */
+  --line:<tenké čáry>;
+  --line-strong:var(--ink);
+  --accent:<barva loga>;     /* grafika, akcent, velké prvky (≥ 3:1) */
+  --accent-text:<tmavší odstín barvy loga>;   /* text a tlačítka (≥ 4,5:1) */
+  --accent-soft:<světlý podklad akcentu>;
+  --wait:<odlišná teplá barva>;               /* označení bloků, které čekají na klienta */
+  /* písmo */
+  --f-head:<písmo loga nebo jeho rodina>,system-ui,sans-serif;
+  --f-body:<čitelné písmo s plnou češtinou>,system-ui,sans-serif;
+  --f-mono:<mono pro popisky a čísla>,ui-monospace,monospace;
+  --t-xs:13px;--t-s:15px;--t-m:17px;--t-l:21px;--t-xl:28px;--t-2xl:40px;--t-3xl:56px;--t-4xl:76px;
+  --lh-body:1.6;--lh-head:1.1;--measure:66ch;
+  /* mřížka a mezery (násobky 4) */
+  --max:1240px;--cols:12;--gutter:24px;--edge:max(16px,env(safe-area-inset-left,0px));
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;--s8:64px;--s9:96px;
+  /* tvary - podle charakteru značky (ostré rohy, zaoblení) */
+  --radius:<rohy>;
+  --stroke:1px;--stroke-strong:1.5px;
+  /* pohyb: pohyb značky má přednost (pohyb-znacky.md); obsah jen jemně */
+  --ease:cubic-bezier(.35,.15,.25,1);--dur-s:160ms;--dur-m:280ms;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --paper:<tmavé pozadí>;--surface:<tmavý panel>;--ink:<světlý text>;--muted:<tlumený světlý>;--line:<tmavé čáry>;
+  --accent:<světlejší akcent>;--accent-text:<světlejší akcent pro text>;--accent-soft:<tmavý podklad akcentu>;--wait:<světlá teplá>;color-scheme:dark}}
+:root[data-theme="dark"]{color-scheme:dark}   /* tytéž hodnoty jako výše */
+@media (prefers-reduced-motion:reduce){:root{--dur-s:0ms;--dur-m:0ms}}
+
+/* Tokeny podle účelu (doplněno v hloubkovém kole): stránky čtou jen tyto */
+:root{
+  --error:<červená chyby>;   /* chyba formuláře - jiná než --wait; ≥ 4,5:1 na --paper i --surface */
+  --c-bg:var(--paper);--c-panel:var(--surface);--c-text:var(--ink);--c-text-muted:var(--muted);
+  --c-rule:var(--line);--c-frame:var(--line-strong);--c-input-border:var(--muted);   /* okraj polí ≥ 3:1 */
+  --c-accent-graphic:var(--accent);--c-accent-text:var(--accent-text);--c-wait:var(--wait);--c-error:var(--error);
+  --t-label:15px;            /* popisky; na telefonu nikdy pod 14 px */
+  --ratio-card:<poměr výřezu karet>;   /* poměry výřezů podle obrazového materiálu klienta */
+  --ratio-hero:<poměr výřezu úvodu>;
+}

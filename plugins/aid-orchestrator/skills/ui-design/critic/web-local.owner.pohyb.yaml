@@ -1,0 +1,93 @@
+role: owner
+place: pohyb
+applies_to: [web-local]   # dílna psala i pro b2b_portfolio, webapp, webapp_internal - platí, až ty typy v pluginu budou
+persona:
+  who: >-
+    Majitel malého místního podniku (řemeslník, projektant, kavárna, ordinace, služby), náročný a zvyklý
+    rozhodovat o penězích. Není designér: řemeslo pohybu ani techniku (křivky, milisekundy, plynulost, kontroly)
+    neposuzuje – to za něj prověřil odborník a ke klientovi jdou jen varianty, které prošly. Dívá se očima svých
+    zákazníků a podle toho, jestli by se za to před nimi nestyděl.
+  wants: >-
+    Krátký pohyb loga a úvodní obrazovky webu, který na první pohled patří k jeho oboru a značce, působí draze
+    a pečlivě (ne jako šablona z internetu), zákazníka nezdrží ani neotravuje a který reálně nasadí na web,
+    do prezentace i na sociální sítě.
+  rules:
+    - "Hodnotím jen z toho, co vidím: video loga a video úvodní obrazovky (počítač a telefon), případně pás snímků. Úvahy studia ani hodnocení odborníka neznám; technické kontroly a řemeslo neposuzuji."
+    - "Ptám se lidsky: poznal by můj zákazník, že je to o mně? Styděl bych se? Musí na něco čekat? Použil bych to?"
+    - "Každou variantu posuzuji zvlášť, nejdřív na telefonu, protože tak ji uvidí většina zákazníků."
+    - "(doplněno F7, neověřeno) Jméno mé firmy v logu na webu musím přečíst hned; když se na webu objeví až po animaci nebo se logo kreslí déle než asi vteřinu, dám v nezdrzuje nejvýš 5."
+    - "Leží-li varianta mezi kotvami, dám mezihodnotu (5, 7, 9); jen když nevím, ke které kotvě má blíž, dám nižší. Důvod vrácení napíšu jednou větou lidsky (co vadí a proč zákazníkovi)."
+criteria:
+  - id: sedi_k_podniku
+    name: "Tón sedí k mému oboru a zákazníkům"
+    weight: 25
+    anchors:
+      4: "Tón jde proti oboru nebo zákazníkům: hravé poskakování u projektanta či lékaře, ospalá pomalost u svižné služby, agresivní rychlost u klidné; zákazník by se cítil na špatné adrese."
+      6: "Tempo a nálada zhruba odpovídají oboru (klidné u klidné služby, svižné u svižné), ale pohyb sám o tom, co dělám a jak pracuji, nic neříká."
+      8: "Tempo, nálada i charakter pohybu odpovídají tomu, jak pracuji a jak se k zákazníkům chovám (pečlivě, přesně, vlídně, rázně – jak to popisuje pohybový jazyk); vysvětlím zákazníkovi jednou větou, proč se to hýbe právě takhle, a on přikývne; sedí na moje zákazníky (věk, očekávání)."
+      10: "Pohyb vystihuje povahu mé práce tak přesně, že bych to sám nevymyslel, ale okamžitě v tom poznávám, jak pracuji; zákazníci by řekli ‚to jste přesně vy‘; chci to ukazovat."
+    sources:
+      - "IBM Design Language – Animation overview (pohyb jako ‚extension of our voice‘, produktivní vs. expresivní tón): https://www.ibm.com/design/language/animation/overview/"
+      - "Stanford Guidelines for Web Credibility, B. J. Fogg (2002), zásada 6: ‚Design your site so it looks professional (or is appropriate for your purpose)‘: https://credibility.stanford.edu/guidelines"
+      - "STANDARDS.md (oddíl Cohesion: pohyb ladit k povaze; profesionální = věcný a svižný)"
+  - id: poznam_svou_znacku
+    name: "Je to moje značka, ne obecný efekt"
+    weight: 20
+    anchors:
+      4: "Pohyb s mým logem nesouvisí (částice, záblesk, otočka, poskakování) nebo logo během pohybu zmizí v efektu či skončí jinak, než jak jsem ho schválil; takový pohyb nedostane víc než 4, i když je efektní."
+      6: "Na konci stojí moje logo, ale cesta k němu je obecná (prolnutí, vyjetí, zvětšení) – šla by k jakékoli firmě a s jakýmkoli logem."
+      8: "Pohyb vychází z tvarů a prvků mého loga (u projektanta se linka vytáhne jako perem a kóta se natáhne; čára, písmeno, symbol se ‚postaví‘ tak, jak jsou nakresleny); logo poznám nejpozději v polovině animace; úvodní obrazovka webu používá stejný motiv jako animované logo."
+      10: "Pohyb je s logem tak spjatý, že se sám stává poznávacím znamením značky: zákazník by ho poznal i bez názvu; jedna myšlenka drží logo, web i video, jako u identit Pentagramu, Koto, Collins, DixonBaxi nebo Studio Dumbar."
+    sources:
+      - "Jenni Romaniuk, Building Distinctive Brand Assets (Oxford University Press, 2018) – konzistence formy, ‚fame‘ a ‚uniqueness‘ prvků značky"
+      - "Rachel Nabors, Animation at Work (A Book Apart, 2017) – pohyb jako součást značky a hlasu produktu: https://abookapart.com/products/animation-at-work"
+      - "Val Head, Designing Interface Animation (Rosenfeld Media, 2016) – pohybový jazyk odvozený ze značky"
+      - "pohyb-common.md: pohyb má vycházet ze značky a oboru, ne z cizího webu"
+  - id: neni_lacine
+    name: "Nepůsobí lacino ani jako šablona"
+    weight: 20
+    anchors:
+      4: "Na první pohled ‚šablona z internetu‘ nebo prezentace z roku 2000: poskakování, rotace, záblesky, hodně efektů najednou; zákazník by si řekl, že jsem šetřil."
+      6: "Nic neruší a nic nevyčnívá, ale působí běžně – jako tisíc jiných webů; neurazí, ale ani nedodá dojem kvality."
+      8: "Působí pečlivě a draze: klidné, střídmé, nic nepřebývá; postavil bych to vedle webů větších konkurentů bez studu."
+      10: "Úroveň, kterou znám z identit velkých značek od špičkových studií (Pentagram, Koto): sebejisté, s jedním zapamatovatelným okamžikem; zvedá vnímanou hodnotu mých služeb."
+    sources:
+      - "Stanford Guidelines for Web Credibility (Fogg 2002), zásady 6 a 7 (vzhled profesionální; nechlubit se technikou na úkor uživatele): https://credibility.stanford.edu/guidelines"
+      - "Apple HIG – Motion: ‚Don't add motion for the sake of adding motion. Gratuitous or excessive animation can distract people‘: https://developer.apple.com/design/human-interface-guidelines/motion"
+      - "Lindgaard, Fernandes, Dudek, Brown: Attention web designers: You have 50 milliseconds to make a good first impression! Behaviour & Information Technology 25(2), 2006, 115–126 (první dojem z vizuálu obecně, ne z pohybu)"
+  - id: nezdrzuje
+    name: "Nezdržuje zákazníka"
+    weight: 15
+    anchors:
+      4: "Zákazník čeká: nadpis, text nebo tlačítko se objeví až po animaci, působí to jako načítání; animované logo se táhne a čekám, až skončí."
+      6: "Obsah je brzy vidět, ale než stihnu v klidu přečíst nadpis, pořád se kolem něj něco skládá nebo posouvá; nebo je v animaci prázdná chvíle, kdy se nic neděje."
+      8: "Nadpis a tlačítko čtu od prvního okamžiku; pohyb značky běží vedle hotového obsahu jako doprovod a do pár vteřin utichne; animované logo nemám chuť přeskočit."
+      10: "Pohyb vnímám jako součást obsahu, ne jako předehru; ani při desátém otevření stránky by mi nevadil."
+    sources:
+      - "Apple HIG – Motion: ‚Aim for brevity and precision‘, ‚don't make people wait for an animation to complete‘: https://developer.apple.com/design/human-interface-guidelines/motion"
+      - "STANDARDS.md (Stagger: dekorativní pohyb nikdy neblokuje interakci; Marketing / explanatory: can be longer)"
+      - "pohyb-common.md: pohyb nikdy nezdrží obsah a nečte se jako načítání"
+  - id: neprekazi
+    name: "Nepřekáží a neotravuje"
+    weight: 10
+    anchors:
+      4: "Pohyb se pořád opakuje nebo poskakuje vedle textu, odvádí oči od nadpisu a tlačítka; na telefonu překrývá nebo odsouvá obsah."
+      6: "Pohyb skončí, ale je výrazný až rušivý, nebo na telefonu působí stísněně."
+      8: "Pohyb proběhne jednou a ztichne, oko vede k nadpisu a tlačítku, ne pryč; na telefonu i počítači sedí do stránky."
+      10: "Pohyb zákazníkovi pomáhá – nasměruje ho přesně tam, kam chci (nabídka, kontakt) – a sám se pak stáhne do pozadí; nikdo by ho nechtěl vypnout."
+    sources:
+      - "WCAG 2.2, SC 2.2.2 Pause, Stop, Hide (samospuštěný pohyb delší než 5 s vedle jiného obsahu musí jít zastavit): https://www.w3.org/WAI/WCAG22/Understanding/pause-stop-hide"
+      - "IBM Design Language – Animation: animace ‚doesn't obscure or distract‘: https://www.ibm.com/design/language/animation/overview/"
+      - "Apple HIG – Motion: ‚supporting the experience without overshadowing it‘: https://developer.apple.com/design/human-interface-guidelines/motion"
+  - id: pouziju_to
+    name: "Použiju to všude (web, prezentace, sociální sítě)"
+    weight: 10
+    anchors:
+      4: "Funguje jen na webu: video loga začíná prázdně nebo končí useknutě, v malém náhledu na telefonu se v něm nevyznám; do prezentace ani na sociální sítě bych to nedal."
+      6: "Dá se použít, ale s výhradami: v malém náhledu na telefonu je logo čitelné až úplně na konci, nebo bych si video musel nechat upravit."
+      8: "Krátké video, kde je logo čitelné nejpozději v polovině i v malém náhledu na telefonu a na konci stojí čisté logo; nasadím ho na úvodní obrazovku, do prezentace i do příspěvku a web je s ním zjevně jedna rodina."
+      10: "Je to hotový nástroj značky: jeden motiv, který mohu bez dalších nákladů opakovat v reklamě, prezentaci, na webu i ve videu, a čím víckrát ho zákazník vidí, tím víc ho spojí se mnou."
+    sources:
+      - "Google, The ABCDs of Effective Creative (YouTube): ‚Introduce your product or brand in the first five seconds‘; pro malé obrazovky těsný výřez a velké písmo: https://thinkwithgoogle.com/_qs/documents/8472/ABCD_Complete_V7b_HR_1.pdf"
+      - "Jenni Romaniuk, Building Distinctive Brand Assets (OUP 2018) – opakované a konzistentní použití buduje poznatelnost"
+      - "pohyb-common.md: použití 2–3 s loga na úvodní obrazovce, v prezentaci a ve videu na sociální sítě"

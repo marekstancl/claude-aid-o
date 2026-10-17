@@ -214,7 +214,13 @@ async function inPage(page) {
     o.hrefs = [...document.querySelectorAll('a[href]')].map(a => a.href);
     // a logo: inside the home link or an element named logo/brand
     const ctx = 'a[href="/"], a[href="./"], a[href="index.html"], a[rel~=home], [class*=logo i], [id*=logo i], [aria-label*=logo i], [class*=brand i], [id*=brand i], [aria-label*=brand i]';
-    o.imgs = [...document.querySelectorAll('img')].map(i => ({ logo: !!i.closest(ctx), src: i.currentSrc || i.src, alt: i.getAttribute('alt'), cls: `${i.className} ${i.id} ${i.alt}` }));
+    o.imgs = [...document.querySelectorAll('img')].map(i => ({ logo: !!i.closest(ctx), src: i.currentSrc || i.src, alt: i.getAttribute('alt'), cls: `${i.className} ${i.id} ${i.alt}`,
+      shown: Math.round(i.getBoundingClientRect().width), vector: /\.svg(\?|$)/i.test(i.currentSrc || i.src),
+      // every file a screen can load for it: src, srcset and the <picture>'s <source srcset>, whatever the descriptor
+      // (w and x are the author's claims; the density pass loads each file and reads its real width)
+      cands: [...new Set([i.getAttribute('src'), ...[i, ...(i.parentElement?.tagName === 'PICTURE' ? i.parentElement.querySelectorAll('source') : [])]
+        .flatMap(e => (e.getAttribute('srcset') || '').split(',').map(c => c.trim().split(/\s+/)[0]))].filter(Boolean)
+        .map(u => { try { return new URL(u, document.baseURI).href; } catch { return null; } }).filter(Boolean))] }));
     o.svgLogos = [...document.querySelectorAll('svg')].map(sv => {
       const c = sv.closest(ctx);
       if (!c) return null;
@@ -281,7 +287,14 @@ async function inPage(page) {
     // business_minimum: seller identification (IČO/IČ + 8 digits) and, next to a form, a link about personal data
     o.ico = /\bI[ČC]O?\s*:?\s*\d{8}\b/.test(document.body.innerText.replace(/\u00a0/g, ' '));
     o.form = !!document.querySelector('form input:not([type=hidden]), form textarea');
-    o.privacyLink = [...document.querySelectorAll('a[href]')].some(a => /osobn(?:[ií]ch|[ýy]ch)\s+[úu]daj|osobnych[-_ ]udaj|zpracov[áa]n[íi]\s+[úu]daj|sprac[úu]van|ochrana\s+[úu]daj|ochrana[-_ ]osobn|GDPR|soukrom[íi]|s[úu]krom|privacy/i.test(a.textContent + ' ' + a.getAttribute('href')));
+    const PRIV = /osobn[a-zá-ž]*\s+[úu]daj|osobnych[-_ ]udaj|zpracov[a-zá-ž]*\s+(?:[a-zá-ž]+\s+){0,2}[úu]daj|sprac[úu]van|ochrana\s+[úu]daj|ochrana[-_ ]osobn|GDPR|soukrom[íi]|s[úu]krom|privacy/i;
+    o.privacyLink = [...document.querySelectorAll('a[href]')].some(a => PRIV.test(a.textContent + ' ' + a.getAttribute('href')));
+    // P113 (the workshop's V9): the notice belongs at the form - a link or a sentence about personal data inside the form
+    // or its own container; one in the footer does not tell the sender what happens to what they type
+    o.formsWithoutNotice = [...document.querySelectorAll('form')].filter(fm => fm.querySelector('input:not([type=hidden]), textarea'))
+      // the container counts unless it is the page itself (body, main): a footer link is not beside the form
+      .filter(fm => ![fm, fm.parentElement].filter(c => c && !['BODY', 'MAIN', 'HTML'].includes(c.tagName)).some(c => PRIV.test(c.innerText || '') || [...c.querySelectorAll('a[href]')].some(a => PRIV.test(a.getAttribute('href') || ''))))
+      .map(fm => fm.getAttribute('action') || fm.id || 'form');
     return o;
   });
 }
@@ -327,7 +340,11 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
   await scrollAll(page);
   // reveals fire while scrolling: settle again before anything is measured or photographed
   const settled2 = settled.ok ? await settleMotion(page) : settled;
-  res.motion_settled = settled2.ok ? ['pass', `settled after ${settled.ms} ms, ${settled2.ms} ms after scrolling`] : ['fail', settled2.why];
+  // script motion watched once per page, width and browser (3 s each)
+  const smKey = `${url}@${page.viewportSize()?.width}@${page.context().browser()?.browserType().name()}`;   // per width (whole review: a phone-only loop)
+  const scripted = !settled2.ok ? null : SCRIPTED.has(smKey) ? SCRIPTED.get(smKey) : SCRIPTED.set(smKey, await scriptMotion(page)).get(smKey);
+  res.motion_settled = !settled2.ok ? ['fail', settled2.why] : scripted ? ['fail', `skriptová animace běží dál: ${scripted}`]
+    : ['pass', `settled after ${settled.ms} ms, ${settled2.ms} ms after scrolling, no script motion`];
   // H1 (12. 10. 2026, klient-Codex retro): what the visitor sees without scripts and before any scroll
   {
     const vp = page.viewportSize();
@@ -371,10 +388,24 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
     const v = ax.violations.filter(x => x.impact === 'serious' || x.impact === 'critical');
     res.axe = v.length ? ['fail', v.map(x => `${x.impact} ${x.id} (${x.nodes.length})`).join(', ')] : ['pass', ''];
   } catch (e) { res.axe = ['not_covered', `axe could not run: ${String(e.message).slice(0, 150)}`]; }
+  // P113 (fix 64): density of the widest file a 2x screen can get - every candidate (src, srcset, <picture> sources) is
+  // loaded in a fresh Image() and its real width read (srcset descriptors are claims; the element's naturalWidth is already
+  // divided by the density); widest under 2x the shown width = blurred. A pass that cannot run is not a pass.
+  const dens = await page.evaluate(async list => {
+    const out = [];
+    const width = u => new Promise(r => { const im = new Image(); im.onload = () => r(im.naturalWidth); im.onerror = () => r(0); im.src = u; });
+    for (const x of list) {
+      if (x.vector || !x.src || x.shown < 40) continue;
+      const w = Math.max(0, ...await Promise.all((x.cands.length ? x.cands : [x.src]).map(width)));
+      if (w && w < x.shown * 2) out.push(`${x.src.replace(location.origin, '')} is ${w} px wide for ${x.shown} px shown (${(w / x.shown).toFixed(2)}x, needs 2x)`);
+    }
+    return out;
+  }, o.imgs).catch(e => ({ error: String(e.message || e).slice(0, 150) }));
   const heavy = imgs.filter(i => !/image\/(webp|avif|svg\+xml|x-icon|vnd\.microsoft\.icon)/.test(i.type) && !/favicon|apple-touch-icon/.test(i.url))
     .map(i => `${i.url.replace(base, '/')} is ${i.type || 'unknown type'}`)
     .concat(imgs.filter(i => i.len > 200 * 1024).map(i => `${i.url.replace(base, '/')} is ${Math.round(i.len / 1024)} kB`));
-  res.image_weight = heavy.length ? ['fail', heavy.join(', ')] : ['pass', ''];
+  if (Array.isArray(dens)) heavy.push(...dens.map(d => `rozmazaný obrázek: ${d}`));
+  res.image_weight = heavy.length ? ['fail', heavy.join(', ')] : !Array.isArray(dens) ? ['not_covered', `image density could not be read: ${dens.error}`] : ['pass', ''];
   res.no_overlap = o.overlaps.length ? ['fail', `overlaps: ${o.overlaps.join(' | ')}`] : ['pass', ''];
   res.text_clearance = o.glued.length ? ['fail', `text closer than 12 px to a divider line: ${o.glued.join(' | ')}`] : ['pass', ''];
   res.brand_consistency = o.undeclaredFonts.length ? ['fail', `fonts not from the site's own @font-face: ${o.undeclaredFonts.join(', ')}`] : ['pass', `fonts: ${o.fontFamilies.join(', ')}`];
@@ -386,7 +417,8 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
   res.page_weight = heavyPage.length ? ['fail', heavyPage.join('; ')] : ['pass', `${Math.round(bytes / 1024)} kB`];
   const biz = [];
   if (!o.ico) biz.push('no seller identification (IČO with 8 digits) on the page');
-  if (o.form && !o.privacyLink) biz.push('a form without a link to how personal data are processed');
+  // P113: each form decides on its own - a link or a sentence about personal data in the form or its container
+  if (o.formsWithoutNotice.length) biz.push(`a form without information about personal data next to it${o.privacyLink ? ' (only elsewhere on the page)' : ''} - a form without a link to how personal data are processed: ${o.formsWithoutNotice.slice(0, 3).join(', ')}`);
   res.business_minimum = biz.length ? ['fail', biz.join('; ')] : ['pass', ''];
   const shot = inside(path.join(out, 'shots'), path.join(...key));
   if (!shot) throw new Error(`screenshot path ${key.join('/')} leaves the output directory`);
@@ -435,6 +467,18 @@ async function settleMotion(page) {
     last = s.started; await page.waitForTimeout(250);
   }
   return { ok: false, why: 'the intro or a finite animation did not end within 10 s (data-aid-intro still shown, or an animation still running)' };
+}
+// P113 (fix 18): motion driven by a script (requestAnimationFrame, timers) changes style or transform attributes and is
+// invisible to getAnimations(); a MutationObserver watches 3 s after the CSS motion settled - a change after the first
+// second means the page is still moving
+const SCRIPTED = new Map();
+async function scriptMotion(page) {
+  return page.evaluate(() => new Promise(res => {
+    const seen = []; const t0 = performance.now();
+    const mo = new MutationObserver(ms => { for (const m of ms) if (m.type === 'attributes' && /^(style|transform|class|d|x|y|cx|cy)$/.test(m.attributeName)) seen.push({ t: performance.now() - t0, el: m.target.tagName.toLowerCase() + (m.target.id ? '#' + m.target.id : '') }); });
+    mo.observe(document.documentElement, { attributes: true, subtree: true });
+    setTimeout(() => { mo.disconnect(); const late = seen.filter(s => s.t > 1000); res(late.length ? `${late.length} change(s) by a script after the motion settled, e.g. ${late[0].el}` : null); }, 3000);
+  })).catch(() => null);
 }
 // applies(check) for this row of the matrix: the expensive checks run only where their row is written
 async function moreRows(page, url, requested, applies) {
@@ -577,6 +621,16 @@ async function moreRows(page, url, requested, applies) {
       }
       const amb = [...byName].filter(([, t]) => t.size > 1).map(([n, t]) => `"${n.slice(0, 25)}" -> ${t.size} places`);
       if (amb.length) why.push(`the same link text leads to different places: ${amb.slice(0, 3).join(', ')}`);
+      // a content image (40 px and more) with an empty alt is decorative only when it says so - role presentation/none or
+      // aria-hidden (P113, the workshop's check procedure: a card photo with alt="" said nothing to a screen reader)
+      // ponytail: the author's marking is trusted - whether an image marked decorative really is, the roles judge, not code
+      const mute = [...document.querySelectorAll('img[alt=""]')].filter(im => im.getBoundingClientRect().width >= 40
+        && !['presentation', 'none'].includes((im.getAttribute('role') || '').toLowerCase()) && !im.closest('[aria-hidden="true"]'))
+        .map(im => (im.getAttribute('src') || '').split('/').pop());
+      if (mute.length) why.push(`content image with an empty alt and no role=presentation or aria-hidden: ${mute.slice(0, 3).join(', ')}`);
+      // one H1 per page (P113, the workshop's check procedure: a second H1 is a defect, not only an SEO warning)
+      const h1s = [...document.querySelectorAll('h1')].filter(h => !h.closest('[hidden], template'));
+      if (h1s.length !== 1) why.push(`${h1s.length} h1 on the page, exactly one expected`);
       // heading order
       let prev = 0;
       for (const hd of document.querySelectorAll('h1, h2, h3, h4, h5, h6')) { const l = +hd.tagName[1]; if (prev && l > prev + 1) { why.push(`heading h${l} "${hd.textContent.trim().slice(0, 30)}" follows h${prev}`); break; } prev = l; }
@@ -611,7 +665,7 @@ async function moreRows(page, url, requested, applies) {
         return e ? `${e.tagName.toLowerCase()}${e.className && typeof e.className === 'string' ? '.' + e.className.trim().split(/\s+/)[0] : ''} "${(e.textContent || '').trim().slice(0, 25)}"` : 'the page'; });
       if (wide) a.push(`at 320 px (400 % zoom) the page scrolls sideways: ${wide}`);
     } finally { await rc.close(); }
-    res.a11y_basics = a.length ? ['fail', a.join('; ')] : ['pass', 'skip link, heading order, focus ring contrast, reflow at 320 px'];
+    res.a11y_basics = a.length ? ['fail', a.join('; ')] : ['pass', 'skip link, one h1, heading order, focus ring contrast, reflow at 320 px'];
   }
   // mobile_native (FB-33, adopted emil-skills/mobile-native, PM 13. 10. 2026): hover styles only where a mouse
   // hovers (a :hover rule inside @media (hover: hover)), zoom never disabled, form fields at least 16 px (else iOS
@@ -628,6 +682,7 @@ async function moreRows(page, url, requested, applies) {
       for (const sh of document.styleSheets) { try { walk(sh.cssRules, false); } catch { /* a foreign sheet: not ours to judge */ } }
       if (loose.length) why.push(`${loose.length} :hover rule(s) outside @media (hover: hover), e.g. ${loose.slice(0, 3).join(' | ')}`);
       const vp = document.querySelector('meta[name="viewport"]')?.content || '';
+      if (!/width\s*=\s*device-width/.test(vp)) why.push('no meta viewport width=device-width (a phone draws the page at 980 px; P113 fix 55)');
       if (/user-scalable\s*=\s*(no|0)|maximum-scale\s*=\s*1(\.0)?\b/.test(vp)) why.push('zoom is disabled in the viewport meta');
       const small = [...document.querySelectorAll('input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea, select')]
         .filter(e => e.getBoundingClientRect().width && parseFloat(getComputedStyle(e).fontSize) < 16).map(e => e.name || e.tagName.toLowerCase());
@@ -645,7 +700,7 @@ async function moreRows(page, url, requested, applies) {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     res.reduced_motion = moving ? ['fail', `${moving} element(s) still animate under prefers-reduced-motion`] : ['pass', ''];
   }
-  res.touch_targets = vw > 430 ? NA(`desktop width ${vw}`) : o.small.length ? ['fail', `under 44 px: ${o.small.slice(0, 6).join(', ')}`] : ['pass', ''];
+  res.touch_targets = o.small.length ? ['fail', `under 44 px at ${vw} px: ${o.small.slice(0, 6).join(', ')}`] : ['pass', ''];   // P113: every width
   const edge = o.sticky.filter(x => x.edge);
   res.safe_area = st.variant?.type !== 'pwa' ? NA('not a PWA') : !edge.length ? NA('no fixed panel at a screen edge')
     : o.safe ? ['pass', 'env(safe-area-inset-*) used'] : ['fail', `fixed panels at a screen edge without env(safe-area-inset-*): ${edge.map(x => x.name).join(', ')}`];
@@ -951,14 +1006,17 @@ async function photoSlots(browser, url, viewport) {
       const height = () => document.documentElement.scrollHeight, before = height(), moved = [];
       // every element outside the slots: where it is before the photos go in (a shift of any of them is a layout shift)
       // fixed panels (a scroll progress bar) and anything that moves on its own (motion still running) are left out:
-      // the baseline is taken twice, and an element that moved between the two is not the photo's doing
+      // the baseline is watched every frame for 300 ms, and an element that moved at any frame is not the photo's doing
+      // (two samples let a motion whose period divides the gap through - P113)
       const at = e => { const b = e.getBoundingClientRect(); return [b.left + scrollX, b.top + scrollY, b.width, b.height]; };
       const differs = (a, b) => a.some((v, k) => Math.abs(v - b[k]) > 1);
       let others = [...document.body.querySelectorAll('*')].filter(e => !e.closest('[data-aid-photo]')
         && ![e, ...(function* up(x) { while ((x = x.parentElement)) yield x; })(e)].some(x => ['fixed', 'sticky'].includes(getComputedStyle(x).position))).slice(0, 2000);
-      const p0 = others.map(at);
-      await new Promise(r => setTimeout(r, 300));
-      const keep = others.map((e, i) => !differs(at(e), p0[i]));
+      const p0 = others.map(at), keep = others.map(() => true), tEnd = performance.now() + 300;
+      while (performance.now() < tEnd) {
+        await new Promise(r => requestAnimationFrame(r));
+        others.forEach((e, i) => { if (keep[i] && differs(at(e), p0[i])) keep[i] = false; });
+      }
       others = others.filter((e, i) => keep[i]);
       const pos = others.map(at);
       const c = document.createElement('canvas'); c.width = 300; c.height = 97;
@@ -1078,7 +1136,7 @@ const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls'
   'brand_assets', 'links_resources', 'required_files', 'axe', 'image_weight', 'lighthouse_mobile', 'seo',
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
   'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
-  'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'copy_review', 'motion_settled', 'motion_fidelity',
+  'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'all_pages', 'copy_review', 'motion_settled', 'motion_fidelity',
   'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots', 'form_delivery', 'text_clearance', 'a11y_basics', 'mobile_native'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
@@ -1209,8 +1267,12 @@ const seo = want('seo') || want('ai_search') ? runSeo() : null;
 const seoRow = (p, ai = false) => {
   if (seo.error) return ['not_covered', seo.error];
   if (ai && !st.options?.seo) return ['pass', 'N/A: SEO is not part of this project (options.seo false)'];
+  // P113: a brief finding names a URL ("/projekty/ochoz") - its page is that URL's file; a finding of no page of the
+  // site is the home page's (it was put on every page, so one wrong H1 failed the seo row of all of them)
+  const fileOf = q => { if (pages.includes(q)) return q; const u = String(q || '').replace(/^\/+|\/+$/g, '');
+    const c = [u ? `${u}/index.html` : 'index.html', `${u}.html`].find(x => pages.includes(x)); return c || null; };
   const mine = seo.findings.filter(f => f.check.startsWith('ai-') === ai
-    && (f.page === p || (!pages.includes(f.page) && (!ai || p === home || p === '_site'))));
+    && (fileOf(f.page) === p || (!fileOf(f.page) && (p === home || p === '_site'))));
   const bl = mine.filter(f => f.level === 'BLOCKER'), wn = mine.filter(f => f.level === 'WARN');
   const txt = xs => xs.map(f => `${f.check}: ${f.detail}`).join('; ');
   return bl.length ? ['fail', `BLOCKER ${txt(bl)}`] : ['pass', wn.length ? `WARN ${txt(wn)}` : ''];
@@ -1228,6 +1290,7 @@ const visionDoc = !want('vision_doc') ? null : !project ? ['not_covered', 'no --
 const coverageRow = !want('coverage') ? null : (() => {
   if (!project) return ['not_covered', 'no --project'];
   const r = spawnSync('bash', [path.join(HERE, '../../scripts/aid-ui-coverage.sh'), 'check', project], { encoding: 'utf8' });
+  if (r.status === 0 && /projekt nemá mapu standardů/.test(r.stderr || '')) return ['warn', 'projekt nemá mapu standardů: pokrytí ověřeno proti kopiím standardů v pluginu (P113)'];
   return r.status === 0 ? ['pass', ''] : r.status === 2 ? ['not_covered', `aid-ui-coverage.sh check could not read the standards: ${(r.stderr || '').trim().split('\n').pop().slice(0, 200)}`] : ['fail', `aid-ui-coverage.sh check exit ${r.status}: ${((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(0, 3).join(' | ').slice(0, 300)}`];
 })();
 // copy_review (P108): the page's copy now, the facts and the approved context now, against the review
@@ -1242,17 +1305,20 @@ async function copyRow(browser, p) {
   const cur = await copyOf(browser, urlOf(p));
   const why = [];
   if (rec.subject_sha256 !== cur.sha256) why.push('text se změnil po kontrole');
-  if (rec.facts_sha256 !== copyNow.facts) why.push('fakta se změnila po kontrole textů');
+  // P113 (IMP-696): a record with facts_used is voided only by a change of the facts ITS claims cite (same yq JSON as
+  // aid-ui-copy.py stored); an older record without it, by any change of the register
+  if (rec.facts_used && typeof rec.facts_used === 'object') {
+    const factOf = k => Array.isArray(facts) ? (facts.find(e => e && typeof e === 'object' && String(e.claim) === k) ?? null)
+      : (facts && typeof facts === 'object' ? facts[k] ?? null : null);   // as aid-ui-copy.py fact_value
+    const moved = Object.keys(rec.facts_used).filter(k => JSON.stringify(factOf(k)) !== JSON.stringify(rec.facts_used[k] ?? null));
+    if (moved.length) why.push(`fakta stránky se změnila po kontrole textů: ${moved.slice(0, 5).join(', ')}`);
+  } else if (rec.facts_sha256 !== copyNow.facts) why.push('fakta se změnila po kontrole textů');
   if (rec.context_sha256 !== copyNow.context) why.push('podklady se změnily po kontrole textů');
   if (why.length) return ['fail', why.join('; ')];
   return rec.verdict === 'pass' ? ['pass', `${rec.provider || '?'} ${rec.at || ''}`.trim()] : ['fail', (rec.blocking || []).slice(0, 4).join('; ') || 'kontrola textů neprošla'];
 }
-// customer_page: the page the customer gets exists, is from this build, has no internal word (exit 3 = not made yet)
-const customerPage = !want('customer_page') ? null : !project ? ['not_covered', 'no --project'] : (() => {
-  const r = spawnSync('python3', [path.join(HERE, '../../scripts/aid-ui-customer-page.py'), project, '--check'], { encoding: 'utf8' });
-  const say = ((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(0, 3).join(' | ').slice(0, 300);
-  return r.status === 0 ? ['pass', ''] : r.status === 1 ? ['fail', say] : ['not_covered', r.status === 3 ? 'made after a green gate (step 7b), then the gate again' : `aid-ui-customer-page.py exit ${r.status}: ${say}`];
-})();
+// customer_page is no row since P113 (IMP-697): aid-ui-state.sh gate-record makes the page from the recorded gate and
+// checks it, so one gate pass suffices
 const brandPkg = want('brand_package') ? (project ? runBrandPackage() : ['not_covered', 'no --project']) : null;
 const motionFid = want('motion_fidelity') ? (project ? runMotionFidelity() : ['not_covered', 'no --project']) : null;
 const designDoc = want('design_standard_doc') ? (project ? runDesignDoc() : ['not_covered', 'no --project']) : null;
@@ -1269,6 +1335,7 @@ const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeho
   'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states', 'photo_slots', 'text_clearance', 'a11y_basics', 'mobile_native'];
 // brand_consistency also compares header and footer with the first page loaded in the same browser and viewport
 const firstShape = {};
+const visited = new Set();   // all_pages: every page load that answered, whichever checks are named
 for (const b of BRS) {
   const type = { chromium, webkit }[b];
   let browser = null, why = '';
@@ -1303,6 +1370,7 @@ for (const b of BRS) {
         for (const c of named) put(m, c, flow && c === 'app_task_states' ? 'fail' : 'not_covered', `${flow ? 'scenario' : 'page'} failed: ${r.error}`);
         continue;
       }
+      if (!flow && r.http_200[0] === 'pass') visited.add(`${m.page}@${m.viewport}@${m.browser}`);
       for (const c of PAGE_CHECKS) put(m, c, ...r[c]);
       if (!flow) {
         const k = `${b}/${v}`, f0 = firstShape[k] || (firstShape[k] = { page: m.page, header: r.header, footer: r.footer });
@@ -1332,7 +1400,6 @@ for (const b of BRS) {
       if (designDoc) put(m, 'design_standard_doc', ...designDoc);
       if (visionDoc) put(m, 'vision_doc', ...visionDoc);
       if (coverageRow) put(m, 'coverage', ...coverageRow);
-      if (customerPage) put(m, 'customer_page', ...customerPage);
       if (want('task_test') && applies('task_test', m)) put(m, 'task_test', ...(await taskTest(browser)));
       if (want('form_delivery') && applies('form_delivery', m)) put(m, 'form_delivery', ...(await formDelivery(browser)));
       if (want('copy_review') && applies('copy_review', m)) put(m, 'copy_review', ...(await copyRow(browser, m.page)));
@@ -1340,6 +1407,17 @@ for (const b of BRS) {
     await ctx.close();
   }
   if (browser) await browser.close();
+}
+// all_pages (P113, fix 64: a sample let 11 overflows through): every page of the site at every width of the matrix
+// was visited - the pages are every .html but 404.html under the site, the visits the page rows written above
+if (want('all_pages')) {
+  const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)]);
+  const onDisk = walk(site).filter(f => f.endsWith('.html') && path.basename(f) !== '404.html').map(f => path.relative(site, f).split(path.sep).join('/'));
+  const missing = [...onDisk.filter(p => !pages.includes(p)).map(p => `${p} not in the build`),
+    ...pages.flatMap(p => VPS.flatMap(v => BRS.filter(b => !visited.has(`${p}@${v}@${b}`)).map(b => `${p} at ${v} px (${b})`)))];
+  const st2 = missing.length ? ['fail', `nenavštíveno: ${missing.slice(0, 8).join(', ')}${missing.length > 8 ? ` (+${missing.length - 8})` : ''}`]
+    : ['pass', `${pages.length} pages x ${VPS.length} widths x ${BRS.length} browsers visited`];
+  for (const m of matrix) put(m, 'all_pages', ...st2);
 }
 
 const result = { run_at: new Date().toISOString(), build_id: st.build?.id, matrix, rows, fingerprints: fps };

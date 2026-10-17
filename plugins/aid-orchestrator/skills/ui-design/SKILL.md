@@ -47,13 +47,36 @@ Do NOT invoke for:
    `/plugin install playwright@claude-plugins-official` (MCP hledá značkový Chrome →
    `PLAYWRIGHT_MCP_BROWSER=chromium` do `env` v `~/.claude/settings.json`
    a `npx @playwright/mcp install-browser chrome-for-testing`).
-3. Standardy čti živě, nikdy z kopie: `/opt/eco/docs/docs/ecosystem/specs/`
-   (`frontend-build-standard.md` FB-1..FB-20, `webapp-tasks-states-standard.md`
-   UA-1..UA-11, `design-system-standard.md`, SEO standard). Chybí některý →
-   jmenuj ho PM a poznamenej v kapitole, které se týká.
+3. Standardy a šablony čti z kopií v pluginu: `references/standards/` (`frontend-build-standard.md`
+   FB-1..FB-20, `webapp-tasks-states-standard.md` UA-1..UA-11, `design-system-standard.md`, SEO standard
+   a `seo/`, šablony zadání značky a vize). Odkud je která kopie, říká `references/standards/SOURCES`,
+   otisk `MANIFEST`; studio tak funguje i tam, kde ekosystémové dokumenty nejsou (P113).
 4. Postup stavby: `references/adopted/frontend-design-SKILL.md` (snímek
    frontend-design) a řemeslné minimum `references/adopted/impeccable-craft-floor.md`;
    generické vzory vyřazuje `references/genericity-rubric.md`.
+
+## Vrstva dílny a místa rozhodnutí (P113, 17. 10. 2026)
+
+**Vrstva:** `references/local/` drží postupy, které dílna PM ověřila naslepo proti krokům studia (sdělení, logo,
+pohyb značky, struktura, vzhled, kontrola). **Postup má přednost před tou částí kroku, kterou jmenuje** v řádku
+„Nahrazuje“ - a jen před ní; všechno ostatní z kroku (vstupy, brány, zápisy stavu, nástroje) platí dál. Krok, který
+postup nahrazuje, na něj odkazuje v bloku „Vrstva dílny“ a `sections.json` ho jmenuje mezi soubory metody (stvrzenka
+`aid-ui-state.sh method` ho tedy vyžaduje).
+
+**Šest míst rozhodnutí** (kolo `aid-ui-quality.py round <projekt> --place <místo>`, nejvýš první hodnocení + tři kola
+oprav): `sdeleni` (otázka `vision`), `logo` (`identity`), `pohyb` (hlídá `build-record`), `struktura` (`structure`),
+`vzhled` (`direction`), `web` (`handover`; každá role hodnotí měřítky hotového webu, vzhledu i struktury = šest známek).
+Na každém místě dvě nezávislé role na Claude Opus (Codex záskok), obě s pamětí hodnotitele: **odborník** (síto:
+řemeslo, fakta, zákon) a **klient** (majitel; jedna role přes všechna místa i odpovědi ve studiu). Brány
+(`critic/<typ>.<role>.<místo>.gates.yaml`) zná jen kód, role ani studio je nevidí.
+
+**Rozhodnutí místa** (`aid-ui-critic.py place-verdict`, zápis `aid-ui-state.sh place-record`): fakta a zákon > vada
+řemesla od odborníka > volba klienta (D5); klient vybírá jen mezi směry, které prošly oběma rolemi (D2; v ručním
+režimu vybírá PM `--pm-choice`, PM má vždy veto `--pm-veto`). Drží-li bránu jen chybějící vstup klienta (`studio_score`
+s `to_ten.client`), místo končí `accepted_with_reservation` - „schváleno s výhradou, čeká na klienta“ (D1); chybějící
+vstup klienta není kritérium práce studia. Schválit otázku místa jde jen s verdiktem nad aktuálními soubory místa
+i míst, na kterých stojí. Projekt bez pohybu značky jen výjimkou PM (`place-record --place pohyb --without <odpověď>`).
+`aid-ui-state.sh decide --step` bere přesný název kroku z `sections.json` (sdělení i logo patří do „Zadání a obsah“).
 
 ## Kroky a části (jak o nich mluvit)
 
@@ -322,8 +345,8 @@ a odkaz.
 2. Answers come only through `aid-ui-state.sh record-answer`, and a mutation
    that needs the PM takes `--answer <id>`; an answer read from chat is never
    a decision.
-3. Ecosystem standards are read live from `/opt/eco/docs/docs/ecosystem/…` on
-   every run; a missing one is named to the PM and noted on the brand page.
+3. Ecosystem standards and templates are read from the plugin's copies in `references/standards/`
+   (source in `SOURCES`, blob ids in `MANIFEST`, P113); nothing is read from the ecosystem docs tree.
 4. The build follows the frontend-design snapshot
    `references/adopted/frontend-design-SKILL.md`; no other design tool.
 5. No invented facts (prices, addresses, references, numbers, quotes): a fact
@@ -352,6 +375,10 @@ a odkaz.
    from the agent's own head ("Jak se ptá PM", point 0).
 
 ---
+
+13. P113: a procedure under `references/local/` wins over the part of a step it names ("Nahrazuje") and only that
+    part; an accepting answer of a decision place's question (vision, identity, structure, direction, handover) and
+    `build-record` need that place's current verdict (`aid-ui-state.sh place-record`); the roles never see the gates.
 
 ## Completeness Gate
 

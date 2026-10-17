@@ -1,0 +1,21 @@
+role: owner
+place: logo
+gates:
+  - criterion: muj_podnik
+    min: 8
+    why: "Zaměnitelná nová značka (projde zástupnou zkouškou, obecný symbol oboru) má podle měřítka nejvýš 6; oživení dostane 8, jen když zachová zavedený motiv, odstraní slabiny z auditu a přidá vlastní prvek (kosmetika = jen čistší kresba, barva nebo písmo je 6); zahození zavedeného motivu bez důvodu z auditu nebo zadání nejvýš 6; vybrat smí klient jen směr s myšlenkou z tohoto podniku. Porušení toho, co podnik nechce, dává nejvýš 4, takže ho tato hranice také vyřadí."
+  - criterion: odliseni_v_kraji
+    min: 8
+    why: "Zadavatel nechce fádní, zaměnitelné směry; jiná barva nebo písmo na obecném symbolu je podle kotev 6 a nesmí stačit k výběru. U oživení je 8 jen pro zavedený motiv s vlastním prvkem, který konkurent nemá; čisté překreslení obecného motivu je 6, i když se s nikým splést nedá."
+  - criterion: zakaznik_pochopi
+    min: 6
+    why: "Směr, kterému zákazník nerozumí nebo ho čte špatně (4), nesmí být vybrán bez ohledu na ostatní body."
+  - criterion: navaznost_a_zapamatovatelnost
+    min: 6
+    why: "U oživení odfiltruje zahození zavedeného motivu bez důvodu z auditu nebo zadání (4) a kosmetiku, která slabiny neodstranila (4), takže vyřadí i nápaditý nový směr, který zahazuje vše poznávané (Walsh, Winterich, Mittal 2010: věrní zákazníci hodnotí výraznou změnu negativně; Romaniuk 2018); oprávněný nový začátek (důvod v auditu nebo zadání) tu prochází, pokud zachová aspoň název, barvu nebo uspořádání; u nového podniku značku, která od názvu odvádí."
+  - criterion: obstoji_v_provozu
+    min: 6
+    why: "Logo, které v některém kontextu z podkladů nejde poznat či přečíst (4), majitel v provozu nepoužije."
+  - criterion: hodnota_za_penize
+    min: 6
+    why: "Šablonovitý nebo módní směr, který by vyžadoval další objednávky (4), nemá za peníze klienta projít."

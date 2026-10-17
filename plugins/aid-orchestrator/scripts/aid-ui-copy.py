@@ -5,6 +5,7 @@
   python3 aid-ui-copy.py run     <run dir> [--stand-in <answer.json> --reason <text>]
   python3 aid-ui-copy.py verdict <run dir>                               prints the verdict JSON
   python3 aid-ui-copy.py record  <project> <run dir>                     (aid-ui-state.sh copy-record)
+  python3 aid-ui-copy.py stale   <project> --subject <subject.json>      pages needing a review; exit 1 when any (P113)
 
 bundle: a new <project>/.aid-ui/copy/runs/<n>/ holding only what the reviewer may read - the
 adopted references/adopted/marketingskills/copy-editing/SKILL.md,
@@ -42,6 +43,9 @@ or product-context.md is not the project's current one, a stand-in without its f
 and dispatch bracket, and a fourth failed review of a page in one series (page, facts, context).
 Otherwise stores copy_review.pages.<page> in docs/design/brand-state.json atomically; a model
 verdict that differs from the recomputed one is noted in <run dir>/verdict.log.
+P113 (IMP-696): each page record also keeps facts_keys (the fact keys its claims cite) and facts_used (their values
+then), so the gate's copy_review row voids a page only when one of ITS facts changed (a page whose text changed is
+re-checked whatever the facts; a record from before 3.5.0 without facts_used falls back to the whole register).
 Exit: 0 done, 1 refused, 2 usage.
 """
 import argparse, datetime, glob, hashlib, json, os, re, shutil, subprocess, sys, tempfile
@@ -85,7 +89,7 @@ Pro KAŽDOU stránku ze `subject.json`:
    zákazník, skeptický zákazník, strážce značky) skóre 1–10 podle kotev, u každé citace místa.
 4. Vypiš každé faktické tvrzení (číslo, jméno, reference, záruka, výsledek, kontakt) s klíčem
    z `facts.yaml`, o který se opírá; když v registru není, `fact_key: null`. Věta, která vyjmenovává víc údajů
-   (název, adresa, telefon), má `fact_key` jako seznam všech klíčů.
+   (název, adresa, telefon), má `fact_key` jako seznam všech klíčů; údaj, který v registru není, je v seznamu `null`.
 
 Odpověz JEN jedním objektem JSON podle tohoto tvaru (žádný text okolo):
 
@@ -138,6 +142,15 @@ def fact_keys(facts):
     if isinstance(facts, list):
         return {str(e.get("claim")) for e in facts if isinstance(e, dict) and e.get("claim") is not None}
     return set()
+
+
+def fact_value(facts, k):
+    """The register's entry for key k: a dict's value, or a list's whole entry whose claim is k (None when absent)."""
+    if isinstance(facts, dict):
+        return facts.get(k)
+    if isinstance(facts, list):
+        return next((e for e in facts if isinstance(e, dict) and str(e.get("claim")) == k), None)
+    return None
 
 
 # ---- bundle -----------------------------------------------------------------------------
@@ -462,8 +475,8 @@ def page_verdict(page, ans, subj, keys):
         if not known(c.get("block")):
             bad.append(f"tvrzení odkazuje na blok, který stránka nemá: {c.get('block')}")
         fk = c.get("fact_key")
-        fks = [str(x) for x in fk] if isinstance(fk, list) else ([str(fk)] if fk else [])
-        if not fks or any(k not in keys for k in fks):   # a list of data (name, address, phone) rests on every key it names
+        fks = [x if x is None else str(x) for x in fk] if isinstance(fk, list) else ([str(fk)] if fk else [])
+        if not fks or any(k is None or k not in keys for k in fks):   # null in a list: a datum the register lacks   # a list of data (name, address, phone) rests on every key it names
             bad.append(f"tvrzení bez faktu v registru: {c.get('text', '')[:120]}")
     lang = subj.get("lang", "")
     if not lang or not os.path.isfile(os.path.join(REF, f"copy-{lang}.md")):
@@ -558,15 +571,20 @@ def record(a):
     fsha, csha = man["facts.yaml"], man["product-context.md"]
     bsha = sha(os.path.join(d, "MANIFEST"))
     new = {}
+    facts_now = yaml_json(os.path.join(proj, "docs/content/facts.yaml"))
     for p, v in out.items():
         old = prev.get(p) or {}
-        same = old.get("facts_sha256") == fsha and old.get("context_sha256") == csha
+        keys = sorted({str(k) for c in ((answer.get("pages") or {}).get(p) or {}).get("claims") or []
+                       for k in (c.get("fact_key") if isinstance(c.get("fact_key"), list) else [c.get("fact_key")]) if k})
+        used = {k: fact_value(facts_now, k) for k in keys}
+        same = (old.get("facts_used") == used if "facts_used" in old else old.get("facts_sha256") == fsha) and old.get("context_sha256") == csha
         failed = old.get("failed_reviews", 0) if same else 0
         if v["verdict"] == "fail":
             if failed >= 3:
                 die(f"{p}: a fourth failed review in this series; ask the PM for an exception (studio exception, check copy_review)")
             failed += 1
         new[p] = {"subject_sha256": subject["pages"][p]["sha256"], "facts_sha256": fsha, "context_sha256": csha,
+                  "facts_keys": keys, "facts_used": used,
                   "bundle_sha256": bsha, "provider": run_rec["provider"], "model": run_rec.get("model"), "at": now(),
                   "failed_reviews": failed, "verdict": v["verdict"], "blocking": v["blocking"], "scores": v["scores"],
                   "lang_guide": v["lang_guide"], "run": os.path.relpath(d, proj)}
@@ -607,6 +625,35 @@ def rejected_hits(st, subject):
     return hits
 
 
+def stale(a):
+    """P113 (aid-ui-state.sh cycle): which pages of the subject need a copy review now - no record, a failed review,
+    another text, another context, or (facts_used) one of the facts its claims cite changed / (an older record) any
+    change of the register. The gate's copy_review row decides the same way; no model is called."""
+    proj = os.path.abspath(a.project)
+    subject = rj(a.subject)
+    rec = (rj(os.path.join(proj, "docs/design/brand-state.json")).get("copy_review") or {}).get("pages") or {}
+    fpath, cpath = os.path.join(proj, "docs/content/facts.yaml"), os.path.join(proj, "docs/content/product-context.md")
+    facts = yaml_json(fpath) if os.path.isfile(fpath) else None
+    fsha = sha(fpath) if os.path.isfile(fpath) else None
+    csha = sha(cpath) if os.path.isfile(cpath) else None
+    out = []
+    for p, pg in sorted((subject.get("pages") or {}).items()):
+        r = rec.get(p)
+        why = ("no copy review" if not r else "the review failed" if r.get("verdict") != "pass"
+               else "the text changed" if r.get("subject_sha256") != pg.get("sha256")
+               else "the context changed" if r.get("context_sha256") != csha else None)
+        if not why and isinstance(r.get("facts_used"), dict):
+            moved = [k for k, v in r["facts_used"].items() if fact_value(facts, k) != v]
+            why = f"its facts changed: {', '.join(moved[:5])}" if moved else None
+        elif not why and r.get("facts_sha256") != fsha:
+            why = "the facts changed (a record without facts_used)"
+        if why:
+            out.append(p)
+            print(f"STALE {p}: {why}")
+    print(f"copy: {len(out)} of {len(subject.get('pages') or {})} page(s) need a review" if out else "copy: every page reviewed and current")
+    return 1 if out else 0
+
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="verb", required=True)
@@ -614,8 +661,9 @@ def main():
     r = sub.add_parser("run"); r.add_argument("dir"); r.add_argument("--stand-in"); r.add_argument("--reason")
     v = sub.add_parser("verdict"); v.add_argument("dir")
     c = sub.add_parser("record"); c.add_argument("project"); c.add_argument("dir")
+    s = sub.add_parser("stale"); s.add_argument("project"); s.add_argument("--subject", required=True)
     a = ap.parse_args()
-    return {"bundle": bundle, "run": run, "verdict": verdict, "record": record}[a.verb](a) or 0
+    return {"bundle": bundle, "run": run, "verdict": verdict, "record": record, "stale": stale}[a.verb](a) or 0
 
 
 if __name__ == "__main__":

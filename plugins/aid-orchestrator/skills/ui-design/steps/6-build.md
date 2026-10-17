@@ -6,6 +6,8 @@ user_invocable: false
 
 # Krok 6 - Stavba
 
+**Vrstva dílny (P113):** stavba doplňuje živou kostru v `site/` (`aid-ui-serve.sh skeleton`), nezačíná z prázdné složky; pohyb značky zapoj podle `references/local/pohyb-znacky.md` (na webu ≤ 1 s, jméno hned). `build-record` vyžaduje verdikt místa `pohyb` (nebo výjimku PM bez pohybu). Místo: `pohyb`. Kolo místa: `aid-ui-quality.py round <projekt> --place pohyb`.
+
 **Last Updated:** 2026-09-30
 
 ## Cíl
@@ -19,8 +21,8 @@ standardů; build zaznamenaný `build-record`.
 Odpověď `direction` a stránka směru z `.aid-ui/directions/`, `structure`,
 `content_plan`, `docs/content/facts.yaml`, `docs/seo/brief.md`, brand
 balíček, `references/adopted/frontend-design-SKILL.md`,
-`/opt/eco/docs/docs/ecosystem/specs/frontend-build-standard.md` (FB-1..FB-20),
-u aplikace `webapp-tasks-states-standard.md` (UA-1..UA-11) - čti živě.
+`references/standards/frontend-build-standard.md` (FB-1..FB-20),
+u aplikace `references/standards/webapp-tasks-states-standard.md` (UA-1..UA-11) - kopie v pluginu.
 
 ## Postup
 

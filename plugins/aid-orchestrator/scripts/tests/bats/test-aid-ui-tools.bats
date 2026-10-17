@@ -207,3 +207,32 @@ H
          and (.controls[0].height."390" > 0) and (.fields | length) == 1 and .type.h1 and (.breakpoints == ["max-width: 760px"])' "$T/m.json" >/dev/null \
     || { jq -c . "$T/m.json"; return 1; }
 }
+
+@test "p113: shot --name gives unique names and a header crop; strip and video record an animation; CHROME nowhere is refused" {
+  mkdir -p "$T/site"
+  printf '<html><head><style>@keyframes k{from{opacity:0}to{opacity:1}} h1{animation:k 1s linear}</style></head><body><h1>Logo</h1></body></html>' > "$T/site/a.html"
+  serve "$T/site"
+  run bash "$TOOL" shot "$T/n" --name konkurent --header "http://127.0.0.1:$PORT/a.html" "http://127.0.0.1:$PORT/a.html"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  for f in konkurent-1440 konkurent-header-1440 konkurent-390 konkurent-2-1440 konkurent-2-390; do [ -s "$T/n/$f.png" ] || { echo "no $f"; return 1; }; done
+  run bash "$TOOL" strip "$T/s" "http://127.0.0.1:$PORT/a.html" --every 250 --until 1000; [ "$status" -eq 0 ]
+  [ "$(ls "$T/s"/frame-*.png | wc -l)" -eq 5 ]
+  ! cmp -s "$T/s/frame-00000.png" "$T/s/frame-01000.png"   # the animation moved between the first and the last frame
+  run bash "$TOOL" video "$T/v" "http://127.0.0.1:$PORT/a.html" --until 600; [ "$status" -eq 0 ]; [ -s "$T/v/video.webm" ]
+  CHROME=/nikde run bash "$TOOL" shot "$T/x" "http://127.0.0.1:$PORT/a.html"; [ "$status" -eq 2 ]; [[ "$output" == *"CHROME=/nikde is not an executable browser"* ]]
+}
+
+@test "p113: wordmark subtitle - a second line under the name, letter-spaced, inside the viewBox; without one the output is unchanged" {
+  F="$BATS_TEST_DIRNAME/../fixtures/aid-ui/verify-site/site/fonts"
+  B="$T/pkg"; mkdir -p "$B/symbol"
+  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0,0,32,32"><rect width="32" height="32"/></svg>' >"$B/symbol/s.svg"
+  base='"package": "'"$B"'", "name": "Mlýn", "font": ["'"$F"'/geist-latin.woff2", "'"$F"'/geist-latin-ext.woff2"], "family": "Geist", "weight": 600, "variants": [{"id": "color", "symbol": "symbol/s.svg", "text": "#111"}]'
+  echo "{\"base\": \"a\", $base}" > "$T/a.json"; echo "{\"base\": \"b\", $base, \"subtitle\": {\"text\": \"pekárna · Brno\", \"tracking_em\": 0.15}}" > "$T/b.json"
+  bash "$TOOL" wordmark --spec "$T/a.json" --root / >/dev/null; bash "$TOOL" wordmark --spec "$T/b.json" --root / >/dev/null
+  grep -q 'class="subtitle"' "$B/source/b-master.svg"; grep -q 'letter-spacing="0.15em"' "$B/source/b-master.svg"; ! grep -q 'subtitle' "$B/source/a-master.svg"
+  python3 - "$B/logo/a-color.svg" "$B/logo/b-color.svg" <<'P'
+import re, sys
+vb = lambda f: list(map(float, re.search(r'viewBox="([^"]+)"', open(f).read()).group(1).split()))
+a, b = vb(sys.argv[1]), vb(sys.argv[2])
+assert b[1] + b[3] > a[1] + a[3] + 5, (a, b)   # the second line lies below the name, inside the box
+P
+}

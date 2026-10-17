@@ -1,0 +1,30 @@
+# Brány hotového webu pro roli owner (P113, 17. 10. 2026): prahy P113a (PM 13. 10. 2026: majitel i technik 8,5,
+# žádné kritérium pod 7), dřív konstanty v aid-ui-critic.py. Zná je jen kód; role je nevidí.
+# Na místě `web` hodnotí role i měřítka vzhledu a struktury; ta používají brány svých míst.
+role: owner
+place: web
+gates:
+  - criterion: prvni_dojem_a_premiovost
+    min: 7
+    why: "P113a: žádné kritérium hotového webu pod 7 (PM 13. 10. 2026)."
+  - criterion: jedinecnost_a_znacka
+    min: 7
+    why: "P113a: žádné kritérium hotového webu pod 7 (PM 13. 10. 2026)."
+  - criterion: hodnota_a_prodejni_texty
+    min: 7
+    why: "P113a: žádné kritérium hotového webu pod 7 (PM 13. 10. 2026)."
+  - criterion: fotografie_a_obrazovy_pribeh
+    min: 7
+    why: "P113a: žádné kritérium hotového webu pod 7 (PM 13. 10. 2026)."
+  - criterion: duvera_a_rozhodovaci_jistota
+    min: 7
+    why: "P113a: žádné kritérium hotového webu pod 7 (PM 13. 10. 2026)."
+  - criterion: cena_objednani_a_kontakt
+    min: 7
+    why: "P113a: žádné kritérium hotového webu pod 7 (PM 13. 10. 2026)."
+weighted_min: 8.5
+# závěrečný audit naslepo: tři hodnocení jedné role (aid-ui-critic.py verdict)
+audit:
+  median_min: 8.5
+  any_min: 8.0
+  criterion_median_min: 7.0

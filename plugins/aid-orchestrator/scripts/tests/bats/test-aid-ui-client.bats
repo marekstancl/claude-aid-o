@@ -2,6 +2,8 @@
 # aid-tier: t2
 # Nightly since 3.4.0 (15. 10. 2026): the merge path overran its 10 min and the /aid-ui studio is the
 # dearest area outside the core; no plan run passes through it, so a regression here shows the next morning.
+# P113 step 3: the client is one role with one memory (its ratings at every place, its studio answers by: client,
+# the PM's decisions apart) and the roles run on Claude Opus first, Codex their stand-in (D4).
 # P113a step 2 - aid-ui-client.py: the critic rates the web from a bundle (a copy of site/, page shots, the
 # frozen role; no history), Codex first and the Claude stand-in on a limit, an empty or an invalid answer, with
 # the same prompt and working directory; text never sees OPENAI_API_KEY; every call goes to the cost book; the
@@ -15,13 +17,17 @@ setup() {
   echo '<html lang="cs"><title>Pekárna</title><body>chleba</body></html>' > "$P/site/index.html"
   echo '<html lang="cs"><title>Ceník</title><body>ceny</body></html>' > "$P/site/cennik/index.html"
   python3 "$CR" freeze "$P" --type web-local >/dev/null
+  # the P113a cases below test the stand-in mechanics with Codex first; the role order of D4 (Claude Opus first) has its own one-client: cases
+  export AID_UI_ROLE_FIRST=codex
   export OPENAI_API_KEY=sk-should-never-reach-text ANTHROPIC_API_KEY=sk-ant-never PATH="$T/bin:$PATH" AID_UI_TOOL="$T/bin/tool" ANS="$T/ans.json"
   for role in tech owner; do python3 - "$SC/../skills/ui-design/critic/web-local.$role.yaml" > "$T/ans-$role.json" <<'PY'
 import sys, json, yaml
 r = yaml.safe_load(open(sys.argv[1])); _lo = (yaml.safe_load(open(__import__("re").sub(r"\.(owner|tech)\.yaml$", ".yaml", sys.argv[1]))).get("launch_only") or {}).get(__import__("re").search(r"\.(owner|tech)\.yaml$", sys.argv[1]).group(1)) or []; r["criteria"] = [c for c in r["criteria"] if c["id"] not in _lo]
+import os; _r = __import__("re").search(r"\.(owner|tech)\.yaml$", sys.argv[1]).group(1)   # P113: the web is rated with the look and structure rubrics too
+r["criteria"] += [dict(c, id=k + "." + c["id"]) for k in ("vzhled", "struktura") for c in yaml.safe_load(open(os.path.dirname(sys.argv[1]) + "/web-local.%s.%s.yaml" % (_r, k)))["criteria"]]
 print(json.dumps({"criteria": [{"id": c["id"], "score": 8, "anchor": 8, "evidence": "úvod: nadpis a fotka pece",
   "missing_for_next": "vlastní motiv", "to_ten": {"studio": ["úvod: vlastní fotka ordinace přes celou šířku"], "client": []}} for c in r["criteria"]], "findings": [{"id": "f1", "criterion": r["criteria"][0]["id"], "severity": "minor",
-  "owner": "agent", "text": "opakované slovo", "fix": "zkrátit", "where": "úvod, druhý odstavec"}],
+  "owner": "agent", "kind": "remeslo", "blocking": False, "text": "opakované slovo", "fix": "zkrátit", "where": "úvod, druhý odstavec"}],
   "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
 PY
   done; cp "$T/ans-owner.json" "$ANS"
@@ -103,6 +109,11 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; [[ -z "${WE
   CODEX_ANS="$T/ans-reg.json" python3 "$CL" critic "$P" --role owner --web "$W" --history "$T/hist.json" --out "$T/r1m" >/dev/null
   cmp -s "$T/hist.json" <(jq . "$T/r1m/bundle/podklady/historie.json" | jq -c . | jq .) || jq -e '.[0].id == "r1-owner-f9"' "$T/r1m/bundle/podklady/historie.json" >/dev/null
   grep -q "podklady/historie.json" "$T/r1m/prompt.md"; jq -e '.history == 1 and .provider == "codex"' "$T/r1m/run.json" >/dev/null
+  # P113 (Coufal round 2): a finding folded into another as its duplicate may come back as a regression too
+  echo '[{"id":"r1-owner-f9","round":1,"criterion":"x","text":"stará vada","state":"fixed","evidence":"opraveno"},{"id":"r1-owner-f8","round":1,"criterion":"x","text":"tá istá","state":"duplicate"}]' > "$T/hist-dup.json"
+  jq '.findings[0].regression_of = "r1-owner-f8"' "$ANS" > "$T/ans-dup.json"
+  CODEX_ANS="$T/ans-dup.json" python3 "$CL" critic "$P" --role owner --web "$W" --history "$T/hist-dup.json" --out "$T/r1d" >/dev/null
+  jq -e '.provider == "codex"' "$T/r1d/run.json" >/dev/null
   jq '.findings[0].regression_of = "r9-owner-nic"' "$ANS" > "$T/ans-bad.json"
   CODEX_ANS="$T/ans-bad.json" CLAUDE_ANS="$ANS" python3 "$CL" critic "$P" --role owner --web "$W" --history "$T/hist.json" --out "$T/r1n" >/dev/null
   jq -e '.provider == "claude" and ([.attempts[] | select(.error != null and (.error | contains("regression_of")))] | length) == 2' "$T/r1n/run.json" >/dev/null
@@ -200,7 +211,8 @@ class H(http.server.BaseHTTPRequestHandler):
         open(T + "/answered", "w").close(); self.send(200, {"ok": True})
 http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
 PY
-  mkdir -p "$P/.aid-ui"; python3 "$T/studio.py" "$PORT" "$P" "$T" & SRV=$!
+  mkdir -p "$P/.aid-ui"; echo 0123456789abcdef0123456789abcdef > "$P/.aid-ui/studio.token"   # P113: the client answers with the agent token
+  python3 "$T/studio.py" "$PORT" "$P" "$T" & SRV=$!
   for _ in $(seq 50); do curl -s "http://127.0.0.1:$PORT/state" >/dev/null && break; sleep 0.1; done
   printf '{"answer": {"decision": "choose", "choice": "a", "comment": "teplejší"}, "feedback": {"question_clear": 4}}' > "$T/client.json"
   CODEX_ANS="$T/client.json" run python3 "$CL" answer "$P" --studio "http://127.0.0.1:$PORT" --once; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -291,4 +303,100 @@ print("ok")
 PY
   [ "$status" -eq 0 ] && [ "${lines[-1]}" = ok ] || { echo "$output"; return 1; }
   grep -q 'answer.items' "$CL" && grep -q '"items"' "$SC/../skills/ui-design/critic/client-template.md"
+}
+
+# ---------------------------------------------------------------- P113 step 3: one client, roles on Opus
+FX_MEM="$BATS_TEST_DIRNAME/../fixtures/aid-ui/client-memory/.aid-ui/studio/history.jsonl"
+mem() { python3 -c 'import json,sys; sys.path.insert(0, sys.argv[1]); import aid_ui_memory as m; print(json.dumps(m.role_memory(sys.argv[2], sys.argv[3], sys.argv[4]), ensure_ascii=False))' "$SC/lib" "$P" "$1" "$2"; }
+round_at() {   # round_at <place> <n>: a recorded round of both roles with one finding each
+  local d="$P/.aid-ui/critic/rounds/$1"; [ "$1" != web ] || d="$P/.aid-ui/critic/rounds"
+  mkdir -p "$d/$2"; jq -n --argjson n "$2" --arg p "$1" '{n: $n, at: "2026-10-12T08:00:00Z", place: $p, score: {criteria: {"owner.muj_podnik": 7, "tech.myslenka": 6}},
+    to_ten: {owner: {muj_podnik: {studio: ["kóta odsazená od okapu"], client: []}}}, findings: [
+    {id: "r\($n)-owner-f1", role: "owner", criterion: "muj_podnik", text: "dům je obecný", where: "karta b", state: "accepted", evidence: "kóta přidána"},
+    {id: "r\($n)-tech-f1", role: "tech", criterion: "myslenka", text: "myšlenka slabá", where: "karta b", state: "rejected_with_reason", reason: "zadání"}]}' > "$d/$2/round.json"
+}
+
+@test "one-client: the client's answer goes with the agent token and X-AID-Role: client; the studio records it by client and the rating sees it" {
+  bash "$SC/aid-ui-state.sh" init "$P" >/dev/null; bash "$SC/aid-ui-state.sh" method "$P" vision >/dev/null
+  echo 0123456789abcdef0123456789abcdef > "$P/.aid-ui/studio.token"; mkdir -p "$P/.aid-ui/studio"
+  jq -n --arg o "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" '{questions: [{id: "v1", kind: "vision", target: "vize@1", title: "Vize", opened_at: $o}], cards: []}' > "$P/.aid-ui/studio/payload.json"
+  PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  python3 "$SC/../lib/aid-ui-studio/server.py" --project "$P" --host 127.0.0.1 --port "$PORT" --token-file "$P/.aid-ui/studio.token" >"$T/studio.log" 2>&1 3>&- & SRV=$!
+  for _ in $(seq 50); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 0.1; done
+  printf '{"answer": {"decision": "approve", "choice": null, "comment": "sedí"}, "feedback": {"question_clear": 4}}' > "$T/client.json"
+  sleep 0.05; CODEX_ANS="$T/client.json" run python3 "$CL" answer "$P" --studio "http://127.0.0.1:$PORT" --once; [ "$status" -eq 0 ] || { echo "$output"; cat "$T/studio.log"; return 1; }
+  jq -se 'map(select(.question.id == "v1")) | length == 1 and .[0].by == "client"' "$P/.aid-ui/studio/history.jsonl" >/dev/null
+  AID_UI_STUDIO_URL="http://127.0.0.1:$PORT" bash "$SC/aid-ui-state.sh" record-answer "$P" --question v1 >/dev/null 2>&1 || true
+  # the client's rating at a place sees its own answer, as its own
+  mem owner sdeleni > "$T/h.json"; jq -e '.my_studio_answers | map(.question) == ["v1"]' "$T/h.json" >/dev/null
+  python3 "$CR" freeze "$P" --type web-local --place sdeleni >/dev/null
+  python3 - "$P" > "$T/ans-sd.json" <<'PY'
+import json, sys
+fz = json.load(open(sys.argv[1] + "/.aid-ui/critic/frozen/sdeleni.json"))
+print(json.dumps({"criteria": [{"id": c["id"], "score": 8, "anchor": 8, "evidence": "dokument, oddíl 1", "missing_for_next": "víc", "to_ten": {"studio": ["oddíl 1: doložit odlišení zakázkou"], "client": []}}
+  for c in fz["roles"]["owner"]["rubric"]["criteria"]], "findings": [], "readiness": [], "summary": "Sdělení pro test paměti."}))
+PY
+  CODEX_ANS="$T/ans-sd.json" python3 "$CL" critic "$P" --place sdeleni --role owner --history "$T/h.json" --out "$T/rs" >/dev/null
+  jq -e '.my_studio_answers[0].question == "v1"' "$T/rs/bundle/podklady/historie.json" >/dev/null; grep -q "Paměť hodnotitele" "$T/rs/prompt.md"
+}
+
+@test "one-client: the first rating at a new place sees the client's earlier places; the expert remembers its own place only" {
+  round_at logo 1
+  mem owner vzhled > "$T/o.json"; mem tech vzhled > "$T/t.json"
+  jq -e '.place == "vzhled" and (.findings | length) == 0 and .other_places.logo.findings[0].id == "r1-owner-f1" and .other_places.logo.ratings[0].scores.muj_podnik == 7' "$T/o.json" >/dev/null
+  jq -e '(has("other_places") | not) and (has("pm_decisions") | not) and (.findings | length) == 0' "$T/t.json" >/dev/null
+  mem tech logo | jq -e '.findings == [.findings[0]] and .findings[0].id == "r1-tech-f1" and .ratings[0].scores.myslenka == 6' >/dev/null
+}
+
+@test "one-client: a PM answer is labelled the PM's, never the client's own words; the client's answer prompt shows both" {
+  mkdir -p "$P/.aid-ui/studio"; cp "$FX_MEM" "$P/.aid-ui/studio/history.jsonl"
+  mem owner logo > "$T/o.json"
+  jq -e '(.my_studio_answers | map(.question)) == ["i1"] and (.pm_decisions | map(.question)) == ["v0","i2"] and .pm_decisions[1].comment == "PM: kóta musí být odsazená"' "$T/o.json" >/dev/null
+  PORT=$(( 39500 + RANDOM % 400 ))
+  python3 - "$PORT" "$P" <<'PY' & SRV=$!
+import http.server, json, sys
+P = sys.argv[2]
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def send(self, code, obj, cookie=None):
+        b = json.dumps(obj).encode(); self.send_response(code); self.send_header("Content-Type", "application/json")
+        if cookie: self.send_header("Set-Cookie", cookie)
+        self.end_headers(); self.wfile.write(b)
+    def do_GET(self):
+        if self.path.startswith("/?k="): return self.send(200, {}, "aid_studio_t=1; Path=/")
+        if self.path == "/state": return self.send(200, {"questions": [{"id": "d1", "kind": "direction", "target": "smer", "title": "Vzhled"}], "cards": []})
+        self.send(404, {})
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
+PY
+  for _ in $(seq 50); do curl -s "http://127.0.0.1:$PORT/state" >/dev/null && break; sleep 0.1; done
+  run python3 "$CL" answer "$P" --studio "http://127.0.0.1:$PORT" --once --dry; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  f="$P/.aid-ui/client/turns/d1-1/prompt.md"
+  grep -q "# Tvoje dřívější odpovědi ve studiu" "$f"; grep -q "nechci dům, chci kótu" "$f"
+  grep -q "# Rozhodnutí PM (ne tvoje slova" "$f"; grep -q "PM: kóta musí být odsazená" "$f"
+  ! awk '/# Tvoje dřívější odpovědi/,/# Rozhodnutí PM/' "$f" | grep -q "kóta musí být odsazená"
+}
+
+@test "one-client: the blind audit (--fresh) reads no memory; a corrupt studio history stops naming its line" {
+  echo '{"findings": [{"id": "r1-owner-f9", "state": "fixed", "text": "x", "criterion": "x"}], "my_studio_answers": [{"question": "i1"}]}' > "$T/h.json"
+  python3 "$CL" critic "$P" --role owner --web "$W" --history "$T/h.json" --fresh --out "$T/fr" >/dev/null
+  [ ! -e "$T/fr/bundle/podklady/historie.json" ]; ! grep -q "historie.json" "$T/fr/prompt.md"; jq -e '.kind == "audit" and .history == null' "$T/fr/run.json" >/dev/null
+  mkdir -p "$P/.aid-ui/studio"; { cat "$FX_MEM"; echo '{"by": "client", "question"'; } > "$P/.aid-ui/studio/history.jsonl"
+  run mem owner logo; [ "$status" -ne 0 ]; [[ "$output" == *"line 5 is not JSON"* ]]
+}
+
+@test "one-client: role calls go to Claude Opus first with Codex as the stand-in; the model and provider of each call are recorded" {
+  unset AID_UI_ROLE_FIRST
+  run python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/o1"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.provider == "claude" and .model == "opus" and .role_call == true and .attempts[0].provider == "claude" and .attempts[0].model == "opus"' "$T/o1/run.json" >/dev/null
+  [ ! -e "$T/codex-n" ]
+  FAKE_CLAUDE=fail run python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/o2"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.provider == "codex" and (.stand_in_reason | length) > 0 and .attempts[0].provider == "claude"' "$T/o2/run.json" >/dev/null
+  AID_UI_ROLE_MODEL=sonnet python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/o3" >/dev/null
+  jq -e '.model == "sonnet"' "$T/o3/run.json" >/dev/null
+  grep -n 'AID_UI_ROLE_MODEL' "$CL" >/dev/null
+}
+
+@test "one-client: a test never reaches a real model - a provider found outside the test's folder stops the call" {
+  unset AID_UI_ROLE_FIRST; rm "$T/bin/claude"
+  run python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/g1"; [ "$status" -eq 3 ]; [[ "$output" == *"a test reached the real claude"* ]]
 }

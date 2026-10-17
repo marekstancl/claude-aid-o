@@ -3,6 +3,36 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.5.0] — 2026-10-17
+
+Studio `/aid-ui` podle dílny (P113): šest míst rozhodnutí, na každém hodnotí klient a odborník na Claude Opus s pamětí a postoupit pustí jen kód. Ověřeno na záznamech dílny (zasazené vady 13/13, brány loga 4/4) a během na Coufalovi: pohyb přijat, sdělení, logo, struktura a vzhled vrácené po vyčerpaných kolech; ověření hotového webu od nuly zůstává otevřené (`docs/reference/2026-10-p113-overeni-coufal.md`).
+
+### Added
+- **Šest míst rozhodnutí** (sdělení, logo, pohyb, struktura, vzhled, hotový web) s měřítky a branami v `critic/*.gates.yaml` (kritérium, `when`, `any_of`, vážené minimum, změřené limity pohybu, audit). Verdikt místa (`aid-ui-critic.py place-verdict`) se zapisuje do stavu (`aid-ui-state.sh place-record`); odpověď ve studiu i zápis buildu bez přijatého verdiktu místa, na kterém stojí, se odmítne. Pořadí rozhodování: fakta a zákon, pak vada řemesla od odborníka, pak volba klienta; výhrada jen tehdy, když bránu drží chybějící vstup klienta.
+- **Klient a odborník na Opusu s pamětí** napříč místy: klient vidí svá dřívější hodnocení, své odpovědi ve studiu a zvlášť rozhodnutí PM; odpověď ze stránky PM se zapisuje jako `by: pm`, odpověď s tokenem agenta nikdy.
+- **Kolo místa:** `aid-ui-quality.py round --place <místo>`, nejvýš tři opravná kola, kolo nevalidní odpovědi se nepočítá.
+- **Postupy dílny jako vrstva s předností** (`references/local/`) a kopie standardů v pluginu (`references/standards/`); studio nečte `/opt/eco/docs`.
+- **Živá kostra webu** na stálé adrese (`aid-ui-serve.sh skeleton`, port 3918), postavená ze schválené struktury a registru faktů; hotové stránky nepřepisuje.
+- **`aid-ui-state.sh cycle`:** strojová část opravného cyklu jedním příkazem (záznam pohybu, build, kontrola textů, měření, brána, gate-check), stop na prvním neúspěchu (IMP-695).
+- **Nástroje značky:** karty směrů pro role (`logo-sheet --cards`, skutečné kontexty, černobílá a inverzní varianta z balíku), nástroj pohybu loga (`aid-ui-logo-motion.py`: web do 1 s s názvem hned, video 2-3 s, konec bez švu, název v křivkách, kreslení jednou za návštěvu), měření pohybu po variantách (`aid-ui-tool.sh motion measure`, i pohyb řízený skriptem).
+- Kontrola balíčku značky pro web chce `og-image.png`, `site.webmanifest`, `head-snippet.html` s absolutní adresou `og:image` a animaci loga (pokud PM nezapsal projekt bez pohybu).
+
+### Changed
+- **Brána hotového webu jde přes každou stránku a každou šířku** (320, 390, 768, 1024, 1440 px) bez vzorku (řádek `all_pages`); hustota obrázků podle skutečné šířky souboru, pohyb řízený skriptem, povinný viewport, jedno H1, dotykové plochy na šířkách dotykových zařízení, informace o osobních údajích u formuláře.
+- **Stránku pro zákazníka dělá zápis brány** z právě zapisovaného výsledku, takže brána proběhne jedním průchodem (IMP-697).
+- **Kontrolu textů zneplatní jen změna faktů, o které se stránka opírá** (IMP-696).
+- Role se nejdřív ptají Opusu; Codex je záskok.
+
+### Fixed
+- Vady, které našel běh na Coufalovi: zhoršení nálezu sloučeného jako duplicita šlo zapsat jen u opravených; souhrn kola místa se směry padal; pohyb řízený skriptem se měřil jako „bez pohybu“; stránka pohybu měla vždy `lang="cs"`.
+- Brána nad záznamy dílny našla napoprvé 8 z 13 zasazených vad; opraveno: počet s přívlastkem („přes 300 dokončených projektů“), obsahový obrázek s prázdným `alt`, informace o údajích jen v patičce, malé položky menu na tabletu, druhé H1 a nálezy SEO zadání připnuté ke všem stránkám.
+- Stop hook `decision_card_complete` čte přepis od konce (dlouhé sezení přeteklo jeho 5 s).
+- Testy studia nenechávají běžet servery (studio spuštěné v podprocesu `run`).
+- Z celkové revize: svazek pro role nebere soubory přes odkaz ve složce, změřené limity pohybu se váží na otisk měřeného souboru, pohyb řízený skriptem se hlídá na každé šířce, `og:image` musí být https.
+
+### Known limits
+- Kostra se staví do `site/` a hotové stránky ponechává, takže u projektu s hotovým webem hodnotí role strukturu na starém webu (IMP-699); ověření studia od nuly zůstává otevřené (IMP-703).
+
 ## [3.4.0] — 2026-10-15
 
 Testy před sloučením se vracejí pod 10 minut a patra odpovídají ekosystémovému standardu (PM 15. 10. 2026, 1A + 2A). Noc 15. 10. naměřila T0 252 s z 120 s a celou cestu 919 s z 600 s, ověřovací běh po změně 544 s (T0 + T1, 713 testů); kontrola pater to hlásila, ale běžela jen v branách plánů a ruční vydání od 3.0.0 ji obcházela.

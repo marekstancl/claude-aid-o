@@ -41,6 +41,12 @@ gen.json stays as the record.
 Every image sent is written to the project's cost book (.aid-ui/costs.jsonl, billing api) and none is sent
 when it would take the project's paid API total over AID_UI_IMAGE_BUDGET_USD (default 2.00, PM 12. 10. 2026:
 for the whole project, all rounds together) - on top of the per-run --max-cost.
+P113 (handover B3, fixes 2-5): --dry-run prices both steps of two_step (the mark and the lockup); gen.json is written
+after every image (an interrupted run lists what was paid for); without --force only the missing variants are made
+(existing files are kept and counted); the lockup prompt carries the slot's brief; the endpoint is AID_UI_IMAGE_BASE
+(default https://api.openai.com) with optional CF_ACCESS_CLIENT_ID/CF_ACCESS_CLIENT_SECRET headers, the key
+OPENAI_API_KEY or AID_UI_IMAGE_KEY; an image the model's safety filter refuses is recorded refused: true (in gen.json
+and the cost book) and not retried. The budget is checked before every call with the full two-step price.
 Exit: 0 every slot succeeded, 1 no key / no route / a slot partial or failed / cost cap hit, 2 usage.
 """
 import base64, json, os, re, struct, sys, time, urllib.error, urllib.request
@@ -92,6 +98,20 @@ def utc():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
+def _base():
+    return os.environ.get("AID_UI_IMAGE_BASE", "https://api.openai.com").rstrip("/")
+
+
+def _headers(key, ctype):
+    h = {"Authorization": "Bearer " + key, "Content-Type": ctype, "User-Agent": "aid-ui-logo-gen/1.0"}
+    if os.environ.get("CF_ACCESS_CLIENT_ID") and os.environ.get("CF_ACCESS_CLIENT_SECRET"):   # a gateway behind Cloudflare Access
+        h["CF-Access-Client-Id"], h["CF-Access-Client-Secret"] = os.environ["CF_ACCESS_CLIENT_ID"], os.environ["CF_ACCESS_CLIENT_SECRET"]
+    return h
+
+
+REFUSED = re.compile(r"moderation|safety|content.policy|rejected by|not allowed", re.I)
+
+
 def generate(key, model, prompt, quality, mode="full", refs=(), size="1024x1024"):
     """One PNG from the API; raises urllib errors, TimeoutError or ValueError (bad response).
     With reference images the call goes to /v1/images/edits as multipart (image[] = the references)."""
@@ -112,13 +132,11 @@ def generate(key, model, prompt, quality, mode="full", refs=(), size="1024x1024"
             parts.append(("--%s\r\nContent-Disposition: form-data; name=\"image[]\"; filename=\"%s\"\r\nContent-Type: %s\r\n\r\n"
                           % (b, os.path.basename(path), mime)).encode("utf-8") + data + b"\r\n")
         parts.append(("--%s--\r\n" % b).encode("utf-8"))
-        req = urllib.request.Request("https://api.openai.com/v1/images/edits", data=b"".join(parts),
-                                     headers={"Authorization": "Bearer " + key, "Content-Type": "multipart/form-data; boundary=" + b}, method="POST")
+        req = urllib.request.Request(_base() + "/v1/images/edits", data=b"".join(parts),
+                                     headers=_headers(key, "multipart/form-data; boundary=" + b), method="POST")
     else:
-        req = urllib.request.Request(
-            "https://api.openai.com/v1/images/generations",
-            data=json.dumps(body).encode("utf-8"),
-            headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"}, method="POST")
+        req = urllib.request.Request(_base() + "/v1/images/generations", data=json.dumps(body).encode("utf-8"),
+                                     headers=_headers(key, "application/json"), method="POST")
     with urllib.request.urlopen(req, timeout=180) as r:
         body = r.read(MAX_BODY + 1)
     if len(body) > MAX_BODY:
@@ -183,13 +201,16 @@ def main():
         if not os.path.isfile(r) or os.path.splitext(r)[1].lower() not in (".png", ".jpg", ".jpeg", ".webp"):
             die("reference not a png/jpg/webp file: %s" % r)
     unit = PRICE[model][quality] + REF_USD * len(refs)
+    two_step = bool(spec.get("two_step")) and mode == "full"
+    lockup_unit = PRICE[model][quality] + REF_USD   # the lockup call carries one reference: the mark just made
+    variant = unit + (lockup_unit if two_step else 0)   # fix 2: one variant of two_step costs both calls
     out = os.path.join(project, ".aid-ui", "logo", "gen")
     os.makedirs(out, exist_ok=True)
     if os.path.islink(out) or not os.path.realpath(out).startswith(project + os.sep):
         die("gen directory must be a plain directory under the project")
     log = {"version": 1, "run_id": time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()), "model": model, "quality": quality,
            "n": n, "mode": mode, "references": [os.path.relpath(r, project) for r in refs], "price_list": PRICE_LIST,
-           "unit_usd": unit, "max_cost_usd": max_cost, "dry_run": dry,
+           "unit_usd": unit, "lockup_unit_usd": lockup_unit if two_step else None, "variant_usd": variant, "max_cost_usd": max_cost, "dry_run": dry,
            "started": utc(), "constraints": constraints_for(spec), "slots": {}, "requested": 0, "received": 0,
            "estimated_usd": 0.0, "status": "planned" if dry else "running"}
     spec["mode"] = mode
@@ -198,20 +219,37 @@ def main():
             log["slots"][slot] = {"concept": concept, "prompt": prompt_for(slots[slot], concept, spec), "requested": n}
         log["requested"] = n * len(spec["slots"])
         log["finished"] = utc()
+        log["estimated_usd"] = round(log["requested"] * variant, 3)
         with open(os.path.join(out, "plan.json"), "w", encoding="utf-8") as f:
             json.dump(log, f, ensure_ascii=False, indent=1)
-        print("plan.json: %d prompt(s) for %d slot(s), ~%.2f USD if run; nothing sent" % (len(spec["slots"]), len(spec["slots"]), log["requested"] * unit))
+        print("plan.json: %d prompt(s) for %d slot(s), ~%.2f USD if run%s; nothing sent" % (len(spec["slots"]), len(spec["slots"]), log["estimated_usd"],
+              " (mark + lockup per variant)" if two_step else ""))
         return
-    key = os.environ.get("OPENAI_API_KEY", "")
+    if os.environ.get("AID_UI_IMAGE_BASE"):   # another endpoint gets its own key, never the OpenAI one by accident
+        key = os.environ.get("AID_UI_IMAGE_KEY", "")
+        if not key:
+            die("AID_UI_IMAGE_BASE is set: its key comes from AID_UI_IMAGE_KEY, which is not set (OPENAI_API_KEY is never sent to another endpoint)", 2)
+    else:
+        key = os.environ.get("OPENAI_API_KEY", "") or os.environ.get("AID_UI_IMAGE_KEY", "")
     if not key:
-        die("OPENAI_API_KEY is not set in the environment (export it from services/.env for this call; never store it)")
-    if not force:
-        clash = [p for s in spec["slots"] for i in range(1, n + 1) for p in [os.path.join(out, "%s-%d.png" % (s, i))] if os.path.exists(p)]
-        if clash:
-            die("%d file(s) already exist in .aid-ui/logo/gen (first: %s); use --force to overwrite" % (len(clash), os.path.basename(clash[0])))
+        die("no image key: OPENAI_API_KEY or AID_UI_IMAGE_KEY is not set in the environment (export it for this call; never store it)", 2)
+
+    def plain_png(p):   # a variant kept only when it is a real PNG of the run's size, not a symlink, under the project
+        try:
+            if os.path.islink(p) or not os.path.realpath(p).startswith(project + os.sep):
+                return False
+            with open(p, "rb") as fh:
+                h = fh.read(24)
+            return h[:8] == b"\x89PNG\r\n\x1a\n" and len(h) == 24
+        except OSError:
+            return False
     capped = False
 
-    lockup_unit = PRICE[model][quality] + REF_USD   # the lockup call carries one reference: the mark just made
+    def write_log():   # fix 3: after every image, so an interrupted run lists what was paid for
+        tmp = os.path.join(out, "gen.json.part")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(log, f, ensure_ascii=False, indent=1)
+        os.replace(tmp, os.path.join(out, "gen.json"))
 
     def send_one(what, nrefs, cost):
         """Book one image before it is sent (billed or not), atomically against the project's image budget."""
@@ -221,9 +259,15 @@ def main():
     for slot, concept in spec["slots"].items():
         prompt = prompt_for(slots[slot], concept, spec)
         two = isinstance(prompt, dict)
-        rec = {"concept": concept, "prompt": prompt, "requested": n, "received": 0, "files": [], "marks": [], "errors": [], "status": "running"}
+        rec = {"concept": concept, "prompt": prompt, "requested": n, "received": 0, "files": [], "marks": [], "errors": [], "kept": [], "status": "running"}
+        log["slots"][slot] = rec
         for i in range(1, n + 1):
-            if log["estimated_usd"] + unit * (2 if two else 1) > max_cost + 1e-9:
+            path = os.path.join(out, "%s-%d.png" % (slot, i))
+            if os.path.exists(path) and not force and plain_png(path):   # fix 4: a variant already made is kept; only the missing ones are made
+                rec["kept"].append(os.path.relpath(path, project)); rec["files"].append(os.path.relpath(path, project))
+                rec["received"] += 1; log["received"] += 1
+                continue
+            if log["estimated_usd"] + (variant if two else unit) > max_cost + 1e-9:
                 rec["errors"].append("cost cap %.2f USD reached before variant %d" % (max_cost, i))
                 capped = True
                 break
@@ -234,6 +278,7 @@ def main():
                 break
             log["requested"] += 1
             log["estimated_usd"] = round(log["estimated_usd"] + unit, 3)   # counted when sent, billed or not
+            write_log()
             try:
                 if two:   # the mark first (square, with the references), then the lockup around exactly that mark
                     mark_png = generate(key, model, prompt["mark"], quality, "full", refs, "1024x1024")
@@ -242,6 +287,7 @@ def main():
                         f.write(mark_png)
                     os.replace(mpath + ".part", mpath)
                     rec["marks"].append(os.path.relpath(mpath, project))
+                    write_log()   # the paid mark is on record before the lockup call
                     budget = send_one(slot + ":lockup", 1, lockup_unit)
                     if budget:
                         rec["errors"].append(budget + " before the lockup of variant %d" % i)
@@ -261,6 +307,12 @@ def main():
                 except OSError:
                     msg = "HTTP %d" % e.code
                 rec["errors"].append("variant %d: %s" % (i, msg.replace(key, "<key>")))
+                if e.code == 400 and REFUSED.search(msg):   # the model's safety filter: recorded, the slot marked, never retried
+                    rec.setdefault("refused", []).append(i)
+                    costs.add(project, {"provider": "openai", "model": model, "purpose": "logo:%s:refused" % slot, "billing": "api",
+                                        "usd": 0, "refused": True, "variant": i})
+                    write_log()
+                    continue
                 if e.code in (401, 403, 429):
                     break
                 continue
@@ -270,7 +322,6 @@ def main():
                 if isinstance(e, urllib.error.URLError) and "timed out" in msg:
                     rec["errors"][-1] += " - unknown (may have been billed); not retried"
                 continue
-            path = os.path.join(out, "%s-%d.png" % (slot, i))
             tmp = path + ".part"
             with open(tmp, "wb") as f:
                 f.write(png)
@@ -278,6 +329,7 @@ def main():
             rec["files"].append(os.path.relpath(path, project))
             rec["received"] += 1
             log["received"] += 1
+            write_log()
         rec["status"] = "succeeded" if rec["received"] == n else ("partial" if rec["received"] else "failed")
         log["slots"][slot] = rec
         print("%s: %d/%d received%s" % (slot, rec["received"], n, "; " + rec["errors"][-1] if rec["errors"] else ""))
@@ -289,10 +341,7 @@ def main():
     log["finished"] = utc()
     log["status"] = "succeeded" if all(s["status"] == "succeeded" for s in log["slots"].values()) else \
         ("failed" if log["received"] == 0 else "partial")
-    tmp = os.path.join(out, "gen.json.part")
-    with open(tmp, "w", encoding="utf-8") as f:
-        json.dump(log, f, ensure_ascii=False, indent=1)
-    os.replace(tmp, os.path.join(out, "gen.json"))
+    write_log()
     print("gen.json: %s, %d/%d received, ~%.2f USD" % (log["status"], log["received"], log["requested"], log["estimated_usd"]))
     if log["status"] != "succeeded":
         sys.exit(1)
@@ -315,7 +364,7 @@ def prompt_for(slot, concept, spec=None):
     spec = dict(spec or {})
     spec.setdefault("mode", "full" if spec.get("name") else "mark")
     if spec.get("two_step") and spec["mode"] == "full":
-        return {"mark": mark_prompt(spec, concept), "lockup": lockup_prompt(spec)}
+        return {"mark": mark_prompt(spec, concept), "lockup": lockup_prompt(spec, concept)}
     return "%s Mark type: %s. Concept: %s" % (constraints_for(spec), slot["kind"], concept.strip())
 
 
@@ -329,13 +378,14 @@ def mark_prompt(spec, concept):
     return MARK_TEMPLATE % (_who(spec), concept.strip(), ("Colours: %s." % col.strip()) if col else "")
 
 
-def lockup_prompt(spec):
+def lockup_prompt(spec, concept=""):
     name = spec.get("name", "").strip()
     typ = (spec.get("typography") or "a clean contemporary geometric sans").strip()
     tag = spec.get("tagline")
     tagp = (', and the tagline "%s" in small tracked letters under the name' % tag.strip()) if isinstance(tag, str) and tag.strip() else ""
     col = spec.get("colors") or spec.get("palette") or ""
-    return LOCKUP_TEMPLATE % (_who(spec), name, typ, tagp, ("Colours: %s." % col.strip()) if col else "")
+    brief = (" Direction of this slot: %s" % concept.strip()) if concept and concept.strip() else ""   # fix 5: the slot's brief into the lockup
+    return LOCKUP_TEMPLATE % (_who(spec), name, typ, tagp, ("Colours: %s." % col.strip()) if col else "") + brief
 
 
 if __name__ == "__main__":

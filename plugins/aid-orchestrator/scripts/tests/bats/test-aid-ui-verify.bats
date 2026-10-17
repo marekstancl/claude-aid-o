@@ -5,12 +5,15 @@
 # a 404 page fails, lazy images reach the screenshot, an edited site is refused, the
 # preview runs beside the brand page, and the checks match checks.yaml one to one.
 
+load aid-ui-places
+setup_file() { places_template; }
+
 setup() {
   SC="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   LIB="$SC/../lib/ui-fidelity"
   FX="$BATS_TEST_DIRNAME/../fixtures/aid-ui/verify-site"
   T="$BATS_TEST_TMPDIR"
-  export AID_UI_HOST=127.0.0.1 AID_UI_PREVIEW_PORT=39927 AID_UI_BRAND_PORT=39926
+  export AID_UI_HOST=127.0.0.1 AID_UI_PREVIEW_PORT=${AID_UI_TEST_PREVIEW_PORT:-39927} AID_UI_BRAND_PORT=${AID_UI_TEST_BRAND_PORT:-39926}   # P113: overridable for a parallel copy
   export AID_UI_STATE_DIR="$T/st"
   PROJ="$T/proj"; SITE="$T/site"; RES="$PROJ/.aid-ui/verify/result.json"
   mkdir -p "$PROJ/docs/brand"
@@ -19,6 +22,7 @@ setup() {
   cp "$FX/project/DESIGN.md" "$PROJ/"
   cp -r "$FX/site" "$SITE"
   "$SC/aid-ui-state.sh" init "$PROJ" >/dev/null
+  places_copy "$PROJ"   # P113: build-record stands on the motion place's verdict
   "$SC/aid-ui-state.sh" method "$PROJ" build >/dev/null   # P108: build-record wants the build method receipt
 }
 
@@ -143,11 +147,12 @@ copy_reviewed() {
     "$PROJ/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
 }
 
-@test "the fixed copy passes every row" {
+# fixed_project — the fixed copy as a finished project: SEO brief approved, customer tasks, the form receiver
+fixed_project() {
   cp -r "$FX/fixed/." "$SITE/"
   # the SEO brief: page table (H1 as built) and the PM's AI robot policy the fixed robots.txt follows
   mkdir -p "$PROJ/docs/seo"
-  printf '| URL | H1 |\n|---|---|\n| / | Pekárna U Mlýna |\n| /o-nas | O nás |\n\n## Politika AI robotů\n- vyhledávání a citace: povolit\n- trénink: zakázat\n' >"$PROJ/docs/seo/brief.md"
+  printf '| URL | H1 |\n|---|---|\n| / | Pekárna U Mlýna |\n| /o-nas | O nás |\n| /vady | Jak pečeme |\n\n## Politika AI robotů\n- vyhledávání a citace: povolit\n- trénink: zakázat\n' >"$PROJ/docs/seo/brief.md"
   # SEO is part of the project and the PM approved exactly this brief (step 1s)
   sha="$(sha256sum "$PROJ/docs/seo/brief.md" | cut -d' ' -f1)"
   jq --arg t "docs/seo/brief.md@$sha" '.options.seo = true | .answers["q-seo"] = {kind: "seo_brief", decision: "approve", target: $t}' \
@@ -156,17 +161,20 @@ copy_reviewed() {
   printf -- '- {id: hours, task: "Kdy", expect: ["7:00 až 18:00"]}\n- {id: price, task: "Bochník", expect: ["Bochník", "65 Kč"]}\n- {id: booking, task: "Objednat", form: true}\n' > "$PROJ/docs/content/tasks.yaml"
   # the preview's form receiver (AC8): o-nas sends its telephone to /api/zprava
   echo '{"endpoint": "/api/zprava", "required": ["tel"], "honeypot": "website"}' > "$PROJ/.aid-ui/form.json"
+}
+
+@test "all-pages: one pass - the fixed copy passes every row at every width; gate-record makes and checks the customer page from that gate" {
+  fixed_project
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   measured
   copy_reviewed
-  # step 7b: the first run has only the customer page open (not made yet), then the page, then the gate again
-  run bash "$SC/aid-ui-verify.sh" "$PROJ"
-  [ "$(jq -c '[.rows[] | select(.status != "pass") | [.check, .status]] | unique' "$RES")" == '[["customer_page","not_covered"]]' ] \
-    || { echo "$output"; jq -c '.rows[] | select(.status != "pass")' "$RES" | head; return 1; }
-  python3 "$SC/aid-ui-customer-page.py" "$PROJ" >/dev/null
+  # P113 (IMP-697): one pass - gate-record makes the customer page from this very gate and checks it
+  # (coverage: a project without a declared standards map gets the warn_only row "projekt nemá mapu standardů")
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   [ "$status" -eq 0 ] || { echo "$output"; jq -c '.rows[] | select(.status != "pass")' "$RES" | head; return 1; }
-  [ "$(jq '[.rows[] | select(.status != "pass")] | length' "$RES")" -eq 0 ]
+  [ "$(jq '[.rows[] | select(.status != "pass" and (.check != "coverage" or .status != "warn"))] | length' "$RES")" -eq 0 ]
+  jq -e '[.rows[] | select(.check == "customer_page")] | length == 1 and .[0].status == "pass"' "$RES" >/dev/null
+  jq -e '.gate.customer_page == "pass"' "$PROJ/docs/design/brand-state.json" >/dev/null
   # the real send went through and the test messages are gone again; the log names no value
   jq -e '.rows[] | select(.check == "form_delivery") | .detail | startswith("delivered and removed again")' "$RES" >/dev/null
   [ -z "$(ls -A "$PROJ/.aid-ui/inbox" 2>/dev/null)" ]
@@ -183,7 +191,7 @@ copy_reviewed() {
   [ "$(jq '[.rows[] | select(.check == "ai_search")] | length' "$RES")" -gt 0 ]
   ! jq -r '.rows[] | select(.check == "ai_search") | .detail' "$RES" | grep -q 'N/A'
   ! jq -r '.rows[] | select(.check == "seo") | .detail' "$RES" | grep -q 'ai-'
-  jq -e '.indexable_pages == 2 and .pages_with_jsonld == 2 and .ai.BLOCKER == 0' "$PROJ/.aid-ui/verify/seo-summary.json" >/dev/null
+  jq -e '.indexable_pages == 3 and .pages_with_jsonld == 3 and .ai.BLOCKER == 0' "$PROJ/.aid-ui/verify/seo-summary.json" >/dev/null
 }
 
 @test "ai_search: N/A without options.seo; with it a missing policy fails the home page only, page findings on their page" {
@@ -327,8 +335,8 @@ copy_reviewed() {
   # the right slots: exact ratio, round, aria-hidden, icon only, position relative; a photo put in moves nothing
   cp "$FX/fixed/index.html" "$SITE/index.html"
   sed -i "s|</main>|<div data-aid-photo=\"a\" aria-hidden=\"true\" style=\"position:relative;overflow:hidden;aspect-ratio:4/5;width:200px\">$cam</div><div data-aid-photo=\"b\" aria-hidden=\"true\" style=\"position:relative;overflow:hidden;aspect-ratio:1/1;width:120px;border-radius:50%\">$cam</div><div data-aid-photo=\"c\" aria-hidden=\"true\" style=\"position:relative;aspect-ratio:3/2;width:300px\">$cam</div><div data-aid-photo=\"d\" aria-hidden=\"true\" style=\"position:relative;aspect-ratio:1/1;width:150px\">$cam</div></main>|" "$SITE/index.html"
-  # a fixed progress bar and an element that moves by itself are not the photo's doing
-  sed -i 's|</main>|<div id="pb" style="position:fixed;top:0;left:0;height:3px;width:10%;background:#1a1a1a"></div><p id="mv" style="position:relative">pohyb</p><script>setInterval(function(){pb.style.width=(Math.random()*100)+"%";mv.style.left=(Math.random()*20)+"px"},40)</script></main>|' "$SITE/index.html"
+  # a fixed progress bar and an element that moves by itself are not the photo's doing (a fixed sequence, not random: P113)
+  sed -i 's|</main>|<div id="pb" style="position:fixed;top:0;left:0;height:3px;width:10%;background:#1a1a1a"></div><p id="mv" style="position:relative">pohyb</p><script>var i=0;setInterval(function(){i++;pb.style.width=[10,90,30,70][i%4]+"%";mv.style.left=[0,20,5,15][i%4]+"px"},40)</script></main>|' "$SITE/index.html"
   verify; [ "$(st photo_slots index.html)" == pass ] || { jq -c '.rows[] | select(.check == "photo_slots")' "$RES"; return 1; }
   # no photos register but a slot on the page: fail; no slot and no register: N/A
   bash "$SC/aid-ui-tool.sh" verify --state "$T/state.json" --checks "$T/ck.json" --site "$SITE" --base "$url" --out "$T/out" --seo "$SC/aid-ui-seo-check.py" >/dev/null
@@ -341,7 +349,7 @@ copy_reviewed() {
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   [ "$(st copy_review index.html)" = not_covered ]
-  [ "$(jq '[.rows[] | select(.check == "copy_review")] | length' "$RES")" -eq 2 ]   # chromium 1440, one row per page
+  [ "$(jq '[.rows[] | select(.check == "copy_review")] | length' "$RES")" -eq 3 ]   # chromium 1440, one row per page (3 pages since P113)
   copy_reviewed
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   [ "$(st copy_review index.html)" = pass ] && [ "$(st copy_review o-nas/index.html)" = pass ]
@@ -496,7 +504,7 @@ YML
   cp -r "$FX/fixed/." "$SITE/"
   sed -i 's|</main>|<a class="btn pomalu" href="/x">Pomalu</a><style>.pomalu{display:inline-block;padding:12px;background:#183870;color:#fff;transition:background-color 3s linear}.pomalu:hover{background:#122a55}</style></main>|' "$SITE/index.html"
   AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" preview "$SITE" >/dev/null
-  run bash "$SC/aid-ui-tool.sh" measure "http://127.0.0.1:39927" "$T/measure.json" /
+  run bash "$SC/aid-ui-tool.sh" measure "http://127.0.0.1:$AID_UI_PREVIEW_PORT" "$T/measure.json" /
   AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" stop preview >/dev/null
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '[.controls[] | select(.examples | index("Pomalu")) | .states.hover] | length == 1 and (.[0] | startswith("rgb(18, 42, 85)"))' "$T/measure.json" >/dev/null
@@ -508,16 +516,16 @@ YML
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   AID_UI_PROJECT="$PROJ" run bash "$SC/aid-ui-serve.sh" preview "$SITE"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"URL: http://127.0.0.1:39927/"* ]]
-  curl -sf "http://127.0.0.1:39926/" >/dev/null
-  curl -sf "http://127.0.0.1:39927/" | grep -q 'Pekárna U Mlýna'
+  [[ "$output" == *"URL: http://127.0.0.1:$AID_UI_PREVIEW_PORT/"* ]]
+  curl -sf "http://127.0.0.1:$AID_UI_BRAND_PORT/" >/dev/null
+  curl -sf "http://127.0.0.1:$AID_UI_PREVIEW_PORT/" | grep -q 'Pekárna U Mlýna'
   AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" stop preview >/dev/null
   # another process on the preview port: the gate refuses and names it
-  python3 -m http.server 39927 --bind 127.0.0.1 --directory "$T" >/dev/null 2>&1 & HOLD=$!
-  for _ in $(seq 50); do [[ -n "$(ss -ltnH 'sport = :39927')" ]] && break; sleep 0.1; done
+  python3 -m http.server $AID_UI_PREVIEW_PORT --bind 127.0.0.1 --directory "$T" >/dev/null 2>&1 & HOLD=$!
+  for _ in $(seq 50); do [[ -n "$(ss -ltnH "sport = :$AID_UI_PREVIEW_PORT")" ]] && break; sleep 0.1; done
   "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
-  [ "$status" -eq 1 ]; [[ "$output" == *"port 39927 in use"*python3* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"port $AID_UI_PREVIEW_PORT in use"*python3* ]]
 }
 
 @test "flow ids that are not an allowlisted name are refused and nothing is imported; a symlinked scenario is refused; role/state cannot move a screenshot" {
@@ -614,4 +622,150 @@ PY
   jq -e '[.rows[] | select(.check == "first_paint_visible" and .page == "index.html") | .detail][0] | contains("main image") and contains("delayed fade")' "$RES" >/dev/null
   sed -i 's|#hero{animation:up 1s .8s both}|#hero{animation:none}|' "$SITE/index.html"
   verify; [ "$(st first_paint_visible index.html)" == pass ] || { jq -c '.rows[] | select(.check == "first_paint_visible")' "$RES"; return 1; }
+}
+
+# ---------------------------------------------------------------- P113 step 7: every page, every width, the workshop's checks
+# vrun <site> <checks csv> [viewports csv]: aid-ui-tool.sh verify over <site> served on a free port with a state whose build
+# lists the site's pages (every .html but 404.html); the result in $T/vr/result.json
+vrun() {
+  local site="$1" checks="$2" vps="${3:-390,1440}"
+  python3 - "$site" "$checks" "$vps" "$T" <<'PY'
+import json, os, sys
+site, checks, vps, t = sys.argv[1:]
+pages = sorted(os.path.relpath(os.path.join(r, f), site) for r, _, fs in os.walk(site) for f in fs if f.endswith(".html") and f != "404.html")
+json.dump({"build": {"id": "test", "fingerprints": {p: "fp" for p in pages}}}, open(t + "/vstate.json", "w"))
+json.dump({"viewports": [int(v) for v in vps.split(",")], "browsers": ["chromium"], "warn_only": [], "applies": {"all_pages": {"scope": "project"}},
+           "checks": {c: "test" for c in checks.split(",")}}, open(t + "/vchecks.json", "w"))
+PY
+  local port; port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+  python3 -m http.server "$port" --bind 127.0.0.1 --directory "$site" >/dev/null 2>&1 & local srv=$!
+  for _ in $(seq 50); do curl -s -o /dev/null "http://127.0.0.1:$port/" && break; sleep 0.1; done
+  bash "$SC/aid-ui-tool.sh" verify --state "$T/vstate.json" --checks "$T/vchecks.json" --site "$site" --base "http://127.0.0.1:$port/" \
+    --out "$T/vr" --seo "$SC/aid-ui-seo-check.py" >/dev/null 2>&1
+  kill "$srv" 2>/dev/null || true
+}
+vst() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .page == $p) | .status] | unique | join(",")' "$T/vr/result.json"; }
+
+@test "all-pages: every page at every width is visited, none sampled; a page on disk missing from the build fails" {
+  S="$T/s1"; mkdir -p "$S/a" "$S/b"
+  for p in index.html a/index.html b/index.html; do printf '<!doctype html><html lang="cs"><head><meta name="viewport" content="width=device-width"><title>x</title></head><body><h1>x</h1></body></html>' > "$S/$p"; done
+  vrun "$S" http_200,all_pages 320,390,768,1024,1440
+  [ "$(jq '[.rows[] | select(.check == "http_200")] | length' "$T/vr/result.json")" -eq 15 ]   # 3 pages x 5 widths
+  jq -e '[.rows[] | select(.check == "all_pages")] | length > 0 and all(.status == "pass" and (.detail | contains("3 pages x 5 widths")))' "$T/vr/result.json" >/dev/null
+  # a page the build does not list is never silently skipped
+  jq '.build.fingerprints |= del(.["b/index.html"])' "$T/vstate.json" > "$T/x" && mv "$T/x" "$T/vstate.json"
+  port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')"
+  python3 -m http.server "$port" --bind 127.0.0.1 --directory "$S" >/dev/null 2>&1 & srv=$!
+  for _ in $(seq 50); do curl -s -o /dev/null "http://127.0.0.1:$port/" && break; sleep 0.1; done
+  bash "$SC/aid-ui-tool.sh" verify --state "$T/vstate.json" --checks "$T/vchecks.json" --site "$S" --base "http://127.0.0.1:$port/" --out "$T/vr" --seo "$SC/aid-ui-seo-check.py" >/dev/null 2>&1
+  kill "$srv" 2>/dev/null || true
+  jq -e '[.rows[] | select(.check == "all_pages")] | length > 0 and all(.status == "fail" and (.detail | contains("b/index.html not in the build")))' "$T/vr/result.json" >/dev/null
+}
+
+@test "all-pages: density is the file a 2x screen gets - a 1x image is blurred, a srcset 2x candidate passes" {
+  S="$T/s2"; mkdir -p "$S/img" "$S/ok"; cp "$FX/site/img/modra.webp" "$FX/site/img/modra-1200.webp" "$S/img/"
+  printf '<!doctype html><html lang="cs"><head><meta name="viewport" content="width=device-width"><title>x</title></head><body><h1>x</h1><img src="/img/modra.webp" alt="m" width="600" height="300"></body></html>' > "$S/index.html"
+  printf '<!doctype html><html lang="cs"><head><meta name="viewport" content="width=device-width"><title>x</title></head><body><h1>x</h1><img src="/img/modra.webp" srcset="/img/modra-1200.webp 1200w, /img/modra.webp 600w" sizes="600px" alt="m" width="600" height="300"></body></html>' > "$S/ok/index.html"
+  # a srcset that claims 1200w for the 600 px file is not believed; x descriptors and <picture> sources are read
+  mkdir -p "$S/lez" "$S/x" "$S/pic"; H='<!doctype html><html lang="cs"><head><meta name="viewport" content="width=device-width"><title>x</title></head><body><h1>x</h1>'
+  printf '%s<img src="/img/modra.webp" srcset="/img/modra.webp 1200w" sizes="600px" alt="m" width="600" height="300"></body></html>' "$H" > "$S/lez/index.html"
+  printf '%s<img src="/img/modra.webp" srcset="/img/modra.webp 1x, /img/modra-1200.webp 2x" alt="m" width="600" height="300"></body></html>' "$H" > "$S/x/index.html"
+  printf '%s<picture><source srcset="/img/modra-1200.webp 2x, /img/modra.webp 1x"><img src="/img/modra.webp" alt="m" width="600" height="300"></picture></body></html>' "$H" > "$S/pic/index.html"
+  vrun "$S" image_weight
+  [ "$(vst image_weight index.html)" = fail ]; [ "$(vst image_weight ok/index.html)" = pass ]
+  [ "$(vst image_weight lez/index.html)" = fail ]; [ "$(vst image_weight x/index.html)" = pass ]; [ "$(vst image_weight pic/index.html)" = pass ]
+  jq -e '[.rows[] | select(.check == "image_weight" and .page == "index.html" and .viewport == "1440") | .detail][0] | contains("600 px wide for 600 px shown (1.00x, needs 2x)")' "$T/vr/result.json" >/dev/null
+}
+
+@test "all-pages: motion a script drives after the CSS motion settled fails motion_settled" {
+  S="$T/s3"; mkdir -p "$S/ok"
+  printf '<!doctype html><html lang="cs"><head><meta name="viewport" content="width=device-width"><title>x</title></head><body><h1>x</h1><span id="k">o</span><script>(function f(t){document.getElementById("k").style.transform="translateY("+(Math.sin(t/200)*3).toFixed(2)+"px)";requestAnimationFrame(f)})(0)</script></body></html>' > "$S/index.html"
+  printf '<!doctype html><html lang="cs"><head><meta name="viewport" content="width=device-width"><title>x</title></head><body><h1>x</h1><span id="k">o</span></body></html>' > "$S/ok/index.html"
+  vrun "$S" motion_settled 1440
+  [ "$(vst motion_settled index.html)" = fail ]; [ "$(vst motion_settled ok/index.html)" = pass ]
+  jq -e '[.rows[] | select(.check == "motion_settled" and .page == "index.html") | .detail][0] | contains("skriptová animace")' "$T/vr/result.json" >/dev/null
+}
+
+@test "all-pages: the motion of each variant is measured into metrics-pohyb-<id>.json; a page without motion is not_applicable" {
+  echo '{"viewBox":"0 0 256 256","web_ms":900,"parts":[{"id":"a","d":"M40 200 L40 100 L60 100 L60 200 Z","strokes":[{"d":"M50 210 L50 90","width":20,"delay":0,"dur":300}]}],"name":{"text":"Pekárna","x":20,"y":245,"size":22}}' > "$T/m.json"
+  python3 "$SC/aid-ui-logo-motion.py" "$T/m.json" "$T/m" >/dev/null
+  run bash "$SC/aid-ui-tool.sh" motion measure "$T/m/logo-animace.html" --variant v1 --out-dir "$T/c"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.web_logo_draw_ms <= 1000 and .web_logo_name_visible_ms == 0 and .web_motion_running_after_ms <= 1000 and .final_frame_diff_px == 0' "$T/c/metrics-pohyb-v1.json" >/dev/null
+  echo '<!doctype html><html><body><h1>x</h1></body></html>' > "$T/static.html"
+  bash "$SC/aid-ui-tool.sh" motion measure "$T/static.html" --variant v2 --out-dir "$T/c" >/dev/null
+  jq -e '.not_applicable == true' "$T/c/metrics-pohyb-v2.json" >/dev/null
+}
+
+@test "all-pages: planted - every defect of the workshop's set is reported by its row on its page (dílna: 13/13); a gate that is not green records no customer page" {
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"; [ "$status" -eq 3 ] || { echo "$output"; return 1; }
+  n=0; tot=0
+  while IFS='|' read -r head check page token; do
+    check="$(echo $check)"; page="$(echo $page)"; token="$(echo $token | sed 's/^ *//; s/ *$//')"; tot=$((tot + 1))
+    if jq -e --arg c "$check" --arg p "$page" --arg w "$token" '[.rows[] | select(.check == $c and .page == $p and .status != "pass" and (.detail | ascii_downcase | contains($w | ascii_downcase)))] | length > 0' "$RES" >/dev/null; then n=$((n + 1)); else echo "not reported: $head -> $check on $page ($token): $(jq -c --arg c "$check" --arg p "$page" '[.rows[] | select(.check == $c and .page == $p) | [.viewport, .status, .detail]] | unique | .[:3]' "$RES")"; fi
+  done < <(grep '^- dílna ' "$FX/README.md")
+  echo "dílna: $n/$tot"; [ "$tot" -eq 13 ] && [ "$n" -eq 13 ]
+  jq -e '.gate.customer_page == "not_covered"' "$PROJ/docs/design/brand-state.json" >/dev/null
+  jq -e '[.rows[] | select(.check == "customer_page")] | length == 1 and (.[0].detail | contains("not made"))' "$RES" >/dev/null
+}
+
+@test "copy-stable: a page's copy review is voided only by a change of the facts its claims cite (facts_used, IMP-696); a record without facts_used by any change" {
+  NARROW_VP=1440 narrow copy_review
+  cp -r "$FX/fixed/." "$SITE/"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  copy_reviewed
+  # index.html cites the phone, o-nas cites nothing; the values as aid-ui-copy.py records them (the register's whole entry)
+  tel="$(yq -o=json '.[] | select(.claim == "telefon")' "$PROJ/docs/content/facts.yaml")"
+  jq --argjson t "$tel" '.copy_review.pages["index.html"] += {facts_keys: ["telefon"], facts_used: {telefon: $t}}
+    | .copy_review.pages["o-nas/index.html"] += {facts_keys: [], facts_used: {}}' "$PROJ/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
+  # another fact changes: both stay, the vady page (no facts_used) is voided by any change
+  sed -i 's|"65 Kč"|"69 Kč"|' "$PROJ/docs/content/facts.yaml"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  [ "$(st copy_review index.html)" = pass ] && [ "$(st copy_review o-nas/index.html)" = pass ]
+  jq -e '.rows[] | select(.check == "copy_review" and .page == "vady/index.html") | .detail | contains("fakta se změnila")' "$RES" >/dev/null
+  # the cited fact changes: index.html is voided and names it, o-nas stays
+  sed -i 's|+420 777 123 456|+420 777 123 457|' "$PROJ/docs/content/facts.yaml"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  jq -e '.rows[] | select(.check == "copy_review" and .page == "index.html") | .status == "fail" and (.detail | contains("fakta stránky se změnila po kontrole textů: telefon"))' "$RES" >/dev/null
+  [ "$(st copy_review o-nas/index.html)" = pass ]
+}
+
+@test "cycle: one command runs the machine stages in order over the fixed copy and ends OK - build, copy, measurement, gate with its customer page, gate-check" {
+  fixed_project
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null; copy_reviewed
+  run "$SC/aid-ui-state.sh" cycle "$PROJ" "$SITE"
+  [ "$status" -eq 0 ] || { echo "$output"; jq -c '.rows[] | select(.status != "pass")' "$RES" 2>/dev/null | head; return 1; }
+  grep -q '^cycle: OK$' <<<"$output"
+  # the stages in their order, each said once
+  [ "$(grep -oP '^cycle: \K[A-Za-z]+' <<<"$output" | paste -sd' ')" == "BUILD copy measured GATE OK" ] || { echo "$output"; return 1; }
+  jq -e '.gate.customer_page == "pass"' "$PROJ/docs/design/brand-state.json" >/dev/null
+  [ -f "$PROJ/.aid-ui/measure.json" ]
+}
+
+@test "p113: the workshop's procedure - a content image with alt=\"\" needs role or aria-hidden, a form needs its notice beside it, touch targets count at 768 px" {
+  S="$T/s9"; mkdir -p "$S/img" "$S/ok"; cp "$FX/site/img/modra-1200.webp" "$S/img/m.webp"
+  H='<!doctype html><html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>x</title></head><body><h1>x</h1><p>IČO 27074358</p>'
+  printf '%s<img src="/img/m.webp" alt="" width="300" height="150"><form action="/api"><label>Tel <input name="tel"></label><button style="min-height:44px">Odeslat</button></form><footer><a href="/gdpr/">Ochrana osobních údajů</a></footer><nav><a href="/a/" style="font-size:11px;line-height:1">A</a> <a href="/b/" style="font-size:11px;line-height:1">B</a></nav></body></html>' "$H" > "$S/index.html"
+  printf '%s<img src="/img/m.webp" alt="" role="presentation" width="300" height="150"><section><form action="/api"><label>Tel <input name="tel"></label><button style="min-height:44px;min-width:44px">Odeslat</button></form><p>Odesláním souhlasíte se <a href="/gdpr/">zpracováním údajů</a>.</p></section></body></html>' "$H" > "$S/ok/index.html"
+  # a notice written as a sentence, no link anywhere on the page, is enough
+  mkdir -p "$S/ok2"; printf '%s<form action="/api"><label>Tel <input name="tel" style="min-height:44px"></label><button style="min-height:44px;min-width:44px">Odeslat</button><p>Odesláním formuláře zpracujeme vaše osobní údaje jen kvůli odpovědi.</p></form></body></html>' "$H" > "$S/ok2/index.html"
+  vrun "$S" a11y_basics,business_minimum,touch_targets 768,1440
+  [ "$(vst business_minimum ok2/index.html)" = pass ] || { jq -c '.rows[] | select(.page == "ok2/index.html")' "$T/vr/result.json"; return 1; }
+  jq -e '[.rows[] | select(.check == "a11y_basics" and .page == "index.html") | .detail][0] | contains("content image with an empty alt")' "$T/vr/result.json" >/dev/null
+  jq -e '[.rows[] | select(.check == "business_minimum" and .page == "index.html") | .detail][0] | contains("without information about personal data next to it")' "$T/vr/result.json" >/dev/null
+  jq -e '[.rows[] | select(.check == "touch_targets" and .page == "index.html" and .viewport == "768") | .status][0] == "fail"' "$T/vr/result.json" >/dev/null
+  ! jq -r '.rows[] | select(.page == "ok/index.html" and (.check == "business_minimum" or .check == "touch_targets")) | .status' "$T/vr/result.json" | grep -qv pass
+  ! jq -r '.rows[] | select(.page == "ok/index.html" and .check == "a11y_basics") | .detail' "$T/vr/result.json" | grep -q 'empty alt'
+}
+
+@test "p113: a brief finding lands on its own page (its URL), not on every page" {
+  NARROW_VP=1440 narrow seo
+  fixed_project
+  sed -i 's#| /o-nas | O nás |#| /o-nas | Jiný nadpis |#' "$PROJ/docs/seo/brief.md"
+  sha="$(sha256sum "$PROJ/docs/seo/brief.md" | cut -d' ' -f1)"
+  jq --arg t "docs/seo/brief.md@$sha" '.answers["q-seo"].target = $t' "$PROJ/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ"
+  jq -e '.rows[] | select(.check == "seo" and .page == "o-nas/index.html") | .status == "fail" and (.detail | contains("brief-h1"))' "$RES" >/dev/null || { jq -c '.rows[] | select(.check == "seo")' "$RES"; return 1; }
+  ! jq -r '.rows[] | select(.check == "seo" and .page != "o-nas/index.html") | .detail' "$RES" | grep -q 'brief-h1: expected'
 }

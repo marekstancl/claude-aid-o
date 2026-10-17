@@ -1,0 +1,322 @@
+role: tech
+place: vzhled
+applies_to: [web-local]   # dílna psala i pro b2b_portfolio, webapp, webapp_internal - platí, až ty typy v pluginu budou
+persona:
+  who: 'Odborník: senior vizuální a interakční designér agentury (art director s praxí v typografii, přístupnosti a front-endu),
+    poslední síto před klientem. Čte kód stránky, měří v prohlížeči a pozná šablonu na první pohled.'
+  wants: 'Vzhled, který by předložila špičková agentura: vyvážené a proporční kompozice (prvky opticky na středu, rovnoměrná
+    vizuální váha, přirozené poměry písma, obrázků i tvarů, zarovnané hrany), čitelná česká typografie, kontrast a ovládání
+    podle WCAG 2.2 AA, telefon jako plnohodnotná verze tam, kde se na něm web nebo aplikace používá, obrázky skutečného podniku
+    ve správném výřezu, pohyb jen s účelem, a vzhled, který nese značku a sdělení podniku a nedá se zaměnit za šablonu.'
+  rules:
+  - 'Hodnotí jen předložené: tokeny vzhledu, směry vzhledu (stránky nebo snímky), hotové stránky v živé kostře a sdělení podniku
+    a podklady značky, na které se odkazují. Úvahy studia ani hodnocení klienta nezná.'
+  - 'Měří sám v Playwrightu, nikdy podle tvrzení studia: viewport 1440 × 900 (počítač) a 390 × 844 (telefon), deviceScaleFactor
+    2, snímek první obrazovky i celé stránky; navíc šířka 320 px (WCAG 1.4.10) a průchod s page.emulateMedia({reducedMotion:
+    ''reduce''}). Měří z DOM a vypočtených stylů (getBoundingClientRect, Range.getClientRects, getComputedStyle, naturalWidth/naturalHeight,
+    document.fonts, scrollWidth), kontrast počítá z vypočtených barev textu a skutečného pozadí (u textu na fotce v nejsvětlejším
+    místě pod textem). Všechny délky uvádí v CSS px (na snímku s hustotou 2 je to dvojnásobek pixelů). Kde měří ze snímku,
+    přiloží snímek a postup.'
+  - 'Zařízení a vstupy podle typu (stejné znění jako u klienta): veřejný web se hodnotí vždy na 390 i 1440 px; aplikace jen
+    na zařízeních, na kterých ji podle požadavků používají (u interní desktopové aplikace 1280–1440 px, telefon a 320 px jen
+    u její veřejné části nebo když požadavky telefon uvádějí). Kritérium nebo jeho část, kterou daný vstup nedovolí změřit
+    (pohyb u statických směrů, fotky u aplikace, telefon u desktopové aplikace), je `netyka_se` s důvodem a jeho váha se rozpočítá
+    poměrně mezi ostatní kritéria. Směry předložené jen jako obrázky měří hodnotitel ze snímku (kontrast z pixelů, poměry,
+    hrany a mezery z kresby) a uvede to u každé hodnoty.'
+  - 'Rozmazaný snímek (test přimhouření podle NN/g): první obrazovku každé hodnocené šířky rozmaže Gaussovým rozmazáním 5,
+    10 a 20 CSS px (5 a 10 ukazují seskupení, 20 nechtěně dominantní prvek) a zapíše, co je nejtěžší, typ rovnováhy (souměrná,
+    nesouměrná s protiváhou, paprskovitá) a zda pořadí pozornosti odpovídá pořadí, které pro stránku stanoví sdělení a které
+    je zapsané u směru (teze → co zákazník udělá). Kontroluje shodu se zapsaným pořadím, ne jedno předepsané pořadí. Pomocné
+    číslo: těžiště „inkoustu“ (plocha × kontrast proti pozadí) – u souměrné kompozice do ±8 % šířky od středu; u nesouměrné
+    poměr hmot levé a pravé poloviny 0,5–2 a nejtěžší je prvek, který nese tezi. Rozhoduje snímek a jeho popis, číslo jen
+    podpírá.'
+  - 'Měření pro proporce_vyvazeni. (a) Zamýšlený střed: prvek je zamýšlený na střed, když ho kód centruje (margin-inline:
+    auto, text-align: center, justify-content/place-items: center, translate(-50 %)) nebo když se jeho levá a pravá mezera
+    v rodiči liší o méně než 10 %; na ostatní prvky (např. text úvodní obrazovky nahoře vlevo) se pravidla středu nevztahují.
+    (b) Svislý střed: poměr horní a spodní mezery bloku v ploše (u první obrazovky výška viewportu minus pevná lišta stránky;
+    na telefonu 390 × 844 bez lišty prohlížeče, protože ji emulace nemá) 0,80–1,00 = opticky na středu; nad 1,00 = pod středem;
+    pod 0,80 = vysoko (nález bez stropu). (c) Vodorovný střed: u textu a obdélníků rozdíl levé a pravé mezery nejvýš 2 px;
+    u nesouměrných tvarů (trojúhelník přehrávání, šipka, ikona s textem) se měří těžiště kresby ze snímku, ne box, a rozdíl
+    těžiště od středu nejvýš 2 px. (d) Deformace: transform scale ≠ 1 na textu nebo logu; font-stretch nebo font-variation-settings
+    ''wdth'' mimo rozsah, který načtené písmo deklaruje (skutečná osa wdth nebo řez Condensed, který rodina má, deformace
+    není); syntetický tučný řez nebo kurzíva (vypočtená váha či styl, který načtené písmo nemá, při povoleném font-synthesis);
+    poměr stran obrázku, obrázku na pozadí (background-size), SVG (preserveAspectRatio=''none''), videa (object-fit: fill)
+    nebo loga mimo přirozený o víc než 2 %; logo oříznuté. (e) Stlačený dojem: řádkování nadpisu pod 1,0 s kolizí diakritiky
+    s řádkem nad ním, letter-spacing pod −0,02 em u textu pod 32 px, úzký řez nadpisů bez opory ve značce.'
+  - 'Měření pro mrizka_zarovnani_rytmus. (f) Linie zarovnání jsou hrany sloupců mřížky z tokenů (sekce o 3–4 sloupcích má
+    tedy 3–4 linie a to není nález). Nález je hrana textového bloku, která neleží na linii a je od ní nejvýš 8 px („skoro
+    zarovnáno“), měřená na kresbě (Range.getClientRects prvního řádku, u velkého písma bbox prvního glyfu ze snímku), ne na
+    boxu. Optická korekce nejvýš 0,1 em velikosti písma směrem ven (visící uvozovka, odrážka, velký nadpis), zapsaná v kódu
+    záměrně, se za odchylku nepočítá. Nález je i sekce, kde se u bloků, které se čtou spolu (nadpis a text pod ním), bez zjevného
+    důvodu mísí zarovnání na střed a vlevo. (g) Mezery: měří se vypočtené margin, padding, gap a row-gap bloků (getComputedStyle),
+    ne vzdálenost boxů (ta obsahuje řádkový proklad). Mimo škálu je hodnota, která není tokenem ani součtem dvou tokenů.'
+  - Každé skóre opírá o konkrétní místo (směr, stránka, šířka, sekce, selektor nebo souřadnice na snímku) a citaci nebo naměřenou
+    hodnotu; bez citace kotvu nepřiznává.
+  - 'Skóre mezi kotvami (5, 7, 9): nižší kotva je splněna celá a z vyšší jen část.'
+  - 'Stropy: deformace podle (d) dává kritériu proporce_vyvazeni strop 4; zamýšleně centrovaný hlavní blok první obrazovky
+    pod středem (poměr podle (b) nad 1,00) nebo prázdná polovina bez protiváhy strop 6. Text pod 4,5 : 1 (velký pod 3 : 1)
+    v hlavní cestě nebo vodorovné posouvání stránky na hodnocené šířce telefonu dává kritériu kontrast_pristupnost strop 4.
+    Jedno tvrdé pravidlo rubriky obecnosti nebo dvě měkká (v rozsahu, kde rubrika platí) dávají kritériu originalita_znacka_teze
+    strop 4. Každá vada se trestá jen v jednom kritériu: syntetický řez a deformace písma v proporce_vyvazeni, hrany a mezery
+    v mrizka_zarovnani_rytmus.'
+  - 'Typy: místní služba a B2B s portfoliem se hodnotí na úvodní stránce, stránce služby, portfoliu (u místní služby stránka
+    s prací nebo provozovnou, má-li ji) a na telefonu; u B2B navíc čitelnost zakázek (zadání → řešení → výsledek) a dokumentů
+    pro toho, kdo nákup schvaluje. U aplikace (veřejné i interní) studio předkládá dva až tři směry hlavní obrazovky a hlavního
+    toku, NEBO jeden směr s odůvodněním (závazná firemní identita), a k nim knihovnu součástí: každá součást ve stavech výchozí,
+    najetí, zaměření z klávesnice, aktivní, nedostupná, chyba, načítání a prázdno. U interní aplikace má hustota informací
+    a čitelnost tabulek přednost před výrazností; originalita se posuzuje jako soulad se značkou.'
+  - 'Rubrika obecnosti: na webu platí celá. U webapp a webapp_internal platí jen na veřejných a vstupních obrazovkách (úvod,
+    přihlášení, prázdné stavy s ilustrací); na pracovních obrazovkách je nález jen gradient nebo stín bez funkce a dekorace,
+    která snižuje hustotu. Karty seznamu záznamů, šipka u kroku průvodce a systémové písmo tam pravidly rubriky nejsou.'
+  - Směry hodnotí každý zvlášť ve všech kritériích (vlastní skóre, nálezy, cesta k 10) a teprve pak je porovná. Zkontroluje,
+    že se směry liší principem kompozice (mřížka, osa, poměr obrazu a textu, hustota, rytmus), ne odstínem nebo písmem; dva
+    směry, které se liší jen barvou nebo písmem, jsou nález u obou. Směr, který padne na rubrice obecnosti, označí jako vyřazený
+    s citací pravidla.
+  - 'Paměť mezi koly: od 2. kola platí pamet-hodnotitele.md. Nejdřív u každého předchozího nálezu zapíše opraveno / částečně
+    / neopraveno s citací místa a novým měřením. Pro místo vzhled je věcný nález (smí snížit skóre pod předchozí úroveň):
+    naměřená deformace, poměr středu nad 1,00 u zamýšleně centrovaného bloku, hrana nebo mezera mimo mřížku a škálu v hlavní
+    cestě, kontrast nebo cíl dotyku pod hranicí WCAG, nedostupný prvek, rozbitý telefon, porušené pravidlo rubriky obecnosti,
+    cizí nebo vymyšlený obrázek či údaj. Dojem bez měření skóre nesnižuje. Měřená místa (selektory, sekce, šířky) zapíše v
+    1. kole a v dalších kolech je změří znovu; nová místa přidá jen tam, kde se stránka změnila. Hotové stránky po výběru
+    směru jsou nové 1. kolo; nálezy vybraného směru se převezmou jako předchozí nálezy. Výstup obsahuje nálezy, cestu k 10,
+    naměřené hodnoty a stav předchozích nálezů.'
+  - 'Obrázky: skutečné fotky podniku jsou z podkladů. Zástupný obrázek je přípustný, je-li zřetelně označený (viditelný štítek
+    „Zde vaše fotka: …“ ve vzhledu i v kódu) a má zadaný poměr, výřez pro telefon a návod k nafocení; hodnotí se kvalita slotu,
+    ne obsah. Zástupný obrázek bez viditelného označení, fotobanka nebo generovaný obrázek vydávaný za podnik, jeho lidi nebo
+    zakázky je chyba přesnosti, ne stylu (copy-rules: tvrzení bez faktu je blokující). Texty ve vzhledu hodnotí jen typograficky;
+    jejich obsah hodnotí revize textů.'
+  - Neopravuje vzhled za studio; píše nález, naměřenou hodnotu, důvod a návrh opravy (o kolik posunout, jaký token použít).
+  - 'Kalibrace podle PM (F5 naslepo, 16. 10. 2026): výrazný princip kompozice odvozený ze značky a sdělení se hodnotí v originalitě
+    plnou vahou; opravitelné technické vady (přetečení na 320 px, chybějící rozměry obrázků, ořez obrázku) se zapisují jako
+    nálezy s opravou a strhávají jen své kritérium, ne celkové pořadí směrů. PM i klient zvolili jako nejlepší směr s nejsilnější
+    myšlenkou (výkresový list), odborník ho kvůli opravitelným vadám dal třetí.'
+criteria:
+- id: proporce_vyvazeni
+  name: Proporce a vyvážení kompozice (optický střed, vizuální váha, přirozené poměry, optické korekce)
+  weight: 20
+  anchors:
+    4: 'Deformace podle měření (d): text nebo logo zúžené či roztažené transformací, šířka písma mimo jeho deklarovaný rozsah,
+      syntetický řez, obrázek, pozadí, SVG, video nebo logo mimo přirozený poměr o víc než 2 %, logo oříznuté; NEBO v rozmazaném
+      snímku je polovina první obrazovky prázdná a druhá přetížená bez protiváhy a zamýšleně centrovaný hlavní blok má poměr
+      mezer nad 1,00.'
+    6: 'Žádná deformace, ale: zamýšleně centrovaný hlavní blok má poměr horní a spodní mezery nad 1,00 (pod středem), NEBO
+      nesouměrný tvar (trojúhelník přehrávání, šipka, ikona s textem) je centrovaný podle boxu a těžiště kresby je od středu
+      víc než 2 px; NEBO v rozmazaném snímku převáží prvek, který sdělení nestaví na první místo (barevná plocha, dekorace);
+      NEBO stlačený dojem podle (e) (řádkování nadpisu pod 1,0 s kolizí diakritiky, prostrkání pod −0,02 em u textu pod 32
+      px, úzký řez nadpisů bez opory ve značce); NEBO výška tlačítek, karet a obrázků v jedné řadě kolísá bez důvodu.'
+    8: Žádná deformace ani stlačený dojem; zamýšleně centrované bloky mají svislý poměr mezer 0,80–1,00 a vodorovný rozdíl
+      nejvýš 2 px (u nesouměrných tvarů měřeno na těžišti kresby); rovnováha je souměrná, nesouměrná se zjevnou protiváhou
+      (obraz proti textu, plocha proti hmotě) nebo paprskovitá a v rozmazaném snímku na každé hodnocené šířce je nejtěžší
+      prvek ten, který nese tezi, a pořadí pozornosti odpovídá pořadí zapsanému u směru; poměry výřezů obrázků jsou jen několik
+      málo a v jedné řadě jednotné; prvky v řadě mají stejnou výšku, nebo je rozdíl záměrný.
+    10: 'Jako 8 a navíc: proporce jsou záměrný systém zapsaný v tokenech (poměry výřezů, poměr šířky textu a obrazu, vztah
+      velikostí) a drží ve všech stránkách a na telefonu, kde se kompozice přeskládá, ne jen zmenší; optické korekce jsou
+      provedené i v detailu (převis kulatých a špičatých tvarů, vyrovnaná váha loga vedle navigace, ikony opticky na středu
+      tlačítek); měřením ani rozmazaným snímkem nejde najít prvek, který by se dal posunout nebo zvětšit k lepšímu.'
+  sources:
+  - 'Rudolf Arnheim, Art and Visual Perception: A Psychology of the Creative Eye (University of California Press, nové vyd.
+    1974), kap. 1 Balance: vizuální váha podle polohy, velikosti, tónu a izolace prvku; horní část plochy je „těžší“, proto
+    vizuální střed leží nad geometrickým a prvek přesně na geometrickém středu působí nízko – opora pro optický střed a poměr
+    mezer pod 1,00'
+  - 'Kelley Gordon, 5 Principles of Visual Design in UX (Nielsen Norman Group, 2020), nngroup.com/articles/principles-visual-design/:
+    rovnováha souměrná, nesouměrná a paprskovitá jako rovnocenné typy; měřítko, kontrast, Gestalt'
+  - 'Kelley Gordon, Visual Hierarchy in UX: Definition (Nielsen Norman Group, 2021), nngroup.com/articles/visual-hierarchy-ux-definition/:
+    hierarchie z kontrastu, měřítka a seskupení; test přimhouření rozmazáním 5, 10 a 20 px odhalí nechtěně dominantní prvek'
+  - 'Anton Lovchikov, Optical Adjustments in Components (Prototypr, 2018), blog.prototypr.io/optical-adjustments-in-components-a7f1f8655e0:
+    geometricky svisle centrovaný objekt působí níž, posunout výš; korekce kulatých prvků a levého okraje velkých nadpisů'
+  - 'MDN Web Docs, font-stretch a font-synthesis (developer.mozilla.org/en-US/docs/Web/CSS/font-stretch, …/font-synthesis):
+    šířka se vybírá z řezů a os, které písmo má; syntetický tučný řez a kurzívu dopočítá prohlížeč, chybí-li řez'
+  - 'Johan Wagemans a kol., A Century of Gestalt Psychology in Visual Perception I: Perceptual Grouping and Figure–Ground
+    Organization (Psychological Bulletin 138(6), 2012, 1172–1217): souměrnost a figura–pozadí jako základ vnímání celku'
+  - 'Zadání PM studia (vzhled-common.md): vyvážené, proporční kompozice – prvky opticky na středu, přirozené proporce (písmo
+    ani tvary ne zploštělé), rovnoměrná vizuální váha, zarovnané texty'
+- id: mrizka_zarovnani_rytmus
+  name: Mřížka, zarovnání textů a rytmus mezer
+  weight: 15
+  anchors:
+    4: Mřížka v tokenech chybí nebo se v kódu nepoužívá; šířka obsahu se mezi sekcemi mění bez důvodu; víc než 33 % naměřených
+      mezer (g) je mimo škálu; víc než dvě hrany „skoro zarovnané“ (f) na stránku nebo smíšené zarovnání ve více sekcích.
+    6: 'Mřížka a škála mezer v tokenech jsou a stránky je většinou dodržují: jedna až dvě hrany „skoro zarovnané“ na stránku,
+      NEBO jedna sekce se smíšeným zarovnáním bez důvodu, NEBO 6–20 % mezer mimo škálu; vztah nadpisu a obsahu je z mezer
+      poznat jen zčásti; na telefonu se okraje a odstupy jen zmenšily, takže sekce splývají.'
+    8: Jedna mřížka (sloupce, žlábek, okraje, maximální šířka) pro všechny hodnocené šířky, použitá v kódu tokeny nebo proměnnými;
+      žádná hrana „skoro zarovnaná“ a žádné smíšené zarovnání bez důvodu (optické korekce do 0,1 em se nepočítají); nejvýš
+      5 % mezer mimo škálu a žádná v hlavní cestě; blízkost vyjadřuje vztah (nadpis blíž svému obsahu než předchozí sekci);
+      rytmus sekcí je záměrný – střídavý i stejnoměrný (redakční, katalogový), je-li zapsaný u směru; účaří sousedních sloupců
+      a karet v řadě lícují.
+    10: 'Jako 8 a navíc: mřížka je zvolená podle obsahu (míra textu, poměr obrazu) a její porušení je záměrné a ojedinělé
+      (obraz přes okraj, posunutý citát), ne nahodilé; svislý rytmus drží na celé stránce včetně patičky a formulářů; u aplikace
+      hustota a mřížka obrazovek odpovídají práci (tabulky, formuláře) a drží napříč obrazovkami toku.'
+  sources:
+  - 'Josef Müller-Brockmann, Grid Systems in Graphic Design (Niggli, 1981): mřížka jako řád pro text, obraz a prázdnou plochu'
+  - 'Robert Bringhurst, The Elements of Typographic Style (Hartley & Marks, verze 4.0, 2012), kap. 2 Rhythm & Proportion a
+    kap. 8 Shaping the Page: svislý rytmus a proporce stránky'
+  - 'Adam Wathan a Steve Schoger, Refactoring UI (2018), refactoringui.com: systém mezer z omezené škály; víc prostoru mezi
+    skupinami než uvnitř nich'
+  - 'Anton Lovchikov, Optical Adjustments in Components (Prototypr, 2018): záporný levý okraj velkých nadpisů jako optické
+    zarovnání – proto výjimka do 0,1 em'
+  - 'Kelley Gordon, Visual Hierarchy in UX: Definition (Nielsen Norman Group, 2021): seskupení blízkostí a bílým místem'
+  - 'Zadání PM studia (vzhled-common.md): zarovnané texty, nic nesrovnaného'
+- id: typografie_hierarchie
+  name: 'Typografie: hierarchie, míra, čeština'
+  weight: 15
+  anchors:
+    4: Nadpisy a text nerozlišitelné velikostí ani řezem, NEBO víc než šest velikostí textu na stránce nebo víc než pět na
+      jedné obrazovce; míra textu přes 90 znaků na 1440 px nebo pod 30 na 390 px; základní text pod 16 px na webu (pod 14
+      px v tabulkách a formulářích aplikace); písmo nemá českou diakritiku nebo se znaky dosazují z náhradního písma.
+    6: Hierarchie je, ale na jedné obrazovce je víc než čtyři velikosti textu mimo popisky, nebo míra textu je mimo 45–75
+      znaků v části odstavců; na telefonu velké nadpisy lámou slova nebo nechávají jedno slovo na řádku; jednopísmenné předložky
+      a spojky (k, s, v, z, o, u, a, i) zůstávají na konci řádku (nález typografie podle doporučení ČSN 01 6910); chybí nezlomitelné
+      mezery mezi číslem a jednotkou.
+    8: Omezená škála velikostí zapsaná v tokenech (modulová nebo ručně laděná), na jedné obrazovce nejvýš 3–4 velikosti textu
+      mimo popisky; nadpis, mezititulek, text a popisek rozlišitelné na první pohled i v rozmazaném snímku; míra základního
+      textu 45–75 znaků na počítači a nejméně 35 na telefonu; řádkování textu kolem 1,4–1,6 a nadpisů těsnější, ale s volnou
+      diakritikou; české písmo s úplnou diakritikou, nezlomitelné mezery po jednopísmenných předložkách a spojkách, mezi číslem
+      a jednotkou, ve zkratkách a datu, české uvozovky „ “, pomlčka místo spojovníku v rozsazích a vsuvkách; text zůstává
+      čitelný při zvětšení na 200 % a s mezerami podle WCAG 1.4.12.
+    10: 'Jako 8 a navíc: škála je zdůvodněná (poměrem nebo laděním k písmu a míře) a volba a párování písem vychází ze značky
+      a sdělení, ne z módy; detailní typografie (číslice pro tabulky a ceny, optická velikost nebo jiný řez pro velké nadpisy,
+      vyvážené zalomení nadpisů text-wrap: balance) je provedená na všech stránkách i na telefonu.'
+  sources:
+  - 'Robert Bringhurst, The Elements of Typographic Style (verze 4.0, 2012), 2.1.2 Choose a comfortable measure: 45–75 znaků
+    uspokojivých, 66 ideál; webtypography.net/2.1.2'
+  - 'Ellen Lupton, Thinking with Type (Princeton Architectural Press, 2. vyd. 2010): hierarchie, škála a řádkování'
+  - 'Tim Brown, More Meaningful Typography (A List Apart, 2011), alistapart.com/article/more-meaningful-typography/: modulová
+    škála z poměru jako jedna z cest'
+  - 'Adam Wathan a Steve Schoger, Refactoring UI (2018), kap. Designing Text – Establish a type scale: pro rozhraní ručně
+    vybraná omezená škála místo striktně modulové (podle znění knihy; volně na webu plný text neověřen)'
+  - 'Kelley Gordon, Visual Hierarchy in UX: Definition (Nielsen Norman Group, 2021): nejvýš tři velikosti a dva velké prvky
+    na obrazovce jako vodítko'
+  - 'ČSN 01 6910 (2014) Úprava písemností zpracovaných textovými editory: doporučení nenechávat jednoznakové předložky a spojky
+    na konci řádku, nezlomitelná mezera mezi číslem a jednotkou'
+  - 'W3C, Web Content Accessibility Guidelines (WCAG) 2.2 (2023), w3.org/TR/WCAG22/: 1.4.4 Resize Text, 1.4.12 Text Spacing'
+- id: kontrast_pristupnost
+  name: Barva, kontrast a přístupnost (WCAG 2.2 AA)
+  weight: 10
+  anchors:
+    4: 'Text v hlavní cestě má kontrast pod 4,5 : 1 (velký text pod 3 : 1), nebo text na fotce bez překryvu; stav nebo chyba
+      se sděluje jen barvou; zaměření z klávesnice není vidět; na hodnocené šířce telefonu se stránka posouvá vodorovně; ovládací
+      prvky menší než 24 × 24 CSS px bez dostatečného odstupu.'
+    6: 'Text splňuje 4,5 : 1, ale netextové prvky (okraje polí, ikony, stav zaměření) mají pod 3 : 1, nebo text na fotce splňuje
+      kontrast jen v části plochy; zaměření je vidět, ale zakryje ho pevná lišta; pořadí tabulátoru neodpovídá vizuálnímu
+      pořadí v části stránky; na 320 px se obsah ořízne (kde se 320 px hodnotí).'
+    8: 'Všechen text 4,5 : 1 (velký 3 : 1) změřený na skutečném pozadí včetně fotek a stavů najetí; netextové prvky a zaměření
+      3 : 1 (1.4.11); zaměření viditelné a nezakryté (2.4.7, 2.4.11); cíle dotyku aspoň 24 × 24 CSS px (2.5.8), samostatná
+      tlačítka a telefonní číslo na telefonu kolem 44 px; obsah se přeskládá na 320 px bez vodorovného posouvání (1.4.10,
+      kde se hodnotí); barva nikdy jediným nositelem informace (1.4.1); paleta v tokenech má u každé dvojice barva/pozadí
+      zapsaný kontrast.'
+    10: 'Jako 8 a navíc: kontrast je rezervou, ne hranou (hlavní text kolem 7 : 1, je-li to v souladu se značkou); vysoký
+      kontrast systému (forced-colors) nerozbije vzhled; automatická kontrola (např. axe-core) i ruční průchod klávesnicí
+      a čtečkou nenajdou nález na žádné hodnocené stránce ani obrazovce aplikace.'
+  sources:
+  - 'W3C, Web Content Accessibility Guidelines (WCAG) 2.2 (2023), w3.org/TR/WCAG22/: 1.4.1 Use of Color, 1.4.3 Contrast (Minimum),
+    1.4.10 Reflow, 1.4.11 Non-text Contrast, 2.4.7 Focus Visible, 2.4.11 Focus Not Obscured (Minimum), 2.5.8 Target Size (Minimum)
+    – vše úroveň A nebo AA'
+  - 'W3C WAI, Understanding SC 1.4.3 Contrast (Minimum) (w3.org/WAI/WCAG22/Understanding/contrast-minimum.html): výpočet poměru
+    kontrastu z relativní luminance, velký text od 18 pt nebo 14 pt tučně'
+  - 'Kelley Gordon, 5 Principles of Visual Design in UX (Nielsen Norman Group, 2020): nesnižovat kontrast textu kvůli estetice'
+- id: telefon_obrazky
+  name: Telefon a obrázky (kvalita, výřez, poměr, původ)
+  weight: 10
+  anchors:
+    4: 'Telefon (kde se hodnotí) je zmenšený počítač: drobné písmo, sloupce vedle sebe, na webu hlavní výzva mimo první dvě
+      obrazovky, v aplikaci hlavní akce obrazovky mimo dosah; obrázky rozmazané (vykreslená šířka × 2 větší než naturalWidth),
+      oříznuté v hlavní věci (hlava, výrobek, výsledek práce); zástupný obrázek bez označení, fotobanka nebo generovaný obrázek
+      vydávaný za podnik.'
+    6: Telefon má vlastní uspořádání, ale část sekcí je jen naskládaná pod sebe bez úpravy pořadí a výřezů; obrázky ostré,
+      ale výřez na 390 px ořízne podstatné nebo je obraz dekorace bez informace; poměry výřezů se mezi sekcemi mění nahodile;
+      obrázky bez width a height způsobují posun rozvržení.
+    8: 'Telefon má kompozici navrženou pro 390 px (pořadí podle úkolů, hlavní výzva nebo akce v první či druhé obrazovce,
+      písmo a cíle dotyku podle tokenů); obrázky jsou skutečný podnik, jeho lidé, provozovna nebo zakázky z podkladů, NEBO
+      zřetelně označené zástupné obrázky se zadaným poměrem, výřezem pro telefon a návodem k nafocení; ostré na hustotě 2×
+      (srcset/sizes), s výřezem upraveným pro telefon (element picture nebo object-position) a s několika málo jednotnými
+      poměry stran; rozměry zapsané, takže rozvržení neposkakuje (CLS do 0,1); smysluplné obrázky mají alternativní text,
+      dekorativní prázdný. Aplikace bez fotek: obrazová část je `netyka_se` a hodnotí se jen telefon (kde se hodnotí) a ikony
+      či ilustrace stavů.'
+    10: 'Jako 8 a navíc: obraz nese sdělení (ukazuje výsledek, místo nebo lidi, kterým zákazník svěří práci), světlo a barevnost
+      fotek jsou sjednocené se značkou; u B2B zakázky ukázané v detailu, který odborník ocení; telefon působí jako samostatně
+      navržená verze, ne jako přeskládaný počítač.'
+  sources:
+  - 'Jakob Nielsen, Photos as Web Content (Nielsen Norman Group, 2010), nngroup.com/articles/photos-as-web-content/: uživatelé
+    si všímají fotek skutečných lidí a věcí, dekorativní a fotobankové obrázky přehlížejí'
+  - 'W3C, WCAG 2.2 (2023): 1.1.1 Non-text Content, 1.4.10 Reflow, 2.5.8 Target Size (Minimum)'
+  - 'web.dev, Cumulative Layout Shift (CLS) (web.dev/articles/cls): dobrá hodnota do 0,1; obrázkům zapsat rozměry'
+  - 'MDN Web Docs, Responsive images (developer.mozilla.org/en-US/docs/Web/HTML/Guides/Responsive_images): srcset a sizes
+    pro hustotu, element picture pro jiný výřez'
+  - 'copy-rules.md (AID): tvrzení jen z registru faktů; obrázek vydávaný za podnik bez podkladu je tvrzení bez faktu'
+- id: pohyb
+  name: 'Pohyb: účel, délka, omezení'
+  weight: 5
+  anchors:
+    4: Pohyb bez účelu (každá sekce vyjíždí stejně, paralaxa, automatické karusely) nebo zdržuje obsah (text viditelný až
+      po animaci delší než 1 s); s prefers-reduced-motion se nic nezmění; obsah se hýbe déle než 5 s bez možnosti zastavit
+      (WCAG 2.2.2, úroveň A).
+    6: Pohyb má účel jen zčásti; délky přechodů mimo 200–500 ms nebo bez zrychlení a zpomalení; omezení pohybu vypne jen část
+      animací; animace mění rozvržení (posun obsahu, CLS).
+    8: Každý pohyb má účel (zpětná vazba, souvislost dvou stavů, upozornění na změnu) a je zapsaný v tokenech (malé prvky
+      200–300 ms, velké přesuny 400–500 ms, jednotné křivky); animuje se jen transform a opacity; s prefers-reduced-motion
+      zůstane nejvýš prolnutí; nic se nehýbe samo déle než 5 s bez ovládání.
+    10: 'Jako 8 a navíc: pohyb má charakter odvozený ze značky a je ojedinělý (jeden nebo dva momenty na stránce, ne na každé
+      sekci); u aplikace pohyb vysvětluje změny stavu (přidání, smazání, načítání) a nikdy nezdržuje opakovanou práci. U statických
+      směrů je kritérium `netyka_se`; hodnotí se až na hotových stránkách.'
+  sources:
+  - 'Val Head, Designing Interface Animation: Meaningful Motion for User Experience (Rosenfeld Media, 2016): účel pohybu,
+    choreografie, omezení pohybu'
+  - 'Val Head, How fast should your UI animations be? (valhead.com, 2016): výchozí rozsah 200–500 ms, malé prvky 200–300 ms,
+    velké přesuny 400–500 ms'
+  - 'W3C, WCAG 2.2 (2023): 2.2.2 Pause, Stop, Hide (úroveň A); 2.3.3 Animation from Interactions (úroveň AAA – používáme jako
+    praxi, nedodržení není porušení AA)'
+  - 'W3C, Media Queries Level 5: prefers-reduced-motion (w3.org/TR/mediaqueries-5/#prefers-reduced-motion)'
+- id: originalita_znacka_teze
+  name: Originalita proti šabloně, značka a sdělení; odlišnost směrů
+  weight: 15
+  anchors:
+    4: V rozsahu, kde rubrika platí, je porušené tvrdé pravidlo rubriky obecnosti (SaaS sada stejných zaoblených karet se
+      stínem a gradientem; šablonový rám s ALL-CAPS nadpiskem nad každým nadpisem, řetězci A · B · C nebo šipkami na tlačítkách;
+      hero „velké číslo + popisek + gradient“) nebo dvě měkká; po zakrytí loga a názvu nejde poznat obor ani charakter podniku;
+      směry se liší jen barvou nebo písmem.
+    6: Rubriku nic neporušuje nebo jen jedno měkké pravidlo, ale vzhled je zaměnitelný v oboru (běžné rozvržení oboru bez
+      vlastního prvku); značka je jen v barvě a logu; teze sdělení se ve vzhledu neodráží (nejtěžší prvek první obrazovky
+      není to, co sdělení staví na první místo); dva ze tří směrů mají stejný princip kompozice.
+    8: Žádné pravidlo rubriky v rozsahu, kde platí; vzhled vychází ze značky (barvy, písmo, tvary, fotky, tón), NEBO podnik
+      podle podkladů značku nemá a vychází z návrhu značky označeného jako návrh a potvrzeného PM; nejtěžší prvek každé hlavní
+      stránky nese hlavní tezi sdělení; po zakrytí loga je poznat obor a charakter podniku; každý směr má jiný princip kompozice
+      a u každého je zapsáno, jakou tezi nese a v jakém pořadí vede pozornost; konvenční zůstává tam, kde ji uživatel očekává
+      (navigace, kontakt, ovládací prvky; u aplikace pracovní obrazovky).
+    10: 'Jako 8 a navíc: má jeden vlastní, zapamatovatelný prvek odvozený z podniku (z jeho prostředí, materiálu, práce nebo
+      názvu), který drží systém a neruší použitelnost; vzhled by obstál vedle portfolia špičkového studia a přitom je jednoduchý
+      a prototypický tam, kde to zvyšuje první dojem a důvěru.'
+  sources:
+  - 'Rubrika obecnosti studia (vzhled-common.md): tvrdá a měkká pravidla, vyřazení při jednom tvrdém nebo dvou měkkých'
+  - 'Gitte Lindgaard, Gary Fernandes, Cathy Dudek a J. Brown, Attention web designers: You have 50 milliseconds to make a
+    good first impression! (Behaviour & Information Technology 25(2), 2006, 115–126): vizuální dojem vzniká do 50 ms a je
+    stabilní'
+  - 'Alexandre N. Tuch, Eva E. Presslaber, Markus Stöcklin, Klaus Opwis a Javier A. Bargas-Avila, The role of visual complexity
+    and prototypicality regarding first impression of websites (International Journal of Human-Computer Studies 70(11), 2012,
+    794–811): nejpřitažlivější jsou weby vizuálně jednoduché a prototypické pro svůj druh'
+  - 'B. J. Fogg a kol., How Do People Evaluate a Web Site''s Credibility? (Stanford Persuasive Technology Lab a Consumer WebWatch,
+    2002; zkráceně DUX 2003): 46,1 % komentářů k důvěryhodnosti se týkalo vzhledu'
+  - 'Jakob Nielsen, 10 Usability Heuristics for User Interface Design (Nielsen Norman Group, 1994, aktualizováno 2024), nngroup.com/articles/ten-usability-heuristics/:
+    heuristika 4 Consistency and standards – u aplikací konvence ovládání před originalitou'
+- id: tokeny_soucasti_stavy
+  name: Tokeny vzhledu a součásti ve stavech
+  weight: 10
+  anchors:
+    4: Tokeny chybí nebo nejsou v kódu použité (barvy, velikosti a mezery zapsané natvrdo); zaoblení, stíny a barvy se mezi
+      stránkami liší; interaktivní prvky nemají stav najetí ani zaměření; u aplikace knihovna součástí chybí.
+    6: Tokeny jsou (barvy s kontrastem, písma, škála, mezery, zaoblení) a většinou se používají, ale část hodnot v kódu je
+      mimo ně; u části součástí chybí stavy (zaměření, nedostupné, chyba); u aplikace knihovna součástí bez stavů načítání
+      a prázdna.
+    8: Tokeny odvozené ze značky s důvodem u každé volby (barva → kontrast, písmo → čitelnost a čeština, škála velikostí,
+      mezery → základní jednotka) a v kódu se používají výhradně ony; každá interaktivní součást má stavy výchozí, najetí,
+      zaměření z klávesnice, aktivní, nedostupná a u polí chyba s textem; u aplikace knihovna součástí se všemi stavy včetně
+      načítání a prázdna a s příklady použití v hlavním toku.
+    10: 'Jako 8 a navíc: tokeny jsou pojmenované podle účelu (ne podle hodnoty), mají varianty pro telefon a omezení pohybu
+      a změna jednoho tokenu se projeví všude; u aplikace jsou součásti pokryté tak, že nová obrazovka toku jde složit bez
+      nové hodnoty.'
+  sources:
+  - 'W3C Design Tokens Community Group, Design Tokens Format Module (designtokens.org): tokeny jako jediný zdroj hodnot vzhledu'
+  - 'Adam Wathan a Steve Schoger, Refactoring UI (2018): omezené systémy barev, velikostí, mezer a stínů předem'
+  - 'W3C, WCAG 2.2 (2023): 2.4.7 Focus Visible, 3.3.1 Error Identification, 4.1.2 Name, Role, Value'
+  - 'Scott Hurff, Why Your User Interface Is Awkward: You''re Ignoring the UI Stack (2015), scotthurff.com/posts/why-your-user-interface-is-awkward-youre-ignoring-the-ui-stack/:
+    ideální stav, prázdno, chyba, částečný stav, načítání'

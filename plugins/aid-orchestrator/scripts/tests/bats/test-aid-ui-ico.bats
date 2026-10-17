@@ -13,12 +13,16 @@ hdr() {
   python3 -c 'import struct,sys; n=int(sys.argv[1]); sys.stdout.buffer.write(b"\x89PNG\r\n\x1a\n"+struct.pack(">I",13)+b"IHDR"+struct.pack(">II",n,n))' "$1" > "$2"
 }
 
+# complete_set [dir] — what export_variants.py --web-icons writes (P113), in $T or <dir>
 complete_set() {
-  cp "$FX"/favicon-16.png "$FX"/favicon-32.png "$FX"/favicon-48.png "$T/"
-  hdr 180 "$T/apple-touch-icon.png"; hdr 192 "$T/icon-192.png"
-  hdr 512 "$T/icon-512.png"; hdr 512 "$T/icon-maskable-512.png"
-  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"/>' > "$T/favicon.svg"
-  python3 "$ICO" "$T/favicon.ico" "$T"/favicon-16.png "$T"/favicon-32.png "$T"/favicon-48.png
+  local d="${1:-$T}"; mkdir -p "$d"
+  cp "$FX"/favicon-16.png "$FX"/favicon-32.png "$FX"/favicon-48.png "$d/"
+  hdr 180 "$d/apple-touch-icon.png"; hdr 192 "$d/icon-192.png"
+  hdr 512 "$d/icon-512.png"; hdr 512 "$d/maskable-512.png"
+  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"/>' > "$d/favicon.svg"
+  echo '{"icons":[{"src":"/icon-512.png","sizes":"512x512"},{"src":"/maskable-512.png","sizes":"512x512","purpose":"maskable"}]}' > "$d/site.webmanifest"
+  echo '<link rel="manifest" href="/site.webmanifest">' > "$d/head-snippet.html"
+  python3 "$ICO" "$d/favicon.ico" "$d"/favicon-16.png "$d"/favicon-32.png "$d"/favicon-48.png
 }
 
 @test "three PNG fixtures -> an ICO with 3 entries of 16/32/48" {
@@ -59,10 +63,29 @@ complete_set() {
 
 @test "--verify names a missing file" {
   complete_set
-  rm "$T/icon-maskable-512.png"
+  rm "$T/maskable-512.png"
   run python3 "$ICO" --verify "$T"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"icon-maskable-512.png expected 512x512, got missing"* ]]
+  [[ "$output" == *"maskable-512.png expected 512x512, got missing"* ]]
+}
+
+@test "p113: --verify knows the export_variants.py text files: a manifest without a maskable icon or a snippet without the manifest link is named" {
+  complete_set
+  run python3 "$ICO" --verify "$T"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  echo '{"icons":[{"src":"/icon-512.png"}]}' > "$T/site.webmanifest"; echo '<link rel="icon" href="/favicon.ico">' > "$T/head-snippet.html"
+  run python3 "$ICO" --verify "$T"; [ "$status" -eq 1 ]
+  [[ "$output" == *"WRONG   site.webmanifest no icon with purpose maskable"* ]]; [[ "$output" == *'WRONG   head-snippet.html no <link rel="manifest">'* ]]
+  # a purpose that only contains the word, an icon pointing elsewhere, a link to another manifest: not the set
+  echo '{"icons":[{"src":"/missing.png","sizes":"512x512","purpose":"maskable"},{"src":"/maskable-512.png","sizes":"512x512","purpose":"not-maskable"}]}' > "$T/site.webmanifest"
+  echo '<link rel="manifest" href="/wrong.json">' > "$T/head-snippet.html"
+  run python3 "$ICO" --verify "$T"; [ "$status" -eq 1 ]
+  [[ "$output" == *"WRONG   site.webmanifest no icon with purpose maskable"* ]]; [[ "$output" == *"WRONG   head-snippet.html no <link"* ]]
+  # quotes and attribute order are free; "any maskable" as purpose counts
+  echo '{"icons":[{"src":"/maskable-512.png?v=2","sizes":"512x512","purpose":"any maskable"}]}' > "$T/site.webmanifest"
+  echo "<link href='/site.webmanifest' rel='manifest'>" > "$T/head-snippet.html"
+  run python3 "$ICO" --verify "$T"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  echo 'nejson' > "$T/site.webmanifest"; rm "$T/head-snippet.html"
+  run python3 "$ICO" --verify "$T"; [[ "$output" == *"WRONG   site.webmanifest not a JSON manifest"* ]]; [[ "$output" == *"WRONG   head-snippet.html missing"* ]]
 }
 
 @test "--verify refuses an unsafe or non-square favicon.svg, one WRONG line each" {
@@ -177,7 +200,7 @@ SVG
 # screenshot() writes a PNG header of the viewport size.
 run_icons() {
   command -v node >/dev/null || skip "node not installed"
-  sed -e "s|__ABSOLUTE_SYMBOL_SVG__|$1|" -e "s|__ABSOLUTE_ICONS_DIR__|$2|" \
+  sed -e "s|__ABSOLUTE_MEDIUM_SVG__|$1|" -e "s|__ABSOLUTE_ICONS_DIR__|$2|" \
     "$BATS_TEST_DIRNAME/../../../skills/ui-design/references/brand-icons.js" > "$T/brand-icons.js"
   run node -e '
     const fs = require("fs"), vm = require("vm");
@@ -216,10 +239,11 @@ run_icons() {
   run_icons "$T/symbol.checked.svg" "$T/icons"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ ! -e "$T/pwned" ]
-  [[ "$output" == *"icon-maskable-512.png"* ]]
+  [[ "$output" == *"written to $T/icons: favicon-32.png favicon-48.png" ]]   # P113: the medium cut only, the rest is export_variants.py's
   [ "$(grep '^GOTO ' <<<"$output")" = "GOTO http://svg.local/blank.html" ]
   [[ "$output" != *LIVE-SVG* ]]
   ! grep -q '<svg' "$T/brand-icons.js"
+  mv "$T/icons/favicon-32.png" "$T/icons/favicon-48.png" "$T/"; complete_set "$T/icons"; mv "$T/favicon-32.png" "$T/favicon-48.png" "$T/icons/"
   cp "$T/symbol.checked.svg" "$T/icons/favicon.svg"
   python3 "$ICO" "$T/icons/favicon.ico" "$T"/icons/favicon-{16,32,48}.png
   run python3 "$ICO" --verify "$T/icons"
@@ -261,4 +285,14 @@ run_icons() {
   run_icons "$T/symbol.checked.svg" "$T/icons"
   [ "$status" -eq 1 ]
   [[ "$output" == *"not square"* ]]
+}
+
+@test "p113: --check-svg accepts a non-square viewBox (a wide logo); favicon.svg in --verify stays square" {
+  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 80"><rect width="320" height="80"/></svg>' > "$T/wide.svg"
+  run python3 "$ICO" --check-svg "$T/wide.svg" "$T/wide.checked.svg"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ -f "$T/wide.checked.svg" ]
+  echo '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 0"/>' > "$T/flat.svg"
+  run python3 "$ICO" --check-svg "$T/flat.svg" "$T/flat.checked.svg"; [ "$status" -eq 1 ]; [[ "$output" == *"not a positive width and height"* ]]
+  complete_set; cp "$T/wide.svg" "$T/favicon.svg"
+  run python3 "$ICO" --verify "$T"; [ "$status" -eq 1 ]; [[ "$output" == *"favicon.svg viewBox 0 0 320 80 is not square"* ]]
 }

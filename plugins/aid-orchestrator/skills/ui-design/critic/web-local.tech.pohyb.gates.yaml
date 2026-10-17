@@ -1,0 +1,39 @@
+role: tech
+place: pohyb
+gates:
+  - criterion: odvozeni_ze_znacky
+    min: 7
+    why: "Šablona (4) nesmí ke klientovi a pohyb, který s logem jen pracuje, ale myšlenkou je zaměnitelný (6), klient vrátí; síto pouští jen variantu s vlastní značkovou myšlenkou."
+  - criterion: remeslo_casovani
+    min: 6
+    why: "Vady z tabulky Never Ship (ease-in na nástupu, růst z bodu, vše naráz, trhnutí na konci) jsou chyby řemesla, ne vkusu; klient je neposuzuje, takže je musí zastavit síto."
+  - criterion: obsah_neceka
+    min: 6
+    why: "Hero, které zdrží nadpis nebo tlačítko či se čte jako načítání, poškozuje web (použitelnost, LCP); taková varianta se klientovi nepředkládá."
+  - criterion: pristupnost
+    min: 6
+    why: "Neúspěšná kontrola omezení pohybu, obsahu bez JavaScriptu nebo doběhu, blikání či automatický pohyb nad 5 s jsou porušení WCAG 2.2.2 / 2.3.1 a progresivního vylepšení – tvrdá vada, ne věc vkusu."
+  - criterion: vernost_logu_a_zaver
+    min: 6
+    why: "Konečný stav jiný než schválené logo znamená, že se mění schválená značka; to síto pustit nesmí."
+  - criterion: technicka_kvalita
+    min: 5
+    why: "Viditelné zasekávání nebo skákající rozvržení (CLS > 0,1) působí lacině a rozbitě; drobné nedostatky (6) jsou opravitelné, hrubé (≤ 4) ne."
+# weighted_min: síto před klientem – průměr blízko úrovni dobrého studia (8); 7 připouští jednu slabší stránku, ne celkově průměrnou práci.
+weighted_min: 7.0
+# (doplněno F7, neověřeno) Strojové limity verze pro web – měří kód (pás snímků / kontrola), role je nevidí.
+# Nový typ brány „metric“: kód P113 ho musí umět (vedle when / any_of / weighted_min z F1). Nesplnění = varianta
+# se rolím nepředkládá (síto), bez ohledu na skóre.
+metrics:
+  - metric: web_logo_draw_ms
+    max: 1000
+    why: "Rozhodnutí PM v F6 (B zkrácený); F6 1,6 s = odborník 5/10; F7 2,06 s prošlo, protože limit chyběl."
+  - metric: web_logo_name_visible_ms
+    max: 0
+    why: "Jméno a podtitul čitelné od prvního snímku (nekreslí se); F6 i F7 skryté jméno."
+  - metric: web_motion_running_after_ms
+    max: 1000
+    why: "Po 1 s na webu nic neběží (kontrola-postup.md, Ověřeno v dílně)."
+  - metric: final_frame_diff_px
+    max: 0
+    why: "Konečný stav = schválené SVG; šev masky měřit snímkem před a po vypnutí masky."

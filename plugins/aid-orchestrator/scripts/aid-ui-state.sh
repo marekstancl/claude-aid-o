@@ -80,6 +80,12 @@
 #                          decision approve, targets docs/content/product-context.md@<sha256 of
 #                          the file now> (step 1p); 1 naming why (no file, no approval, changed
 #                          since approval). Steps 1v, 3 and 6 call it first.
+#     cycle <project> [<site dir>]                (P113, IMP-695) the machine part of a repair cycle in order:
+#                          motion record (a picked reference), build-record, copy check (aid-ui-copy.py stale -
+#                          which pages need a review; no model), measure + design standard, gate (aid-ui-verify.sh,
+#                          which records it with its customer page),
+#                          gate-check; stops at the first failure: `cycle: FAIL <stage> <reason>`, exit 1;
+#                          `cycle: OK`. Calls no role (the place round does). The site defaults to the build's.
 #     exception-covered <project> <result.json>   (P108) prints one JSON line per open row of the
 #                          result (fail, not_covered, warn outside warn_only of the checks.json next to
 #                          it, as finish counts them) that a live PM exception covers (same selector and
@@ -235,7 +241,7 @@ BRAND="$PROJECT/docs/brand"
 HTML="$BRAND/index.html"
 STATE="$PROJECT/docs/design/brand-state.json"
 OLD="$BRAND/state.json"   # P101 location, migrated by init
-if [[ "$VERB" != build-id ]]; then   # one mutation at a time: the answer check and the write are one step
+if [[ "$VERB" != build-id && "$VERB" != exception-covered && "$VERB" != cycle ]]; then   # one mutation at a time (exception-covered only reads: gate-record's customer page calls it under the lock; cycle only calls verbs that lock themselves)
   [[ "$VERB" != init ]] || mkdir -p "${STATE%/*}"
   if [[ -d "${STATE%/*}" ]]; then
     exec 9<"${STATE%/*}"   # read-only fd of the directory: a project symlink cannot make us write
@@ -727,7 +733,7 @@ take_answer() {
       elif $it != "" and ($a.items | type) != "array" then "answer \($id) has no items; --answer-item \($it) does not apply"
       elif $x == null then "answer \($id) has no item \($it)"
       elif $x.kind != $k then "answer \($used) is a \($x.kind) answer, not \($k)"
-      elif (if $k == "exception" then ((try ($x.target | fromjson) catch null) | if type == "object" then with_entries(select(.value != "*")) else . end)
+      elif (if $k == "exception" and ($t | startswith("{")) then ((try ($x.target | fromjson) catch null) | if type == "object" then with_entries(select(.value != "*")) else . end)
               != (($t | fromjson) | with_entries(select(.value != "*"))) else $x.target != $t end)
         then "answer \($used) is for \($x.target | tojson), not \($t)"
       elif ($x.decision | IN("approve", "choose") | not) then "answer \($used) decided \($x.decision), not approve or choose"
@@ -824,8 +830,8 @@ end_in_order() {
   jq -e '.gate.result_file' "$STATE" >/dev/null || die "$VERB refused: no gate recorded; the handover comes after the final gate (step 7)"
   local res; res="$(jq -r '.gate.result_file' "$STATE")"
   [[ -f "$res" ]] || die "$VERB refused: the recorded gate result $res is gone"
-  jq -e '[.rows[] | select(.check == "customer_page")] | length > 0 and all(.[]; .status == "pass")' "$res" >/dev/null ||
-    die "$VERB refused: the recorded gate did not pass the customer page (row customer_page); make the page, run the gate, gate-record, then the handover"
+  jq -e '.gate.customer_page == "pass"' "$STATE" >/dev/null ||
+    die "$VERB refused: the recorded gate has no checked customer page (gate.customer_page); a green gate's gate-record makes and checks it, then the handover"
   local page="$PROJECT/docs/zakaznik/index.html"
   [[ -f "$page" && "$(sha256sum "$page" | cut -d' ' -f1)" == "$(jq -r '.gate.customer_page_sha256 // ""' "$STATE")" ]] ||
     die "$VERB refused: docs/zakaznik/index.html is missing or not the page the recorded gate ran over (sha); the gate must run over the page the PM gets, then gate-record, then the handover"
@@ -841,6 +847,16 @@ chapter_all_target() {
   end_in_order
   { for id in $ids; do t="$(chapter_target "$id")" || exit 1; printf '%s\n%s\n' "$id" "$t"; done; } |
     sha256sum | { read -r h _; printf 'sha256:%s' "$h"; }
+}
+
+# P113: an accepting answer of a place's question needs the place's current verdict (aid-ui-critic.py place-guard)
+place_guard_answer() {   # <answer json>
+  jq -e '.places == true' "$STATE" >/dev/null || return 0
+  local kind dec pl
+  kind="$(jq -r .kind <<<"$1")"; dec="$(jq -r .decision <<<"$1")"
+  [[ "$dec" == choose || "$dec" == approve ]] || return 0
+  case "$kind" in vision) pl=sdeleni ;; identity) pl=logo ;; structure) pl=struktura ;; direction) pl=vzhled ;; handover) pl=web ;; *) return 0 ;; esac
+  python3 "$HERE/aid-ui-critic.py" place-guard "$PROJECT" --place "$pl" >/dev/null || die "the answer to $(jq -r .question <<<"$1") is not recorded (see above)"
 }
 
 json_sha() { printf 'sha256:%s' "$(jq -S -c -j . <<<"$1" | sha256sum | cut -d' ' -f1)"; }
@@ -886,7 +902,8 @@ case "$VERB" in
     else
       src="$TEMPLATE"; [[ -f "$OLD" ]] && src="$OLD"
       tmp="$(tmpfile brand-state.json)"
-      jq -s '.[0] * .[1]' "$TEMPLATE" "$src" > "$tmp" || { rm -f "$tmp"; die "could not read $src"; }
+      jq -s --argjson new "$([[ "$src" == "$TEMPLATE" ]] && echo true || echo false)" '.[0] * .[1]
+        | if $new then .places = true else . end' "$TEMPLATE" "$src" > "$tmp" || { rm -f "$tmp"; die "could not read $src"; }   # P113: a new project goes through the decision places
       mv "$tmp" "$STATE"; echo "brand-state.json created: $STATE (from $src)"
     fi
     if [[ -f "$HTML" ]]; then html_edit upgrade $CHAPTERS; fi
@@ -940,6 +957,7 @@ case "$VERB" in
       [[ "$(jq -r .target <<<"$pq")" == "items@$psha" && "$(jq -r '.items_sha256 // ""' <<<"$ans")" == "$psha" && "$asha" == "$psha" ]] ||
         die "the studio's answer to $qid does not carry the listed items (sha $psha); nothing recorded"
     fi
+    place_guard_answer "$ans"
     at="$(jq -r .at <<<"$ans")"
     [[ "$(date -u -d "$at" +%s%N 2>/dev/null || echo 0)" -gt "$(date -u -d "$opened" +%s%N 2>/dev/null || echo 0)" ]] ||
       die "the answer to $qid ($at) is not newer than its round ($opened); nothing recorded"
@@ -950,7 +968,7 @@ case "$VERB" in
     jq_write --arg q "$qid" --arg f "$file" --arg sha "$sha" --arg o "$opened" --argjson a "$ans" \
       '.answers[$q] = {kind: $a.kind, target: $a.target, decision: $a.decision, choice: $a.choice,
                        comment: $a.comment, cards: $a.cards, cards_sha256: $a.cards_sha256,
-                       answer_file: $f, answer_sha256: $sha, opened_at: $o, at: $a.at}
+                       answer_file: $f, answer_sha256: $sha, opened_at: $o, at: $a.at, by: $a.by}
                       + (if ($a.items | type) == "array" then {items: $a.items, items_sha256: $a.items_sha256} else {} end)'
     echo "ANSWER $qid: $(jq -c '{kind, target, decision, choice}' <<<"$ans")"
     ;;
@@ -1130,6 +1148,10 @@ case "$VERB" in
       die "build-record refused: the site $site holds the project or its state (docs/, .aid-ui/); the state would land inside it"
     # the method before the output (P108, 10. 10. 2026): the build was made after reading the build method
     receipt_fresh build
+    # P113: the motion place has no studio question; its verdict guards the build receipt
+    if jq -e '.places == true' "$STATE" >/dev/null; then
+      python3 "$HERE/aid-ui-critic.py" place-guard "$PROJECT" --place pohyb >/dev/null || die "build-record refused (see above)"
+    fi
     # the reference's motion, as the PM saw it with the directions, runs in the build (P108)
     motion_note=""
     if jq -e 'any(.refs[]?; .picked == true)' "$STATE" >/dev/null; then
@@ -1168,24 +1190,82 @@ case "$VERB" in
     # the same run recorded twice = the gate did not run (9. 10.: --copy-subject mistaken for a gate run)
     [[ "$(jq -r '.run_at // ""' "$res")" != "$(jq -r '.gate.run_at // ""' "$STATE")" ]] ||
       die "gate-record refused: this result (run_at $(jq -r .run_at "$res")) is already the recorded gate; the gate did not run again (aid-ui-verify.sh without --copy-subject)"
+    # P113 (IMP-697): the customer page is made from THIS result and checked before anything is recorded, so one gate
+    # pass suffices; the row customer_page is written here (the gate no longer computes it). Not green: the page is not
+    # made, the row is not_covered with the generator's reason; a made page failing its check: nothing recorded.
+    # A customer_page row already in the result is dropped - only gate-record writes it (none of the gate's rows vouch for it).
+    ckj="$(checks_json)"
+    cpo="$(tmpfile customer-page.out)"
+    cps=not_covered
+    # made into a staging folder and moved over docs/zakaznik only once the gate is recorded: a refused record keeps the
+    # page the recorded gate ran over (and the one the PM may already have)
+    cpn="$PROJECT/.aid-ui/customer-page.new"; rm -rf "$cpn"
+    if python3 "$HERE/aid-ui-customer-page.py" "$PROJECT" --result "$res" --out "$cpn" >"$cpo" 2>&1; then
+      python3 "$HERE/aid-ui-customer-page.py" "$PROJECT" --check --out "$cpn" >"$cpo" 2>&1 ||
+        { rm -rf "$ckj" "$cpn"; die "gate-record refused (nothing recorded): the customer page made from this gate fails its check: $(head -c 300 "$cpo")"; }
+      cps=pass
+    fi
+    cpd="$(tr '\n' ' ' <"$cpo" | sed 's/ERROR: //' | head -c 300)"; rm -f "$cpo"
+    tmp="$(tmpfile result.json)"
+    jq --arg s "$cps" --arg d "$([[ $cps == pass ]] && echo "made from this gate and checked by gate-record" || echo "not made: $cpd")" --slurpfile ck "$ckj" '
+      ((.fingerprints | keys | map(select(. != "_site"))) as $p | ($p | index("index.html")) as $h
+       | {check: "customer_page", page: (if $h then "index.html" else ($p[0] // "") end),
+          viewport: ($ck[0].viewports[-1] | tostring), browser: $ck[0].browsers[0], role: "", state: "", status: $s, detail: $d}) as $row
+      | .rows = [.rows[] | select(.check != "customer_page")] + [$row]' "$res" > "$tmp" && mv "$tmp" "$res" || { rm -f "$tmp" "$ckj"; die "gate-record refused: could not write the customer_page row into $res"; }
+    rm -f "$ckj"
     ck="$(checks_json)"
     rc=0; resolve="$(bpy gate "$STATE" "$ck" "$res")" || rc=$?
     mig="{}"; [[ "$rc" -ne 0 ]] || mig="$(bpy migrate "$STATE" "$ck" "$res")"
     rm -f "$ck"
-    [[ "$rc" -eq 0 ]] || exit 1
+    [[ "$rc" -eq 0 ]] || { rm -rf "$cpn"; exit 1; }
     if [[ "$mig" != "{}" ]]; then   # once per old exception, visibly: from now on it holds while its reason holds
       jq_write --argjson m "$mig" 'reduce ($m | to_entries[]) as $x (.; .exceptions[($x.key | tonumber)].reasons = $x.value
         | .exceptions[($x.key | tonumber)].reasons_migrated = true)'
       echo "MIGRATED page-* exception(s) to their reasons: $(jq -c . <<<"$mig")"
     fi
     jq_write --arg f "$res" --arg sha "$(sha256sum "$res" | cut -d' ' -f1)" --argjson r "$(jq -c '{run_at, build_id}' "$res")" \
-      --argjson idx "$resolve" '.gate = {run_at: $r.run_at, result_file: $f, result_sha256: $sha, build_id: $r.build_id}
+      --arg cps "$(jq -r 'first(.rows[] | select(.check == "customer_page") | .status) // "not_covered"' "$res")" \
+      --argjson idx "$resolve" '.gate = {run_at: $r.run_at, result_file: $f, result_sha256: $sha, build_id: $r.build_id, customer_page: $cps}
       | reduce $idx[] as $i (.; .exceptions[$i].resolved = $r.run_at) | .finished = null'
+    # the gate is recorded: its customer page replaces the previous one (index.html and www/, nothing else of the folder)
+    if [[ "$cps" == pass ]]; then
+      mkdir -p "$PROJECT/docs/zakaznik"; rm -rf "$PROJECT/docs/zakaznik/www"
+      [[ ! -d "$cpn/www" ]] || mv "$cpn/www" "$PROJECT/docs/zakaznik/www"
+      mv -f "$cpn/index.html" "$PROJECT/docs/zakaznik/index.html"
+    fi
+    rm -rf "$cpn"
     # the customer page the gate ran over, by sha (end_in_order compares); a new gate forgets finish.json
     cp_sha=""; [[ ! -f "$PROJECT/docs/zakaznik/index.html" ]] || cp_sha="$(sha256sum "$PROJECT/docs/zakaznik/index.html" | cut -d' ' -f1)"
     jq_write --arg s "$cp_sha" '.gate.customer_page_sha256 = (if $s == "" then null else $s end)'
     rm -f "$PROJECT/.aid-ui/finish.json"
     echo "GATE: $(jq -r '[.rows[] | .status] | group_by(.) | map("\(.[0]) \(length)") | join(", ")' "$res")"
+    ;;
+
+  places-on)
+    need_state
+    jq_write '.places = true'
+    echo "PLACES: on (accepting answers of the place questions and build-record need the place verdicts)"
+    ;;
+
+  place-record)
+    need_state
+    pl="$(opt place "$@")"
+    [[ "$pl" =~ ^(sdeleni|logo|pohyb|struktura|vzhled|web)$ ]] || usage "place-record needs --place sdeleni|logo|pohyb|struktura|vzhled|web"
+    wo="$(opt without "$@")"
+    if [[ -n "$wo" ]]; then   # no motion in this project: only the PM's own exception answer, never a bare flag
+      [[ "$pl" == pohyb ]] || usage "--without is for --place pohyb only"
+      jq -e --arg q "$wo" '.answers[$q] | .kind == "exception" and .target == "pohyb@without" and .decision == "approve" and .by == "pm"' "$STATE" >/dev/null ||
+        die "place-record refused: --without needs a recorded studio answer of the PM (by pm) of kind exception, target pohyb@without, decision approve; $wo is not one"
+      ANSWER="$wo"; USED="$wo"; take_answer exception "pohyb@without"
+      v="$(python3 "$HERE/aid-ui-critic.py" place-without "$PROJECT" "$ANSWER" "$(jq -r --arg q "$ANSWER" '.answers[$q].comment // ""' "$STATE")")" || die "place-record refused (see above)"
+      jq_write --argjson v "$v" --arg u "$USED" '.place_verdicts.pohyb = $v | .consumed += [$u]'
+      echo "PLACE pohyb: bez pohybu (answer $ANSWER)"
+      exit 0
+    fi
+    vf="${@: -1}"; [[ -f "$vf" ]] || usage "place-record needs <verdict.json> (aid-ui-critic.py place-verdict) or --without <answer id>"
+    v="$(python3 "$HERE/aid-ui-critic.py" place-check "$PROJECT" --place "$pl" "$vf")" || die "place-record refused (see above)"
+    jq_write --argjson v "$v" --arg p "$pl" '.place_verdicts[$p] = $v'
+    echo "PLACE $pl: $(jq -r '.status + (if .chosen then " (" + .chosen + ")" else "" end)' <<<"$v")"
     ;;
 
   step)
@@ -1410,6 +1490,55 @@ case "$VERB" in
       '{finished: $d, at: $at, web: $w, customer: $c, verdict: $v, rating: (if $r == "" then null else $r end), publish_blocked_by: $b}' > "$tmp" && mv "$tmp" "$PROJECT/.aid-ui/finish.json"
     echo "FINISHED: $(today) · $web · $customer · verdict $verdict${rating:+ ($rating/10)}"
     [[ "$blocked" == "[]" ]] || echo "PUBLISH BLOCKED by $(jq length <<<"$blocked") critical open item(s): $(jq -r 'map(.id) | join(", ")' <<<"$blocked")"
+    ;;
+
+  cycle)
+    # P113 (IMP-695): the machine part of a repair cycle in its order - motion record (a picked reference only),
+    # build-record, copy check, measurement, gate (aid-ui-verify.sh records it with its customer page), gate-check; stops at the first
+    # failure. No role and no model is called: the copy check only says which pages need a review, the rating is the
+    # place round (aid-ui-quality.py round --place), the handover is guarded by the web verdict.
+    need_state
+    (( $# <= 1 )) || usage "cycle <project> [<site dir>]"
+    site="${1:-$(jq -r '.build.dir // empty' "$STATE")}"
+    [[ -n "$site" && -d "$site" ]] || usage "cycle needs <site dir> (or a recorded build to take it from)"
+    site="$(realpath "$site")"
+    out="$(tmpfile cycle.out)"
+    fail() { echo "cycle: FAIL $1 $(tr '\n' ' ' <"$out" | sed -E 's/ERROR: ([a-z-]+\.(sh|py): )?//g' | head -c 400)"; rm -f "$out"; exit 1; }
+    me="$HERE/aid-ui-state.sh"; url=""
+    trap 'AID_UI_PROJECT="$PROJECT" bash "$HERE/aid-ui-serve.sh" stop preview >/dev/null 2>&1 || true' EXIT
+    serve() {   # the preview of the site, reused when it already serves this folder
+      [[ -n "$url" ]] && return 0
+      url="$(AID_UI_PROJECT="$PROJECT" bash "$HERE/aid-ui-serve.sh" preview "$site" 2>"$out" | sed -n 's/^URL: //p')"
+      [[ -n "$url" ]]
+    }
+    echo "cycle: $site"
+    if jq -e 'any(.refs[]?; .picked == true)' "$STATE" >/dev/null; then
+      serve || fail motion
+      bash "$HERE/aid-ui-tool.sh" motion "$url" "$PROJECT/.aid-ui/build.motion.json" \
+        --dir-sha256 "$(python3 "$HERE/aid-ui-motion.py" dirsha "$site")" >"$out" 2>&1 || fail motion
+      echo "cycle: motion recorded"
+    fi
+    "$me" build-record "$PROJECT" "$site" >"$out" 2>&1 || fail build-record
+    echo "cycle: $(grep -m1 '^BUILD:' "$out")"
+    mkdir -p "$PROJECT/.aid-ui/copy"
+    bash "$HERE/aid-ui-verify.sh" "$PROJECT" --copy-subject "$PROJECT/.aid-ui/copy/subject.json" >"$out" 2>&1 || fail copy
+    url=""   # aid-ui-verify.sh stops the preview it served
+    python3 "$HERE/aid-ui-copy.py" stale "$PROJECT" --subject "$PROJECT/.aid-ui/copy/subject.json" >"$out" 2>&1 || fail copy
+    echo "cycle: $(tail -1 "$out")"
+    serve || fail measure
+    pages=(); while IFS= read -r p; do pages+=("$p"); done < <(jq -r '.build.fingerprints | keys[] | select(. != "_site")
+      | "/" + (sub("index\\.html$"; "") | sub("\\.html$"; ""))' "$STATE")
+    bash "$HERE/aid-ui-tool.sh" measure --build "$(jq -r .build.id "$STATE")" "$url" "$PROJECT/.aid-ui/measure.json" "${pages[@]}" >"$out" 2>&1 || fail measure
+    python3 "$HERE/aid-ui-design-standard.py" write "$PROJECT" --measure "$PROJECT/.aid-ui/measure.json" >"$out" 2>&1 || fail measure
+    echo "cycle: measured ${#pages[@]} page(s), design standard written"
+    rc=0; bash "$HERE/aid-ui-verify.sh" "$PROJECT" >"$out" 2>&1 || rc=$?; url=""
+    # aid-ui-verify.sh records the gate itself (gate-record, with the customer page); 3 = rows open, recorded all the
+    # same - gate-check decides with the exceptions
+    (( rc == 0 || rc == 3 )) || fail gate
+    echo "cycle: $(grep -m1 '^GATE:' "$out") · customer page $(jq -r '.gate.customer_page' "$STATE")"
+    "$me" gate-check "$PROJECT" >"$out" 2>&1 || fail gate-check
+    rm -f "$out"
+    echo "cycle: OK"
     ;;
 
   gate-check)

@@ -1,0 +1,35 @@
+role: owner
+place: pohyb
+gates:
+  - criterion: sedi_k_podniku
+    min: 6
+    why: "Pohyb, jehož tón jde proti oboru nebo zákazníkům, majitel vrátí bez ohledu na ostatní kvality."
+  - criterion: poznam_svou_znacku
+    min: 7
+    why: "Obecný pohyb, který by šel s jakýmkoli logem (6), se nepřijímá; pohyb musí aspoň zčásti vycházet z vlastního loga."
+  - criterion: neni_lacine
+    min: 6
+    why: "Lacino působící pohyb snižuje důvěryhodnost podniku – je to horší než žádný pohyb."
+  - criterion: nezdrzuje
+    min: 6
+    why: "Pokud zákazník čeká na nadpis nebo tlačítko, pohyb škodí obchodu."
+  - criterion: neprekazi
+    min: 6
+    why: "Opakující se, rušivý nebo obsah zakrývající pohyb majitel na webu nechce."
+weighted_min: 7.0
+# (doplněno F7, neověřeno) Strojové limity verze pro web – měří kód (pás snímků / kontrola), role je nevidí.
+# Nový typ brány „metric“: kód P113 ho musí umět (vedle when / any_of / weighted_min z F1). Nesplnění = varianta
+# se rolím nepředkládá (síto), bez ohledu na skóre.
+metrics:
+  - metric: web_logo_draw_ms
+    max: 1000
+    why: "Rozhodnutí PM v F6 (B zkrácený); F6 1,6 s = odborník 5/10; F7 2,06 s prošlo, protože limit chyběl."
+  - metric: web_logo_name_visible_ms
+    max: 0
+    why: "Jméno a podtitul čitelné od prvního snímku (nekreslí se); F6 i F7 skryté jméno."
+  - metric: web_motion_running_after_ms
+    max: 1000
+    why: "Po 1 s na webu nic neběží (kontrola-postup.md, Ověřeno v dílně)."
+  - metric: final_frame_diff_px
+    max: 0
+    why: "Konečný stav = schválené SVG; šev masky měřit snímkem před a po vypnutí masky."

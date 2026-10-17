@@ -1,0 +1,52 @@
+# Brány pro roli tech na místě logo. Zná je jen kód; role je nevidí.
+# Směr, který nesplní kteroukoli platnou bránu, ke klientovi nejde bez ohledu na vážený součet.
+# Režim určuje role (pole `rezim` ve výstupu hodnocení, podle auditu, který studio dodává jako fakt),
+# ne studio. Kód bere "when" výhradně z pole `rezim`.
+#   "nove"    = směr nestaví na zavedeném motivu (podnik ho nemá, audit nedoložil poznávanost a výhradnost,
+#               NEBO jde o nový směr u podniku se zavedeným logem);
+#   "oziveni" = směr staví na zavedeném motivu, který role určila podle pravidla „Zavedený motiv“.
+#   "zavedeny_motiv" = role ve výstupu uvedla `zavedeny_motiv: ano` (platí pro oživení i pro nový směr
+#               u podniku se zavedeným logem; chrání proti zahození hodnoty bez důvodu).
+# Brána bez "when" platí vždy.
+# Typy bran: {criterion, min} = známka kritéria >= min;
+#            {any_of: [ids], min} = aspoň jedno z vyjmenovaných kritérií má známku >= min.
+role: tech
+place: logo
+gates:
+  - criterion: myslenka
+    min: 7
+    when: nove
+    why: "Zaměnitelná nebo obecná myšlenka (strop 6 z testu záměny) nesmí projít díky vysokým známkám za řemeslo; právě tak prošly fádní směry minulých kol."
+  - criterion: odlisnost
+    min: 7
+    when: nove
+    why: "Nové logo rozlišitelné od konkurence jen barvou nebo písmem je zaměnitelné; čistota řemesla to nevyváží."
+  - criterion: myslenka
+    min: 6
+    when: oziveni
+    why: "Oživení musí zavedený motiv zachovat poznávaný (kotva 6); zahození nebo rozmělnění motivu (kotva 4) neprojde. Spolu s branou any_of níže musí aspoň jedno z kritérií myšlenka/odlišnost ukázat vlastní detail (>= 7)."
+  - criterion: odlisnost
+    min: 6
+    when: oziveni
+    why: "U oživení se odlišnost měří provedením zavedeného motivu proti konkurentům, ne motivem samotným; motiv nakreslený stejně jako u konkurenta (kotva 4) neprojde."
+  - any_of: [myslenka, odlisnost]
+    min: 7
+    when: oziveni
+    why: "Rozhodnutí PM (recenze 2, nález 4, varianta b): čisté překreslení zavedeného motivu bez vlastního detailu (6/6) je kosmetika a projde jinak i váženým minimem (7,16); aspoň jedno z kritérií musí ukázat vlastní detail z podniku. Zavedený motiv se přitom netrestá (Romaniuk 2018; Walsh, Winterich, Mittal 2010)."
+  - criterion: navaznost_trvanlivost
+    min: 6
+    when: zavedeny_motiv
+    why: "U podniku se zavedeným motivem (oživení i nový směr) odliší kosmetiku a zbytečné zahození poznávané a vlastní hodnoty (kotva 4) od použitelného oživení; při váze 8 by se selhání v součtu ztratilo."
+  - criterion: jednoduchost_skala
+    min: 3
+    why: "Smrtelná vada (a): značka je v 16 px beztvará skvrna (role dá nejvýš 2)."
+  - criterion: falesna_cteni
+    min: 3
+    why: "Smrtelná vada (b): nechtěné čtení nebo podobnost se známou značkou (role dá nejvýš 2)."
+  - criterion: typografie
+    min: 3
+    why: "Smrtelná vada (c): název nečitelný v hlavičce webu nebo na vizitce (role dá nejvýš 2)."
+  - criterion: remeslo_tvaru
+    min: 4
+    why: "Viditelné chyby kresby pod úrovní kotvy 4 se klientovi neukazují; studio je opraví."
+weighted_min: 7.0

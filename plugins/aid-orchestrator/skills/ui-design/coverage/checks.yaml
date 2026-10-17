@@ -4,9 +4,9 @@
 # Rules FB-1..FB-15 and FB-21..FB-24 of /ecosystem/specs/frontend-build-standard, plus checks
 # beyond the FB rules that implement other ecosystem standards (named with their source below;
 # P103 extension, rules not yet numbered in the frontend-build standard).
-viewports: [390, 768, 1440]
+viewports: [320, 390, 768, 1024, 1440]   # P113: every page at every width the workshop measured (fix 64)
 browsers: [chromium, webkit]
-warn_only: [lighthouse_mobile]   # measured and reported, never blocks (FB-13)
+warn_only: [lighthouse_mobile, coverage]   # measured and reported, never blocks (FB-13); coverage: only its "no standards map" warn (P113), a gap is still a fail
 # where a check applies (default: every page, viewport, browser and flow state); a
 # combination outside it needs no row. Keys: browsers and viewports (subsets), flows: false,
 # scope: project (one row: the home page, the last viewport, the first browser).
@@ -20,7 +20,8 @@ applies:
   design_standard_doc: {scope: project}
   vision_doc: {scope: project}
   coverage: {scope: project}
-  customer_page: {scope: project}
+  customer_page: {scope: project}   # written by gate-record (P113)
+  all_pages: {scope: project}
   copy_review: {browsers: [chromium], viewports: [1440], flows: false}
   motion_fidelity: {scope: project}   # the gate observes the home page's motion itself (aid-ui-motion.mjs) and checks it against .aid-ui/motion.json
   safe_area: {browsers: [chromium], viewports: [390], flows: false}
@@ -36,7 +37,7 @@ applies:
   photo_slots: {browsers: [chromium], viewports: [1440, 390], flows: false}
   form_delivery: {scope: project, browsers: [chromium]}   # one row; inside it the form is sent at 390 px
   privacy_before_consent: {browsers: [chromium], viewports: [1440], flows: false}
-  touch_targets: {viewports: [390]}
+  touch_targets: {viewports: [320, 390, 768, 1024]}   # P113: every touch screen width (a menu folds away at 390 and shows at 768/1024)
 checks:
   http_200: every page answers HTTP 200 (FB-1)
   glyph_coverage: every character renders in the intended font, Czech diacritics included, no system fallback (FB-2)
@@ -62,23 +63,24 @@ checks:
   form_states: a form never posts to mailto:; sent by script it locks the submit button while sending, shows an error with a clickable phone or e-mail when the endpoint fails and a message of its own when it succeeds (FB-28)
   form_delivery: "the form sent for real through the preview's receiver (.aid-ui/form.json) at 390 px lands in .aid-ui/inbox and the page says so; the receiver refuses an incomplete message (422), drops a filled spam trap, delivers a repeat once; the preview log holds no sent value (P113a AC8; frontend-build-standard FB-28)"
   mobile_native: "hover styles only inside @media (hover: hover), zoom never disabled, form fields at least 16 px (adopted emil-skills/mobile-native; frontend-build-standard FB-33)"
-  a11y_basics: "a page with a navigation starts with a skip link to the content, headings never skip a level, the focus ring has at least 3:1 against what is behind the control, one link text never leads to two places, and at 320 px (400 % zoom) nothing scrolls sideways (PM 13. 10. 2026, Coufal critic; frontend-build-standard FB-32)"
+  a11y_basics: "a page with a navigation starts with a skip link to the content, it has exactly one h1, a content image with an empty alt says it is decorative (role presentation/none or aria-hidden), headings never skip a level, the focus ring has at least 3:1 against what is behind the control, one link text never leads to two places, and at 320 px (400 % zoom) nothing scrolls sideways (PM 13. 10. 2026, Coufal critic; frontend-build-standard FB-32)"
   text_clearance: "text beside a vertical divider line (a one-sided border of a block, not a control) keeps at least 12 px from it on every page and viewport (PM 13. 10. 2026, Coufal; frontend-build-standard FB-31)"
   photo_slots: "a photo the client still owes has a slot of its exact shape and ratio (docs/content/photos.yaml, data-aid-photo): empty it is aria-hidden with a camera icon, no text, nothing focusable; a test photo put in keeps the slot and the page height (P113a, PM 1A; frontend-build-standard FB-30)"
   task_test: "what a customer comes for (docs/content/tasks.yaml: a price, the opening hours, the booking form; every searched text from the facts register; the critic rubric's task ids all present) is found within two steps from the home page at 1440 and 390 px (P113a; frontend-build-standard FB-29)"
-  touch_targets: at phone width every control is at least 44 x 44 px, inline text links excepted (design-system-standard "Co se na platformách liší - Dotyk")
+  touch_targets: at every touch screen width (phone and tablet, 320-1024 px) every control is at least 44 x 44 px, inline text links excepted (design-system-standard "Co se na platformách liší - Dotyk")
   safe_area: a PWA's fixed panels at a screen edge use env(safe-area-inset-*); not a PWA = N/A (design-system-standard "Systémové okraje")
   privacy_before_consent: before any consent no third-party request, no cookie (public web) and no consent banner over 30 % of the screen (seo-audit-agent-standard "Privacy", seo/technicke-seo)
   vision_doc: docs/product-vision.md has the parts of the product-vision template, FAKT labels, an owner and a date; no vision in the project = N/A (product-vision, templates/product-vision-prompt; aid-ui-vision-check.py)
-  coverage: the coverage map still matches the ecosystem standards (aid-ui-coverage.sh check exit 0; frontend-build-standard "Enforcement"); reads the standards from the eco docs tree (/opt/eco/docs/docs), so a host without it gets not_covered
+  coverage: the coverage map still matches the ecosystem standards (aid-ui-coverage.sh check exit 0; frontend-build-standard "Enforcement"); reads the standards from the docs tree the project declares (its standards map), else from the plugin's copies (references/standards/) with a warn row "projekt nemá mapu standardů"
   ai_search: AI search and citation readiness - the PM's AI robot policy in robots.txt, JSON-LD on every indexable page matching the facts register, main text in the HTML, no snippet bans, no llms.txt without a decision (seo-audit-agent-standard §3-4, seo/technicke-seo; aid-ui-seo-check.py --ai)
   app_task_states: an application's task x state scenarios from the task map pass (FB-11)
   no_overlap: no two visible texts, controls or images overlap (FB-21)
   brand_consistency: every text uses a webfont the site declares, and header and footer are the same on every page (FB-22)
   page_weight: a page transfers at most 1 MB, no render-blocking script in head, large raster images have srcset (FB-23)
-  business_minimum: the seller is identified (IČO) on every page and a form links to how personal data are processed (FB-24)
+  business_minimum: the seller is identified (IČO) on every page and a form links to how personal data are processed, inside the form or its own container (FB-24; P113)
   screenshots_reviewed: the PM has reviewed a full-page screenshot of every page at every viewport (FB-15)
-  customer_page: the customer page (docs/zakaznik, aid-ui-customer-page.py) exists, is made from this build and holds no internal word; not_covered until it is generated after a green gate
+  customer_page: the customer page (docs/zakaznik, aid-ui-customer-page.py) is made from the recorded gate's own result and holds no internal word; written by aid-ui-state.sh gate-record (P113, IMP-697 - one gate pass), not by the gate run; not_covered while the gate is not green
+  all_pages: every page of the site (every .html but 404.html) at every width and browser of the matrix was visited, none sampled; a page missing from the build or a page x width not visited fails (P113, fix 64 - a sample of 30 of 152 pages let 11 overflows through)
   copy_review: the page's copy passed the independent copy review (aid-ui-copy.py, recorded by aid-ui-state.sh copy-record) for its current text, facts and approved product context; not_covered until reviewed; a PM exception does not make it pass (finish and the customer page read the exception)
   motion_settled: every finite animation of the page ended, nothing new started for 500 ms and the intro overlay (data-aid-intro, the one contract for an intro) is gone within 10 s; the page is measured and photographed at that moment (P108; design-system-standard "Tokeny - Pohyb")
   motion_fidelity: the built home page carries the reference's motion as the PM saw it listed with the directions - every adopt/replace item of .aid-ui/motion.json was observed to run (load, second load, scroll, hover, page) by aid-ui-motion.mjs over the site itself; no picked reference = N/A (P108)
