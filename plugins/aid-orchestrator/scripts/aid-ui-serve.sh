@@ -25,7 +25,14 @@
 #   preview <dir>          python3 -m http.server on AID_UI_HOST:AID_UI_PREVIEW_PORT
 #                          for a built site (the gate, aid-ui-verify.sh): the dir
 #                          must hold index.html and no symlink; idempotent like brand.
-#   stop <studio|brand|preview>  cancel that role's job, found under <jobs> or else
+#   skeleton <project>     (P113) builds the live skeleton from <project>/.aid-ui/structure.json into
+#                          <project>/site (lib/aid-ui-skeleton.py build: marked pages only, built pages kept)
+#                          and serves site/ as its own job on AID_UI_HOST:AID_UI_SKELETON_PORT - a fixed
+#                          address the gate's preview start/stop never touches; idempotent like preview
+#                          (a running skeleton job of the same site is reused after the rebuild).
+#   skeleton-check <project>  lib/aid-ui-skeleton.py check: redirect targets in the tree, one H1 per page,
+#                          no claim outside the facts register. Exit 1 on a finding.
+#   stop <studio|brand|preview|skeleton>  cancel that role's job, found under <jobs> or else
 #                          through the pointer $STATE_DIR/<id> that start writes
 #                          (line 1 jobs dir, line 2 project root). Pointer use:
 #                          a known project ($AID_UI_PROJECT, else the git root of
@@ -43,7 +50,7 @@
 # <project>/.aid-ui/jobs. Pointer dir = $AID_UI_STATE_DIR, else ~/.cache/aid-ui
 # (one file per job id = per port: jobs dir and project of the job started last).
 # Env: AID_UI_HOST (10.20.20.22), AID_UI_STUDIO_PORT (3915), AID_UI_BRAND_PORT (3916),
-# AID_UI_PREVIEW_PORT (3917).
+# AID_UI_PREVIEW_PORT (3917), AID_UI_SKELETON_PORT (3918).
 # Output: URL: <url> and JOB: <id>.
 # Exit: 0 ok, 1 port in use / start failure, 2 usage or refused target.
 # =============================================================================
@@ -55,6 +62,8 @@ STUDIO_PORT="${AID_UI_STUDIO_PORT:-3915}"
 STUDIO_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")/../lib/aid-ui-studio" && pwd)/server.py"
 BRAND_PORT="${AID_UI_BRAND_PORT:-3916}"
 PREVIEW_PORT="${AID_UI_PREVIEW_PORT:-3917}"
+SKELETON_PORT="${AID_UI_SKELETON_PORT:-3918}"   # P113: the skeleton's fixed address (G-008 range 3910-3919)
+SKELETON_PY="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/aid-ui-skeleton.py"
 PROJECT="${AID_UI_PROJECT:-$PWD}"
 JOBS="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}"
 STATE_DIR="${AID_UI_STATE_DIR:-$HOME/.cache/aid-ui}"
@@ -64,11 +73,11 @@ DEADLINE=604800   # 7 days (P108, 11. 10. 2026: the studio died after exactly 8 
 # and without directory listings (a directory serves its index.html or 404).
 # aid-job.sh stores argv one line per element, so the script is one line (exec of an escaped string).
 PREVIEW_PY="$(dirname "${BASH_SOURCE[0]}")/aid-ui-preview.py"   # static site + the form receiver (P113a)
-usage() { echo "usage: aid-ui-serve.sh studio <project> | brand <dir> | preview <dir> | stop <studio|brand|preview>   (preview: aid-ui-preview.py, with the form receiver of <project>/.aid-ui/form.json)" >&2; exit 2; }
+usage() { echo "usage: aid-ui-serve.sh studio <project> | brand <dir> | preview <dir> | skeleton <project> | skeleton-check <project> | stop <studio|brand|preview|skeleton>   (preview: aid-ui-preview.py, with the form receiver of <project>/.aid-ui/form.json)" >&2; exit 2; }
 die() { echo "ERROR: aid-ui-serve.sh: $1" >&2; exit 1; }
 refuse() { echo "ERROR: aid-ui-serve.sh: $1" >&2; exit 2; }
 
-port_of() { case "$1" in studio) echo "$STUDIO_PORT" ;; preview) echo "$PREVIEW_PORT" ;; *) echo "$BRAND_PORT" ;; esac; }
+port_of() { case "$1" in studio) echo "$STUDIO_PORT" ;; preview) echo "$PREVIEW_PORT" ;; skeleton) echo "$SKELETON_PORT" ;; *) echo "$BRAND_PORT" ;; esac; }
 job_id() { echo "aid-ui-$1-$(port_of "$1")"; }
 listening() { [[ -n "$(ss -ltnH "sport = :$1" 2>/dev/null)" ]]; }
 alive() {   # our job dir exists and its process is still running
@@ -165,8 +174,27 @@ case "$1" in
     fi
     start preview python3 "$(realpath "$PREVIEW_PY")" "$PREVIEW_PORT" "$HOST" "$dir" "$(realpath -m "$PROJECT")"
     ;;
+  skeleton)
+    dir="$(realpath -e "$2" 2>/dev/null || true)"
+    [[ -d "$dir" && -f "$dir/.aid-ui/structure.json" ]] || refuse "$2 has no .aid-ui/structure.json; the skeleton is built from the approved structure"
+    PROJECT="$dir"; JOBS="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}"
+    python3 "$SKELETON_PY" build "$dir" >/dev/null || die "the skeleton could not be built (see above)"
+    site="$dir/site"
+    l="$(find "$site" -mindepth 1 -type l -printf '%P' -quit)"
+    [[ -z "$l" ]] || refuse "$site/$l is a symlink; the skeleton serves no symlinks"
+    id="$(job_id skeleton)"
+    if alive "$id" && listening "$SKELETON_PORT" && [[ "$(jq -r '.command[4]' "$JOBS/$id/job.json")" == "$site" ]]; then
+      echo "URL: http://$HOST:$SKELETON_PORT/"; echo "JOB: $id"; exit 0
+    fi
+    start skeleton python3 "$(realpath "$PREVIEW_PY")" "$SKELETON_PORT" "$HOST" "$site" "$dir"
+    ;;
+  skeleton-check)
+    dir="$(realpath -e "$2" 2>/dev/null || true)"
+    [[ -d "$dir" ]] || refuse "$2 is not a project directory"
+    exec python3 "$SKELETON_PY" check "$dir"
+    ;;
   stop)
-    [[ "$2" == studio || "$2" == brand || "$2" == preview ]] || usage
+    [[ "$2" == studio || "$2" == brand || "$2" == preview || "$2" == skeleton ]] || usage
     id="$(job_id "$2")"
     jobs="$JOBS"
     if [[ ! -f "$jobs/$id/job.json" ]]; then

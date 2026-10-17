@@ -22,6 +22,10 @@ setup() {
   # the agent's own session: a transcript the cost book reads
   export CLAUDE_CODE_SESSION_ID=test-sid AID_UI_CLAUDE_PROJECTS="$T/cc"; mkdir -p "$T/cc/proj"; : > "$T/cc/proj/test-sid.jsonl"
   export PATH="$T/bin:$PATH" AID_UI_TOOL="$T/bin/tool" AID_UI_STATE_SH="$T/bin/state"
+  # P113: role calls go to Claude Opus first; these cases stub Codex, so Codex goes first and a real Claude is never
+  # reachable from a test (a stub that fails loudly: no model call in any test, llm-test-cost-control)
+  export AID_UI_ROLE_FIRST=codex
+  printf '#!/usr/bin/env bash\necho "a real claude was called from a test" >&2; exit 1\n' > "$T/bin/claude"
   printf '#!/usr/bin/env bash\n[[ -e "$BATS_TEST_TMPDIR/gate-red" ]] && { echo "ERROR: gate-check refused: fail row" >&2; exit 1; }; echo GATE OK\n' > "$T/bin/state"
   cat > "$T/bin/tool" <<'SH'
 #!/usr/bin/env bash
@@ -54,7 +58,7 @@ a = None if s < 4 else max(x for x in (4, 6, 8, 10) if x <= s)
 print(json.dumps({"criteria": [{"id": c["id"], "score": s, "anchor": a, "evidence": "úvod: nadpis a fotka pece", "missing_for_next": "víc", "to_ten": {"studio": ["úvod: vlastní fotka ordinace přes celou šířku"], "client": []}}
   for c in r["criteria"]], "findings": [
   {"id": "f1", "criterion": c0, "severity": sys.argv[3], "owner": "agent", "kind": "remeslo", "blocking": False, "text": "obecná věta", "fix": "konkrétně", "where": "úvod"},
-  {"id": "f2", "criterion": c0, "severity": "major", "owner": "client", "kind": "volba", "blocking": False, "text": "chybí fotky", "fix": "dodat", "where": "o nás"}],
+  {"id": "f2", "criterion": c0, "severity": "major", "owner": "client", "kind": "remeslo", "blocking": False, "text": "chybí fotky", "fix": "dodat", "where": "o nás"}],
   "readiness": [{"item": "vlastní fotky"}], "summary": "Solidní web, chybí nálada."}))
 PY
   done

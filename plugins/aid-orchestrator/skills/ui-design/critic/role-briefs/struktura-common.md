@@ -46,3 +46,7 @@ Tasks“, Nielsen Norman Group o informační architektuře, navigaci, tree test
 Search Central o struktuře webu a přesunu webu) a o přiložená pravidla studia `copy-rules.md`. Zdroje ověř na webu.
 Hranice přijetí neuváděj – zapiš je do `web-local.<role>.struktura.gates.yaml` (`gates: [{criterion, min, why}]`,
 `weighted_min`). Čeština.
+
+(P113, doplněno po napsání měřítek; brief_sha256 v AUTHORS.yaml je otisk znění, ze kterého autoři psali.)
+Prvním podkladem obou rolí na místě struktura je **stálá adresa živé kostry** (`aid-ui-serve.sh skeleton`, výchozí port
+3918): role kostru proklikávají jako zákazník, dokumenty jsou až druhý podklad.
