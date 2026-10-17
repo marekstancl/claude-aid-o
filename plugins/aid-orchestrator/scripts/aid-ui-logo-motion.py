@@ -4,7 +4,9 @@
   python3 aid-ui-logo-motion.py <spec.json> <out-dir>
 
 Input (JSON): {viewBox: "0 0 256 256", parts: [{id, d, fill?, strokes: [{d, width, delay, dur}]}],
-name?: {text, x, y, size?, family?, fill?}, web_ms?: 900, video_ms?: 2500, overlap?: 14, ease?}.
+name: {text, x, y, size?, family?, fill?}, web_ms?: 900, video_ms?: 2500, overlap?: 14, ease?}.
+The short form of the plan is accepted too: parts [{id, d, stroke_order}] (the part drawn along its own outline, in
+that order, pen_width default 24) and name_text (the name at the bottom left). The name is required.
 `parts` are the approved mark split into its pieces (their union is the approved SVG); each part is revealed by its
 pen strokes (a CSS mask: a stroke drawn along `d` with stroke-dasharray), in the order and relative timing of
 `delay`/`dur` (any unit; scaled). Writes:
@@ -30,6 +32,23 @@ def die(msg, code=1):
     sys.exit(code)
 
 
+def normalise(spec):
+    """The short form {parts: [{id, d, stroke_order}], name_text} into strokes and a name."""
+    for p in spec.get("parts") or []:
+        if isinstance(p, dict) and "strokes" not in p and isinstance(p.get("stroke_order"), (int, float)):
+            p["strokes"] = [{"d": p.get("d"), "width": spec.get("pen_width", 24), "delay": p["stroke_order"], "dur": 1}]
+    if isinstance(spec.get("name_text"), str) and not spec.get("name"):
+        vb = [float(x) for x in str(spec.get("viewBox", "0 0 256 256")).split()] if re.fullmatch(r"[-\d. ]+", str(spec.get("viewBox", ""))) else [0, 0, 256, 256]
+        spec["name"] = {"text": spec["name_text"], "x": vb[0] + 4, "y": vb[1] + vb[3] - 4, "size": round(vb[3] / 10, 2)}
+    return spec
+
+
+def num(v, what):
+    if not (isinstance(v, (int, float)) and v == v and abs(v) < 1e6):
+        die(f"{what} must be a finite number (got {v!r})")
+    return v
+
+
 def check(spec):
     if not re.fullmatch(r"-?[\d.]+ -?[\d.]+ [\d.]+ [\d.]+", str(spec.get("viewBox", ""))):
         die("viewBox must be 'x y w h'")
@@ -45,6 +64,15 @@ def check(spec):
         for s in ss:
             if not (isinstance(s.get("d"), str) and all(isinstance(s.get(k), (int, float)) and s[k] >= 0 for k in ("width", "delay", "dur")) and s["dur"] > 0):
                 die(f"part {p['id']}: a stroke needs d, width, delay >= 0 and dur > 0")
+    nm = spec.get("name")
+    if not (isinstance(nm, dict) and isinstance(nm.get("text"), str) and nm["text"].strip()):
+        die("name (or name_text): the name is part of the logo and is readable from the first frame")
+    for k in ("x", "y", "size"):
+        if k in nm:
+            num(nm[k], "name." + k)
+    ov = spec.get("overlap", 14)
+    if not (isinstance(ov, (int, float)) and ov == ov and 0 < ov < 1e4):
+        die(f"overlap {ov!r}: a positive number - the masks must overrun the straight ends (fix 63)")
     web, video = spec.get("web_ms", 900), spec.get("video_ms", 2500)
     if not (0 < web <= WEB_MAX):
         die(f"web_ms {web}: the web version draws within {WEB_MAX} ms (PM F6, pohyb-znacky.md limits)")
@@ -57,7 +85,14 @@ def timing(parts, total):
     """Stroke delays and durations scaled so the last stroke ends exactly at total ms."""
     end = max(s["delay"] + s["dur"] for p in parts for s in p["strokes"])
     k = total / end
-    return [[(round(s["delay"] * k), round(s["dur"] * k)) for s in p["strokes"]] for p in parts]
+    out = []
+    for p in parts:   # start and end rounded, the duration their difference: the last end is exactly total, never over
+        row = []
+        for s in p["strokes"]:
+            a, b = round(s["delay"] * k), min(total, round((s["delay"] + s["dur"]) * k))
+            row.append((a, max(1, b - a)) if b > a else (max(0, b - 1), 1))
+        out.append(row)
+    return out
 
 
 def svg(spec, ver, times):
@@ -70,7 +105,7 @@ def svg(spec, ver, times):
         masks.append(f'<mask id="m-{ver}-{p["id"]}" maskUnits="userSpaceOnUse">{ms}</mask>')
         paths.append(f'<path class="part" data-part="{p["id"]}" d="{html.escape(p["d"])}" fill="{html.escape(p.get("fill", "currentColor"))}" mask="url(#m-{ver}-{p["id"]})"/>')
     nm = spec.get("name") or {}
-    name = (f'<text class="name" x="{nm.get("x", 0)}" y="{nm.get("y", 0)}" font-size="{nm.get("size", 24)}" '
+    name = (f'<text class="name" x="{float(nm.get("x", 0)):g}" y="{float(nm.get("y", 0)):g}" font-size="{float(nm.get("size", 24)):g}" '
             f'font-family="{html.escape(nm.get("family", "system-ui, sans-serif"))}" fill="{html.escape(nm.get("fill", "currentColor"))}">{html.escape(nm["text"])}</text>'
             if nm.get("text") else "")
     return (f'<svg class="mark" viewBox="{vb}" role="img" aria-label="{html.escape(nm.get("text", "logo"))}" xmlns="http://www.w3.org/2000/svg">'
@@ -103,7 +138,7 @@ def main(a):
         spec = json.load(open(a[0], encoding="utf-8"))
     except (OSError, ValueError) as e:
         die(f"{a[0]}: {e}")
-    web, video = check(spec)
+    web, video = check(normalise(spec))
     out = a[1]
     os.makedirs(out, exist_ok=True)
     rec = {}

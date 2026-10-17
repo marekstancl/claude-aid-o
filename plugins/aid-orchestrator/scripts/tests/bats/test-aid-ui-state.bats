@@ -1694,11 +1694,12 @@ decide_payload() {
 
 @test "P108 method: prints the method files, writes the receipt; the live studio and payload-check refuse a question opened before it" {
   run "$SCRIPT" method "$PROJ" identity; [ "$status" -eq 0 ]
-  [ "$(grep -c '^===== ' <<<"$output")" -eq 15 ]   # P113a: critique, principles and the rest of logo-design are required reading too
+  n="$(jq '.methods.identity.files | length' "$BATS_TEST_DIRNAME/../../../skills/ui-design/sections.json")"; [ "$n" -ge 15 ]   # P113a + P113: the logo procedure and rubrics too
+  [ "$(grep -c '^===== ' <<<"$output")" -eq "$n" ]
   grep -q '^===== skills/ui-design/references/adopted/logo-design/SKILL.md' <<<"$output"
   grep -q 'Phase 3 — Concepts' <<<"$output"                    # the text itself was printed, not just named
   R="$PROJ/.aid-ui/method/identity.json"
-  [ "$(jq -r '.files | length' "$R")" -eq 15 ]
+  [ "$(jq -r '.files | length' "$R")" -eq "$n" ]
   [ "$(jq -r '.files[0].sha256' "$R")" = "$(sha256sum "$BATS_TEST_DIRNAME/../../../skills/ui-design/references/adopted/logo-design/SKILL.md" | cut -d' ' -f1)" ]
   run "$SCRIPT" method "$PROJ" nonsense; [ "$status" -eq 2 ]
   studio   # fresh receipts now
@@ -1706,8 +1707,10 @@ decide_payload() {
     "$PROJ/.aid-ui/studio/payload.json" > "$T/p.t" && mv "$T/p.t" "$PROJ/.aid-ui/studio/payload.json"
   run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"not from the 12 hours"* ]]
   run "$SCRIPT" record-answer "$PROJ" --question i1; [ "$status" -eq 1 ]; [[ "$output" == *"HTTP 422"* ]]   # the studio refuses the payload
-  jq '.questions[-1].opened_at = (now | todate)' "$PROJ/.aid-ui/studio/payload.json" > "$T/p.t" && mv "$T/p.t" "$PROJ/.aid-ui/studio/payload.json"
-  run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 0 ]
+  # opened at the receipt's own moment, never by the clock (P113: `now | todate` drops the milliseconds, so within the
+  # same second the question opened "before" its receipt and the case failed on a fast machine)
+  jq --arg at "$(jq -r .at "$PROJ/.aid-ui/method/identity.json")" '.questions[-1].opened_at = $at' "$PROJ/.aid-ui/studio/payload.json" > "$T/p.t" && mv "$T/p.t" "$PROJ/.aid-ui/studio/payload.json"
+  run "$SCRIPT" payload-check "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
 @test "P108 method: a kind with null in the map refuses until the PM's no_method answer, then writes the waiver with its mode" {

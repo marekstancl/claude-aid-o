@@ -23,6 +23,9 @@
 #                                                      the project design standard (step 7 bod 4)
 #   logo-sheet --spec <sheet.json> [--root <project>]  aid-ui-logo-sheet.mjs: every logo direction where
 #   logo-sheet --contact <dir> --out <png> [--root]     ... or the curation contact sheet of every concept PNG in <dir>
+#   logo-sheet --cards <sheet.json> [--root <project>]  (P113) the roles' direction cards: <cards_dir>/<id>.png (default
+#                                                      .aid-ui/logo/cards = the logo place's bundle), lockup, mark,
+#                                                      cuts 48/32/16 x4, black and white, inverted, the brief's contexts
 #                                                      it will live (header, tab 16 px, phone icon, avatar,
 #                                                      business card) as logo-<id>.png, and logo-prehled.png
 #                                                      of all directions next to the competitors' logos

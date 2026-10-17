@@ -225,9 +225,24 @@ def main():
         print("plan.json: %d prompt(s) for %d slot(s), ~%.2f USD if run%s; nothing sent" % (len(spec["slots"]), len(spec["slots"]), log["estimated_usd"],
               " (mark + lockup per variant)" if two_step else ""))
         return
-    key = os.environ.get("OPENAI_API_KEY", "") or os.environ.get("AID_UI_IMAGE_KEY", "")
+    if os.environ.get("AID_UI_IMAGE_BASE"):   # another endpoint gets its own key, never the OpenAI one by accident
+        key = os.environ.get("AID_UI_IMAGE_KEY", "")
+        if not key:
+            die("AID_UI_IMAGE_BASE is set: its key comes from AID_UI_IMAGE_KEY, which is not set (OPENAI_API_KEY is never sent to another endpoint)", 2)
+    else:
+        key = os.environ.get("OPENAI_API_KEY", "") or os.environ.get("AID_UI_IMAGE_KEY", "")
     if not key:
         die("no image key: OPENAI_API_KEY or AID_UI_IMAGE_KEY is not set in the environment (export it for this call; never store it)", 2)
+
+    def plain_png(p):   # a variant kept only when it is a real PNG of the run's size, not a symlink, under the project
+        try:
+            if os.path.islink(p) or not os.path.realpath(p).startswith(project + os.sep):
+                return False
+            with open(p, "rb") as fh:
+                h = fh.read(24)
+            return h[:8] == b"\x89PNG\r\n\x1a\n" and len(h) == 24
+        except OSError:
+            return False
     capped = False
 
     def write_log():   # fix 3: after every image, so an interrupted run lists what was paid for
@@ -248,7 +263,7 @@ def main():
         log["slots"][slot] = rec
         for i in range(1, n + 1):
             path = os.path.join(out, "%s-%d.png" % (slot, i))
-            if os.path.exists(path) and not force:   # fix 4: a variant already made is kept; only the missing ones are made
+            if os.path.exists(path) and not force and plain_png(path):   # fix 4: a variant already made is kept; only the missing ones are made
                 rec["kept"].append(os.path.relpath(path, project)); rec["files"].append(os.path.relpath(path, project))
                 rec["received"] += 1; log["received"] += 1
                 continue
@@ -263,6 +278,7 @@ def main():
                 break
             log["requested"] += 1
             log["estimated_usd"] = round(log["estimated_usd"] + unit, 3)   # counted when sent, billed or not
+            write_log()
             try:
                 if two:   # the mark first (square, with the references), then the lockup around exactly that mark
                     mark_png = generate(key, model, prompt["mark"], quality, "full", refs, "1024x1024")
@@ -271,6 +287,7 @@ def main():
                         f.write(mark_png)
                     os.replace(mpath + ".part", mpath)
                     rec["marks"].append(os.path.relpath(mpath, project))
+                    write_log()   # the paid mark is on record before the lockup call
                     budget = send_one(slot + ":lockup", 1, lockup_unit)
                     if budget:
                         rec["errors"].append(budget + " before the lockup of variant %d" % i)

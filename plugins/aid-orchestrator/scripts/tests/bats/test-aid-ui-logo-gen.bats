@@ -139,22 +139,24 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; }
 @test "p113: the endpoint and key come from the environment; gen.json after every image; only missing variants are made" {
   stub ok
   spec 3 '{"WC": "a crown"}'
-  mkdir -p "$P/.aid-ui/logo/gen"; printf 'x' > "$P/.aid-ui/logo/gen/WC-1.png"
+  mkdir -p "$P/.aid-ui/logo/gen"; printf '\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR\x00\x00\x04\x00\x00\x00\x04\x00' > "$P/.aid-ui/logo/gen/WC-1.png"; cp "$P/.aid-ui/logo/gen/WC-1.png" "$BATS_TEST_TMPDIR/kept.png"
   AID_UI_IMAGE_KEY=sk-test-0001 CF_ACCESS_CLIENT_ID=cid CF_ACCESS_CLIENT_SECRET=csec run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ "$(cat "$BATS_TEST_TMPDIR/req")" -eq 2 ]   # WC-1 existed: kept, only 2 and 3 made
   jq -e 'with_entries(.key |= ascii_downcase) | .authorization == "Bearer sk-test-0001" and .["cf-access-client-id"] == "cid"' "$BATS_TEST_TMPDIR/hdr-1" >/dev/null
   jq -e '.slots.WC.kept == [".aid-ui/logo/gen/WC-1.png"] and .received == 3 and .status == "succeeded"' "$P/.aid-ui/logo/gen/gen.json" >/dev/null
-  [ "$(cat "$P/.aid-ui/logo/gen/WC-1.png")" = x ]
+  cmp -s "$P/.aid-ui/logo/gen/WC-1.png" "$BATS_TEST_TMPDIR/kept.png"   # kept, not regenerated
+  # another endpoint never gets the OpenAI key: with AID_UI_IMAGE_BASE only AID_UI_IMAGE_KEY counts
+  OPENAI_API_KEY=sk-openai-0009 run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json; [ "$status" -eq 2 ]; [[ "$output" == *"AID_UI_IMAGE_KEY"* ]]
 }
 
 @test "p113: an interrupted run's gen.json lists the images already paid for; a filter refusal is recorded and not retried" {
   stub fail-after-1; spec 3 '{"WC": "a crown"}'
-  OPENAI_API_KEY=sk-test-0002 run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json; [ "$status" -eq 1 ]
+  AID_UI_IMAGE_KEY=sk-test-0002 run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json; [ "$status" -eq 1 ]
   jq -e '.slots.WC.files == [".aid-ui/logo/gen/WC-1.png"] and .received == 1' "$P/.aid-ui/logo/gen/gen.json" >/dev/null
   kill "$SRV"; rm -rf "$P/.aid-ui/logo/gen" "$BATS_TEST_TMPDIR"/req*; SRV=
   stub refuse-2; spec 3 '{"WC": "a crown"}'
-  OPENAI_API_KEY=sk-test-0003 run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json; [ "$status" -eq 1 ]
+  AID_UI_IMAGE_KEY=sk-test-0003 run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json; [ "$status" -eq 1 ]
   [ "$(cat "$BATS_TEST_TMPDIR/req")" -eq 3 ]   # 1 ok, 2 refused (not retried), 3 ok
   jq -e '.slots.WC.refused == [2] and .received == 2' "$P/.aid-ui/logo/gen/gen.json" >/dev/null
   jq -se '[.[] | select(.refused == true)] | length == 1' "$P/.aid-ui/costs.jsonl" >/dev/null
@@ -164,6 +166,6 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; }
   stub ok
   printf '{"n": 1, "two_step": true, "name": "Firma", "quality": "high", "slots": {"WC": "a crown"}}' > "$P/.aid-ui/logo/gen.json"
   echo '{"provider": "openai", "billing": "api", "purpose": "logo:old", "usd": 1.95}' > "$P/.aid-ui/costs.jsonl"
-  OPENAI_API_KEY=sk-test-0004 run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json; [ "$status" -eq 1 ]
+  AID_UI_IMAGE_KEY=sk-test-0004 run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json; [ "$status" -eq 1 ]
   [[ "$output" == *"image budget"* ]]; [ ! -e "$BATS_TEST_TMPDIR/req" ]   # no request was made
 }

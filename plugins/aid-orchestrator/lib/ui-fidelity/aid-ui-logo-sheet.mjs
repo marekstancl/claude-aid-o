@@ -15,15 +15,23 @@
 // embedded as data URIs; a lockup SVG is inlined into the page, so its <text> may use a family from
 // `fonts` (exploration only; the kit sets the name in outlines through aid-ui-tool.sh wordmark).
 // Prints one line per written file. Exit: 0, 1 a file cannot be read, 2 usage.
+//   node aid-ui-logo-sheet.mjs --cards <sheet.json> [--root <project>]   (P113, logo-postup.md bod 5, fix 69)
+// The direction cards the two roles rate at the logo place: per direction one card of the same format,
+// <cards_dir>/<id>.png (default .aid-ui/logo/cards, the logo place's bundle): the lockup, the mark enlarged, the cuts
+// 48/32/16 px and each enlarged x4 (`mid` = the 32-48 px cut, `small` = the 16 px cut, both falling back to `symbol`),
+// black on white, inverted, and every context the brand brief names (`contexts`: ["záložka prohlížeče", "vizitka",
+// "cedule", ...]) in a neutral frame. No reasoning, no scores of the studio on a card. A non-square viewBox is
+// accepted (the card fits it).
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
 import path from 'node:path';
 
 const args = process.argv.slice(2);
 const opt = (k) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : undefined; };
-const specPath = opt('--spec');
+const cardsPath = opt('--cards');
+const specPath = opt('--spec') || cardsPath;
 const contactDir = opt('--contact');
-if (!specPath && !contactDir) { console.error('usage: aid-ui-logo-sheet.mjs --spec <sheet.json> [--root <project>] | --contact <dir of concept PNGs> --out <png> [--root <project>]'); process.exit(2); }
+if (!specPath && !contactDir) { console.error('usage: aid-ui-logo-sheet.mjs --spec <sheet.json> [--root <project>] | --cards <sheet.json> [--root <project>] | --contact <dir of concept PNGs> --out <png> [--root <project>]'); process.exit(2); }
 const root = path.resolve(opt('--root') || '.');
 if (contactDir) {   // the curation contact sheet (step 1i phase 4b): every concept PNG with its name, large and at 32 px
   const dir = path.resolve(root, contactDir);
@@ -54,7 +62,7 @@ if (contactDir) {   // the curation contact sheet (step 1i phase 4b): every conc
 let spec;
 try { spec = JSON.parse(fs.readFileSync(path.resolve(root, specPath), 'utf8')); }
 catch (e) { console.error(`ERROR: ${specPath}: ${e.message}`); process.exit(1); }
-if (!spec.name || !Array.isArray(spec.directions) || !spec.directions.length || !spec.out_dir) {
+if (!spec.name || !Array.isArray(spec.directions) || !spec.directions.length || (!spec.out_dir && !cardsPath)) {
   console.error('ERROR: sheet.json needs name, out_dir and a non-empty directions list'); process.exit(2);
 }
 // P113a (PM 13. 10. 2026): a symbol the vectorizer measured as asymmetric (<symbol>.json symmetry.best under 0.92)
@@ -168,6 +176,42 @@ function overview() {
   ${comp ? `<div class="shelf"><h3>VEDLE KONKURENCE (jejich dnešní loga)</h3><div class="r">${comp}</div></div>` : ''}</div></body></html>`;
 }
 
+function roleCard(d) {   // P113: what the expert and the client rate - the mark in every size and context, nothing else
+  const L = inlineSvg(d.lockup, 'lk'), S = uri(d.symbol, false, true), M = uri(d.mid || d.symbol, false, true);
+  const Sm = uri(d.small || d.symbol, false, true), Si = uri(d.symbol, true, true), Smi = uri(d.small || d.symbol, true, true);
+  const cut = (src, px, lab) => `<figure><img src="${src}" style="width:${px}px;height:${px}px"><img src="${src}" style="width:${px * 4}px;height:${px * 4}px;image-rendering:pixelated"><figcaption>${lab}</figcaption></figure>`;
+  const ctx = (spec.contexts || []).map((c) => `<div class="ctxn"><div class="slot"><img src="${S}"><span>${esc(spec.name)}</span></div><figcaption>${esc(c)}</figcaption></div>`).join('');
+  return `<!doctype html><html><head>${head}<style>.rc{width:1400px;padding:24px;box-sizing:border-box;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .rc section{border:1px solid #ddd;border-radius:10px;padding:16px}.rc h3{margin:0 0 10px;font-size:12px;color:#666;letter-spacing:.06em}
+  .lkw .lk{height:120px;width:auto;max-width:100%}.big img{width:360px;height:360px;object-fit:contain}
+  .cuts{display:flex;gap:22px;align-items:flex-end}.cuts figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:6px}
+  .bw{filter:grayscale(1) contrast(1.4)}.inv{background:#111}.ctxs{display:flex;flex-wrap:wrap;gap:14px}
+  .ctxn{border:1px solid #e3e3e3;border-radius:8px;padding:10px;width:200px}.ctxn .slot{display:flex;gap:8px;align-items:center}.ctxn img{width:32px;height:32px}
+  figcaption{font-size:11px;color:#666}</style></head><body><div class="rc">
+  <section class="lkw" style="grid-column:1/3"><h3>LOGO S NÁZVEM</h3>${L}</section>
+  <section class="big"><h3>ZNAČKA ZVĚTŠENÁ</h3><img src="${S}"></section>
+  <section><h3>ŘEZY 48 / 32 / 16 PX (A ×4)</h3><div class="cuts">${cut(M, 48, '48 px (střední řez)')}${cut(M, 32, '32 px (střední řez)')}${cut(Sm, 16, '16 px (malý řez)')}</div></section>
+  <section class="bw"><h3>ČERNOBÍLE</h3>${L}</section>
+  <section class="inv"><h3 style="color:#aaa">INVERZNĚ</h3><img src="${Si}" style="width:120px;height:120px"> <img src="${Smi}" style="width:32px;height:32px"></section>
+  ${ctx ? `<section style="grid-column:1/3"><h3>KONTEXTY ZE ZADÁNÍ ZNAČKY</h3><div class="ctxs">${ctx}</div></section>` : ''}
+  </div></body></html>`;
+}
+if (cardsPath) {
+  const cdir = path.resolve(root, spec.cards_dir || '.aid-ui/logo/cards');
+  fs.mkdirSync(cdir, { recursive: true });
+  const b = await chromium.launch({ executablePath: process.env.CHROME || undefined });
+  for (const d of spec.directions) {
+    if (!/^[A-Za-z0-9-]+$/.test(String(d.id)) || !d.lockup || !d.symbol) { console.error(`ERROR: a direction card needs id [A-Za-z0-9-], lockup and symbol: ${JSON.stringify(d.id)}`); process.exit(2); }
+    const p = await b.newPage({ viewport: { width: 1400, height: 900 } });
+    await p.setContent(roleCard(d), { waitUntil: 'networkidle' });
+    await p.waitForFunction(() => [...document.images].every((i) => i.complete));
+    const file = path.join(cdir, `${d.id}.png`);
+    await p.screenshot({ path: file, fullPage: true }); await p.close();
+    console.log(path.relative(root, file));
+  }
+  await b.close();
+  process.exit(0);
+}
 const out = path.resolve(root, spec.out_dir);
 fs.mkdirSync(out, { recursive: true });
 const browser = await chromium.launch({ executablePath: process.env.CHROME || undefined });

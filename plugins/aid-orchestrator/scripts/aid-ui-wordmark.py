@@ -27,6 +27,10 @@ centred on the symbol; the viewBox grows to the real outline bounds, so accents 
 and descenders (Ž, Á, g, y) are never cut. Pair kerning from the font's GPOS 'kern' feature
 (or the legacy kern table) is applied to the outlines and written as dx on the live text, so
 both versions set the same.
+Optional (P113, logo-postup.md): "subtitle": {"text": "projekční kancelář", "font": [...] (default the name's), "weight",
+"family" (default the name's), "size_to_cap": 0.45 (its cap height against the name's), "tracking_em": 0.12} - a second
+line under the name, flush with its start, letter-spaced; the live master carries it as <text letter-spacing>.
+No subtitle = the output as before.
 Exit: 0 written, 1 a file cannot be read or the font lacks a glyph, 2 a bad spec.
 """
 import argparse, json, os, re, sys
@@ -144,24 +148,45 @@ def main():
         die(f"no font file has a glyph for {''.join(missing)!r}; add the subset that has it to 'font'", 1)
     cap_px = H / float(spec.get("symbol_to_cap", 1.3))
     gap, baseline = H / 4, H / 2 + cap_px / 2
-    x, paths, dx, prev = H + gap, [], [], None
-    lo, hi = 0.0, H
-    for ch in name:
-        f = next(f for f in fonts if ord(ch) in f["cmap"])
-        g, scale = f["cmap"][ord(ch)], cap_px / f["cap"]
-        k = (f["kern"].get((prev[1], g), 0) * scale) if prev and prev[0] is f else 0.0
-        x += k
-        dx.append(k)
-        pen, bp = SVGPathPen(f["gs"]), BoundsPen(f["gs"])
-        t = (scale, 0, 0, -scale, x, baseline)
-        f["gs"][g].draw(TransformPen(pen, t))
-        f["gs"][g].draw(TransformPen(bp, t))
-        if pen.getCommands():
-            paths.append(pen.getCommands())
-        if bp.bounds:
-            lo, hi = min(lo, bp.bounds[1]), max(hi, bp.bounds[3])
-        x += f["hmtx"][g][0] * scale
-        prev = (f, g)
+
+    def set_line(fonts, text, cap, x, base, track=0.0):
+        """Outlines of one line: (paths, dx per glyph, end x, low y, high y); tracking in units added after each glyph."""
+        paths, dx, prev, lo, hi = [], [], None, base, base
+        for i, ch in enumerate(text):
+            f = next(f for f in fonts if ord(ch) in f["cmap"])
+            g, scale = f["cmap"][ord(ch)], cap / f["cap"]
+            k = (f["kern"].get((prev[1], g), 0) * scale) if prev and prev[0] is f else 0.0
+            x += k + (track if i else 0.0)
+            dx.append(k)
+            pen, bp = SVGPathPen(f["gs"]), BoundsPen(f["gs"])
+            tr = (scale, 0, 0, -scale, x, base)
+            f["gs"][g].draw(TransformPen(pen, tr))
+            f["gs"][g].draw(TransformPen(bp, tr))
+            if pen.getCommands():
+                paths.append(pen.getCommands())
+            if bp.bounds:
+                lo, hi = min(lo, bp.bounds[1]), max(hi, bp.bounds[3])
+            x += f["hmtx"][g][0] * scale
+            prev = (f, g)
+        return paths, dx, x, lo, hi
+
+    paths, dx, x, lo, hi = set_line(fonts, name, cap_px, H + gap, baseline)
+    lo, hi = min(0.0, lo), max(H, hi)
+    sub = spec.get("subtitle") or None
+    if sub:
+        if not (isinstance(sub, dict) and isinstance(sub.get("text"), str) and sub["text"].strip()):
+            die("subtitle needs text")
+        sfonts = load_fonts(dict(spec, font=sub.get("font", spec["font"]), weight=sub.get("weight", spec.get("weight"))), a.root) if (sub.get("font") or sub.get("weight")) else fonts
+        miss = [c for c in sub["text"] if not any(ord(c) in f["cmap"] for f in sfonts)]
+        if miss:
+            die(f"no subtitle font file has a glyph for {''.join(miss)!r}", 1)
+        scap = cap_px * float(sub.get("size_to_cap", 0.45))
+        strack = scap * float(sub.get("tracking_em", 0.12)) * sfonts[0]["font"]["head"].unitsPerEm / sfonts[0]["cap"]
+        sbase = baseline + scap + cap_px * 0.5
+        spaths, sdx, sx, slo, shi = set_line(sfonts, sub["text"], scap, H + gap, sbase, strack)
+        paths += spaths
+        x, lo, hi = max(x, sx), min(lo, slo), max(hi, shi)
+        sfs = round(scap * sfonts[0]["font"]["head"].unitsPerEm / sfonts[0]["cap"], 3)
     lo, hi = lo - 1, hi + 1  # a hairline of air so antialiasing is not clipped either
     width, height = round(x + 1, 2), round(hi - lo, 2)
     fs = round(cap_px * fonts[0]["font"]["head"].unitsPerEm / fonts[0]["cap"], 3)
@@ -176,6 +201,10 @@ def main():
             kern = f' dx="{" ".join(f"{d:.2f}" for d in dx)}"' if any(dx) else ""
             txt = (f'<text x="{H + gap:g}" y="{baseline:g}"{kern} fill="{attr(v["text"])}" font-family="{attr(spec["family"])}" '
                    f'font-weight="{attr(weight)}" font-size="{fs:g}">{escape(name)}</text>')
+            if sub:
+                txt += (f'<text class="subtitle" x="{H + gap:g}" y="{sbase:g}" fill="{attr(v.get("subtitle_text", v["text"]))}" '
+                        f'font-family="{attr(sub.get("family", spec["family"]))}" font-weight="{attr(sub.get("weight", weight))}" '
+                        f'font-size="{sfs:g}" letter-spacing="{float(sub.get("tracking_em", 0.12)):g}em">{escape(sub["text"])}</text>')
         return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 {lo:g} {width:g} {height:g}" width="{width * 2:g}" '
                 f'height="{height * 2:g}" role="img" aria-label="{attr(name)}"><!-- {escape(note)}; '
                 f'{"text converted to outlines" if outlined else "live text, editable master"} -->{sym}{txt}</svg>\n')

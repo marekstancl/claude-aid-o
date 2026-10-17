@@ -42,6 +42,9 @@ or product-context.md is not the project's current one, a stand-in without its f
 and dispatch bracket, and a fourth failed review of a page in one series (page, facts, context).
 Otherwise stores copy_review.pages.<page> in docs/design/brand-state.json atomically; a model
 verdict that differs from the recomputed one is noted in <run dir>/verdict.log.
+P113 (IMP-696): each page record also keeps facts_keys (the fact keys its claims cite) and facts_used (their values
+then), so the gate's copy_review row voids a page only when one of ITS facts changed (a page whose text changed is
+re-checked whatever the facts; a record from before 3.5.0 without facts_used falls back to the whole register).
 Exit: 0 done, 1 refused, 2 usage.
 """
 import argparse, datetime, glob, hashlib, json, os, re, shutil, subprocess, sys, tempfile
@@ -558,15 +561,20 @@ def record(a):
     fsha, csha = man["facts.yaml"], man["product-context.md"]
     bsha = sha(os.path.join(d, "MANIFEST"))
     new = {}
+    facts_now = yaml_json(os.path.join(proj, "docs/content/facts.yaml")) or {}
     for p, v in out.items():
         old = prev.get(p) or {}
-        same = old.get("facts_sha256") == fsha and old.get("context_sha256") == csha
+        keys = sorted({str(k) for c in ((answer.get("pages") or {}).get(p) or {}).get("claims") or []
+                       for k in (c.get("fact_key") if isinstance(c.get("fact_key"), list) else [c.get("fact_key")]) if k})
+        used = {k: facts_now.get(k) for k in keys} if isinstance(facts_now, dict) else {}
+        same = (old.get("facts_used") == used if "facts_used" in old else old.get("facts_sha256") == fsha) and old.get("context_sha256") == csha
         failed = old.get("failed_reviews", 0) if same else 0
         if v["verdict"] == "fail":
             if failed >= 3:
                 die(f"{p}: a fourth failed review in this series; ask the PM for an exception (studio exception, check copy_review)")
             failed += 1
         new[p] = {"subject_sha256": subject["pages"][p]["sha256"], "facts_sha256": fsha, "context_sha256": csha,
+                  "facts_keys": keys, "facts_used": used,
                   "bundle_sha256": bsha, "provider": run_rec["provider"], "model": run_rec.get("model"), "at": now(),
                   "failed_reviews": failed, "verdict": v["verdict"], "blocking": v["blocking"], "scores": v["scores"],
                   "lang_guide": v["lang_guide"], "run": os.path.relpath(d, proj)}
