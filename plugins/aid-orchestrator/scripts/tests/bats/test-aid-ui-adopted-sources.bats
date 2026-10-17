@@ -42,10 +42,12 @@ check() {
   return $bad
 }
 
-# manifest <refdir> <snapshot> — adopted/<snapshot>/MANIFEST lists exactly the files under it, each with
-# the git blob id of its bytes (git hash-object), so a changed byte, a missing or an extra file fails.
+# manifest <refdir> <snapshot|folder/> — adopted/<snapshot>/MANIFEST (or <refdir>/<folder>/MANIFEST when the second
+# argument ends in /, P113: the standards' copies) lists exactly the files under it, each with the git blob id of its
+# bytes (git hash-object), so a changed byte, a missing or an extra file fails. A SOURCES file is no copy.
 manifest() {
   local m="$1/adopted/${2:-marketingskills}" bad=0 id p listed
+  [[ "${2:-}" != */ ]] || m="$1/${2%/}"
   [[ -f "$m/MANIFEST" ]] || { echo "no MANIFEST"; return 1; }
   while read -r id p; do
     [[ -f "$m/$p" ]] || { echo "missing: $p"; bad=1; continue; }
@@ -54,7 +56,7 @@ manifest() {
   listed=$(awk '{print $2}' "$m/MANIFEST" | sort)
   while IFS= read -r p; do
     grep -qxF "$p" <<<"$listed" || { echo "extra: $p"; bad=1; }
-  done < <(cd "$m" && find . -type f ! -name MANIFEST | sed 's#^\./##' | sort)
+  done < <(cd "$m" && find . -type f ! -name MANIFEST ! -name SOURCES | sed 's#^\./##' | sort)
   return $bad
 }
 
@@ -155,4 +157,37 @@ for f in sorted(glob.glob(sys.argv[2] + "/**/*.md", recursive=True)):
         dead.append(rel)
 assert not dead, "adopted but read by no step method (sections.json methods): " + ", ".join(dead)
 PY
+}
+
+# ---------------------------------------------------------------- P113 step 5: the standards inside the plugin
+@test "standards: the copies match their MANIFEST byte for byte, SOURCES names each one, and they are the coverage sources" {
+  run manifest "$REF" standards/; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(grep -c . "$REF/standards/MANIFEST")" -ge 12 ]
+  for p in $(awk '{print $2}' "$REF/standards/MANIFEST"); do grep -q "^$p ecosystem/" "$REF/standards/SOURCES" || { echo "no source for $p"; return 1; }; done
+  for s in $(yq -r '.sources[]' "$REF/../coverage/sources.yaml"); do grep -q " $s$" "$REF/standards/SOURCES" || { echo "no copy of coverage source $s"; return 1; }; done
+  # a changed byte fails
+  cp -r "$REF" "$BATS_TEST_TMPDIR/ref"; echo x >> "$BATS_TEST_TMPDIR/ref/standards/seo/index.md"
+  run manifest "$BATS_TEST_TMPDIR/ref" standards/; [ "$status" -eq 1 ]; [[ "$output" == *"changed: seo/index.md"* ]]
+}
+
+@test "standards: no step, SKILL.md, command file, method map or studio server needs /opt/eco/docs" {
+  run grep -rn '/opt/eco/docs' "$PLUGIN/skills/ui-design/steps" "$PLUGIN/skills/ui-design/SKILL.md" "$PLUGIN/commands/aid-ui.md" \
+    "$PLUGIN/skills/ui-design/sections.json" "$PLUGIN/lib/aid-ui-studio/server.py" "$PLUGIN/scripts/aid-ui-coverage.sh"
+  [ "$status" -eq 1 ] || { echo "$output"; return 1; }
+  for f in $(jq -r '[.methods[] | select(type == "object") | .files[]] | unique[]' "$PLUGIN/skills/ui-design/sections.json"); do
+    [[ "$f" != /* ]] || { echo "a method file outside the plugin: $f"; return 1; }
+  done
+}
+
+@test "standards: a project without a declared standards map is checked against the plugin's copies with a warning and exit 0; a declared one is read" {
+  P="$BATS_TEST_TMPDIR/p"; mkdir -p "$P"
+  run bash "$PLUGIN/scripts/aid-ui-coverage.sh" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"projekt nemá mapu standardů"* ]]; [[ "$output" == *"coverage ok"* ]]
+  # a declared docs tree is the project's own data: read there (here a copy of the standards with one changed item)
+  D="$BATS_TEST_TMPDIR/docs/ecosystem/specs"; mkdir -p "$D/seo" "$BATS_TEST_TMPDIR/docs/ecosystem/templates" "$P/.aid-o/config"
+  while read -r rel src; do [[ "$rel" == \#* || -z "$rel" ]] && continue; mkdir -p "$BATS_TEST_TMPDIR/docs/$(dirname "$src")"; cp "$REF/standards/$rel" "$BATS_TEST_TMPDIR/docs/$src"; done < "$REF/standards/SOURCES"
+  touch "$D/standards-map.md"; printf 'standards:\n  map_path: %s\n' "$D/standards-map.md" > "$P/.aid-o/config/project.yaml"
+  run bash "$PLUGIN/scripts/aid-ui-coverage.sh" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }; [[ "$output" != *"nemá mapu"* ]]
+  sed -i '0,/^- /s/^- \(.*\)$/- \1 ZMĚNA/' "$D/design-system-standard.md"
+  run bash "$PLUGIN/scripts/aid-ui-coverage.sh" check "$P"; [ "$status" -ne 0 ]   # the declared tree, not the copies
 }

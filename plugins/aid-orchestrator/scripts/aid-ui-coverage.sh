@@ -3,11 +3,12 @@
 # aid-ui-coverage.sh — which items of the ecosystem standards /aid-ui applies,
 # waives or leaves to someone, and the proof for each (P103 Step 2).
 #
-# The standard files are read live from the docs root; the list of them is
-# skills/ui-design/coverage/sources.yaml (docs-root-relative paths). The docs root
-# is three directories above the standards map `aid_standards_map_file` returns
-# (<root>/ecosystem/specs/standards-map.md), /opt/eco/docs/docs when the project
-# has no map configured.
+# The list of standard files is skills/ui-design/coverage/sources.yaml (docs-root-relative paths). They are read
+# from the docs tree the PROJECT declares: three directories above the standards map `aid_standards_map_file`
+# returns (<root>/ecosystem/specs/standards-map.md) - the project's own data. A project without a declared map is
+# checked against the plugin's copies (skills/ui-design/references/standards/, SOURCES maps each docs path to its
+# copy), with "WARN: projekt nemá mapu standardů" on stderr and the exit code of the check (P113: nothing is read
+# from a docs tree the project did not declare).
 #
 #   extract [<project>]   one line per item: <id> TAB <text>. An item is a list entry
 #                         or a table row (not the header row), or a paragraph that opens in
@@ -51,16 +52,28 @@ command -v yq >/dev/null || { echo "ERROR: aid-ui-coverage.sh: yq is missing" >&
 rc=0; map_md="$(aid_standards_map_file "$PROJECT")" || rc=$?
 case "$rc" in
   0) DOCS="$(dirname "$(dirname "$(dirname "$map_md")")")" ;;
-  1) DOCS=/opt/eco/docs/docs ;;
+  1) DOCS="" ; echo "WARN: projekt nemá mapu standardů: standardy čteny z kopií pluginu (skills/ui-design/references/standards/)" >&2 ;;
   *) echo "ERROR: aid-ui-coverage.sh: the standards map of $PROJECT cannot be read" >&2; exit 2 ;;
 esac
-[[ -d "$DOCS" && -r "$DOCS" ]] || { echo "ERROR: aid-ui-coverage.sh: docs root $DOCS cannot be read" >&2; exit 2; }
+COPIES="$DIR/../skills/ui-design/references/standards"
+if [[ -n "$DOCS" ]]; then [[ -d "$DOCS" && -r "$DOCS" ]] || { echo "ERROR: aid-ui-coverage.sh: docs root $DOCS cannot be read" >&2; exit 2; }
+else [[ -r "$COPIES/SOURCES" ]] || { echo "ERROR: aid-ui-coverage.sh: the plugin's copies of the standards are missing ($COPIES/SOURCES)" >&2; exit 2; }; fi
 
 MAP="${AID_UI_COVERAGE_MAP:-$COV/map.yaml}"
-exec python3 - "$VERB" "$PROJECT" "$DOCS" "${AID_UI_COVERAGE_SOURCES:-$COV/sources.yaml}" "$MAP" "$(dirname "$MAP")/checks.yaml" <<'PY'
+exec python3 - "$VERB" "$PROJECT" "$DOCS" "${AID_UI_COVERAGE_SOURCES:-$COV/sources.yaml}" "$MAP" "$(dirname "$MAP")/checks.yaml" "$COPIES" <<'PY'
 import datetime, hashlib, json, os, re, subprocess, sys
 
-verb, project, docs, sources_f, map_f, checks_f = sys.argv[1:]
+verb, project, docs, sources_f, map_f, checks_f, copies = sys.argv[1:]
+
+def source_path(rel):
+    """The file of a docs-root-relative standard: in the declared docs tree, else the plugin's copy (SOURCES)."""
+    if docs:
+        return os.path.join(docs, rel)
+    for ln in open(os.path.join(copies, "SOURCES"), encoding="utf-8"):
+        p = ln.split()
+        if len(p) == 2 and not ln.startswith("#") and p[1] == rel:
+            return os.path.join(copies, p[0])
+    return os.path.join(copies, "(no copy of %s)" % rel)
 VARIANTS = ("web", "webapp", "pwa")
 
 def die(msg, code):
@@ -85,7 +98,7 @@ def norm(s):
 # (unindented) continuation starts no item and is not part of any.
 def extract_file(rel):
     try:
-        lines = open(os.path.join(docs, rel), encoding="utf-8").read().split("\n")
+        lines = open(source_path(rel), encoding="utf-8").read().split("\n")
     except OSError as e:
         die("standard %s cannot be read: %s" % (rel, e), 2)
     items, heads, fence, cur = [], [], None, None

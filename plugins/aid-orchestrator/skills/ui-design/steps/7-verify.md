@@ -18,8 +18,8 @@ Brána prošla na zaznamenaném buildu, PM ve studiu schválil každou stránku
 ## Vstupy
 
 Zaznamenaný build, `coverage/checks.yaml`, `DESIGN.md`,
-`/opt/eco/docs/docs/ecosystem/specs/design-system-standard.md`
-a `frontend-build-standard.md` (čti živě).
+`references/standards/design-system-standard.md`
+a `references/standards/frontend-build-standard.md` (kopie v pluginu).
 
 ## Postup
 

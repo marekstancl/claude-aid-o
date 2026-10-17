@@ -19,8 +19,8 @@ a stavba (krok 6) z něj vycházejí. Kapitola `seo` to nese.
 ## Vstupy
 
 `PRODUCT.md`, `docs/product-vision.md` (je-li), `variant`, standard
-`/opt/eco/docs/docs/ecosystem/specs/seo-audit-agent-standard.md` a složka
-`/opt/eco/docs/docs/ecosystem/specs/seo/` (čti živě, nekopíruj).
+`references/standards/seo-audit-agent-standard.md` a složka
+`references/standards/seo/` (kopie v pluginu, zdroj v `references/standards/SOURCES`).
 
 ## Postup
 

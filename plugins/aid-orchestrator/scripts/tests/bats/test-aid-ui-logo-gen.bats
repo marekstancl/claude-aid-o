@@ -43,9 +43,9 @@ setup() {
   [[ "$l" == "Using the attached brand mark exactly as it is"* && "$l" == *'wordmark "Firma"'* && "$l" == *"a warm serif"* && "$l" == *'tagline "pekárna · Brno"'* ]]
 }
 
-@test "gen: no key -> exit 1 naming the variable; a slot outside the route, n over 10, n x slots over 60, a bad model -> exit 2" {
+@test "gen: no key -> exit 2 naming the variable; a slot outside the route, n over 10, n x slots over 60, a bad model -> exit 2" {
   spec 2 '{"WC": "x"}'
-  run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json; [ "$status" -eq 1 ]; [[ "$output" == *"OPENAI_API_KEY"* ]]
+  run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json; [ "$status" -eq 2 ]; [[ "$output" == *"OPENAI_API_KEY"* ]]   # P113: exit 2 naming the variable
   spec 2 '{"ZZ": "x"}'; run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json --dry-run; [ "$status" -eq 2 ]; [[ "$output" == *"not in route.json"* ]]
   spec 11 '{"WC": "x"}'; run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json --dry-run; [ "$status" -eq 2 ]
   echo '{"situation":"x","slots":[{"id":"A","kind":"k"},{"id":"B","kind":"k"},{"id":"C","kind":"k"},{"id":"D","kind":"k"},{"id":"E","kind":"k"},{"id":"F","kind":"k"},{"id":"G","kind":"k"}]}' > "$P/.aid-ui/logo/route.json"
@@ -98,4 +98,72 @@ PY
   run sheet .aid-ui/logo/ok.svg; [ "$status" -eq 1 ]; [[ "$output" == *"only 0.82 symmetric"* ]]
   printf '{"name":"F","out_dir":".aid-ui/studio","directions":[{"id":"a","title":"A","asymmetry":"zub v otvore C, zámerne","lockup":".aid-ui/logo/lock.svg","symbol":".aid-ui/logo/ok.svg"}]}' > "$P/.aid-ui/logo/sheet.json"
   run bash "$PLUGIN/scripts/aid-ui-tool.sh" logo-sheet --spec .aid-ui/logo/sheet.json --root "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+# ---------------------------------------------------------------- P113 step 8: no network - a stub at AID_UI_IMAGE_BASE
+stub() {   # stub <mode>: ok | refuse-2 (variant 2 refused by the filter) | fail-after-1; counts requests in $BATS_TEST_TMPDIR/req
+  PORT="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  python3 - "$PORT" "$1" "$BATS_TEST_TMPDIR" <<'PY' & SRV=$!
+import base64, http.server, json, struct, sys, zlib
+port, mode, d = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+def png(w, h):
+    ch = lambda t, x: struct.pack(">I", len(x)) + t + x + struct.pack(">I", zlib.crc32(t + x) & 0xffffffff)
+    return b"\x89PNG\r\n\x1a\n" + ch(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0)) + ch(b"IDAT", zlib.compress(b"\x00" * (w * 3 + 1))) + ch(b"IEND", b"")
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_POST(self):
+        n = int(open(d + "/req").read()) + 1 if __import__("os").path.exists(d + "/req") else 1
+        open(d + "/req", "w").write(str(n))
+        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        open(d + "/req-%d" % n, "wb").write(body)
+        open(d + "/hdr-%d" % n, "w").write(json.dumps(dict(self.headers)))
+        if (mode == "refuse-2" and n == 2) or (mode == "fail-after-1" and n > 1):
+            msg = b'{"error":{"message":"Your request was rejected by the safety system (moderation)"}}' if mode == "refuse-2" else b'{"error":"x"}'
+            self.send_response(400 if mode == "refuse-2" else 500); self.send_header("Content-Length", str(len(msg))); self.end_headers(); self.wfile.write(msg); return
+        size = (1536, 1024) if b"1536x1024" in body else (1024, 1024)
+        out = json.dumps({"data": [{"b64_json": base64.b64encode(png(*size)).decode()}]}).encode()
+        self.send_response(200); self.send_header("Content-Type", "application/json"); self.send_header("Content-Length", str(len(out))); self.end_headers(); self.wfile.write(out)
+http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+PY
+  export AID_UI_IMAGE_BASE="http://127.0.0.1:$PORT"
+  for _ in $(seq 50); do (exec 3<>/dev/tcp/127.0.0.1/$PORT) 2>/dev/null && return 0; sleep 0.1; done; return 1
+}
+teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; }
+
+@test "p113: the dry run prices both steps of two_step; the lockup prompt carries the slot's brief" {
+  printf '{"n": 2, "two_step": true, "name": "Firma", "quality": "low", "slots": {"WC": "a loaf as a letter F"}}' > "$P/.aid-ui/logo/gen.json"
+  run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json --dry-run; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.variant_usd == (.unit_usd + .lockup_unit_usd) and .estimated_usd == (2 * .variant_usd) and (.slots.WC.prompt.lockup | contains("a loaf as a letter F"))' "$P/.aid-ui/logo/gen/plan.json" >/dev/null
+}
+
+@test "p113: the endpoint and key come from the environment; gen.json after every image; only missing variants are made" {
+  stub ok
+  spec 3 '{"WC": "a crown"}'
+  mkdir -p "$P/.aid-ui/logo/gen"; printf 'x' > "$P/.aid-ui/logo/gen/WC-1.png"
+  AID_UI_IMAGE_KEY=sk-test-0001 CF_ACCESS_CLIENT_ID=cid CF_ACCESS_CLIENT_SECRET=csec run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(cat "$BATS_TEST_TMPDIR/req")" -eq 2 ]   # WC-1 existed: kept, only 2 and 3 made
+  jq -e 'with_entries(.key |= ascii_downcase) | .authorization == "Bearer sk-test-0001" and .["cf-access-client-id"] == "cid"' "$BATS_TEST_TMPDIR/hdr-1" >/dev/null
+  jq -e '.slots.WC.kept == [".aid-ui/logo/gen/WC-1.png"] and .received == 3 and .status == "succeeded"' "$P/.aid-ui/logo/gen/gen.json" >/dev/null
+  [ "$(cat "$P/.aid-ui/logo/gen/WC-1.png")" = x ]
+}
+
+@test "p113: an interrupted run's gen.json lists the images already paid for; a filter refusal is recorded and not retried" {
+  stub fail-after-1; spec 3 '{"WC": "a crown"}'
+  OPENAI_API_KEY=sk-test-0002 run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json; [ "$status" -eq 1 ]
+  jq -e '.slots.WC.files == [".aid-ui/logo/gen/WC-1.png"] and .received == 1' "$P/.aid-ui/logo/gen/gen.json" >/dev/null
+  kill "$SRV"; rm -rf "$P/.aid-ui/logo/gen" "$BATS_TEST_TMPDIR"/req*; SRV=
+  stub refuse-2; spec 3 '{"WC": "a crown"}'
+  OPENAI_API_KEY=sk-test-0003 run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json; [ "$status" -eq 1 ]
+  [ "$(cat "$BATS_TEST_TMPDIR/req")" -eq 3 ]   # 1 ok, 2 refused (not retried), 3 ok
+  jq -e '.slots.WC.refused == [2] and .received == 2' "$P/.aid-ui/logo/gen/gen.json" >/dev/null
+  jq -se '[.[] | select(.refused == true)] | length == 1' "$P/.aid-ui/costs.jsonl" >/dev/null
+}
+
+@test "p113: a step that would cross the project's image budget is refused before the request (two-step price)" {
+  stub ok
+  printf '{"n": 1, "two_step": true, "name": "Firma", "quality": "high", "slots": {"WC": "a crown"}}' > "$P/.aid-ui/logo/gen.json"
+  echo '{"provider": "openai", "billing": "api", "purpose": "logo:old", "usd": 1.95}' > "$P/.aid-ui/costs.jsonl"
+  OPENAI_API_KEY=sk-test-0004 run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json; [ "$status" -eq 1 ]
+  [[ "$output" == *"image budget"* ]]; [ ! -e "$BATS_TEST_TMPDIR/req" ]   # no request was made
 }

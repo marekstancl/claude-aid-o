@@ -18,8 +18,8 @@ zapsal; kapitola `struktura` ji ukazuje.
 ## Vstupy
 
 `PRODUCT.md`, `variant`, potvrzený seznam stránek z `docs/seo/brief.md`
-(je-li), `/opt/eco/docs/docs/ecosystem/specs/webapp-tasks-states-standard.md`
-a `frontend-build-standard.md` (čti živě).
+(je-li), `references/standards/webapp-tasks-states-standard.md`
+a `references/standards/frontend-build-standard.md` (kopie v pluginu, zdroj v `references/standards/SOURCES`).
 
 ## Postup
 

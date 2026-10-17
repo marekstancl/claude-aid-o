@@ -59,7 +59,7 @@ are recorded with `aid-ui-state.sh decide` and appear in the same list, marked A
   project (`~/.claude/projects/<project>/`), used only after ONE approval of the listed sources
   (`sources` answer on `manifest@<sha>`, step 1p; the text snapshots are deleted with
   `aid-ui-sources.py <project> --purge` once the product context is approved);
-  ecosystem standards under `/opt/eco/docs/docs/ecosystem/`.
+  ecosystem standards and templates from the plugin's copies (`skills/ui-design/references/standards/`).
 - **Writes (target project):** `docs/design/brand-state.json`, chapter bodies and
   statuses in `docs/brand/index.html` (both only through `scripts/aid-ui-state.sh`),
   other `docs/brand/*`, `.aid-ui/`, `.aid-o/work/companion/`,

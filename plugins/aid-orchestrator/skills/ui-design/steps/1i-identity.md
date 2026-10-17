@@ -21,7 +21,7 @@ balíček, který prošel kontrolou výstupu šablony; kapitola `logo` to nese.
 ## Vstupy
 
 `PRODUCT.md`, `docs/product-vision.md`, šablona
-`/opt/eco/docs/docs/ecosystem/templates/brand-brief-prompt.md` (čti živě),
+`references/standards/brand-brief-prompt.md` (kopie v pluginu),
 `references/brand-icons.js`, `scripts/aid-ui-ico.py`, existující balíček
 z inventury kroku 0.
 

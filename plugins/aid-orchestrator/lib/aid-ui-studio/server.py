@@ -118,7 +118,6 @@ CARD_FIELDS = ("id", "title", "url", "thesis", "preview", "preview2", "preview2_
 PRIOR = {"direction": "references"}
 STEP_METHODS = {"build"}   # P108: the build has a method and a receipt (aid-ui-state.sh build-record), no question
 RECEIPT_AGE = 12 * 3600   # a method receipt serves questions opened within this many seconds after it
-STANDARDS = "/opt/eco/docs/docs/ecosystem/"   # the only place a method file may live outside the plugin (read live)
 WAIVERS = ("pm", "without")   # no_method card values that let the kind be asked without a method
 DECISIONS = {"approve", "choose", "return", "reroll", "reroll_safer", "reroll_bolder"}
 # Previews are raster images only: an .html/.svg preview would run script on this origin.
@@ -252,10 +251,7 @@ def load_sections():
         if len(set(v["files"])) != len(v["files"]):
             raise ValueError("methods.%s names a file twice" % k)
         for x in v["files"]:
-            if x.startswith(STANDARDS):   # a standard read live: checked when read, not here
-                if os.path.normpath(x) != x or os.path.islink(x) or (os.path.exists(x) and not os.path.isfile(x)):
-                    raise ValueError("methods.%s: %s is not a plain file path" % (k, x))
-                continue
+            # P113: standards are the plugin's copies (references/standards/); no method file lives outside the plugin
             full = os.path.join(PLUGIN, x)
             if os.path.isabs(x) or os.path.normpath(x) != x or x.startswith("..") \
                     or os.path.islink(full) or not os.path.isfile(full) or not os.path.realpath(full).startswith(PLUGIN + os.sep):

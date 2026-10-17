@@ -47,10 +47,10 @@ Do NOT invoke for:
    `/plugin install playwright@claude-plugins-official` (MCP hledá značkový Chrome →
    `PLAYWRIGHT_MCP_BROWSER=chromium` do `env` v `~/.claude/settings.json`
    a `npx @playwright/mcp install-browser chrome-for-testing`).
-3. Standardy čti živě, nikdy z kopie: `/opt/eco/docs/docs/ecosystem/specs/`
-   (`frontend-build-standard.md` FB-1..FB-20, `webapp-tasks-states-standard.md`
-   UA-1..UA-11, `design-system-standard.md`, SEO standard). Chybí některý →
-   jmenuj ho PM a poznamenej v kapitole, které se týká.
+3. Standardy a šablony čti z kopií v pluginu: `references/standards/` (`frontend-build-standard.md`
+   FB-1..FB-20, `webapp-tasks-states-standard.md` UA-1..UA-11, `design-system-standard.md`, SEO standard
+   a `seo/`, šablony zadání značky a vize). Odkud je která kopie, říká `references/standards/SOURCES`,
+   otisk `MANIFEST`; studio tak funguje i tam, kde ekosystémové dokumenty nejsou (P113).
 4. Postup stavby: `references/adopted/frontend-design-SKILL.md` (snímek
    frontend-design) a řemeslné minimum `references/adopted/impeccable-craft-floor.md`;
    generické vzory vyřazuje `references/genericity-rubric.md`.
@@ -345,8 +345,8 @@ a odkaz.
 2. Answers come only through `aid-ui-state.sh record-answer`, and a mutation
    that needs the PM takes `--answer <id>`; an answer read from chat is never
    a decision.
-3. Ecosystem standards are read live from `/opt/eco/docs/docs/ecosystem/…` on
-   every run; a missing one is named to the PM and noted on the brand page.
+3. Ecosystem standards and templates are read from the plugin's copies in `references/standards/`
+   (source in `SOURCES`, blob ids in `MANIFEST`, P113); nothing is read from the ecosystem docs tree.
 4. The build follows the frontend-design snapshot
    `references/adopted/frontend-design-SKILL.md`; no other design tool.
 5. No invented facts (prices, addresses, references, numbers, quotes): a fact

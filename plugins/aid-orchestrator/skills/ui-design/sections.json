@@ -454,7 +454,7 @@
   "seo_brief": {
    "files": [
     "skills/ui-design/steps/1s-seo.md",
-    "/opt/eco/docs/docs/ecosystem/specs/seo-audit-agent-standard.md"
+    "skills/ui-design/references/standards/seo-audit-agent-standard.md"
    ],
    "receipt": true
   },
@@ -591,7 +591,7 @@
     "skills/ui-design/steps/6-build.md",
     "skills/ui-design/references/adopted/frontend-design-SKILL.md",
     "skills/ui-design/references/adopted/impeccable-craft-floor.md",
-    "/opt/eco/docs/docs/ecosystem/specs/frontend-build-standard.md",
+    "skills/ui-design/references/standards/frontend-build-standard.md",
     "skills/ui-design/references/adopted/emil-skills/animate/SKILL.md",
     "skills/ui-design/references/adopted/emil-skills/animate/RECIPES.md",
     "skills/ui-design/references/adopted/emil-skills/review-animations/SKILL.md",

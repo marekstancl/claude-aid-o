@@ -20,8 +20,8 @@ kapitoly `vize`.
 ## Vstupy
 
 `PRODUCT.md`, existující vize (`docs/product-vision.md` nebo stránka
-v Docusauru), šablona `/opt/eco/docs/docs/ecosystem/templates/product-vision-prompt.md`
-(čti živě), brand brief `docs/design/brand-package/brand-brief.md`, je-li.
+v Docusauru), šablona `references/standards/product-vision-prompt.md`
+(kopie v pluginu, zdroj v `references/standards/SOURCES`), brand brief `docs/design/brand-package/brand-brief.md`, je-li.
 
 ## Postup
 

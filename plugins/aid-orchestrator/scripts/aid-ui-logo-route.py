@@ -22,6 +22,8 @@ Situations (first match wins):
   assets    options.identity == "package"                          0 directions: the existing symbol, kit only
   app       variant.type in (webapp, pwa)                           3 directions, symbol first
   redesign  variant.type == web and an old site was fetched         5 directions
+  established  a redesign whose current logo is usable and whose continuity is evidenced (reviews >= 20 or the
+            name >= 3 years): 3 revivals (R, RD, RB) + 2 new (WC, WP) (P113, fix 69)
   new       variant.type == web, no old site                        3 directions
 Every slot has a fixed id (stable; the display order is the recommendation) and a construction kind
 that no other slot may use. `local` (variant.local) adds the category-sign slot's rule "in a fresh form".
@@ -48,16 +50,26 @@ SLOTS = {
         {"id": "P", "kind": "pictorial", "text": "obrazový symbol z metafory slovní mapy; symbol první"},
     ],
     "assets": [],
+    # P113 (fix 69, logo-postup.md bod 1): an established mark - a redesign with a usable current logo and continuity
+    # evidenced - gets three revivals (each its own construction) and two new directions
+    "established": [
+        {"id": "R", "kind": "revitalization", "text": "oživení blízké dnešku: zavedený motiv zachovaný a poznávaný, zpřesněná stavba, slabiny z auditu odstraněné", "needs_logo": True},
+        {"id": "RD", "kind": "revitalization+detail", "text": "oživení s vlastním detailem: zavedený motiv + jeden nový prvek navázaný na fakt podniku (ne jen čistší kresba)", "needs_logo": True},
+        {"id": "RB", "kind": "revitalization+bold", "text": "odvážné oživení: zavedený motiv v nové stavbě (kompozice, kontejner), poznávaný na první pohled", "needs_logo": True},
+        {"id": "WC", "kind": "name+sign", "text": "nový směr: nápis + znak z vize nebo oboru v nové formě (jen s důvodem z auditu nebo zadání)"},
+        {"id": "WP", "kind": "name+pictorial", "text": "nový směr: nápis + obrazový symbol z metafory slovní mapy bez oborového klišé"},
+    ],
 }
 # the test contexts every direction is shown in, by situation (the brief's own list is added)
 TEST_CONTEXTS = {
     "new": ["hlavička webu", "záložka prohlížeče 16 px", "avatar v kroužku", "tisk černobíle"],
     "redesign": ["hlavička webu", "záložka prohlížeče 16 px", "avatar v kroužku", "tisk černobíle"],
+    "established": ["hlavička webu", "záložka prohlížeče 16 px", "avatar v kroužku", "tisk černobíle"],
     "app": ["ikona aplikace", "záložka prohlížeče 16 px", "hlavička aplikace", "avatar v kroužku"],
     "assets": [],
 }
 CRITERIA = ["clarity", "distinction", "simplicity", "relevance", "small_size"]   # 0-4 each, skill phase 3
-WEIGHTS = {"new": {"relevance": 2}, "redesign": {"relevance": 2}, "app": {"small_size": 2}, "assets": {}}
+WEIGHTS = {"new": {"relevance": 2}, "redesign": {"relevance": 2}, "established": {"relevance": 2}, "app": {"small_size": 2}, "assets": {}}
 BRIEF_CONTEXTS = [  # phrase in the brief's list -> context the sheet shows
     (r"hlavičk|hero|web", "hlavička webu"), (r"favicon|záložk|prohlížeč", "záložka prohlížeče 16 px"),
     (r"telefon|ploch|aplikac|pwa", "ikona na telefonu"), (r"avatar|profil", "avatar v kroužku"),
@@ -126,7 +138,7 @@ def brief_contexts(project):
 
 
 def facts(project):
-    """recenzie_pocet and rok_jmena from facts.yaml (value: lines only, no yaml library)."""
+    """recenzie_pocet and rok_jmena from facts.yaml - a plain `key: 2014` or `key: {value: 2014, ...}` (fix 6)."""
     path = os.path.join(project, "docs", "content", "facts.yaml")
     out = {}
     try:
@@ -135,7 +147,7 @@ def facts(project):
     except OSError:
         return out
     for key in ("recenzie_pocet", "rok_jmena", "brand"):
-        m = re.search(r"^%s:\s*\{value:\s*\"?([^,\"}]+)\"?" % key, text, re.M)
+        m = re.search(r"^%s:\s*(?:\{\s*value:\s*)?\"?([^,\"}\n#]+?)\"?\s*(?:[,}].*)?(?:#.*)?$" % key, text, re.M)
         if m:
             v = m.group(1).strip()
             out[key] = int(v) if v.isdigit() else v
@@ -163,6 +175,14 @@ def route(project):
     else:
         situation = "new"
     logo = current_logo(project)
+    fx = facts(project)
+    cont = None
+    if "recenzie_pocet" in fx or "rok_jmena" in fx:
+        import datetime
+        age = datetime.date.today().year - fx["rok_jmena"] if isinstance(fx.get("rok_jmena"), int) else 0
+        cont = (isinstance(fx.get("recenzie_pocet"), int) and fx["recenzie_pocet"] >= 20) or age >= 3
+    if situation == "redesign" and logo["state"] == "usable" and cont:
+        situation = "established"
     slots = [dict(s) for s in SLOTS[situation]]
     notes = []
     for s in slots:
@@ -175,12 +195,6 @@ def route(project):
         for s in slots:
             if s["kind"] == "name+sign":
                 s["text"] += "; místní služba: znak oboru povinný, v nové formě (zásada 4 skillu), kreslené klišé zakázáno"
-    fx = facts(project)
-    cont = None
-    if "recenzie_pocet" in fx or "rok_jmena" in fx:
-        import datetime
-        age = datetime.date.today().year - fx["rok_jmena"] if isinstance(fx.get("rok_jmena"), int) else 0
-        cont = (isinstance(fx.get("recenzie_pocet"), int) and fx["recenzie_pocet"] >= 20) or age >= 3
     contexts = list(TEST_CONTEXTS[situation])
     for c in brief_contexts(project):
         if c not in contexts:

@@ -21,8 +21,8 @@ standardů; build zaznamenaný `build-record`.
 Odpověď `direction` a stránka směru z `.aid-ui/directions/`, `structure`,
 `content_plan`, `docs/content/facts.yaml`, `docs/seo/brief.md`, brand
 balíček, `references/adopted/frontend-design-SKILL.md`,
-`/opt/eco/docs/docs/ecosystem/specs/frontend-build-standard.md` (FB-1..FB-20),
-u aplikace `webapp-tasks-states-standard.md` (UA-1..UA-11) - čti živě.
+`references/standards/frontend-build-standard.md` (FB-1..FB-20),
+u aplikace `references/standards/webapp-tasks-states-standard.md` (UA-1..UA-11) - kopie v pluginu.
 
 ## Postup
 

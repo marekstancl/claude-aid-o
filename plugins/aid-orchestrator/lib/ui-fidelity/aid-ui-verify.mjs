@@ -1228,6 +1228,7 @@ const visionDoc = !want('vision_doc') ? null : !project ? ['not_covered', 'no --
 const coverageRow = !want('coverage') ? null : (() => {
   if (!project) return ['not_covered', 'no --project'];
   const r = spawnSync('bash', [path.join(HERE, '../../scripts/aid-ui-coverage.sh'), 'check', project], { encoding: 'utf8' });
+  if (r.status === 0 && /projekt nemá mapu standardů/.test(r.stderr || '')) return ['warn', 'projekt nemá mapu standardů: pokrytí ověřeno proti kopiím standardů v pluginu (P113)'];
   return r.status === 0 ? ['pass', ''] : r.status === 2 ? ['not_covered', `aid-ui-coverage.sh check could not read the standards: ${(r.stderr || '').trim().split('\n').pop().slice(0, 200)}`] : ['fail', `aid-ui-coverage.sh check exit ${r.status}: ${((r.stdout || '') + (r.stderr || '')).trim().split('\n').slice(0, 3).join(' | ').slice(0, 300)}`];
 })();
 // copy_review (P108): the page's copy now, the facts and the approved context now, against the review
