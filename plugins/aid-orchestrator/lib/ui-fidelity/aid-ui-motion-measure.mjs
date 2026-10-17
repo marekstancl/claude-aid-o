@@ -9,7 +9,8 @@
 //   final_frame_diff_px         pixels that differ between the final frame and the same frame with every mask
 //                               switched off - a seam left by the masks shows here (fix 63)
 // Time is read from the animations themselves (paused and set to each moment), never from the machine's speed.
-// A page with no animation writes {"not_applicable": true}: only the motion place's `without` record waives it.
+// A page with no animation writes {"not_applicable": true}: only the motion place's `without` record waives it. A page moved
+// by a script (no browser animation, attributes changing) writes script_driven with the end and null for what cannot be read.
 // Exit 0 written, 1 the page did not load, 2 usage.
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
@@ -32,7 +33,19 @@ export default async function measure(args) {
              name: !!document.querySelector('svg.mark .name, .mark .name, [data-aid-logo-name], svg.mark text, [data-aid-logo] text') };
   });
   let rec;
-  if (!info.n) rec = { not_applicable: true };
+  // P113 (Coufal: the PM's logo moved by requestAnimationFrame and read as no motion at all): without browser animations
+  // the page is watched for 4 s - attributes a script keeps changing are motion too. Its end is measured; when the name
+  // shows cannot be read from a script, so it stays null and the gate treats it as missing (never as a pass).
+  const scripted = info.n ? null : await page.evaluate(() => new Promise(res => {
+    let last = -1, n = 0;
+    const mo = new MutationObserver(ms => { for (const m of ms) if (m.type === 'attributes') { n++; last = performance.now(); } });
+    mo.observe(document.documentElement, { attributes: true, subtree: true });
+    setTimeout(() => { mo.disconnect(); res({ n, last: Math.round(last), running: last > performance.now() - 300 }); }, 4000);
+  }));
+  if (!info.n && !(scripted && scripted.n)) rec = { not_applicable: true };
+  else if (!info.n) rec = { script_driven: true, web_logo_draw_ms: scripted.running ? 999999 : scripted.last,
+    web_motion_running_after_ms: scripted.running ? 999999 : scripted.last, web_logo_name_visible_ms: null, final_frame_diff_px: null,
+    note: 'pohyb řízený skriptem: konec změřen ze změn stránky; čitelnost názvu a švy masek změřit nejde - pro web pohyb přes CSS (aid-ui-logo-motion.py)' };
   else {
     const hold = (t) => page.evaluate(ms => document.getAnimations().forEach(a => { a.pause(); a.currentTime = ms; }), t);
     const nameVisible = () => page.evaluate(() => {

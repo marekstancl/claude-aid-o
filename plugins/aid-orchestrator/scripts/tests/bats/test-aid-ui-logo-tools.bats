@@ -103,3 +103,9 @@ PY
   jq '.overlap = 0' "$T/motion.json" > "$T/o0.json"; run python3 "$MOT" "$T/o0.json" "$T/m4"; [ "$status" -eq 1 ]; [[ "$output" == *"overlap"* ]]
   jq 'del(.name)' "$T/motion.json" > "$T/nn.json"; run python3 "$MOT" "$T/nn.json" "$T/m5"; [ "$status" -eq 1 ]; [[ "$output" == *"name"* ]]
 }
+
+@test "logo-tools: a logo moved by a script (no browser animation) is measured as motion - its end, and null where nothing can be read" {
+  printf '<!doctype html><html><body><svg id="l" viewBox="0 0 100 100"><rect id="r" width="0" height="10"/></svg><script>var s=null;function f(t){if(s===null)s=t;var p=Math.min((t-s)/1500,1);document.getElementById("r").setAttribute("width",(100*p).toFixed(1));if(p<1)requestAnimationFrame(f)}requestAnimationFrame(f)</script></body></html>' > "$T/script.html"
+  run bash "$TOOL" motion measure "$T/script.html" --variant s --out-dir "$T/m"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.script_driven == true and .web_logo_draw_ms > 1000 and .web_logo_draw_ms < 3000 and .web_logo_name_visible_ms == null and (.not_applicable | not)' "$T/m/metrics-pohyb-s.json" >/dev/null || { cat "$T/m/metrics-pohyb-s.json"; return 1; }
+}
