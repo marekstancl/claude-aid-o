@@ -313,9 +313,10 @@ aid_hook_rule_decision_card() {
   fi
 
   local last
-  last="$(jq -rs '[.[] | select(.type == "assistant")] | last
-                  | (.message.content // []) | map(select(.type == "text") | .text) | join("\n")' \
-          "$transcript" 2>/dev/null)"
+  # read from the end and stop at the last assistant entry: slurping the whole transcript (158 MB in a long P113
+  # session) overran the rule's 5 s budget and failed closed on a turn that asked for nothing
+  last="$(tac "$transcript" 2>/dev/null | jq -c 'select(.type == "assistant")' 2>/dev/null | head -n 1 \
+          | jq -r '(.message.content // []) | map(select(.type == "text") | .text) | join("\n")' 2>/dev/null)"
   if [[ -z "$last" || "$last" == "null" ]]; then
     echo "no assistant text in the transcript — nothing to check" >&2
     return 3
