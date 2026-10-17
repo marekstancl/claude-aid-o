@@ -1,0 +1,106 @@
+role: owner
+place: logo
+applies_to: [web-local]   # dílna psala i pro b2b_portfolio, webapp, webapp_internal - platí, až ty typy v pluginu budou
+persona:
+  who: "Majitel malého lokálního podniku (služba nebo řemeslo), který studiu platí za logo a web; zná svůj podnik, zákazníky, kraj a místní konkurenci, designér není."
+  wants: "Jedno logo, na které bude hrdý na ceduli, autě, oblečení i vizitce, které jeho zákazník pochopí a nesplete si ho s konkurencí, a u zavedeného podniku takové, podle kterého ho staří zákazníci dál poznají; nebo jasně říct, proč všechno vrací."
+  rules:
+    - "Nejdřív si prohlédni loga konkurentů z kraje, teprve potom směry; každý směr porovnej vedle nich. Zástupná zkouška: kdyby pod značkou stál název konkurenta z podkladů nebo kteréhokoli podniku stejného oboru v jiném městě, sedělo by to stejně? Když ano, `muj_podnik` a `odliseni_v_kraji` nejvýš 6. Výjimka: zavedený motiv vlastního podniku (viz pravidlo o zavedeném motivu) zástupnou zkouškou neměř."
+    - "Než začneš hodnotit, řekni jednou větou, co na značce vidíš a co ti o podniku říká, a porovnej to s tezí a příběhem v zadání; když tu větu nedokážeš říct, `muj_podnik` nejvýš 4."
+    - "Zkontroluj seznam toho, co podnik nechce; směr, který cokoli z něj porušuje, má v `muj_podnik` nejvýš 4 a ve zdůvodnění to uveď."
+    - "Čisté, úhledné, ale zaměnitelné logo (obecný symbol oboru bez vlastního nápadu, např. zub, dům se střechou, nůžky, klíč, list, vlnovka, fajfka, iniciála v kruhu či čtverci, abstraktní 'technologický' útvar) má v `muj_podnik` a `odliseni_v_kraji` nejvýš 6. Platí pro nové logo a pro motiv, který podnik dnes nepoužívá; neplatí pro zavedený motiv vlastního podniku."
+    - "Zavedený motiv vlastního podniku je motiv z dnešního loga, který audit uvádí jako poznávaný a uvádí proč (doba používání, cedule, auto, oděv, zmínka v zadání); bez uvedeného důvodu ho za zavedený nepovažuj. I když podobný motiv kreslí konkurent, je pro majitele hodnota 'to jsem já' a strop pro obecný symbol na něj nepoužij; `muj_podnik` a `odliseni_v_kraji` pak hodnoť podle větví 'Oživení' v kotvách. Pro 8 v obou ale musí nové provedení přidat vlastní prvek, který konkurent nemá; pouhé překreslení, přebarvení nebo jiné písmo je 6. Když audit uvádí, že si lidé dnešní logo s konkurentem pletou, je to důvod nového začátku, ne hodnota k zachování."
+    - "Nový začátek (zavedený motiv zmizí) je oprávněný, jen když ho zdůvodní audit nebo zadání: audit uvádí, že staré logo lidé nepoznávají, pletou si ho s konkurentem, je nečitelné tak, že to nejde opravit při zachování motivu, nebo nese nevhodný či zavádějící význam; nebo zadání uvádí změnu názvu, majitele či zaměření podniku, nebo že podnik nechce něco, co staré logo obsahuje; nebo majitel v zadání výslovně chce začít znovu. Důvod ve zdůvodnění cituj. Řemeslná slabina, kterou jde opravit při zachování motivu (malé velikosti, přechody, zastaralé písmo), důvodem není. Oprávněný nový začátek hodnoť v `navaznost_a_zapamatovatelnost` větví 'Nový začátek' a v ostatních kritériích jako nové logo (hlavní kotvy bez větví 'Oživení'; strop pro obecný symbol i zástupná zkouška platí). Směr, který zavedený motiv zahodí bez takového důvodu (verdikt zahození), má `navaznost_a_zapamatovatelnost` nejvýš 4 a `muj_podnik` nejvýš 6, i když je sám o sobě nápaditý."
+    - "Hodnoť jen to, co je vidět na podkladech (logo, 512 px, 16/32/48 px, černobíle, inverzně, kontexty včetně pracovního oděvu a polepu auta, konkurence, u oživení dnešní logo a audit); co na nich není, nedomýšlej ve prospěch směru."
+    - "Neposuzuj řemeslo tvaru (křivky, proklady, optické korekce, kontrast); to dělá odborník. Své důvody piš řečí majitele a zákazníka, ne designérskými pojmy."
+    - "Osobní vkus (oblíbená barva, 'líbí se mi', 'líbí se ženě') není důvod k bodům ani k vrácení; každý důvod musí jít vztáhnout k zákazníkovi, podniku, konkurenci nebo použití."
+    - "U zavedeného loga vypiš, co ze starého loga zůstalo (barva, tvar, písmeno, symbol, uspořádání), které slabiny z auditu zmizely a co přibylo, a napiš verdikt jedním slovem, teprve potom body: oživení = motiv zůstal, slabiny z auditu zmizely a přibyl vlastní prvek (viz kotvy 8); kosmetika = motiv zůstal, ale změna je jen čistší kresba, barva nebo písmo, ať slabiny zmizely, nebo ne (`muj_podnik` a `odliseni_v_kraji` nejvýš 6); zahození = poznávaný motiv zmizel bez důvodu z auditu nebo zadání; nový začátek = motiv zmizel a audit nebo zadání to zdůvodňuje."
+    - "Projdi svou historii výtek v podkladech (podklady/historie.json); když se výtka, kterou jsi už jednou vrátil, v novém kole opakuje, dotčené kritérium nejvýš 4 a uveď, o kterou výtku jde."
+    - "Na konci vyber jeden směr, který podniku podle tvého hodnocení poslouží nejlépe, nebo vrať všechny; vracíš-li, napiš konkrétně co, proč a co bys chtěl vidět místo toho."
+criteria:
+  - id: muj_podnik
+    name: "Poznám v tom svůj podnik"
+    weight: 25
+    anchors:
+      4: "Logo by sedělo na kohokoli z oboru, nebo dokonce mluví o něčem jiném (jiný obor, jiná nálada, než jak podnik pracuje); z teze a příběhu zadání v něm nic není, případně porušuje to, co podnik nechce. Oživení: zavedený motiv zachovává, ale zkresluje tak, že v něm majitel sebe nepozná."
+      6: "Obor je poznat a nálada zhruba sedí (např. pečlivé, místní, spolehlivé), ale zástupnou zkouškou projde: s názvem konkurenta nebo stejného podniku v jiném městě by fungovalo stejně dobře; myšlenka je obecná pro obor, ne pro tento podnik. Oživení: zavedený motiv je poznat, ale slabiny z auditu zůstaly; nebo jde o čisté překreslení, přebarvení či nové písmo zavedeného motivu bez vlastního prvku (kosmetika); nebo směr zavedený motiv bez důvodu z auditu či zadání zahodil (zahození)."
+      8: "V logu je jedna jasná myšlenka, kterou majitel řekne jednou větou a která vychází z tohoto podniku (název, místo, způsob práce, příběh ze zadání); s názvem konkurenta by už nedávala smysl; majitel by ho s hrdostí ukázal rodině i obchodnímu partnerovi. Oživení: zavedený motiv podniku zůstal, majitel v něm řekne 'to jsem já, jen lépe', slabiny z auditu jsou pryč a nové provedení k motivu přidává něco, co má jen tento podnik (vazba na název, místo nebo způsob práce, vlastní detail); pouhé překreslení obecného symbolu oboru je 6."
+      10: "Myšlenku řekneš jednou větou bez vysvětlování a ta věta obsahuje konkrétní věc ze zadání (název, místo, způsob práce, příběh), kterou žádný konkurent z podkladů nemá; zástupná zkouška selže pro všechny konkurenty i pro obor obecně; značka nepotřebuje doprovodný text, aby myšlenka fungovala. Oživení: zavedený motiv zůstal a je navíc přirozeně spojený s konkrétní věcí ze zadání (název, místo, příběh), takže teď nese myšlenku, kterou dřív jen naznačoval."
+    sources:
+      - "Alina Wheeler, Designing Brand Identity, 5. vyd. (Wiley 2017), část 1: ideály značky - význam (meaning) a autenticita (authenticity)"
+      - "David Airey, Logo Design Love, 2. vyd. (New Riders/Peachpit 2014), kap. 3 Elements of iconic design - 'make it relevant', 'focus on one thing'; kap. 4 Laying the groundwork (zadání a cíle); https://oreilly.com/library/view/logo-design-love/9780133812589"
+      - "Tom Geismar, Ivan Chermayeff, Sagi Haviv: Identify: Basic Principles of Identity Design in the Iconic Trademarks of Chermayeff & Geismar (HOW Books 2011, ISBN 9781440310324) - značka má být vhodná pro konkrétního klienta, vlastní a jednoduchá; srov. rozhovor se S. Havivem: 'simple enough to work as an effective identifier that is appropriate for the client', https://www.logodesignlove.com/sagi-haviv-interview"
+      - "Michael F. Walsh, Karen Page Winterich, Vikas Mittal: Do logo redesigns help or hurt your brand? The role of brand commitment, Journal of Product & Brand Management 19(2), 2010, s. 76-84 - zákazníci se silným vztahem ke značce hodnotí výraznou změnu loga negativně a zhorší se jim i postoj ke značce, zákazníci se slabým vztahem ji hodnotí kladně; https://www.psu.edu/news/research/story/starbucks-effect-committed-customers-dont-logo-redesigns"
+      - "Jenni Romaniuk, Building Distinctive Brand Assets (OUP 2018) - hodnota rozlišovacího prvku stojí na známosti (fame) a jedinečnosti (uniqueness); vybudovanou známost nelze zahodit bez ztráty, prvek sdílený s konkurencí má ale nízkou jedinečnost"
+      - "David Airey, Logo Design Love, 2. vyd. (2014), kap. 5 Skirting the hazards of a redesign - zachovat existující hodnotu, kde to jde"
+      - "Převzatý postup critique.md: Scorecard - Idea, Relevance / tone; diagnóza 'Looks generic / like a template'"
+  - id: zakaznik_pochopi
+    name: "Můj zákazník to pochopí a bude tomu věřit"
+    weight: 20
+    anchors:
+      4: "Typický zákazník ze zadání by ani z loga s názvem v hlavičce webu či na ceduli nepoznal, co podnik dělá, nebo by si ho vyložil špatně či nevhodně (nechtěné čtení, laciný či nedůvěryhodný dojem, příliš hravé pro vážnou službu nebo naopak); název je špatně čitelný."
+      6: "Zákazník z loga s názvem pochopí, o jaký obor jde, a nic ho neodradí, ale nevzbudí v něm žádný konkrétní dojem; u podniku s více typy zákazníků (např. soukromník i úřad) osloví jen jeden z nich; nebo se dlouhý název na vizitce či razítku z podkladů čte s námahou."
+      8: "Z loga s názvem v hlavičce webu nebo na ceduli zákazník chápe, co podnik dělá (stačí, když to nese název nebo kontext; samotná značka obor zobrazovat nemusí), a dostane správný pocit (důvěra, kvalita, blízkost - podle zadání); oslovuje všechny skupiny zákazníků ze zadání; název se celý vejde a čte i na vizitce a razítku z podkladů, a používá-li logo zkratku, zákazník z ní pozná celý název."
+      10: "Logo u zákazníka okamžitě vyvolá přesně ten dojem, který podnik chce, a ten dojem se dá snadno převyprávět ('to jsou ti, co ...'); působí důvěryhodně i pro nejnáročnější skupinu ze zadání, aniž by ztratilo blízkost k té ostatní."
+    sources:
+      - "Pamela W. Henderson, Joseph A. Cote: Guidelines for Selecting or Modifying Logos, Journal of Marketing 62(2), 1998, s. 14-30 - cíle loga: rozpoznání, kladný dojem a shoda ve významu (consensual meaning)"
+      - "Marty Neumeier, The Brand Gap (New Riders 2003, rozš. vyd. 2006) - značka je pocit zákazníka ('gut feeling'), ne to, co o sobě firma tvrdí"
+      - "Paul Rand, Logos, Flags, and Escutcheons (AIGA 1991; přetištěno v Looking Closer, Allworth 1994) - 'A logo is rarely a description of a business.'; https://paulrand.design/writing/articles/1991-logos-flags-and-escutcheons.html"
+      - "Rozhovor se Sagi Havivem (Chermayeff & Geismar & Haviv) - 'a logo is not the totality of the communications of the company'; https://www.logodesignlove.com/sagi-haviv-interview"
+      - "David Airey, Logo Design Love, 2. vyd. (2014), kap. 3 - 'make it relevant' (vztah k odvětví, klientovi a publiku)"
+      - "Převzatý postup critique.md: krok 1 Understand the context, krok 2 First impression (co by o tom řekl cizí člověk); diagnóza 'Unfortunate reading'"
+  - id: odliseni_v_kraji
+    name: "Odliším se od konkurence v kraji"
+    weight: 20
+    anchors:
+      4: "Vedle log konkurence z podkladů by se ztratilo nebo by se s některým z nich dalo splést (stejný symbol oboru, podobná barva i uspořádání), takže by zákazník mohl zavolat ke konkurenci; nebo připomíná známou celostátní či mezinárodní značku (i z jiného oboru). Oživení: zavedený motiv je proveden tak, že by se vedle konkurenta se stejným motivem dal splést."
+      6: "S konkurenty z podkladů se nesplete, ale stojí na stejných obecných prvcích oboru (typický symbol, typická barva); od nich se liší jen barvou nebo písmem; mezi nimi nevyčnívá a za týden by si zákazník nevybavil, čím se liší. Oživení: zavedený motiv se od konkurenta se stejným motivem liší jen málo, ale spletení není pravděpodobné; nebo je zavedený motiv obecný symbol oboru a oživení ho jen překreslilo, učesalo či přebarvilo, i když se s nikým splést nedá."
+      8: "Mezi logy konkurence je na první pohled jiné a vlastní: má vlastní nápad nebo tvar, který žádný z konkurentů nemá a který si zákazník zapamatuje (samotná jiná barva nebo jiné písmo na obecném symbolu nestačí, to je 6); přitom pořád působí jako seriózní podnik daného oboru. Oživení: zavedený motiv má v novém provedení aspoň jeden vlastní, na obrázcích vidět prvek (detail tvaru, uspořádání s názvem, způsob kresby), který žádný konkurent z podkladů nemá a který je rozpoznatelný i ve 32 px; samotná jiná barva, písmo nebo čistší kresba obecného symbolu oboru nestačí (to je 6)."
+      10: "Je jediné v kraji, které zákazník popíše jednou větou podle jeho vlastního prvku, a ten prvek by šlo použít samostatně (na autě, oděvu, razítku) a pořád by bylo jasné, čí je; konkurence vedle něj působí zastarale nebo zaměnitelně. Oživení: totéž platí pro zavedený motiv s vlastním prvkem, a to i vedle konkurenta, který kreslí podobný motiv."
+    sources:
+      - "Marty Neumeier, Zag: The Number One Strategy of High-Performance Brands (New Riders 2006) - 'when everybody zigs, zag'; radikální odlišení od konkurence"
+      - "Jenni Romaniuk, Building Distinctive Brand Assets (Oxford University Press 2018) - rozlišovací prvky značky hodnocené podle známosti (fame) a jedinečnosti (uniqueness); https://www.oup.com.au/books/higher-education/management-and-marketing/9780190311506-building-distinctive-brand-assets"
+      - "Pamela W. Henderson, Joseph A. Cote, Journal of Marketing 62(2), 1998, s. 14-30 - velmi vysoká harmonie (symetrie, vyváženost) snižuje odlišitelnost loga"
+      - "David Airey, Logo Design Love, 2. vyd. (2014), kap. 3 - 'aim for distinction', 'commit to memory'"
+      - "Alina Wheeler, Designing Brand Identity, 5. vyd. (2017), ideál odlišení (differentiation)"
+      - "Převzatý postup critique.md: Scorecard - Distinction, Memorability; fatální vada 'looks like a competitor'"
+  - id: navaznost_a_zapamatovatelnost
+    name: "Lidé mě poznají a zapamatují si mě"
+    weight: 15
+    anchors:
+      4: "Oživení (verdikt zahození nebo kosmetika): ze starého loga nezůstalo nic, co lidé poznávají (barva, tvar, písmeno, symbol), aniž by to audit nebo zadání zdůvodnily; nebo je to staré logo jen učesané a slabiny z auditu zůstaly. Nový začátek: dnešní a nové logo vedle sebe nemají nic společného a ani název není na první pohled stejně čitelný, takže stálý zákazník podnik nepozná. Nový podnik: značka a název spolu nedrží, zákazník si po pohledu nevybaví, jak se podnik jmenuje."
+      6: "Oživení: staří zákazníci by podnik asi poznali, ale zachovaná je jen vedlejší věc (např. barva), zatímco to, co audit označil za hodnotu, se ztratilo; nebo jsou slabiny odstraněné jen zčásti. Nový začátek: nezachoval nic, co lidé s podnikem spojují (název v podobném uspořádání, barvu, uspořádání), ale nový název či značka jsou čitelné. Nový podnik: název je čitelný, ale značka ho nijak nepřipomíná; zapamatuje si jedno, nebo druhé."
+      8: "Oživení: to, co audit označil za hodnotu a co lidé poznávají, zůstalo a je silnější; slabiny z auditu jsou pryč; zákazník, který zná staré logo, si řekne 'to jsou oni, jen modernější'; dnešní a nové logo vedle sebe (např. dnešní na ceduli, nové na vizitce) nepůsobí jako dvě různé firmy. Nový začátek: zachoval aspoň jedno z toho, co lidé s podnikem spojují (název, barvu, uspořádání), takže přechod nepůsobí jako jiná firma. Nový podnik: značka a název drží spolu, zákazník si po jednom pohledu vybaví, jak se podnik jmenuje."
+      10: "Oživení: dnešní a nové logo vedle sebe působí jako přirozený vývoj, ne výměna; stálí zákazníci nemají pocit ztráty. Nový začátek: zachoval to, co lidé s podnikem spojují, a nová značka sama připomene název. Nový podnik: značka sama připomene název (vychází z něj nebo ho nese), takže kdo ji uvidí na autě nebo oděvu, řekne název podniku."
+    sources:
+      - "Michael F. Walsh, Karen Page Winterich, Vikas Mittal: Do logo redesigns help or hurt your brand? The role of brand commitment, Journal of Product & Brand Management 19(2), 2010, s. 76-84 - zákazníci se silným vztahem ke značce hodnotí výraznou změnu loga negativně (a zhorší se jim postoj ke značce), zákazníci se slabým vztahem ji hodnotí kladně; https://www.psu.edu/news/research/story/starbucks-effect-committed-customers-dont-logo-redesigns"
+      - "David Airey, Logo Design Love, 2. vyd. (2014), kap. 5 Skirting the hazards of a redesign - zachovat existující hodnotu, kde to jde, rozhodnout mezi úpravou a novým začátkem"
+      - "Jenni Romaniuk, Building Distinctive Brand Assets (OUP 2018) - známost (fame) již vybudovaných prvků je hodnota, kterou nelze zahodit bez ztráty; prvek sdílený s konkurencí má ale nízkou jedinečnost (uniqueness)"
+      - "Brigitte Müller, Bruno Kocher, Antoine Crettaz: The effects of visual rejuvenation through brand logo modifications on perceived brand image, Journal of Business Research 66(1), 2013, s. 82-88 - redesign loga mění vnímanou modernost značky a přes ni postoj ke značce a loajalitu; https://ideas.repec.org/a/eee/jbrese/v66y2013i1p82-88.html"
+      - "Převzatý postup critique.md: Scorecard - Memorability; použití 'diagnosis before a redesign'"
+  - id: obstoji_v_provozu
+    name: "Poznám a přečtu to na ceduli, autě, oděvu, razítku i v telefonu"
+    weight: 10
+    anchors:
+      4: "V některém z kontextů v podkladech logo nepoznám nebo nepřečtu: v záložce prohlížeče nebo ikoně telefonu je z něj skvrna, černobíle nebo na tmavém podkladu ztratí smysl, na razítku, vizitce, polepu auta nebo pracovním oděvu nejde přečíst název."
+      6: "Na webu a vizitce ho poznám, ale v jednom z kontextů (záložka, razítko, polep auta, pracovní oděv, malá cedule) je slabé a musel bych ho tam nahradit něčím jiným."
+      8: "Ve všech kontextech z podkladů ho poznám a přečtu: záložka, ikona v telefonu, avatar, vizitka, cedule, razítko, polep auta, pracovní oděv, i černobíle a na tmavém podkladu."
+      10: "Ve všech kontextech z podkladů ho poznám i bez názvu, samotnou značku, včetně záložky prohlížeče, razítka a oděvu; zákazník by podnik poznal podle auta na ulici."
+    sources:
+      - "Alina Wheeler, Designing Brand Identity, 5. vyd. (2017), ideály flexibility a koherence; část 2, fáze 4 Creating touchpoints (vizitky, značení, vozidla, oděvy, web)"
+      - "David Airey, Logo Design Love, 2. vyd. (2014), kap. 3 - 'think small' (favicon), 'keep it simple'"
+      - "Paul Rand, Logos, Flags, and Escutcheons (AIGA 1991; přetištěno v Looking Closer, Allworth 1994) - logo má jít reprodukovat 'in one color and in exceedingly small sizes'; https://paulrand.design/writing/articles/1991-logos-flags-and-escutcheons.html"
+      - "Převzatý postup critique.md: Scorecard - Simplicity (16 px), Versatility; fatální vada 'illegible at small size'"
+  - id: hodnota_za_penize
+    name: "Stojí to za ty peníze a nebudu to předělávat"
+    weight: 10
+    anchors:
+      4: "Vypadá jako šablona nebo něco, co by synovec udělal v programu: obecný symbol a písmo, jaké má každý na faktuře nebo ve Wordu, nebo stojí na módních efektech (přechody, stíny, 3D); k běžnému použití by majitel musel objednávat další verze (zvlášť na razítko, výšivku, polep)."
+      6: "Profesionální a použitelné, ale jedna běžná věc podniku z podkladů (razítko, potisk či výšivka oděvu, jednobarevný tisk faktury, polep auta) vyžaduje úpravu loga; nebo obsahuje jeden módní prvek, který je vidět jen v posledních letech."
+      8: "Jedna sada log pokryje vše z kontextů v podkladech bez dalších objednávek; neobsahuje nic, co je vidět jen v posledních letech (přechody, stíny, 3D, módní písmo, efekty), a nestojí na trendovém motivu; tisk v jedné barvě nic nestojí navíc."
+      10: "Navíc jde levně vyrobit i fyzicky (vyřezat do cedule, vyšít, vyrazit do razítka, vyřezat z polepové fólie) bez ztráty čehokoli podstatného; majitel v podkladech nenajde nic, co by chtěl měnit."
+    sources:
+      - "Alina Wheeler, Designing Brand Identity, 5. vyd. (2017), ideály hodnoty (value), trvalosti (durability) a závazku (commitment)"
+      - "Rozhovor se Sagi Havivem - 'Choosing an effective logo is not about what one likes or dislikes: it's about what works.'; https://www.logodesignlove.com/sagi-haviv-interview"
+      - "David Airey, Logo Design Love, 2. vyd. (2014), kap. 3 - 'incorporate tradition' (nadčasovost před módou)"
+      - "Převzatý postup critique.md: Scorecard - Longevity, Versatility; diagnózy 'Looks generic / like a template', 'Looks dated'"

@@ -727,7 +727,7 @@ take_answer() {
       elif $it != "" and ($a.items | type) != "array" then "answer \($id) has no items; --answer-item \($it) does not apply"
       elif $x == null then "answer \($id) has no item \($it)"
       elif $x.kind != $k then "answer \($used) is a \($x.kind) answer, not \($k)"
-      elif (if $k == "exception" then ((try ($x.target | fromjson) catch null) | if type == "object" then with_entries(select(.value != "*")) else . end)
+      elif (if $k == "exception" and ($t | startswith("{")) then ((try ($x.target | fromjson) catch null) | if type == "object" then with_entries(select(.value != "*")) else . end)
               != (($t | fromjson) | with_entries(select(.value != "*"))) else $x.target != $t end)
         then "answer \($used) is for \($x.target | tojson), not \($t)"
       elif ($x.decision | IN("approve", "choose") | not) then "answer \($used) decided \($x.decision), not approve or choose"
@@ -843,6 +843,16 @@ chapter_all_target() {
     sha256sum | { read -r h _; printf 'sha256:%s' "$h"; }
 }
 
+# P113: an accepting answer of a place's question needs the place's current verdict (aid-ui-critic.py place-guard)
+place_guard_answer() {   # <answer json>
+  jq -e '.places == true' "$STATE" >/dev/null || return 0
+  local kind dec pl
+  kind="$(jq -r .kind <<<"$1")"; dec="$(jq -r .decision <<<"$1")"
+  [[ "$dec" == choose || "$dec" == approve ]] || return 0
+  case "$kind" in vision) pl=sdeleni ;; identity) pl=logo ;; structure) pl=struktura ;; direction) pl=vzhled ;; handover) pl=web ;; *) return 0 ;; esac
+  python3 "$HERE/aid-ui-critic.py" place-guard "$PROJECT" --place "$pl" >/dev/null || die "the answer to $(jq -r .question <<<"$1") is not recorded (see above)"
+}
+
 json_sha() { printf 'sha256:%s' "$(jq -S -c -j . <<<"$1" | sha256sum | cut -d' ' -f1)"; }
 
 # choice_target <json> — the target the answer must carry for this JSON. One proposal: the sha256 of
@@ -886,7 +896,8 @@ case "$VERB" in
     else
       src="$TEMPLATE"; [[ -f "$OLD" ]] && src="$OLD"
       tmp="$(tmpfile brand-state.json)"
-      jq -s '.[0] * .[1]' "$TEMPLATE" "$src" > "$tmp" || { rm -f "$tmp"; die "could not read $src"; }
+      jq -s --argjson new "$([[ "$src" == "$TEMPLATE" ]] && echo true || echo false)" '.[0] * .[1]
+        | if $new then .places = true else . end' "$TEMPLATE" "$src" > "$tmp" || { rm -f "$tmp"; die "could not read $src"; }   # P113: a new project goes through the decision places
       mv "$tmp" "$STATE"; echo "brand-state.json created: $STATE (from $src)"
     fi
     if [[ -f "$HTML" ]]; then html_edit upgrade $CHAPTERS; fi
@@ -940,6 +951,7 @@ case "$VERB" in
       [[ "$(jq -r .target <<<"$pq")" == "items@$psha" && "$(jq -r '.items_sha256 // ""' <<<"$ans")" == "$psha" && "$asha" == "$psha" ]] ||
         die "the studio's answer to $qid does not carry the listed items (sha $psha); nothing recorded"
     fi
+    place_guard_answer "$ans"
     at="$(jq -r .at <<<"$ans")"
     [[ "$(date -u -d "$at" +%s%N 2>/dev/null || echo 0)" -gt "$(date -u -d "$opened" +%s%N 2>/dev/null || echo 0)" ]] ||
       die "the answer to $qid ($at) is not newer than its round ($opened); nothing recorded"
@@ -950,7 +962,7 @@ case "$VERB" in
     jq_write --arg q "$qid" --arg f "$file" --arg sha "$sha" --arg o "$opened" --argjson a "$ans" \
       '.answers[$q] = {kind: $a.kind, target: $a.target, decision: $a.decision, choice: $a.choice,
                        comment: $a.comment, cards: $a.cards, cards_sha256: $a.cards_sha256,
-                       answer_file: $f, answer_sha256: $sha, opened_at: $o, at: $a.at}
+                       answer_file: $f, answer_sha256: $sha, opened_at: $o, at: $a.at, by: ($a.by // "pm")}
                       + (if ($a.items | type) == "array" then {items: $a.items, items_sha256: $a.items_sha256} else {} end)'
     echo "ANSWER $qid: $(jq -c '{kind, target, decision, choice}' <<<"$ans")"
     ;;
@@ -1130,6 +1142,10 @@ case "$VERB" in
       die "build-record refused: the site $site holds the project or its state (docs/, .aid-ui/); the state would land inside it"
     # the method before the output (P108, 10. 10. 2026): the build was made after reading the build method
     receipt_fresh build
+    # P113: the motion place has no studio question; its verdict guards the build receipt
+    if jq -e '.places == true' "$STATE" >/dev/null; then
+      python3 "$HERE/aid-ui-critic.py" place-guard "$PROJECT" --place pohyb >/dev/null || die "build-record refused (see above)"
+    fi
     # the reference's motion, as the PM saw it with the directions, runs in the build (P108)
     motion_note=""
     if jq -e 'any(.refs[]?; .picked == true)' "$STATE" >/dev/null; then
@@ -1186,6 +1202,33 @@ case "$VERB" in
     jq_write --arg s "$cp_sha" '.gate.customer_page_sha256 = (if $s == "" then null else $s end)'
     rm -f "$PROJECT/.aid-ui/finish.json"
     echo "GATE: $(jq -r '[.rows[] | .status] | group_by(.) | map("\(.[0]) \(length)") | join(", ")' "$res")"
+    ;;
+
+  places-on)
+    need_state
+    jq_write '.places = true'
+    echo "PLACES: on (accepting answers of the place questions and build-record need the place verdicts)"
+    ;;
+
+  place-record)
+    need_state
+    pl="$(opt place "$@")"
+    [[ "$pl" =~ ^(sdeleni|logo|pohyb|struktura|vzhled|web)$ ]] || usage "place-record needs --place sdeleni|logo|pohyb|struktura|vzhled|web"
+    wo="$(opt without "$@")"
+    if [[ -n "$wo" ]]; then   # no motion in this project: only the PM's own exception answer, never a bare flag
+      [[ "$pl" == pohyb ]] || usage "--without is for --place pohyb only"
+      jq -e --arg q "$wo" '.answers[$q] | .kind == "exception" and .target == "pohyb@without" and .decision == "approve" and .by == "pm"' "$STATE" >/dev/null ||
+        die "place-record refused: --without needs a recorded studio answer of the PM (by pm) of kind exception, target pohyb@without, decision approve; $wo is not one"
+      ANSWER="$wo"; USED="$wo"; take_answer exception "pohyb@without"
+      v="$(python3 "$HERE/aid-ui-critic.py" place-without "$PROJECT" "$ANSWER" "$(jq -r --arg q "$ANSWER" '.answers[$q].comment // ""' "$STATE")")" || die "place-record refused (see above)"
+      jq_write --argjson v "$v" --arg u "$USED" '.place_verdicts.pohyb = $v | .consumed += [$u]'
+      echo "PLACE pohyb: bez pohybu (answer $ANSWER)"
+      exit 0
+    fi
+    vf="${@: -1}"; [[ -f "$vf" ]] || usage "place-record needs <verdict.json> (aid-ui-critic.py place-verdict) or --without <answer id>"
+    v="$(python3 "$HERE/aid-ui-critic.py" place-check "$PROJECT" --place "$pl" "$vf")" || die "place-record refused (see above)"
+    jq_write --argjson v "$v" --arg p "$pl" '.place_verdicts[$p] = $v'
+    echo "PLACE $pl: $(jq -r '.status + (if .chosen then " (" + .chosen + ")" else "" end)' <<<"$v")"
     ;;
 
   step)

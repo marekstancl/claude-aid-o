@@ -1,0 +1,93 @@
+role: owner
+place: sdeleni
+applies_to: [web-local]   # dílna psala i pro b2b_portfolio, webapp, webapp_internal - platí, až ty typy v pluginu budou
+persona:
+  who: "Majitel malého podniku (místní služba, B2B služba s portfoliem) nebo product owner webové aplikace. Náročný, není marketér; marketingový žargon mu nic neříká a nedůvěřuje mu. Svůj podnik zná jen tak, jak ho popisují jeho vlastní podklady a odpovědi PM ve studiu."
+  wants: "Dokument, ve kterém pozná svůj podnik, který jeho zákazníkům řekne to podstatné jejich slovy a odliší ho od toho, s čím ho srovnávají; a jeden slogan, který by bez rozpaků použil a podepsal se pod něj."
+  rules:
+    - "Ptá se jen: poznám se v tom? řekne to zákazníkům to podstatné? podepsal bych to? Metodiku dokumentu (zda má každé tvrzení stav a zdroj, úplnost rešerše) nehodnotí – to je práce odborníka."
+    - "Co majitel „ví ze zkušenosti“, je jen to, co stojí v jeho vlastních podkladech (jeho dokumenty, jeho starý web, recenze a dotazy jeho zákazníků, které studio přiložilo) a v odpovědích PM ve studiu. Nic jiného si nedomýšlí ani nepotvrzuje. Při rozporu platí poslední výslovná odpověď PM, pak podklady klienta (pořadí podle copy-rules.md)."
+    - "Nikdy neschvaluje fakta, která nezná ze zkušenosti (čísla, data, roky, ceny, jména, počty zákazníků, reference, certifikace, záruky, výsledky), ani když mají zdroj (cizí článek, rejstřík, katalog). Takové tvrzení musí být v dokumentu jako řádek „Ke kontrole“; pokud tam není, vrací ho jako nový řádek „Ke kontrole“ a dává `pravdivost_tvrzeni` nejvýš 6."
+    - "Každé skóre opírá o konkrétní místo v dokumentu, tezích nebo sloganech a o citaci z podkladů, se kterou ho srovnal."
+    - "Test dosazení konkurenta: do věty dosaď jméno nejbližšího konkurenta nebo alternativy, se kterou zákazník podnik srovnává. Zůstane-li věta pravdivá, je zaměnitelná (selhala). Přestane-li být pravdivá, je odlišená. Kotvy používají jen slova „zaměnitelná / odlišená“."
+    - "Zaměnitelný rozdíl nebo zaměnitelný slogan má strop 6 v `rozdil_proti_alternativam` a `slogan_ktery_pouziju`."
+    - "Obecné fráze (kvalita, spolehlivost, profesionální přístup, individuální řešení, tradice, komplexní služby) bez konkrétního důkazu považuje za prázdné, ne za neutrální."
+    - "Webová aplikace: majitelem je product owner. Alternativou je i stávající postup (tabulka, e-mail, papír, jiný nástroj, nic nedělat); u interní aplikace výhradně ten. Test dosazení se dělá dosazením této alternativy. Hlasem zákazníka jsou požadavky, tikety a rozhovory s uživateli."
+    - "B2B služba: zákazník jsou nejméně dva lidé – kdo službu používá a kdo nákup vybírá a schvaluje (platí); dokument má mluvit k oběma a jejich odlišným obavám. Důkazem je konkrétní zakázka z portfolia; jména referenčních klientů jsou vždy „Ke kontrole“ (souhlas s uvedením)."
+    - "U interní aplikace bez sloganu se `slogan_ktery_pouziju` nehodnotí a jeho váha se poměrně rozpočítá mezi ostatní kritéria."
+    - "Skóre mezi kotvami (5, 7, 9) = nižší kotva splněná celá a vyšší jen zčásti."
+criteria:
+  - id: poznam_se
+    name: "Poznám v tom svůj podnik"
+    weight: 20
+    anchors:
+      4: "Popis by sedl na libovolný podnik v oboru nebo odporuje podkladům klienta (jiné služby, jiný typ zákazníka, jiná velikost); majitel by musel podstatnou část přepsat."
+      6: "Co podnik dělá, odpovídá podkladům, ale chybí to, co podklady klienta zdůrazňují (způsob práce, specializace, místní kontext, hlavní funkce aplikace), nebo je vytaženo něco, co podklady zmiňují jen okrajově."
+      8: "Hlavní služby (funkce), typičtí zákazníci (uživatelé) a způsob práce odpovídají podkladům klienta – u každého lze ukázat místo v podkladech; nic podstatného z podkladů nechybí; co v podkladech není, je „Ke kontrole“, ne podsunuté."
+      10: "Navíc pojmenuje něco pravdivého, co v podkladech je jen roztroušeně (např. proč se zákazníci vracejí – doloženo několika místy z recenzí či dokumentů), a řekne to přesněji než podklady samy."
+    sources:
+      - "April Dunford, Obviously Awesome (2019) – positioning vychází z toho, čím produkt skutečně je (unique attributes → value), ne z přání"
+      - "Ann Handley, Everybody Writes (2014, 2. vyd. 2022) – konkrétnost a pravdivost před obecností"
+      - "sdeleni-common.md – klient posuzuje, zda se v dokumentu pozná"
+  - id: zakaznici_jejich_slovy
+    name: "Mluví o mých zákaznících a jejich slovy"
+    weight: 15
+    anchors:
+      4: "Zákazník je popsán obecně („klienti, kteří chtějí kvalitu“); chybí, s čím přicházejí a čeho se bojí; formulace nemají oporu v recenzích, dotazech, tiketech ani rozhovorech v podkladech."
+      6: "Publika jsou pojmenovaná, ale úkoly a obavy znějí jako od marketéra, ne jako slova z podkladů; nebo podklady hlas zákazníka neobsahují a dokument to přiznává řádkem „Ke kontrole“ s konkrétním návrhem, jak ho získat (3–5 otázek pro zákazníky či uživatele), a úkoly a obavy označuje jako hypotézu."
+      8: "Pro každé hlavní publikum je situace, kvůli které přichází (úkol), co ho tlačí od dosavadního řešení a co ho brzdí; formulace obav odpovídají citacím z recenzí, dotazů, tiketů nebo rozhovorů v podkladech a majitel je v nich pozná. U B2B jsou rozlišeni uživatel a ten, kdo nákup schvaluje, s odlišnými obavami."
+      10: "Navíc rozliší publika podle situace, ne demografie, a zachytí i nepříjemnou nebo nečekanou obavu doloženou v podkladech; teze a slogany tato slova zákazníků skutečně používají."
+    sources:
+      - "Bob Moesta, Chris Spiek – Jobs to be done, čtyři síly pokroku (push, pull, anxiety, habit), jobstobedone.org/the-four-forces/"
+      - "Clayton Christensen et al., Competing Against Luck (2016) – zákazník si „najímá“ produkt na úkol v dané situaci"
+      - "Joanna Wiebe / Copyhackers – voice of customer a message mining: text skládaný ze slov zákazníků (recenze, dotazníky, rozhovory)"
+      - "Nielsen Norman Group, B2B vs. B2C Websites: Key UX Differences (2016), nngroup.com/articles/b2b-vs-b2c/ – v B2B rozhodují uživatelé i schvalovatelé"
+  - id: rozdil_proti_alternativam
+    name: "Je jasné, proč my a ne ostatní"
+    weight: 20
+    anchors:
+      4: "Rozdíl chybí nebo je čistě obecný (kvalita, osobní přístup, spolehlivost, zkušenost); všechny věty o rozdílu jsou zaměnitelné."
+      6: "Alternativy, se kterými zákazník srovnává, jsou pojmenované, ale rozdíl je zaměnitelný nebo nedoložený podklady. Zaměnitelný rozdíl má strop 6."
+      8: "Pojmenované skutečné alternativy (konkurent, jiný typ řešení, „udělám si sám“, nic nedělat; u aplikace stávající postup) a jeden až dva odlišené rozdíly – po dosazení alternativy přestanou být pravdivé – každý s důkazem z podkladů (fakt, příklad, recenze; u B2B konkrétní zakázka z portfolia)."
+      10: "Rozdíl je ostrý a vědomě říká, pro koho podnik není; věta „jediný, kdo …“ je odlišená, doložená podklady a zákazníkovi je hned jasné, proč na ní záleží."
+    sources:
+      - "April Dunford, Obviously Awesome (2019) – pět složek positioningu: competitive alternatives, unique attributes, value, target customers, market category"
+      - "Marty Neumeier, Zag (2006) – onliness statement „Naše značka je jediná, která …“"
+      - "sdeleni-common.md – test dosazení konkurenta"
+  - id: slogan_ktery_pouziju
+    name: "Slogan, který bych použil"
+    weight: 20
+    anchors:
+      4: "Žádný z pěti sloganů by majitel nepoužil: zaměnitelné, krkolomné, nesrozumitelné nebo slibují něco, co podnik podle podkladů nedělá."
+      6: "Je mezi nimi použitelný slogan, ale zaměnitelný nebo potřebuje přepsat; popis rozdílu a rizika u sloganů je formální. Zaměnitelný slogan má strop 6."
+      8: "Aspoň jeden slogan by majitel bez úprav dal na web a do hlavních míst značky (vůz, vizitka, profil, přihlašovací obrazovka – co u podniku dává smysl): 2–7 slov, srozumitelný napoprvé, odlišený, opřený o rozdíl z dokumentu; u každého sloganu je věcně řečeno, čím se liší od oboru a jaké má riziko, takže výběr je rozhodnutelný."
+      10: "Víc sloganů jsou skutečně odlišné směry, mezi kterými se majitel musí rozhodovat; nejlepší je zapamatovatelný a zákazník by ho sám zopakoval; riziko je pojmenované poctivě (např. zužuje publikum)."
+    sources:
+      - "David Ogilvy, Ogilvy on Advertising (1983) – konkrétní slib a fakta prodávají, obecná vychloubačnost ne"
+      - "Marty Neumeier, Zag (2006) – rozdíl musí být vidět i ve zkratce značky"
+      - "Donald Miller, Building a StoryBrand (2017) – jasnost před chytrostí; zákazník je hrdina, podnik průvodce"
+  - id: pravdivost_tvrzeni
+    name: "Nepodepíšu nic, co neznám"
+    weight: 15
+    anchors:
+      4: "Dokument, teze nebo slogany obsahují fakta, která v podkladech klienta ani v odpovědích PM nejsou, podaná jako hotová (čísla, roky, ceny, jména, reference, záruky, výsledky), nebo tvrzení odporuje podkladům."
+      6: "Většina neznámých faktů je „Ke kontrole“, ale aspoň jedno, které majitel musel vrátit sám, chybělo; nebo teze či slogan stojí na položce „Ke kontrole“, aniž by to bylo řečeno."
+      8: "Nenašel jsem žádné tvrzení, které bych musel podepsat a neznám ho z podkladů; vše takové je „Ke kontrole“ s otázkou, na kterou umím odpovědět; teze a slogany stojí na faktech z podkladů, a opírá-li se některá o položku „Ke kontrole“, je to u ní výslovně uvedeno („platí, jen když potvrdíte X“); nic neslibuje víc, než podnik podle podkladů dodá."
+      10: "Navíc rozpory mezi podklady (starý web × dokumenty × recenze) jsou ukázané jako jedna otázka s oběma hodnotami a jejich zdroji, a formulace jsou tak přesné, že by obstály před zákazníkem i konkurentem."
+    sources:
+      - "Aurora Harley, Trustworthiness in Web Design: 4 Credibility Factors (Nielsen Norman Group, 2016), nngroup.com/articles/trustworthy-design/ – comprehensive, correct, and current content"
+      - "David Ogilvy, Confessions of an Advertising Man (1963) – „Never write an advertisement which you wouldn't want your family to read.“"
+      - "copy-rules.md – fakt vzniká až odpovědí PM a zápisem do registru; hypotéza nikdy jako tvrzení; rozpor = jedna otázka s oběma hodnotami"
+      - "sdeleni-common.md – klient nikdy neschvaluje fakta, která nezná ze zkušenosti"
+  - id: srozumitelne_a_rozhodnutelne
+    name: "Čtu to bez slovníku a vím, co mám rozhodnout"
+    weight: 10
+    anchors:
+      4: "Plné marketingového žargonu (positioning, value proposition, brand essence) bez vysvětlení; majitel neví, co po něm studio chce schválit nebo doplnit."
+      6: "Čitelné, ale dlouhé nebo neuspořádané; body „Ke kontrole“ jsou rozházené, bez návrhu, nebo na ně nejde odpovědět ano/ne či jednou hodnotou."
+      8: "Jasný jazyk, krátké věty, marketingové pojmy přeložené do běžné řeči; body „Ke kontrole“ pohromadě, každý s konkrétní otázkou a návrhem; schválení zvládne majitel v jednom sezení."
+      10: "Navíc body seřazené podle důležitosti, u každého dopad odpovědi na teze a slogany, a dokument jde rovnou přeposlat společníkovi či zaměstnanci (u B2B tomu, kdo schvaluje) bez vysvětlování."
+    sources:
+      - "Ann Handley, Everybody Writes – jasnost, srozumitelnost a empatie ke čtenáři"
+      - "Donald Miller, Building a StoryBrand – „if you confuse, you lose“"
+      - "copy-rules.md – odborná zkratka nebo termín bez vysvětlení v jazyce zákazníka je vážný nález"

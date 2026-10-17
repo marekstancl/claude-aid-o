@@ -1,0 +1,25 @@
+role: tech
+place: vzhled
+gates:
+  - criterion: proporce_vyvazeni
+    min: 7
+    why: "Výslovný vkus PM: vyvážené, proporční kompozice, prvky opticky na středu, nic zploštělého. Deformace (strop 4) i zamýšleně centrovaný hlavní blok s poměrem mezer nad 1,00 nebo prázdná polovina bez protiváhy (strop 6) bránu spolehlivě zastaví; o hranici rozhoduje měření (poměr mezer, těžiště kresby, odchylka poměru stran), ne dojem."
+  - criterion: mrizka_zarovnani_rytmus
+    min: 7
+    why: "Zarovnané texty jsou výslovný vkus PM. Hrany „skoro zarovnané“ měřené na kresbě a smíšené zarovnání (kotva 6) bránu zastaví; optické korekce do 0,1 em, mřížka o 3–4 sloupcích a řádkový proklad se za odchylku nepočítají, takže dobrá agentura projde."
+  - criterion: kontrast_pristupnost
+    min: 7
+    why: "Text pod 4,5 : 1 v hlavní cestě nebo vodorovné posouvání na telefonu (strop 4) a nekontrastní ovládací prvky či zakryté zaměření (kotva 6) jsou porušení WCAG 2.2 AA, které klient ve vzhledu nepozná a které se po stavbě opravuje dráž."
+  - criterion: originalita_znacka_teze
+    min: 6
+    why: "Rubrika obecnosti studia vyřazuje při jednom tvrdém nebo dvou měkkých pravidlech (strop 4); u aplikací platí jen na veřejných a vstupních obrazovkách, takže brána netrestá konvence pracovních obrazovek. Kotva 6 projde, protože zaměnitelnost v oboru je nález k opravě, ne vyřazení; prototypičnost zvyšuje první dojem (Tuch a kol. 2012)."
+  - criterion: typografie_hierarchie
+    min: 6
+    why: "Nerozlišitelná hierarchie, míra textu mimo čitelný rozsah nebo písmo bez české diakritiky (kotva 4) jsou chyby řemesla viditelné na každé stránce; chybějící nezlomitelné mezery (kotva 6) jsou opravitelné bez zásahu do kompozice."
+  - criterion: telefon_obrazky
+    min: 6
+    why: "Zmenšený počítač místo telefonu, rozmazané či oříznuté obrázky a obrázky vydávané za podnik bez podkladu nebo bez označení zástupného obrázku (kotva 4) zastaví; obrázek vydávaný za podnik je podle copy-rules tvrzení bez faktu. Poctivě označené zástupné obrázky bránu projdou."
+  - criterion: tokeny_soucasti_stavy
+    min: 6
+    why: "Bez tokenů použitých v kódu a bez stavu zaměření se vzhled nedá udržet napříč stránkami a obrazovkami ani ovládat z klávesnice; u aplikace je knihovna součástí podmínkou stavby toků."
+weighted_min: 7.5

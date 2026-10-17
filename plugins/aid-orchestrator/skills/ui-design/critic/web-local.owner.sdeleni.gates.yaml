@@ -1,0 +1,16 @@
+role: owner
+place: sdeleni
+gates:
+  - criterion: pravdivost_tvrzeni
+    min: 8
+    why: "Majitel nepodepíše dokument, ve kterém je fakt, který nezná z podkladů, podaný jinak než jako „Ke kontrole“; vymyšlený údaj na webu je jeho reputační i právní riziko."
+  - criterion: poznam_se
+    min: 6
+    why: "Když popis odporuje podkladům klienta nebo by sedl na kohokoli, dokument se vrací celý – vše ostatní na něm stojí."
+  - criterion: rozdil_proti_alternativam
+    min: 7
+    why: "Strop zaměnitelného rozdílu je 6; klient nepřijme dokument, kde rozdíl po dosazení konkurenta (u aplikace stávajícího postupu) platí i pro něj."
+  - criterion: slogan_ktery_pouziju
+    min: 8
+    why: "Majitel musí jeden slogan vybrat a použít bez úprav; zaměnitelný slogan (strop 6) nepřijme. U interní aplikace bez sloganu se nehodnotí."
+weighted_min: 7.5

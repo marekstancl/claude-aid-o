@@ -48,6 +48,8 @@ ans() {
     python3 - "$K/web-local.$role.yaml" "$s" "${3:-major}" > "$T/ans-$role.json" <<'PY'
 import sys, json, yaml
 r = yaml.safe_load(open(sys.argv[1])); _lo = (yaml.safe_load(open(__import__("re").sub(r"\.(owner|tech)\.yaml$", ".yaml", sys.argv[1]))).get("launch_only") or {}).get(__import__("re").search(r"\.(owner|tech)\.yaml$", sys.argv[1]).group(1)) or []; r["criteria"] = [c for c in r["criteria"] if c["id"] not in _lo]; s = int(sys.argv[2]); c0 = r["criteria"][0]["id"]
+import os; _role = __import__("re").search(r"\.(owner|tech)\.yaml$", sys.argv[1]).group(1)   # P113: the web is rated with the look and structure rubrics too
+r["criteria"] += [dict(c, id=k + "." + c["id"]) for k in ("vzhled", "struktura") for c in yaml.safe_load(open(os.path.dirname(sys.argv[1]) + "/web-local.%s.%s.yaml" % (_role, k)))["criteria"]]
 a = None if s < 4 else max(x for x in (4, 6, 8, 10) if x <= s)
 print(json.dumps({"criteria": [{"id": c["id"], "score": s, "anchor": a, "evidence": "úvod: nadpis a fotka pece", "missing_for_next": "víc", "to_ten": {"studio": ["úvod: vlastní fotka ordinace přes celou šířku"], "client": []}}
   for c in r["criteria"]], "findings": [
@@ -95,8 +97,9 @@ work() {   # the agent works: one assistant turn in its transcript, now
   ans 7; run python3 "$Q" round "$P" --web "$W"
   jq -e '.fixed_before[0].id == "r1-owner-f1" and (.fixed_before[0].method | startswith("z hlavy"))' <<<"${lines[-1]}" >/dev/null
   # memory: each role got its own findings of round 1 with what happened to them, and nothing of the other role
-  jq -e '(map(.id) | sort) == ["r1-owner-f1","r1-owner-f2"] and (.[] | select(.id == "r1-owner-f1") | .state == "fixed" and (.evidence | contains("kvásku")))' "$P/.aid-ui/critic/rounds/2/history-owner.json" >/dev/null
-  jq -e '.[0].id' "$P/.aid-ui/critic/rounds/2/tech/bundle/podklady/historie.json" | grep -q tech
+  jq -e '(.findings | map(.id) | sort) == ["r1-owner-f1","r1-owner-f2"] and (.findings[] | select(.id == "r1-owner-f1") | .state == "fixed" and (.evidence | contains("kvásku")))
+         and .ratings[0].round == 1 and .ratings[0].scores.prvni_dojem_a_premiovost == 6 and (.ratings[0].to_ten | length) > 0' "$P/.aid-ui/critic/rounds/2/history-owner.json" >/dev/null   # P113: the previous rating too
+  jq -e '.findings[0].id' "$P/.aid-ui/critic/rounds/2/tech/bundle/podklady/historie.json" | grep -q tech
   # cost and time per round: the critics, and the agent's work after round 1 belongs to round 1
   jq -e '.rounds == 2 and .scores == [6, 7] and .history[0].cost.agent_measured == true and .history[0].cost.by.agent > 2
          and .history[0].cost.by.critic > 0 and (.history[0].cost.minutes | type) == "number" and .cost_total_usd > 2' "$P/.aid-ui/critic/loop.json" >/dev/null  || { jq -c . "$P/.aid-ui/costs.jsonl"; jq -c ".history[] | {n,at,cost}" "$P/.aid-ui/critic/loop.json"; return 1; }
@@ -204,4 +207,71 @@ work() {   # the agent works: one assistant turn in its transcript, now
   jq '.findings[0].id = "r1-01" | .findings[1].id = "r2-01"' "$T/ans-tech.json" > "$T/x" && mv "$T/x" "$T/ans-tech.json"
   python3 "$Q" round "$P" --web "$W" >/dev/null
   jq -e '([.findings[].id] | sort) == ["r1-owner-01", "r1-owner-02", "r1-tech-r1-01", "r1-tech-r2-01"]' "$P/.aid-ui/critic/rounds/1/round.json" >/dev/null
+}
+
+# P113 step 2: the loop per decision place - its own rounds, cap and reopen
+pans() {   # pans <place> <score>: both roles' answers of a one-result place, f1 by the agent
+  for role in owner tech; do
+    python3 - "$P" "$1" "$role" "$2" > "$T/ans-$role.json" <<'PY'
+import json, sys
+p, place, role, s = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+fz = json.load(open(p + "/.aid-ui/critic/frozen/%s.json" % place))
+ids = [c["id"] for c in fz["roles"][role]["rubrics"][0]["rubric"]["criteria"]]
+a = None if s < 4 else max(x for x in (4, 6, 8, 10) if x <= s)
+print(json.dumps({"criteria": [{"id": i, "score": s, "anchor": a, "evidence": "dokument, oddíl 1", "missing_for_next": "víc", "to_ten": {"studio": ["oddíl 1: doložit odlišení zakázkou"], "client": []}} for i in ids],
+  "findings": [{"id": "f1", "criterion": ids[0], "severity": "major", "owner": "agent", "kind": "remeslo", "text": "obecná věta", "fix": "konkrétně", "where": "oddíl 1"}],
+  "readiness": [], "summary": "Místo pro test smyčky."}))
+PY
+  done
+}
+pcycle() { local n; n="$(python3 "$Q" status "$P" --place "$1" | jq -r .rounds)"
+  for r in owner tech; do python3 "$Q" triage "$P" "r$n-$r-f1" accepted --expected "+1" --place "$1" >/dev/null && python3 "$Q" fixed "$P" "r$n-$r-f1" --evidence "oddíl přepsán" --method "steps/1v-vision.md" --place "$1" >/dev/null; done; }
+
+@test "gates: place loop - a fifth round at one place is refused while another place still has its rounds" {
+  python3 "$SC/aid-ui-critic.py" freeze "$P" --type web-local --place sdeleni >/dev/null
+  # the codex stub tells the roles apart by the sdeleni tech rubric's first criterion
+  cat > "$T/bin/codex" <<SH
+#!/usr/bin/env bash
+p="\$(cat)"; role=owner; grep -q "### $(yq -r '.criteria[0].id' "$K/web-local.tech.sdeleni.yaml") " <<<"\$p" && role=tech
+python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
+SH
+  chmod +x "$T/bin/codex"
+  pans sdeleni 6
+  for i in 1 2 3 4; do
+    run python3 "$Q" round "$P" --place sdeleni; [ "$status" -eq 0 ] || { echo "round $i: $output"; return 1; }
+    jq -e --argjson i "$i" '.round == $i and .place == "sdeleni"' <<<"${lines[-1]}" >/dev/null
+    [ -f "$P/.aid-ui/critic/rounds/sdeleni/$i/round.json" ]
+    [ "$i" -eq 4 ] || pcycle sdeleni
+  done
+  pcycle sdeleni
+  [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = "stop:round_cap" ]
+  run python3 "$Q" round "$P" --place sdeleni; [ "$status" -eq 1 ]; [[ "$output" == *"round_cap"* ]]
+  # the finished web has its own count: no round yet, nothing of sdeleni in rounds/<n>
+  [ "$(python3 "$Q" status "$P" | jq -r '.decision + " " + (.rounds | tostring)')" = "round 0" ]
+  [ ! -e "$P/.aid-ui/critic/rounds/1" ]
+  # the memory at the place carries the previous rating
+  jq -e '.place == "sdeleni" and (.ratings | length) == 3 and (.findings | length) == 3 and (.findings | all(.role == null and (.id | contains("-tech-"))))' "$P/.aid-ui/critic/rounds/sdeleni/4/history-tech.json" >/dev/null
+}
+
+@test "gates: place loop - a reopen of one place does not reset another; the audit is the finished web's only" {
+  python3 "$SC/aid-ui-critic.py" freeze "$P" --type web-local --place sdeleni >/dev/null
+  cat > "$T/bin/codex" <<SH
+#!/usr/bin/env bash
+p="\$(cat)"; role=owner; grep -q "### $(yq -r '.criteria[0].id' "$K/web-local.tech.sdeleni.yaml") " <<<"\$p" && role=tech
+python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
+SH
+  chmod +x "$T/bin/codex"
+  pans sdeleni 6; for i in 1 2 3 4; do python3 "$Q" round "$P" --place sdeleni >/dev/null; pcycle sdeleni; done
+  # the web place goes on in its own folder meanwhile
+  cat > "$T/bin/codex" <<SH
+#!/usr/bin/env bash
+p="\$(cat)"; role=owner; grep -q "$(yq -r '.criteria[0].id' "$K/web-local.tech.yaml")" <<<"\$p" && role=tech
+python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
+SH
+  ans 6 7; python3 "$Q" round "$P" --web "$W" >/dev/null
+  run python3 "$Q" reopen "$P" --place sdeleni --reason "PM chce jiný slogan"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ -f "$P/.aid-ui/critic/rounds/sdeleni/reopened.json" ]; [ ! -e "$P/.aid-ui/critic/loop-reopened.json" ]
+  [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r '.decision + " " + (.repair_rounds | tostring)')" = "round 0" ]
+  [ "$(python3 "$Q" status "$P" | jq -r '.decision + " " + (.rounds | tostring)')" = "triage 1" ]
+  run python3 "$Q" audit "$P" --place sdeleni --web "$W"; [ "$status" -eq 2 ]
 }

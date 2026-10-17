@@ -1,0 +1,22 @@
+role: owner
+place: struktura
+gates:
+  - criterion: nepodepisu_nic_neznameho
+    min: 8
+    why: "Majitel nepodepíše strukturu, ve které je služba, cena, reference nebo jiný údaj, který nezná z podkladů, podaný jinak než jako „Ke kontrole“; vymyšlená stránka nebo údaj na webu je jeho reputační i právní riziko."
+  - criterion: moje_sluzby_cele
+    min: 7
+    why: "Chybí-li hlavní služba nebo je ve stromu jako hotová služba, kterou podnik nedělá, vrací se celý strom – sekce, plán obsahu i kostra na něm stojí."
+  - criterion: zakaznici_najdou
+    min: 7
+    why: "Když majitel v kostře nenajde do dvou kliknutí, s čím mu zákazníci nejčastěji volají a píšou (u aplikace nejčastější úlohu uživatele), struktura nesplnila svůj hlavní účel."
+  - criterion: nic_co_chci_nezmizi
+    min: 7
+    why: "Ztráta stránky, na kterou vedou zákazníci, tiskoviny nebo profil na mapách (u aplikace úlohy ze stávajícího postupu), je nevratná škoda; u nového webu bez starého se brána nepoužije."
+  - criterion: vim_co_dodat
+    min: 6
+    why: "Bez srozumitelného seznamu toho, co má majitel dodat, se web zasekne na obsahu; drobné nedostatky seznamu kolo nezastaví."
+  - criterion: chci_takovy_web
+    min: 6
+    why: "Bez proklikatelné kostry nejde test nalezitelnosti ani rozhodnutí „takový web chci“; PM žádá web vidět co nejdřív a doplňovat ho, ne předělávat."
+weighted_min: 7.5

@@ -8,6 +8,7 @@
 # each with its own rubric; the ids come from the rubrics, which their authors own.
 
 setup() {
+  export P
   C="$BATS_TEST_DIRNAME/../../aid-ui-critic.py"
   P="$BATS_TEST_TMPDIR/p"; mkdir -p "$P/docs/content" "$P/site"
   printf '# Pekárna U Mlýna\nKváskový chleba v Brně, otevřeno denně od 6.\n' > "$P/docs/content/product-context.md"
@@ -20,6 +21,11 @@ import sys, json, yaml, os
 s = int(sys.argv[1]); r = yaml.safe_load(open(os.environ["K"] + "/web-local." + os.environ.get("ROLE", "owner") + ".yaml"))
 lo = [] if os.environ.get("KEEP_LAUNCH") else (yaml.safe_load(open(os.environ["K"] + "/web-local.yaml")).get("launch_only") or {}).get(os.environ.get("ROLE", "owner")) or []
 r["criteria"] = [c for c in r["criteria"] if c["id"] not in lo]
+try:   # P113: the finished web is rated with the rubrics of the look and the structure too (prefixed ids)
+    fz = json.load(open(os.environ["P"] + "/.aid-ui/critic/frozen.json"))
+    r["criteria"] += [dict(c, id=e["key"] + "." + c["id"]) for e in fz["roles"][os.environ.get("ROLE", "owner")]["rubrics"][1:] for c in e["rubric"]["criteria"]]
+except (OSError, KeyError):
+    pass
 anchor = lambda x: max(a for a in (4, 6, 8, 10) if a <= x) if x >= 4 else None
 print(json.dumps({"criteria": [{"id": c["id"], "score": s, "anchor": anchor(s), "evidence": "úvod: nadpis a fotka pece",
   "missing_for_next": "více obrazu", "to_ten": {"studio": ["úvod: vlastní fotka ordinace přes celou šířku"] if s < 10 else [], "client": []}} for c in r["criteria"]], "findings": [{"id": "f1", "criterion": r["criteria"][0]["id"], "severity": "minor",
@@ -137,4 +143,162 @@ score() { python3 "$C" score "$P" "$BATS_TEST_TMPDIR/a.json" --role "${ROLE:-own
   run python3 "$C" verdict "$P" --role tech "$BATS_TEST_TMPDIR"/r9-*.json; [ "$status" -eq 1 ]; [[ "$output" == *"exactly 3"* ]]
   answer 7; cp "$BATS_TEST_TMPDIR/a.json" "$BATS_TEST_TMPDIR/r-low.json"; rm "$(ls "$BATS_TEST_TMPDIR"/r8-*.json)"
   run python3 "$C" verdict "$P" --role tech "$BATS_TEST_TMPDIR"/r*.json; [ "$status" -eq 3 ]; jq -e '.accepted == false and .lowest_rating < 8 and .verdict == "nepřijato"' <<<"$output" >/dev/null
+}
+
+# ---------------------------------------------------------------- P113 step 2: gates at the decision places
+# mk <place> <role> <score> [jq edit] -> $BATS_TEST_TMPDIR/<role>.json: every criterion of the frozen place at <score>;
+# DIRS="a b" gives one direction per id (logo, motion, look), each with rezim from REZIM (default nove)
+mk() {
+  python3 - "$1" "$2" "$3" > "$BATS_TEST_TMPDIR/$2.json" <<'PY'
+import json, os, sys
+place, role, s = sys.argv[1], sys.argv[2], int(sys.argv[3])
+fz = json.load(open(os.environ["P"] + "/.aid-ui/critic/" + ("frozen.json" if place == "web" else "frozen/%s.json" % place)))
+ids = [("" if e["key"] == place else e["key"] + ".") + c["id"] for e in fz["roles"][role]["rubrics"] for c in e["rubric"]["criteria"]]
+anc = lambda x: None if x < 4 else max(a for a in (4, 6, 8, 10) if a <= x)
+crit = [{"id": i, "score": s, "anchor": anc(s), "evidence": "karta směru, značka 512 px", "missing_for_next": "detail",
+         "to_ten": {"studio": ["karta: dokreslit vlastní detail do značky"] if s < 10 else [], "client": []}} for i in ids]
+a = {"findings": [], "readiness": [], "summary": "Hodnocení místa pro test."}
+dirs = os.environ.get("DIRS", "").split()
+if dirs:
+    a["directions"] = [{"id": d, "rezim": os.environ.get("REZIM", "nove"), "zavedeny_motiv": "ne", "criteria": crit} for d in dirs]
+else:
+    a["criteria"] = crit
+print(json.dumps(a, ensure_ascii=False))
+PY
+  [ -z "${4:-}" ] || { jq "$4" "$BATS_TEST_TMPDIR/$2.json" > "$BATS_TEST_TMPDIR/x.json" && mv "$BATS_TEST_TMPDIR/x.json" "$BATS_TEST_TMPDIR/$2.json"; }
+}
+sc() { python3 "$C" score "$P" "$BATS_TEST_TMPDIR/$2.json" --role "$2" --place "$1" ${3:+--metrics-dir "$3"}; }
+st() { jq -r --arg d "$1" --arg r "${2:-}" '[.directions[] | select(.direction == $d and ($r == "" or .rubric == $r)) | .status] | join(",")'; }
+logo_inputs() { mkdir -p "$P/.aid-ui/logo/cards"; for d in "$@"; do printf '%s' "$d" > "$P/.aid-ui/logo/cards/$d.png"; done; }
+verdict_of() {   # verdict_of <place> [args]: both roles' scores of $T/owner.json and $T/tech.json -> place-verdict
+  local pl="$1"; shift
+  sc "$pl" owner > "$BATS_TEST_TMPDIR/so.json" && sc "$pl" tech > "$BATS_TEST_TMPDIR/st.json" &&
+    python3 "$C" place-verdict "$P" --place "$pl" --score "$BATS_TEST_TMPDIR/so.json" --score "$BATS_TEST_TMPDIR/st.json" "$@"
+}
+
+@test "gates: when nove|oziveni|zavedeny_motiv pick the logo gates by the role's own mode; a when gate without the mode fails" {
+  python3 "$C" freeze "$P" --type web-local --place logo >/dev/null
+  DIRS="a" mk logo tech 8 '(.directions[0].criteria[] | select(.id == "myslenka")) |= (.score = 6 | .anchor = 6)'
+  run sc logo tech; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(st a <<<"$output")" = failed ]   # a new mark: idea under 7
+  jq -e '[.directions[0].gates[] | select(.ok == false) | .gate] == ["myslenka >= 7 when nove"]' <<<"$output" >/dev/null
+  DIRS="a" REZIM=oziveni mk logo tech 8 '(.directions[0].criteria[] | select(.id == "myslenka")) |= (.score = 6 | .anchor = 6)'
+  run sc logo tech; [ "$(st a <<<"$output")" = accepted ]   # a revival keeps its motif at 6, odlisnost 8 shows the own detail
+  DIRS="a" mk logo tech 8 'del(.directions[0].rezim)'
+  run sc logo tech; [ "$(st a <<<"$output")" = failed ]; [[ "$output" == *"role neuvedla režim"* ]]
+  DIRS="a" mk logo tech 8 '.directions[0].zavedeny_motiv = "ano" | (.directions[0].criteria[] | select(.id == "navaznost_trvanlivost")) |= (.score = 5 | .anchor = 4)'
+  run sc logo tech; [ "$(st a <<<"$output")" = failed ]   # an established motif: continuity under 6
+}
+
+@test "gates: any_of lets a revival through only with its own detail; a 6/6 redraw fails although its weighted mean passes" {
+  python3 "$C" freeze "$P" --type web-local --place logo >/dev/null
+  DIRS="a" REZIM=oziveni mk logo tech 8 '(.directions[0].criteria[] | select(.id == "myslenka" or .id == "odlisnost")) |= (.score = 6 | .anchor = 6)'
+  run sc logo tech; [ "$(st a <<<"$output")" = failed ]
+  jq -e '[.directions[0].gates[] | select(.ok == false) | .gate] == ["any_of myslenka|odlisnost >= 7 when oziveni"] and .directions[0].weighted >= 7' <<<"$output" >/dev/null
+  DIRS="a" REZIM=oziveni mk logo tech 8 '(.directions[0].criteria[] | select(.id == "myslenka")) |= (.score = 6 | .anchor = 6) | (.directions[0].criteria[] | select(.id == "odlisnost")) |= (.score = 7 | .anchor = 6)'
+  run sc logo tech; [ "$(st a <<<"$output")" = accepted ]
+  # none of the any_of criteria assessable -> the gate fails
+  DIRS="a" REZIM=oziveni mk logo tech 8 '(.directions[0].criteria[] | select(.id == "myslenka" or .id == "odlisnost")) |= (.score = null | .anchor = null | .not_assessable = "nejde posoudit")'
+  run sc logo tech; [ "$(st a <<<"$output")" = failed ]; [[ "$output" == *"žádné kritérium nešlo posoudit"* ]]
+}
+
+@test "gates: weighted_min holds a direction whose every criterion passes its own gate" {
+  python3 "$C" freeze "$P" --type web-local --place struktura >/dev/null
+  mk struktura tech 7; run sc struktura tech; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.directions[0].status == "failed" and ([.directions[0].gates[] | select(.ok == false) | .gate] == ["weighted >= 7.5"])' <<<"$output" >/dev/null
+  mk struktura tech 8; run sc struktura tech; jq -e '.directions[0].status == "accepted" and .accepted == true' <<<"$output" >/dev/null
+}
+
+@test "gates: motion metrics - a missing measurement fails, an animation over the limit fails, a measured one within passes" {
+  python3 "$C" freeze "$P" --type web-local --place pohyb >/dev/null
+  M="$BATS_TEST_TMPDIR/m"; mkdir -p "$M"
+  DIRS="v1" mk pohyb tech 8; run sc pohyb tech "$M"; [ "$(st v1 <<<"$output")" = failed ]; [[ "$output" == *"nezměřeno"* ]]
+  echo '{"web_logo_draw_ms": 2060, "web_logo_name_visible_ms": 0, "web_motion_running_after_ms": 400, "final_frame_diff_px": 0}' > "$M/metrics-pohyb-v1.json"
+  run sc pohyb tech "$M"; [ "$(st v1 <<<"$output")" = failed ]
+  jq -e '[.directions[0].metrics[] | select(.ok == false) | .metric] == ["web_logo_draw_ms"]' <<<"$output" >/dev/null
+  echo '{"web_logo_draw_ms": 900, "web_logo_name_visible_ms": 0, "web_motion_running_after_ms": 400, "final_frame_diff_px": 0}' > "$M/metrics-pohyb-v1.json"
+  run sc pohyb tech "$M"; [ "$(st v1 <<<"$output")" = accepted ]
+  echo '{"not_applicable": true}' > "$M/metrics-pohyb-v1.json"
+  run sc pohyb tech "$M"; [ "$(st v1 <<<"$output")" = failed ]; [[ "$output" == *"bez pohybu"* ]]   # only the place's without record waives it
+}
+
+@test "gates: a reservation only when the client's part holds the gate (studio_score + to_ten.client); a volba finding is no reservation" {
+  python3 "$C" freeze "$P" --type web-local --place vzhled >/dev/null
+  hold='(.directions[0].criteria[] | select(.id == "moje_obrazky_a_zakazky")) |= (.score = 5 | .anchor = 4 | .studio_score = 8 | .studio_anchor = 8 | .limited_by = ["oi-1"] | .to_ten.client = ["vlastní fotky provozovny a lidí"])'
+  DIRS="a" mk vzhled owner 8 "$hold"; run sc vzhled owner; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.directions[0].status == "reservation" and .directions[0].reservation == ["moje_obrazky_a_zakazky"] and .accepted == true' <<<"$output" >/dev/null
+  # the studio's own part under the gate too: failed, not a reservation
+  DIRS="a" mk vzhled owner 8 '(.directions[0].criteria[] | select(.id == "moje_obrazky_a_zakazky")) |= (.score = 5 | .anchor = 4 | .studio_score = 6 | .studio_anchor = 6 | .limited_by = ["oi-1"] | .to_ten.client = ["vlastní fotky provozovny a lidí"])'
+  run sc vzhled owner; [ "$(st a <<<"$output")" = failed ]
+  # the client's taste on the failing criterion: never a reservation
+  DIRS="a" mk vzhled owner 8 "$hold"' | .findings = [{"id": "v1", "criterion": "moje_obrazky_a_zakazky", "severity": "major", "owner": "client", "kind": "volba", "direction": "a", "text": "chci jiné fotky", "fix": "jiné fotky", "where": "úvod"}]'
+  run sc vzhled owner; [ "$(st a <<<"$output")" = failed ]
+}
+
+@test "gates: D5 - a fact returns the place, a blocking craft defect takes its direction out, the client chooses among the rest" {
+  python3 "$C" freeze "$P" --type web-local --place logo >/dev/null
+  mkdir -p "$P/docs/content"; logo_inputs a b
+  DIRS="a b" mk logo owner 8 '.choice = "a"'; DIRS="a b" mk logo tech 8
+  run verdict_of logo; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.status == "accepted" and .chosen == "a" and .chosen_by == "client" and (.target | length) == 64' <<<"$output" >/dev/null
+  # the expert's blocking craft defect on a: a is out, the client's choice of a is refused (exit 3), b remains
+  DIRS="a b" mk logo tech 8 '.findings = [{"id": "t1", "criterion": "remeslo_tvaru", "severity": "blocking", "owner": "agent", "kind": "remeslo", "direction": "a", "text": "kóta přes obrys", "fix": "odsadit", "where": "značka 512"}]'
+  run verdict_of logo; [ "$status" -eq 3 ]; jq -e '.error == "client_choice_failed" and .passing == ["b"]' <<<"$output" >/dev/null
+  DIRS="a b" mk logo owner 8 '.choice = "b"'; run verdict_of logo; jq -e '.status == "accepted" and .chosen == "b"' <<<"$output" >/dev/null
+  # a fact without a direction (the whole place): returned whatever the scores
+  DIRS="a b" mk logo tech 8 '.findings = [{"id": "t2", "criterion": "typografie", "severity": "major", "owner": "agent", "kind": "fakt", "text": "rok založení na značce nesedí", "fix": "opravit", "where": "logo s názvem"}]'
+  run verdict_of logo; [ "$status" -eq 0 ]; jq -e '.status == "returned" and (.blocked_by | map(.kind) | index("fakt")) != null' <<<"$output" >/dev/null
+  # both roles report the same fact: listed once
+  DIRS="a b" mk logo owner 8 '.choice = "b" | .findings = [{"id": "o2", "criterion": "muj_podnik", "severity": "major", "owner": "agent", "kind": "fakt", "text": "rok založení na značce nesedí", "fix": "opravit", "where": "logo"}]'
+  run verdict_of logo; [ "$(jq '[.blocked_by[] | select(.kind == "fakt")] | length' <<<"$output")" -eq 1 ]
+}
+
+@test "gates: the client cannot pick a direction that failed the client's own gate" {
+  python3 "$C" freeze "$P" --type web-local --place logo >/dev/null
+  logo_inputs a b
+  DIRS="a b" mk logo owner 8 '.choice = "a" | (.directions[0].criteria[] | select(.id == "muj_podnik")) |= (.score = 6 | .anchor = 6)'
+  DIRS="a b" mk logo tech 8
+  run verdict_of logo; [ "$status" -eq 3 ]; jq -e '.chosen == "a" and .passing == ["b"]' <<<"$output" >/dev/null
+}
+
+@test "gates: web needs all six scores - the look and structure rubrics at web use their places' gates; five of six is incomplete" {
+  python3 "$C" freeze "$P" --type web-local >/dev/null
+  mk web owner 9; mk web tech 9 '(.criteria[] | select(.id == "vzhled.proporce_vyvazeni")) |= (.score = 6 | .anchor = 6)'
+  run sc web tech; [ "$status" -eq 0 ]
+  jq -e '([.directions[] | select(.rubric == "web") | .status] == ["accepted"]) and ([.directions[] | select(.rubric == "vzhled") | .status] == ["failed"]) and .accepted == false' <<<"$output" >/dev/null
+  sc web owner > "$BATS_TEST_TMPDIR/so.json"; sc web tech > "$BATS_TEST_TMPDIR/st.json"
+  jq 'del(.directions[] | select(.rubric == "struktura"))' "$BATS_TEST_TMPDIR/st.json" > "$BATS_TEST_TMPDIR/st5.json"
+  run python3 "$C" place-verdict "$P" --place web --score "$BATS_TEST_TMPDIR/so.json" --score "$BATS_TEST_TMPDIR/st5.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"incomplete_place"* ]]
+  run python3 "$C" place-verdict "$P" --place web --score "$BATS_TEST_TMPDIR/so.json"; [ "$status" -eq 1 ]; [[ "$output" == *"incomplete_place"* ]]
+}
+
+@test "gates: --pm-choice (manual mode, the client's pick kept) and --pm-veto" {
+  python3 "$C" freeze "$P" --type web-local --place logo >/dev/null
+  logo_inputs a b
+  DIRS="a b" mk logo owner 8 '.choice = "a"'; DIRS="a b" mk logo tech 8
+  run verdict_of logo --pm-choice b; [ "$status" -eq 2 ]   # a PM choice says why
+  run verdict_of logo --pm-choice b --reason "PM chce klidnější"; [ "$status" -eq 0 ]
+  jq -e '.status == "accepted" and .chosen == "b" and .chosen_by == "pm" and .client_choice == "a"' <<<"$output" >/dev/null
+  run verdict_of logo --pm-veto "zaměnitelné s konkurentem"; jq -e '.status == "returned" and .pm_veto != null and (.blocked_by | map(.kind) | index("veto")) != null' <<<"$output" >/dev/null
+}
+
+@test "gates: a mark the PM supplied (--supplied) failing a gate is returned to the PM with the findings" {
+  python3 "$C" freeze "$P" --type web-local --place logo >/dev/null
+  logo_inputs dodano
+  DIRS="dodano" mk logo owner 8; DIRS="dodano" mk logo tech 8 '(.directions[0].criteria[] | select(.id == "jednoduchost_skala")) |= (.score = 2 | .anchor = null)'
+  run verdict_of logo --supplied; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.status == "returned" and .supplied == true and .chosen_by == "pm" and .out.dodano != null' <<<"$output" >/dev/null
+  DIRS="dodano" mk logo tech 8; run verdict_of logo --supplied; jq -e '.status == "accepted" and .chosen == "dodano"' <<<"$output" >/dev/null
+}
+
+@test "gates: the closing audit reads its thresholds from the web gate files' audit block" {
+  python3 "$C" freeze "$P" --type web-local >/dev/null
+  [ "$(yq -r '.audit.median_min' "$K/web-local.tech.web.gates.yaml")" = 8.5 ]
+  for i in 1 2 3; do mk web tech 9; cp "$BATS_TEST_TMPDIR/tech.json" "$BATS_TEST_TMPDIR/au$i.json"; done
+  run python3 "$C" verdict "$P" --role tech "$BATS_TEST_TMPDIR"/au*.json; [ "$status" -eq 0 ]; jq -e '.accepted and .other_rubrics_ok' <<<"$output" >/dev/null
+  # the look rubric at web failing in the audit: not accepted although the web rubric's median passes
+  mk web tech 9 '(.criteria[] | select(.id == "vzhled.kontrast_pristupnost")) |= (.score = 5 | .anchor = 4)'; cp "$BATS_TEST_TMPDIR/tech.json" "$BATS_TEST_TMPDIR/au1.json"
+  run python3 "$C" verdict "$P" --role tech "$BATS_TEST_TMPDIR"/au*.json; [ "$status" -eq 3 ]; jq -e '.other_rubrics_ok == false' <<<"$output" >/dev/null
+  ! grep -nE '^ACCEPT, ACCEPT_ANY, FLOOR = ' "$C"
 }

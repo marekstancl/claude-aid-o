@@ -307,12 +307,92 @@ def comp_shots(project):
     return man, [os.path.join(d, f) for c in man["competitors"] for f in c["shots"] if os.path.isfile(os.path.join(d, f))]
 
 
-def critic(project, web, audit, out, role, history=None):
-    r = subprocess.run([sys.executable, CRITIC, "prompt", project, "--role", role], capture_output=True, text=True)
+def place_bundle(project, place):
+    """The files a place's roles rate (aid-ui-critic.py bundle-files): dies naming the first missing input."""
+    r = subprocess.run([sys.executable, CRITIC, "bundle-files", project, "--place", place], capture_output=True, text=True)
+    if r.returncode:
+        die((r.stderr or r.stdout).strip().replace("ERROR: aid-ui-critic.py: ", ""))
+    s = subprocess.run([sys.executable, CRITIC, "bundle-sha", project, "--place", place], capture_output=True, text=True)
+    return [x for x in r.stdout.splitlines() if x.strip()], s.stdout.strip()
+
+
+def critic_place(project, web, audit, out, role, history, place, role_text, frozen):
+    """One rating of a decision place other than the finished web (P113): the role gets the place's bundle under
+    podklady/ (and the skeleton address at the structure), the png files of it as images."""
+    files, bsha = place_bundle(project, place)
+    kind = "audit" if audit else "critic"
+    out = out or os.path.join(project, ".aid-ui", "critic", "runs", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-%s-%s-%s" % (place, kind, role))
+    bundle = os.path.join(out, "bundle")
+    for rel in files:
+        dst = os.path.join(bundle, "podklady", rel.replace(".aid-ui/", "").replace("docs/", ""))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(os.path.join(project, rel), dst)
+    facts = os.path.join(project, "docs", "content", "facts.yaml")
+    if os.path.isfile(facts):
+        os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
+        shutil.copyfile(facts, os.path.join(bundle, "podklady", "facts.yaml"))
+    hist_ids, h = set(), None
+    if history and not audit:   # an audit is blind: no memory
+        h = json.load(open(history, encoding="utf-8"))
+        hist_ids = {f["id"] for f in (h.get("findings") if isinstance(h, dict) else h) if f.get("state") in ("fixed", "rejected_with_reason", "superseded")}
+        os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
+        wj(os.path.join(bundle, "podklady", "historie.json"), h)
+    images = [os.path.join(bundle, "podklady", rel.replace(".aid-ui/", "").replace("docs/", "")) for rel in files if rel.endswith(".png")][:MAX_IMAGES]
+    if web:
+        pages = site_pages(os.path.join(project, "site")) if os.path.isdir(os.path.join(project, "site")) else [""]
+        images += shots(os.path.join(out, "shots"), [web.rstrip("/") + "/" + pg for pg in pages[:MAX_PAGES]])[:MAX_IMAGES]
+    prompt = (role_text + "\n\n# Podklady místa\n\nV pracovním adresáři v `podklady/` (jen ke čtení, nic mimo něj nečti):\n"
+              + "\n".join("- podklady/" + rel.replace(".aid-ui/", "").replace("docs/", "") for rel in files)
+              + ("\n\nŽivá adresa: " + web if web else "")
+              + ("\n\nRegistr faktů, které podnik potvrdil, je v `podklady/facts.yaml`." if os.path.isfile(facts) else "")
+              + ("\n\nTvé předchozí hodnocení a co studio udělalo: `podklady/historie.json` (pravidla v části Paměť hodnotitele)." if h is not None else "")
+              + ("\n\n# Přiložené obrázky\n" + "\n".join("- " + os.path.basename(i) for i in images) if images else ""))
+    os.makedirs(out, exist_ok=True)
+    with open(os.path.join(out, "prompt.md"), "w", encoding="utf-8") as fh:
+        fh.write(prompt)
+
+    def valid(text):
+        a = parse_json(text)
+        if not isinstance(a, dict):
+            return None, "not JSON"
+        with tempfile.NamedTemporaryFile("w", suffix=".json", dir=out, delete=False, encoding="utf-8") as fh:
+            json.dump(a, fh, ensure_ascii=False)
+        s = subprocess.run([sys.executable, CRITIC, "score", project, fh.name, "--role", role, "--place", place], capture_output=True, text=True)
+        os.unlink(fh.name)
+        if s.returncode:
+            return None, (s.stderr or s.stdout).strip().replace("ERROR: aid-ui-critic.py: ", "")[:300]
+        bad = [x["regression_of"] for x in a.get("findings") or [] if x.get("regression_of") and x["regression_of"] not in hist_ids]
+        if bad:
+            return None, "regression_of %s: no fixed or rejected finding with that id in podklady/historie.json" % ", ".join(bad)
+        return {"answer": a, "score": json.loads(s.stdout)}, None
+
+    got, rec = ask(project, prompt, images, bundle, out, valid, "critic:%s:%s:%s" % (place, kind, role))
+    _, after = place_bundle(project, place)
+    if after != bsha:
+        die("the %s inputs changed during the rating; rate again" % place)
+    run = {"kind": kind, "place": place, "role": role, "web": web, "site_sha": bsha, "frozen_sha": frozen["sha256"],
+           "role_sha": frozen["roles"][role]["sha256"], "bundle_sha": site_sha(bundle),
+           "history": (len(h.get("findings") or []) if isinstance(h, dict) else len(h)) if h is not None else None,
+           "images": image_meta(images), "at": now(), **rec}
+    if got:
+        wj(os.path.join(out, "answer.json"), got["answer"])
+        run["score"] = got["score"]
+    wj(os.path.join(out, "run.json"), run)
+    if not got:
+        die(f"no valid rating from any provider ({rec.get('stand_in_reason')}); record in {out}/run.json")
+    print(json.dumps({"out": out, "provider": rec["provider"], **{k: v for k, v in got["score"].items() if k != "findings"}}, ensure_ascii=False))
+
+
+def critic(project, web, audit, out, role, history=None, place="web"):
+    r = subprocess.run([sys.executable, CRITIC, "prompt", project, "--role", role, "--place", place], capture_output=True, text=True)
     if r.returncode:
         die("no usable frozen critic: " + (r.stderr or r.stdout).strip())
     role_text = r.stdout
-    frozen = json.load(open(os.path.join(project, ".aid-ui", "critic", "frozen.json"), encoding="utf-8"))
+    frozen = json.load(open(os.path.join(project, ".aid-ui", "critic", "frozen.json" if place == "web" else os.path.join("frozen", place + ".json")), encoding="utf-8"))
+    if place != "web":
+        return critic_place(project, web, audit, out, role, history, place, role_text, frozen)
+    if not web:
+        die("--web <url>: the finished web is rated live", 2)
     site = os.path.join(project, "site")
     if not os.path.isdir(site):
         die(f"no site directory {site}")
@@ -344,7 +424,8 @@ def critic(project, web, audit, out, role, history=None):
     hist_ids = set()
     if history and not audit:   # an audit is blind: no memory
         h = json.load(open(history, encoding="utf-8"))
-        hist_ids = {f["id"] for f in h if f.get("state") in ("fixed", "rejected_with_reason", "superseded")}   # what may come back as a regression
+        hist_ids = {f["id"] for f in (h.get("findings") if isinstance(h, dict) else h)
+                    if f.get("state") in ("fixed", "rejected_with_reason", "superseded")}   # what may come back as a regression
         os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
         wj(os.path.join(bundle, "podklady", "historie.json"), h)
     for f in comp:
@@ -416,7 +497,7 @@ def critic(project, web, audit, out, role, history=None):
     if site_sha(site) != rated_sha:   # the site changed while the critic was rating: the rating belongs to no build
         die("the site changed during the rating (site/ differs from the copy the critic read); rate again")
     run = {"kind": kind, "role": role, "web": base, "site_sha": rated_sha, "frozen_sha": frozen["sha256"],
-           "role_sha": frozen["roles"][role]["sha256"], "bundle_sha": site_sha(bundle), "history": len(json.load(open(history, encoding="utf-8"))) if history and not audit else None, "facts_sha": facts_sha, "images": image_meta(images),
+           "role_sha": frozen["roles"][role]["sha256"], "bundle_sha": site_sha(bundle), "history": (lambda h: len(h.get("findings") or []) if isinstance(h, dict) else len(h))(json.load(open(history, encoding="utf-8"))) if history and not audit else None, "facts_sha": facts_sha, "images": image_meta(images),
            "pages": urls, "at": now(), **rec}
     if got:
         wj(os.path.join(out, "answer.json"), got["answer"])
@@ -424,7 +505,7 @@ def critic(project, web, audit, out, role, history=None):
     wj(os.path.join(out, "run.json"), run)
     if not got:
         die(f"no valid rating from any provider ({rec.get('stand_in_reason')}); record in {out}/run.json")
-    print(json.dumps({"out": out, "provider": rec["provider"], **got["score"]}, ensure_ascii=False))
+    print(json.dumps({"out": out, "provider": rec["provider"], **{k: v for k, v in got["score"].items() if k != "findings"}}, ensure_ascii=False))
 
 
 # ---------------------------------------------------------------- studio answers
@@ -670,8 +751,8 @@ def main(a):
         print(json.dumps(costs.summary(os.path.abspath(a[1])), ensure_ascii=False))
         return
     opt = lambda k: a[a.index(k) + 1] if k in a and a.index(k) + 1 < len(a) else None
-    if len(a) >= 2 and a[0] == "critic" and opt("--web") and opt("--role"):
-        return critic(os.path.abspath(a[1]), opt("--web"), "--audit" in a, opt("--out"), opt("--role"), opt("--history"))
+    if len(a) >= 2 and a[0] == "critic" and opt("--role"):
+        return critic(os.path.abspath(a[1]), opt("--web"), "--audit" in a, opt("--out"), opt("--role"), opt("--history"), opt("--place") or "web")
     if len(a) == 2 and a[0] == "competitors":
         return competitors(os.path.abspath(a[1]))
     if len(a) >= 2 and a[0] == "answer" and opt("--studio"):

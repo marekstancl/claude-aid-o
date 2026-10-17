@@ -45,8 +45,11 @@ CLIENT, CRITIC = (os.path.join(HERE, x) for x in ("aid-ui-client.py", "aid-ui-cr
 STATE = os.environ.get("AID_UI_STATE_SH") or os.path.join(HERE, "aid-ui-state.sh")
 ROUND_CAP = 3   # PM 13. 10. 2026: at most three repair rounds, or both roles at 8.5
 ROLES = ("owner", "tech")
+PLACE = "web"   # P113: the decision place this run works on (--place); the P113a loop is the place `web`
+PLACES = ("sdeleni", "logo", "pohyb", "struktura", "vzhled", "web")
 sys.path.insert(0, os.path.join(HERE, "lib"))
 import aid_ui_costs as costs   # noqa: E402
+LABEL_URL = {"web": "finished web", "struktura": "structure"}
 STATES = ("accepted", "rejected_with_reason", "duplicate", "blocked", "superseded")
 
 
@@ -70,19 +73,29 @@ def wj(path, obj):
     os.replace(tmp, path)
 
 
+def rdir(p):
+    """Rounds of the current place: .aid-ui/critic/rounds/<n> for `web` (the P113a loop), rounds/<place>/<n> for the rest."""
+    return os.path.join(cdir(p), "rounds", *([] if PLACE == "web" else [PLACE]))
+
+
 def rounds(p):
-    d = os.path.join(cdir(p), "rounds")
+    d = rdir(p)
     ns = sorted(int(x) for x in os.listdir(d) if x.isdigit()) if os.path.isdir(d) else []
     return [json.load(open(os.path.join(d, str(n), "round.json"), encoding="utf-8")) for n in ns
             if os.path.isfile(os.path.join(d, str(n), "round.json"))]
 
 
 def save_round(p, r):
-    os.makedirs(os.path.join(cdir(p), "rounds", str(r["n"])), exist_ok=True)
-    wj(os.path.join(cdir(p), "rounds", str(r["n"]), "round.json"), r)
+    os.makedirs(os.path.join(rdir(p), str(r["n"])), exist_ok=True)
+    wj(os.path.join(rdir(p), str(r["n"]), "round.json"), r)
 
 
 def site_sha(p):
+    if PLACE != "web":   # a place's bundle (aid-ui-critic.py bundle-sha), the web keeps the site's sha of P113a
+        r = subprocess.run([sys.executable, CRITIC, "bundle-sha", p, "--place", PLACE], capture_output=True, text=True)
+        if r.returncode:
+            die((r.stderr or r.stdout).strip())
+        return r.stdout.strip()
     sys.path.insert(0, HERE)
     import importlib.util
     spec = importlib.util.spec_from_file_location("aid_ui_client", CLIENT)
@@ -92,13 +105,23 @@ def site_sha(p):
 
 
 def verdict(p):
+    if PLACE != "web":   # a place is decided by its place verdict (aid-ui-state.sh place-record), not by an audit
+        try:
+            v = (json.load(open(os.path.join(p, "docs", "design", "brand-state.json"), encoding="utf-8")).get("place_verdicts") or {}).get(PLACE)
+        except (OSError, ValueError):
+            v = None
+        return {"site_sha": v["target"], "accepted": v["status"] != "returned", "verdict": v["status"]} if v and v.get("target") else None
     vf = os.path.join(cdir(p), "verdict.json")
     return json.load(open(vf, encoding="utf-8")) if os.path.isfile(vf) else None
 
 
+def reopen_file(p):
+    return os.path.join(cdir(p), "loop-reopened.json") if PLACE == "web" else os.path.join(rdir(p), "reopened.json")
+
+
 def reopened_at(p):
     try:
-        return json.load(open(os.path.join(cdir(p), "loop-reopened.json"), encoding="utf-8"))[-1]["at"]
+        return json.load(open(reopen_file(p), encoding="utf-8"))[-1]["at"]
     except (OSError, ValueError, IndexError, KeyError):
         return ""
 
@@ -151,6 +174,9 @@ def status(p):
             return dict(out, decision="close", why="%s (best: round %d, owner %.1f, tech %.1f); set %s superseded with the reason, then audit"
                         % ("both roles reached the goal" if last["score"]["accepted"] else "%d repair rounds done" % ROUND_CAP,
                            target["n"], target["score"]["owner"], target["score"]["tech"], ", ".join(todo)))
+        if PLACE != "web":
+            return dict(out, decision="verdict", why="place %s: decide it from round %d - aid-ui-critic.py place-verdict, then aid-ui-state.sh place-record"
+                        % (PLACE, rs[-1]["n"]))
         return dict(out, decision="audit", why="audit the best accepted web: round %d (owner %.1f, tech %.1f); the site must be exactly that web - restore it if a later round changed it"
                     % (target["n"], target["score"]["owner"], target["score"]["tech"]))
     if cap:
@@ -220,9 +246,9 @@ def task_row(p):
 
 def frozen_sha(p):
     try:
-        return json.load(open(os.path.join(cdir(p), "frozen.json"), encoding="utf-8"))["sha256"]
+        return json.load(open(os.path.join(cdir(p), "frozen.json" if PLACE == "web" else os.path.join("frozen", PLACE + ".json")), encoding="utf-8"))["sha256"]
     except (OSError, ValueError, KeyError):
-        die("no frozen critic (aid-ui-critic.py freeze first)")
+        die("no frozen critic of place %s (aid-ui-critic.py freeze --place %s first)" % (PLACE, PLACE))
 
 
 def same_loop(p, web):
@@ -232,7 +258,7 @@ def same_loop(p, web):
         return
     if frozen_sha(p) != rs[0]["frozen_sha"]:
         die("the frozen critic changed since round 1 (%s, the loop started with %s)" % (frozen_sha(p)[:12], rs[0]["frozen_sha"][:12]))
-    if web.rstrip("/") != rs[0]["web"].rstrip("/"):
+    if (web or "").rstrip("/") != (rs[0].get("web") or "").rstrip("/"):
         die("the loop rates %s; %s is another address" % (rs[0]["web"], web))
 
 
@@ -251,12 +277,19 @@ def mark_client(f):
 
 
 def history(p, role):
-    """The role's own findings of this loop (since a reopen) and what the studio did with them - the critic's memory."""
+    """The role's memory at this place (pamet-hodnotitele.md): its own findings of this loop (since a reopen) and what
+    the studio did with them, and its previous rating - scores per criterion and the path to 10 of each round."""
     since = reopened_at(p)
-    return [{"id": f["id"], "round": r["n"], "criterion": f["criterion"], "where": f.get("where"), "text": f["text"],
-             "state": "fixed" if f.get("state") == "accepted" and f.get("evidence") else f.get("state"),
-             "reason": f.get("reason"), "evidence": f.get("evidence")}
-            for r in rounds(p) if r["at"] >= since and not r.get("audit") for f in r["findings"] if f.get("role") == role]
+    rs = [r for r in rounds(p) if r["at"] >= since and not r.get("audit")]
+    finds = [{"id": f["id"], "round": r["n"], "criterion": f["criterion"], "where": f.get("where"), "text": f["text"],
+              "state": "fixed" if f.get("state") == "accepted" and f.get("evidence") else f.get("state"),
+              "reason": f.get("reason"), "evidence": f.get("evidence")}
+             for r in rs for f in r["findings"] if f.get("role") == role]
+    if not rs:
+        return finds
+    return {"place": PLACE, "findings": finds,
+            "ratings": [{"round": r["n"], "scores": {k.split(".", 1)[1]: v for k, v in (r["score"].get("criteria") or {}).items() if k.startswith(role + ".")},
+                         "to_ten": (r.get("to_ten") or {}).get(role) or {}} for r in rs]}
 
 
 def rate(p, web, d, audit=False, hist=None):
@@ -264,7 +297,7 @@ def rate(p, web, d, audit=False, hist=None):
     procs = {}
     for role in ROLES:
         out = os.path.join(d, role)
-        cmd = [sys.executable, CLIENT, "critic", p, "--web", web, "--role", role, "--out", out] + (["--audit"] if audit else [])
+        cmd = [sys.executable, CLIENT, "critic", p, "--role", role, "--out", out, "--place", PLACE] + (["--web", web] if web else []) + (["--audit"] if audit else [])
         if hist is not None:
             hf = os.path.join(d, "history-%s.json" % role)
             os.makedirs(d, exist_ok=True)
@@ -282,8 +315,22 @@ def bare(fid, ids):
 
 
 def merge(runs):
-    """The round's score from both roles: quality_score = the lower role score; accepted = both accepted."""
+    """The round's score from both roles: quality_score = the lower role score; accepted = both accepted. At a place
+    with several directions: the best direction (the higher lower-role weighted score) and accepted when some
+    direction passed every gate of both roles (the place verdict then decides by D5)."""
     sc = {role: runs[role]["score"] for role in ROLES}
+    if PLACE != "web":
+        dirs = sorted({x["direction"] for r in ROLES for x in sc[r].get("directions") or []})
+        w = {(r, x["direction"]): x["weighted"] for r in ROLES for x in sc[r].get("directions") or [] if x["rubric"] == PLACE}
+        ok = {d: all(x["status"] != "failed" for r in ROLES for x in sc[r]["directions"] if x["direction"] == d) for d in dirs}
+        best = max(dirs, key=lambda d: (ok[d], min(w.get((r, d), 0) for r in ROLES))) if dirs else None
+        crit = {"%s.%s" % (role, k): v for role in ROLES for k, v in sc[role]["criteria"].items()}
+        return {"quality_score": min(w.get((r, best), 0) for r in ROLES) if best else 0, "owner": w.get(("owner", best), 0), "tech": w.get(("tech", best), 0),
+                "owner_now": sc["owner"].get("quality_now"), "tech_now": sc["tech"].get("quality_now"), "best_direction": best,
+                "directions": {d: {"accepted": ok[d], "owner": w.get(("owner", d)), "tech": w.get(("tech", d))} for d in dirs},
+                "limited_by": sorted({i for r in ROLES for i in sc[r].get("limited_by") or []}), "criteria": crit,
+                "min_criterion": min(crit.values()) if crit else 0, "accepted": any(ok.values()),
+                "readiness": sorted({i for r in ROLES for i in sc[r]["readiness"]})}
     crit = {"%s.%s" % (role, k): v for role in ROLES for k, v in sc[role]["criteria"].items()}
     return {"quality_score": min(sc[r]["quality_score"] for r in ROLES), "owner": sc["owner"]["quality_score"], "tech": sc["tech"]["quality_score"],
             "owner_now": sc["owner"].get("quality_now"), "tech_now": sc["tech"].get("quality_now"),   # the web as it is, client items missing
@@ -296,12 +343,15 @@ def do_round(p, web):
     st = status(p)
     if st["decision"] != "round":
         die("no round now: %s (%s)" % (st["decision"], st["why"]))
+    if PLACE in ("web", "struktura") and not web:
+        die("--web <url>: the %s is rated live (%s)" % (LABEL_URL[PLACE], "the served site" if PLACE == "web" else "the skeleton address"), 2)
     same_loop(p, web)
-    ok, msg = gate_ok(p)
-    if not ok:
-        die("the site does not pass the regression check (aid-ui-state.sh gate-check); rebuild, build-record and run the gate first:\n" + msg)
+    if PLACE == "web":   # the regression check guards the built site; earlier places have no build yet
+        ok, msg = gate_ok(p)
+        if not ok:
+            die("the site does not pass the regression check (aid-ui-state.sh gate-check); rebuild, build-record and run the gate first:\n" + msg)
     n = st["rounds"] + 1
-    d = os.path.join(cdir(p), "rounds", str(n))
+    d = os.path.join(rdir(p), str(n))
     os.makedirs(d, exist_ok=True)
     costs.book_agent(p, "agent:before-round-%d" % n)   # the agent's own work since the last round (fixes, rebuilds)
     at = now()
@@ -320,7 +370,7 @@ def do_round(p, web):
         ans = json.load(open(os.path.join(out, "answer.json"), encoding="utf-8"))
         finds += [mark_client(dict(f, id="r%d-%s-%s" % (n, role, bare(f["id"], [x["id"] for x in ans["findings"]])), role=role, state=None)) for f in ans["findings"]]
     score = merge(runs)
-    rec = {"n": n, "at": at, "web": web, "site_sha": runs["owner"]["site_sha"], "frozen_sha": runs["owner"]["frozen_sha"],
+    rec = {"n": n, "at": at, "place": PLACE, "web": web, "site_sha": runs["owner"]["site_sha"], "frozen_sha": runs["owner"]["frozen_sha"],
            "provider": {r: runs[r].get("provider") for r in ROLES}, "score": score, "findings": finds, "readiness": score["readiness"],
            "task_test": task_row(p), "usd_equiv": usd_since(p, at)}
     save_round(p, rec)
@@ -334,7 +384,7 @@ def do_round(p, web):
     done = [{k: f.get(k) for k in ("id", "text", "evidence", "method")} for f in (prev[-1]["findings"] if prev else []) if f.get("evidence")]
     rec["to_ten"] = to_ten
     save_round(p, rec)
-    print(json.dumps({"round": n, "owner": score["owner"], "tech": score["tech"], "owner_now": score["owner_now"], "tech_now": score["tech_now"],
+    print(json.dumps({"round": n, "place": PLACE, "best_direction": score.get("best_direction"), "owner": score["owner"], "tech": score["tech"], "owner_now": score["owner_now"], "tech_now": score["tech_now"],
                       "limited_by": score["limited_by"], "min_criterion": score["min_criterion"],
                       "findings": len(finds), "top3": top, "decision": st["decision"], "loop_usd": st["cost_total_usd"],
                       "loop_minutes": sum(h["cost"]["minutes"] for h in st["history"]),
@@ -398,6 +448,8 @@ def fixed(p, fid, evidence, method):
 
 
 def audit(p, web):
+    if PLACE != "web":
+        die("the blind audit closes the finished web only; place %s is decided by aid-ui-critic.py place-verdict" % PLACE, 2)
     st = status(p)
     if st["decision"] != "audit":
         die("no audit now: %s (%s)" % (st["decision"], st["why"]))
@@ -458,13 +510,15 @@ def reopen(p, reason):
     the next round rates the changed web and only rounds from now on can be audited."""
     if not (reason or "").strip():
         die("reopen needs --reason", 2)
-    if status(p)["decision"] != "done":
+    if status(p)["decision"] not in ("done",) + (("stop:round_cap", "verdict") if PLACE != "web" else ()):
         die("only a done loop is reopened (now: %s)" % status(p)["decision"])
     at = now()
-    vf = os.path.join(cdir(p), "verdict.json")
-    os.makedirs(os.path.join(cdir(p), "verdicts"), exist_ok=True)
-    os.replace(vf, os.path.join(cdir(p), "verdicts", at.replace(":", "") + ".json"))
-    lf = os.path.join(cdir(p), "loop-reopened.json")
+    if PLACE == "web":
+        vf = os.path.join(cdir(p), "verdict.json")
+        os.makedirs(os.path.join(cdir(p), "verdicts"), exist_ok=True)
+        os.replace(vf, os.path.join(cdir(p), "verdicts", at.replace(":", "") + ".json"))
+    os.makedirs(os.path.dirname(reopen_file(p)), exist_ok=True)
+    lf = reopen_file(p)
     log = json.load(open(lf, encoding="utf-8")) if os.path.isfile(lf) else []
     log.append({"at": at, "reason": reason.strip()})
     wj(lf, log)
@@ -474,7 +528,14 @@ def reopen(p, reason):
 def main(a):
     if len(a) < 2:
         die("usage: round|triage|fixed|status|audit <project> ... (see the header)", 2)
+    global PLACE
     cmd, p = a[0], os.path.abspath(a[1])
+    if "--place" in a:
+        i = a.index("--place")
+        PLACE = a[i + 1] if i + 1 < len(a) else ""
+        a = a[:i] + a[i + 2:]
+        if PLACE not in PLACES:
+            die("--place must be one of " + ", ".join(PLACES), 2)
     opts, rest, i = {}, [], 2
     while i < len(a):
         if a[i].startswith("--") and i + 1 < len(a):
@@ -485,8 +546,8 @@ def main(a):
             i += 1
     if cmd == "status":
         print(json.dumps(write_loop(p) if rounds(p) else status(p), ensure_ascii=False))
-    elif cmd == "round" and opts.get("web"):
-        do_round(p, opts["web"])
+    elif cmd == "round":
+        do_round(p, opts.get("web"))
     elif cmd == "audit" and opts.get("web"):
         audit(p, opts["web"])
     elif cmd == "triage" and len(rest) == 2:

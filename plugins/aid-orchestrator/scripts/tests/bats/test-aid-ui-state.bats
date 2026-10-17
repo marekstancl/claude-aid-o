@@ -7,6 +7,9 @@
 # P102 Step 1 (kept): state in docs/design/brand-state.json, chapter bodies, fonts,
 # migration from docs/brand/state.json.
 
+load aid-ui-places
+setup_file() { places_template; }
+
 setup() {
   SCRIPT="$BATS_TEST_DIRNAME/../../aid-ui-state.sh"
   PAGE="$BATS_TEST_DIRNAME/../../../skills/ui-design/brand-page"
@@ -16,6 +19,7 @@ setup() {
   mkdir -p "$PROJ/docs/brand"
   cp "$PAGE/index.html" "$PROJ/docs/brand/"
   "$SCRIPT" init "$PROJ" >/dev/null
+  places_copy "$PROJ"   # P113: the place verdicts a build and the place questions stand on
   "$SCRIPT" method "$PROJ" build >/dev/null   # P108: build-record wants the build method receipt
   STATE="$PROJ/docs/design/brand-state.json"
   HTML="$PROJ/docs/brand/index.html"
@@ -86,6 +90,10 @@ ans() {
   curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H 'Content-Type: application/json' \
     -d "$(jq -nc --arg q "$1" --arg k "$2" --arg t "$3" --arg d "$d" \
           '{question: $q, kind: $k, target: $t, decision: $d, choice: "x", comment: "PM"}')" "$AID_UI_STUDIO_URL/answer"
+  # P113: an accepting answer of a place's question needs the place's verdict (the gates' own cases are below)
+  if [[ "$d" == approve || "$d" == choose ]] && [[ -z "${NO_PLACE_OK:-}" ]]; then
+    case "$2" in handover) place_ok "$PROJ" web ;; identity|vision) place_ok "$PROJ" sdeleni ;; esac
+  fi
   "$SCRIPT" record-answer "$PROJ" --question "$1" >/dev/null
 }
 
@@ -1741,4 +1749,80 @@ decide_payload() {
   # a returned item turned into an approval in the state is refused against the studio (the decisions are compared, not only the sha)
   jq '.answers.m1.items[1].decision = "approve"' "$STATE" > "$STATE.t" && mv "$STATE.t" "$STATE"
   run "$SCRIPT" approve-page "$PROJ" kontakt.html --answer m1 --answer-item kontakt.html; [ "$status" -eq 1 ]; [[ "$output" == *"differs from the recorded one"* ]]
+}
+
+# ---------------------------------------------------------------- P113 step 2: the place verdict guards the decisions
+@test "gates: decision without verdict - no verdict of the place refuses the accepting answer; a reroll passes" {
+  jqw 'del(.place_verdicts.struktura)'
+  NO_PLACE_OK=1 run ans s1 structure "sha256:abc"; [ "$status" -ne 0 ]; [[ "$output" == *"place_verdict_missing"* ]]
+  jq -e '.answers.s1 == null' "$STATE" >/dev/null
+  NO_PLACE_OK=1 run ans s2 structure "sha256:abc" reroll; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  NO_PLACE_OK=1 run ans s3 structure "sha256:abc" return; [ "$status" -eq 0 ]
+}
+
+@test "gates: decision without verdict - a verdict over an older target refuses (the structure changed after it)" {
+  echo '{"pages": [{"slug": "nova"}]}' > "$PROJ/.aid-ui/structure.json"
+  NO_PLACE_OK=1 run ans s1 structure "sha256:abc"; [ "$status" -ne 0 ]; [[ "$output" == *"decided over another bundle"* ]]
+}
+
+@test "gates: decision without verdict - an upstream file changed after its verdict refuses the places standing on it" {
+  echo zmena >> "$PROJ/.aid-ui/logo/cards/a.png"
+  studio; "$SCRIPT" method "$PROJ" direction >/dev/null
+  NO_PLACE_OK=1 run ans d1 direction "smer:abc" choose; [ "$status" -ne 0 ]; [[ "$output" == *"logo changed after its verdict"* ]]
+  run "$SCRIPT" build-record "$PROJ" "$SITE"; [ "$status" -ne 0 ]; [[ "$output" == *"logo changed after its verdict"* ]]
+}
+
+@test "gates: decision without verdict - a hand-made verdict is refused by place-record" {
+  V="$PROJ/.aid-ui/critic/rounds/struktura/1/verdict.json"; [ -f "$V" ]
+  run "$SCRIPT" place-record "$PROJ" --place struktura "$V"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }   # the real one records
+  jq '.chosen = "jiny"' "$V" > "$T/v1.json"
+  run "$SCRIPT" place-record "$PROJ" --place struktura "$T/v1.json"; [ "$status" -ne 0 ]; [[ "$output" == *"place_verdict_handmade"* ]]
+  jq '.target = "0000"' "$V" > "$T/v2.json"
+  run "$SCRIPT" place-record "$PROJ" --place struktura "$T/v2.json"; [ "$status" -ne 0 ]; [[ "$output" == *"older bundle"* ]]
+  # a returned place made "accepted" by hand
+  jq '.findings = [{"id":"x","criterion":"ukoly_zakaznika","severity":"major","owner":"agent","kind":"fakt","text":"vymyšlená služba","fix":"smazat","where":"strom"}]' \
+    "$PROJ/.aid-ui/critic/rounds/struktura/1/tech/answer.json" > "$T/a.json" && mv "$T/a.json" "$PROJ/.aid-ui/critic/rounds/struktura/1/tech/answer.json"
+  run "$SCRIPT" place-record "$PROJ" --place struktura "$V"; [ "$status" -ne 0 ]; [[ "$output" == *"place_verdict_handmade"* ]]
+}
+
+@test "gates: decision without verdict - build-record without the motion verdict refuses" {
+  jqw 'del(.place_verdicts.pohyb)'
+  run "$SCRIPT" build-record "$PROJ" "$SITE"; [ "$status" -ne 0 ]; [[ "$output" == *"place_verdict_missing"* ]]; [[ "$output" == *"pohyb"* ]]
+  jq -e '.build == null or .build.id == null' "$STATE" >/dev/null
+}
+
+@test "gates: without - the PM's exception answer for pohyb@without lets build-record and the later places pass" {
+  jqw 'del(.place_verdicts.pohyb)'; rm -rf "$PROJ/.aid-ui/motion"
+  ans m1 exception "pohyb@without"
+  run "$SCRIPT" place-record "$PROJ" --place pohyb --without m1; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.place_verdicts.pohyb.without == "m1" and .place_verdicts.pohyb.status == "accepted" and (.consumed | index("m1")) != null' "$STATE" >/dev/null
+  [ -f "$PROJ/.aid-ui/critic/pohyb-without.json" ]
+  run "$SCRIPT" build-record "$PROJ" "$SITE"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  place_ok "$PROJ" vzhled   # the look is decided over the without record
+  "$SCRIPT" method "$PROJ" direction >/dev/null
+  NO_PLACE_OK=1 run ans d1 direction "smer:abc" choose; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "gates: without - a bare flag or an unknown answer is refused" {
+  run "$SCRIPT" place-record "$PROJ" --place pohyb --without; [ "$status" -ne 0 ]
+  run "$SCRIPT" place-record "$PROJ" --place pohyb --without nope; [ "$status" -ne 0 ]; [[ "$output" == *"not one"* ]]
+  ans x1 exception '{"check":"motion_settled","page":"*","viewport":"*","browser":"*","role":"*","state":"*"}'
+  run "$SCRIPT" place-record "$PROJ" --place pohyb --without x1; [ "$status" -ne 0 ]   # another exception
+  run "$SCRIPT" place-record "$PROJ" --place logo --without x1; [ "$status" -eq 2 ]
+}
+
+@test "gates: without - an answer the client agent gave is refused" {
+  studio
+  local p="$PROJ/.aid-ui/studio/payload.json"
+  jq --arg o "$(date -u +%Y-%m-%dT%H:%M:%S.%6NZ)" '.questions += [{id: "c1", kind: "exception", target: "pohyb@without", opened_at: $o}] | .cards += [{id: "x", question: "c1", method: "SKILL.md"}]' "$p" > "$p.t" && mv "$p.t" "$p"
+  curl -sf -o /dev/null -H "X-AID-Token: $STOKEN" -H "X-AID-Role: client" -H 'Content-Type: application/json' \
+    -d '{"question":"c1","kind":"exception","target":"pohyb@without","decision":"approve","comment":"klient"}' "$AID_UI_STUDIO_URL/answer"
+  "$SCRIPT" record-answer "$PROJ" --question c1 >/dev/null
+  jq -e '.answers.c1.by == "client"' "$STATE" >/dev/null
+  run "$SCRIPT" place-record "$PROJ" --place pohyb --without c1; [ "$status" -ne 0 ]; [[ "$output" == *"by pm"* ]]
+}
+
+@test "gates: without - a return decision is refused" {
+  ans r1 exception "pohyb@without" return
+  run "$SCRIPT" place-record "$PROJ" --place pohyb --without r1; [ "$status" -ne 0 ]; [[ "$output" == *"not one"* ]]
 }

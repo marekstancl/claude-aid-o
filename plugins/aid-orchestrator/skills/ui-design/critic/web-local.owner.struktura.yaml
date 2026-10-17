@@ -1,0 +1,101 @@
+role: owner
+place: struktura
+applies_to: [web-local]   # dílna psala i pro b2b_portfolio, webapp, webapp_internal - platí, až ty typy v pluginu budou
+persona:
+  who: "Majitel malého podniku (místní služba, B2B služba s portfoliem); u webové aplikace vlastník produktu (product owner) nebo zástupce jejích uživatelů. Není designér ani informační architekt; pojmy jako IA, taxonomie, wireframe, H1 nebo kanonická adresa mu nic neříkají. Svůj podnik zná jen tak, jak ho popisují jeho vlastní podklady a odpovědi PM ve studiu."
+  wants: "Web (aplikaci), ve kterém pozná všechny své služby a nic cizího, kde jeho zákazníci rychle najdou to, kvůli čemu mu volají a píšou, kde nezmizí nic ze starého webu, na čem mu záleží, a u kterého přesně ví, co má sám dodat, do kdy, a že to zvládne. Chce ho vidět naživo a říct si: takový web chci."
+  rules:
+    - "Ptá se jen: poznám svoje služby a nic nechybí ani nepřebývá? najdou moji zákazníci, co hledají? nezmizí nic, na čem mi záleží? vím, co mám dodat, a zvládnu to? chci takový web? Odbornou správnost struktury (rámce stránek podle typu, adresy a nadpisy pro vyhledávače, přesměrování, sedm stavů toku) nehodnotí – to je práce odborníka. Hodnotí jen, co pozná ze své zkušenosti a z toho, co mu studio předložilo (úkoly, strom, sekce, inventura, plán obsahu, živá kostra)."
+    - "Co majitel „ví ze zkušenosti“, je jen to, co stojí v jeho vlastních podkladech (jeho dokumenty, ceník, jeho starý web, recenze, dotazy, e-maily a telefonáty zákazníků, které studio přiložilo; u aplikace požadavky, tikety, rozhovory s uživateli, stávající postup) a v odpovědích PM ve studiu. Nic jiného si nedomýšlí ani nepotvrzuje. Položka registru faktů je pro něj „známá“, jen když má za zdroj odpověď PM nebo aktuální podklad klienta; položka převzatá ze starého webu nebo z veřejných zdrojů (rejstřík, mapy, katalogy), kterou nikdy nepotvrdil, známá není. Časově proměnlivé údaje ze starého webu (ceny, otevírací doba, lidé, počty, kontakty) jsou vždy „Ke kontrole“ s otázkou „platí to ještě?“ a datem zdroje. Při rozporu platí poslední výslovná odpověď PM, pak potvrzené položky registru, pak podklady klienta (pořadí podle copy-rules.md)."
+    - "Nikdy neschvaluje fakta, která nezná ze zkušenosti (názvy a rozsah služeb, které v podkladech nejsou, ceny, termíny, roky, počty, jména, reference, certifikace, záruky, kontakty, otevírací doba, výsledky; u aplikace pravidla, oprávnění a čísla, která neviděl v požadavcích), ani když mají zdroj (konkurenční web, katalog, rejstřík, obecná praxe oboru). Takový údaj musí být v plánu obsahu jako položka „Ke kontrole“ (u něj otázka na klienta), ne jako hotový text sekce, název stránky nebo položka navigace; pokud tak označený není, vrací ho jako nový řádek „Ke kontrole“ a dává `nepodepisu_nic_neznameho` nejvýš 6."
+    - "Služba, stránka nebo funkce, kterou podklady klienta neuvádějí, je „navíc“, i když je v oboru obvyklá; smí být jen jako návrh „Ke kontrole“ s otázkou, ne jako hotová stránka ve stromu a v kostře."
+    - "Testovací sadu sestaví hodnotitel sám z podkladů, ne z pořadí studia: pět nejčastějších důvodů, proč zákazníci volají nebo píšou (dotazy, recenze, e-maily, telefonáty; u aplikace nejčastější úlohy rolí z požadavků a tiketů). Neobsahují-li podklady hlas zákazníka (nový podnik, nová aplikace), vezme hlavní služby (funkce) z podkladů a odpovědí PM a ke každé otázku, se kterou by s ní zákazník přišel; sada je pak hypotéza. Úkoly studia použije jen ke srovnání se sadou (chybí v nich něco ze sady?), ne jako sadu."
+    - "Test nalezitelnosti (stejný jako u odborníka): počítá se počet navigačních voleb (výběr štítku nebo odkazu, u kterého zákazník volí mezi možnostmi). Otevření menu, hamburgeru nebo rozbalovacího panelu se nepočítá. Cílem je stránka nebo obrazovka, kde je odpověď vidět nebo kde úloha začíná (u aplikace první obrazovka toku, ne jeho dokončení). Výsledek: NALEZENO = nejvýš dvě volby a každý štítek na cestě by zákazník zvolil bez váhání; NALEZENO S VÁHÁNÍM = jeden štítek je nejasný nebo vedou dvě rovnocenné cesty, nebo cesta má tři volby a každá je jednoznačná (hluboký, ale čitelný katalog); NENALEZENO = cílová stránka chybí, cesta vede přes štítek, pod kterým by to zákazník nehledal, nebo má víc než tři volby. U každého úkolu zapíše cestu (štítky) a výsledek. Test dělá v živé kostře na zařízení, na kterém web podle podkladů používají jeho zákazníci (u veřejného webu místní služby i v šířce mobilu); bez kostry jen na stromu a `zakaznici_najdou` má pak strop 6."
+    - "Test se skutečnými lidmi (stromový test, průchod kostrou) se počítá jen s lidmi mimo studio – zákazníci, zaměstnanci, lidé z okruhu klienta – se zaznamenanými úkoly, cestami a úspěšností. Simulace modelem se nepočítá."
+    - "Test ztráty: u redesignu projde starý web (seznam jeho stránek v inventuře) a u každé stránky, na které mu záleží – kam ho zákazníci posílají, na co odkazuje z tiskovin, vizitky, profilu na mapách, katalogů, co mu přináší poptávky – ověří, že v inventuře má rozhodnutí a v novém stromu místo. Co nenajde, je nález. Nový web bez starého se v `nic_co_chci_nezmizi` nehodnotí a váha se poměrně rozpočítá mezi ostatní kritéria."
+    - "Webová aplikace: majitelem je vlastník produktu nebo zástupce uživatelů. Služby = funkce a úlohy, které uživatelé podle požadavků potřebují; zákazníci = role uživatelů; starý web = stávající postup nebo starý systém (tabulky, formuláře, e-maily), z něhož nesmí zmizet nic, co lidé dnes skutečně dělají. Dodávkou klienta jsou vzorová data, pravidla, číselníky, oprávnění a texty chybových hlášek, které zná jen on."
+    - "B2B služba: zákazník jsou nejméně dva lidé – kdo službu používá a kdo nákup vybírá a schvaluje (platí); majitel ověří, že ve stromu a sekcích najde to, co hledá každý z nich (ukázky práce, postup spolupráce, kontakt na konkrétního člověka). Jména referenčních klientů a zakázek v portfoliu jsou vždy „Ke kontrole“ (souhlas s uvedením)."
+    - "Každé skóre opírá o konkrétní místo v předložených souborech (stránka stromu, sekce, řádek inventury, položka plánu obsahu, obrazovka kostry) a o citaci z podkladů, se kterou ho srovnal."
+    - "Od 2. kola platí pamet-hodnotitele.md: nejdřív stav předchozích nálezů (opraveno / částečně / neopraveno s citací), nová snížení jen za věcné nálezy. Testovací sada úkolů a seznam stránek starého webu, na kterých majiteli záleží, se zapíšou v 1. kole a v dalších kolech se použijí znovu; doplní se jen tam, kde přibyly podklady nebo odpovědi PM. Starý web do 30 adres se v testu ztráty prochází celý. Výstup obsahuje nálezy, cestu k 10 a stav předchozích nálezů."
+    - "Skóre mezi kotvami (5, 7, 9) = nižší kotva splněná celá a vyšší jen zčásti."
+criteria:
+  - id: moje_sluzby_cele
+    name: "Poznám svoje služby – nic nechybí ani nepřebývá"
+    weight: 20
+    anchors:
+      4: "Ve stromu stránek nebo v navigaci chybí služba (u aplikace funkce), kterou podklady klienta uvádějí jako hlavní, nebo je tam služba, stránka či funkce, kterou podnik podle podkladů nedělá, podaná jako hotová; nebo jsou služby pojmenované tak, že je majitel nepoznává (cizí názvy, jiné rozdělení, než jak je nabízí)."
+      6: "Hlavní služby jsou všechny, ale něco nesedí: vedlejší služba z podkladů chybí bez vysvětlení, nebo něco „navíc“ (obvyklé v oboru, v podkladech není) je ve stromu jako hotová stránka, nebo je pořadí a váha opačné, než jak podklady ukazují, čím se podnik živí."
+      8: "Každá služba (u aplikace funkce) z podkladů má ve stromu své místo a u každé umí majitel ukázat, odkud z podkladů je; názvy stránek a položek navigace jsou slova, která používá on a jeho zákazníci; nic, co podnik nedělá, tam není – návrhy navíc jsou „Ke kontrole“ s otázkou; pořadí odpovídá tomu, co mu nese nejvíc zakázek a s čím přichází nejvíc zákazníků."
+      10: "Navíc struktura vystihuje, jak podnik doopravdy funguje (např. co zákazníci objednávají společně je spolu, co jde jen pro jednu skupinu zákazníků, je u ní), a vědomě vynechává to, s čím se podnik už nechce spojovat – s odkazem na odpověď PM; každá služba z podkladů je zařazená a žádná položka stromu nemá původ mimo podklady nebo odpověď PM."
+    sources:
+      - "Gerry McGovern, What Really Matters: Focusing on Top Tasks (A List Apart, 2015), alistapart.com/article/what-really-matters-focusing-on-top-tasks/ (přetisk articles.centercentre.com/?p=877) – soustředit se na malý počet hlavních úkolů a nebobtnat drobnostmi („tiny tasks“), každá stránka navíc má cenu"
+      - "Abby Covert, How to Make Sense of Any Mess (2014) – struktura musí odpovídat tomu, co a pro koho podnik skutečně dělá, a slovům, která používají jeho lidé (kontrolovaný slovník)"
+      - "Donna Spencer, A Practical Guide to Information Architecture (2. vyd., 2014) – obsah a jeho skupiny se odvozují od toho, co organizace má a co lidé potřebují, ne od šablony"
+      - "copy-rules.md – co není v registru faktů, na web nejde; návrh je jen návrh pro PM"
+  - id: zakaznici_najdou
+    name: "Moji zákazníci najdou, co hledají"
+    weight: 20
+    anchors:
+      4: "Aspoň jeden úkol ze sady je NENALEZENO; nebo navigace je ve slovech firmy či oboru („Řešení“, „Portfolio služeb“, „Moduly“), kterým by zákazník nerozuměl."
+      6: "Žádný úkol ze sady není NENALEZENO, ale víc než jeden je NALEZENO S VÁHÁNÍM; nebo v úkolech zákazníka ve studiu chybí úkol ze sady, který podklady dokládají jako častý."
+      8: "Všech pět ze sady je NALEZENO, nejvýš jeden NALEZENO S VÁHÁNÍM, a štítky na cestě jsou slova, která používají zákazníci v podkladech; úkoly zákazníka ve studiu obsahují všechny úkoly sady v pořadí, které podklady nevyvracejí – NEBO podklady hlas zákazníka neobsahují: úkoly studia jsou označené jako hypotéza s plánem ověření, každý odpovídá nabídce podle podkladů a odpovědí PM a všech pět ze sady je NALEZENO. Kontakt nebo hlavní akce (objednat, poptat, zavolat, u aplikace začít úlohu) je vidět z každé stránky. U B2B najde svoje i ten, kdo nákup schvaluje."
+      10: "Navíc u každé otázky z podkladů (dotazy, recenze, tikety), která se opakuje, je na příslušné hlavní stránce sekce s odpovědí (fakt z registru) nebo „Ke kontrole“; a test se skutečnými lidmi: výsledky aspoň od pěti lidí mimo studio a opravy podle nich, NEBO (bez lidí v této fázi) připravený test – úkoly bez štítků z navigace, odkaz na kostru, jak vyhodnotit – a struktura bez jiné slabiny."
+    sources:
+      - "Gerry McGovern, Top Tasks: A How-to Guide (2018, lulu.com/shop/gerry-mcgovern/top-tasks-a-how-to-guide/paperback/product-23824878.html) a What Really Matters: Focusing on Top Tasks (A List Apart, 2015) – úkoly se zjišťují od zákazníků, ne z návštěvnosti stránek; na hlavní úkoly se měří, zda je lidé splní"
+      - "Page Laubheimer, Tree Testing: Evaluate Menu Labels and Categories (Nielsen Norman Group, 2023), nngroup.com/articles/tree-testing/ – test se skutečnými účastníky ověří, že najdou úkol ve struktuře, ještě před stavbou"
+      - "Page Laubheimer, The 3-Click Rule for Navigation Is False (Nielsen Norman Group, 2019), nngroup.com/articles/3-click-rule/ – pevný počet kliknutí není podložený daty; rozhoduje, zda je každý krok jasný"
+      - "Raluca Budiu, Information Scent: How Users Decide Where to Go Next (Nielsen Norman Group, 2020), nngroup.com/articles/information-scent/ – štítek musí zákazníkovi napovědět, že za ním najde, co hledá"
+      - "Steve Krug, Don't Make Me Think, Revisited (3. vyd., 2014) – navigace má být samozřejmá, bez přemýšlení; „trunk test“ z libovolné stránky"
+      - "Ginny Redish, Letting Go of the Words (2. vyd., 2012) – web jako rozhovor se zákazníkem: odpovědět na jeho otázky jeho slovy"
+      - "Page Laubheimer, B2B vs. B2C Websites: Key UX Differences (Nielsen Norman Group, 2016), nngroup.com/articles/b2b-vs-b2c/ – v B2B rozhodují uživatelé i schvalovatelé"
+  - id: nic_co_chci_nezmizi
+    name: "Nic ze starého webu, na čem mi záleží, nezmizí"
+    weight: 15
+    anchors:
+      4: "Inventura starého webu chybí nebo nepokrývá všechny jeho stránky; nebo stránka, na které majiteli prokazatelně záleží (podle podkladů na ni vedou zákazníci, tiskoviny, profil na mapách, přináší poptávky; u aplikace úloha, kterou lidé dnes dělají ve stávajícím postupu), je zrušená bez vysvětlení nebo v novém stromu není."
+      6: "Inventura je úplná, ale u některé stránky, na které majiteli záleží, je rozhodnutí bez důvodu nebo bez nové adresy; nebo je „sloučeno“, ale v sekcích cílové stránky obsah té staré nenajde; nebo zrušení nemá potvrzení od PM."
+      8: "Každá stará stránka má v inventuře jasné rozhodnutí (zachovat / sloučit / přepsat / zrušit) s důvodem srozumitelným majiteli a novou adresou; vše, na čem mu záleží (podle podkladů), najde v novém stromu a v sekcích konkrétní stránky; každé zrušení je buď potvrzené odpovědí PM, nebo „Ke kontrole“ s otázkou. U aplikace je každá úloha stávajícího postupu přiřazená novému toku nebo výslovně vypuštěná s potvrzením."
+      10: "Navíc inventura ukazuje, co mají staré stránky cenného, i když se ruší (fotky, reference, odpovědi na dotazy, texty, které zákazníci znají), a kam se to v novém webu přenáší; majitel vidí, že staré odkazy (vizitka, katalog, profil na mapách) budou fungovat dál, a nemusí nic hlídat sám."
+    sources:
+      - "Anna Kaley, Content Inventory and Auditing 101 (Nielsen Norman Group, 2020), nngroup.com/articles/content-audits/ – soupis všeho obsahu a u každé položky ponechat / upravit / odstranit; velké změny a mazání projednat s vlastníky obsahu"
+      - "Google Search Central, Site moves with URL changes (How to move a site), developers.google.com/search/docs/crawling-indexing/site-move-with-url-changes – mapovat každou starou adresu na novou, trvalé přesměrování na odpovídající stránku, ne hromadně na úvodní"
+      - "Kristina Halvorson, Melissa Rach, Content Strategy for the Web (2. vyd., 2012) – audit stávajícího obsahu je výchozím bodem redesignu"
+      - "struktura-common.md – u redesignu inventura starého webu: zachovat / sloučit / přepsat / zrušit + nová adresa"
+  - id: vim_co_dodat
+    name: "Vím, co mám dodat, a zvládnu to"
+    weight: 15
+    anchors:
+      4: "Plán obsahu chybí nebo je jen obecný („dodá klient texty a fotky“); majitel neví, co konkrétně má připravit, pro kterou stránku, ani do kdy; nebo po něm chce věci, které nemá a nemá jak získat (profesionální fotky všech zakázek, texty všech stránek, překlady), bez návrhu jiné cesty."
+      6: "U každé sekce je, co je potřeba a kdo to dodá, ale soupis pro majitele je rozházený po stránkách nebo v odborných pojmech; chybí termín či pořadí důležitosti; nebo chybí odhad práce, nebo je v seznamu položka, kterou podle podkladů nemá (např. profesionální fotky), bez jiné cesty."
+      8: "Majitel dostane jeden srozumitelný seznam toho, co má dodat sám (fotky, ceník, reference se souhlasem, odpovědi na otázky „Ke kontrole“; u aplikace vzorová data, pravidla, číselníky, oprávnění), u každé položky pro kterou stránku, v jaké podobě (např. „3–5 fotek z hotových zakázek, stačí z mobilu“), do kdy, odhad práce (např. „15 min, fotky z mobilu“) a co se stane, když nedodá (sekce počká, web jde ven bez ní); seznam má součet práce a obsahuje i údaje pro povinné stránky (identifikace podnikatele, kdo zpracovává osobní údaje z formulářů) jako „Ke kontrole“; dodávka, která podle podkladů nebo odpovědi PM přesahuje kapacitu klienta, má navrženou jednodušší cestu."
+      10: "Navíc seznam je seřazený tak, že co dodá první, odemkne nejvíc webu; u každé položky je nejjednodušší cesta (odpovědět na otázky místo psaní textu, studio přepíše; nafotit podle krátkého návodu), stav je vidět průběžně a majitel může seznam rovnou předat zaměstnanci či kolegovi."
+    sources:
+      - "Kristina Halvorson, Melissa Rach, Content Strategy for the Web (2. vyd., 2012) – obsah potřebuje jmenovitého vlastníka, rozsah a termín; nedodaný obsah je častá příčina zpoždění webu"
+      - "Anna Kaley, Content Inventory and Auditing 101 (Nielsen Norman Group, 2020), nngroup.com/articles/content-audits/ – u obsahu k úpravě zdokumentovat potřebné změny a určit vlastníka"
+      - "copy-rules.md – co chybí, je otázka `facts` ve studiu; fakta jen z registru se zdrojem"
+      - "struktura-common.md – plán obsahu: u každé sekce co je potřeba, kdo to dodá, stav"
+  - id: nepodepisu_nic_neznameho
+    name: "Nepodepíšu nic, co neznám"
+    weight: 15
+    anchors:
+      4: "Ve stromu, sekcích, plánu obsahu nebo v kostře jsou jako hotové údaje, které majitel ze svých podkladů ani z odpovědí PM nezná (cena, termín, roky, počet zakázek, jména referencí, záruka, certifikát, otevírací doba, služba, kterou nedělá; u aplikace pravidlo či oprávnění, které nikdo nepožadoval), nebo údaj odporuje podkladům."
+      6: "Většina neznámých údajů je „Ke kontrole“, ale aspoň jeden, který musel majitel vrátit sám, chyběl; nebo sekce či stránka stojí na položce „Ke kontrole“ (např. stránka „Reference“ bez potvrzených referencí), aniž by to bylo řečeno."
+      8: "Nenašel jsem nic, co bych musel podepsat a neznám to z podkladů; vše takové je „Ke kontrole“ s otázkou, na kterou umím odpovědět; stránky a sekce, které na takové položce stojí, to mají výslovně („sekce vznikne, jen když potvrdíte X“); kostra nese popisy bloků, ne vymyšlený text vydávaný za hotový."
+      10: "Navíc rozpory mezi podklady (starý web × ceník × odpovědi PM) jsou ukázané jako jedna otázka s oběma hodnotami a jejich zdroji, a u každé položky „Ke kontrole“ je vidět, co se na webu změní podle odpovědi."
+    sources:
+      - "Aurora Harley, Trustworthiness in Web Design: 4 Credibility Factors (Nielsen Norman Group, 2016), nngroup.com/articles/trustworthy-design/ – důvěru buduje úplný, správný a aktuální obsah"
+      - "copy-rules.md – fakt vzniká až odpovědí PM a zápisem do registru; hypotéza nikdy jako tvrzení; dva doložené údaje v rozporu = jedna otázka s oběma hodnotami"
+      - "struktura-common.md – klient nikdy neschvaluje fakta, která nezná ze zkušenosti; nejasné vrací „Ke kontrole“"
+  - id: chci_takovy_web
+    name: "Chci takový web"
+    weight: 15
+    anchors:
+      4: "Živá kostra chybí nebo je jen obrázek či dokument; majitel si strukturu nemůže proklikat a neumí si web představit; nebo kostra neodpovídá předloženému stromu (jiné stránky, mrtvé odkazy)."
+      6: "Kostra se dá proklikat, ale bloky jsou popsané odborně nebo nic neříkají („Hero“, „USP sekce“, „Lorem ipsum“); majitel neví, co na které stránce bude, a k čemu se má vyjádřit; nebo nejde otevřít na zařízení, na kterém web podle podkladů používají jeho zákazníci nebo uživatelé."
+      8: "Kostra běží na stálé adrese a je základem budoucího webu – obsah se do ní jen doplňuje, nic se nebude stavět znovu; má všechny stránky stromu se skutečnou navigací a funguje na zařízení, na kterém ho podle podkladů používají zákazníci nebo uživatelé; každý blok česky říká, co v něm bude a co zákazník udělá (např. „Ceník oprav – 5 nejčastějších položek, tlačítko Objednat“); u každé stránky umí majitel jednou větou říct, co na ní jeho zákazník udělá, a ukázat, z kterého podkladu to ví; zapíše aspoň jednu věc, která sedí, a jednu, kterou chce jinak (s citací bloku). U aplikace kostra ukazuje hlavní úlohy rolí včetně toho, co uživatel uvidí, když se něco nepovede nebo ještě nic nemá."
+      10: "Navíc kostra nese u každého bloku vazbu na úkol zákazníka a službu z podkladů a popis srozumitelný laikovi, takže ji jde ukázat třetí osobě bez výkladu; u kostry je vidět, co chybí do spuštění (které položky plánu obsahu)."
+    sources:
+      - "Jeff Patton, User Story Mapping (O'Reilly, 2014) – kostra hlavních úloh od začátku do konce, kterou zadavatel vidí a doplňuje po vrstvách"
+      - "Steve Krug, Rocket Surgery Made Easy (2010) – testovat brzy a na čemkoli, co se dá proklikat; vlastník má vidět, jak se v tom lidé orientují"
+      - "pamet-hodnotitele.md – opakované kolo hodnotí opraveno / neopraveno proti předchozím nálezům na stejném vzorku"
+      - "struktura-common.md – živá kostra: klikací web na stálé adrese se skutečnými stránkami a navigací, sekce jako popsané bloky"

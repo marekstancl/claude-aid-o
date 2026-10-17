@@ -5,6 +5,9 @@
 # a 404 page fails, lazy images reach the screenshot, an edited site is refused, the
 # preview runs beside the brand page, and the checks match checks.yaml one to one.
 
+load aid-ui-places
+setup_file() { places_template; }
+
 setup() {
   SC="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
   LIB="$SC/../lib/ui-fidelity"
@@ -19,6 +22,7 @@ setup() {
   cp "$FX/project/DESIGN.md" "$PROJ/"
   cp -r "$FX/site" "$SITE"
   "$SC/aid-ui-state.sh" init "$PROJ" >/dev/null
+  places_copy "$PROJ"   # P113: build-record stands on the motion place's verdict
   "$SC/aid-ui-state.sh" method "$PROJ" build >/dev/null   # P108: build-record wants the build method receipt
 }
 
