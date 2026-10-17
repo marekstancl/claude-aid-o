@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 662 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 672 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
   # ── Plan amendments recorded here because this file is the TRACKED authority ──
   # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
   # `git check-ignore`; `docs/extending-aid.md` is the tracked exception), so an
@@ -4505,3 +4505,153 @@ enforcements:
     enforcement_degree: 2
     description: '3.0.0 (P114): every entry of the removed EPIC path — epic-start, epic-merge-to-plan, next-epic, epic-base, queue-revalidate, and plan-run on a plan generated the EPIC way (an EPIC file, a non-direct manifest entry, a generation transaction or its archive, the plan own entries in the old queue) — refuses epic_path_removed before any lock or write, with the way out: finish on 2.118.x, or close the plan and start a NEW plan with a new id.'
     test: scripts/tests/bats/test-epic-path-removed.bats
+  - id: aid_ui_place_gates
+    type: 12
+    source: "scripts/aid-ui-critic.py"
+    instruction: "skills/ui-design/SKILL.md (Vrstva dílny a místa rozhodnutí)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "That a role scores honestly: the gates judge the scores the role gave, and a role that inflates a score passes a gate it should not. The memory rule (a score drops only on a factual finding) is in the prompt, not checked."
+    description: "P113 Step 2 - a decision place's direction passes only through the gates of <type>.<role>.<place>.gates.yaml, which no role prompt contains: criterion minimums (with when nove|oziveni|zavedeny_motiv read from the role's own mode, a when gate without the mode failing), any_of, weighted_min and the motion metrics measured per variant (a missing measurement fails). The web place's thresholds (8.5 / 8.0 / 7.0) live in its gate files, not in the code."
+    recovery: "The score names every failing gate per direction and rubric. Fix what the role's findings and path to 10 name, then rate again (aid-ui-quality.py round --place)."
+    test_covers: "when, any_of (a 6/6 redraw fails), weighted_min, metrics missing and over limit, the reservation only through studio_score and to_ten.client and never a volba finding, web's six scores, the audit block, gate texts absent from the prompts (test-aid-ui-critic.bats, test-aid-ui-places.bats)."
+    test: "scripts/tests/bats/test-aid-ui-critic.bats"
+  - id: aid_ui_place_verdict_missing
+    type: 12
+    source: "scripts/aid-ui-state.sh"
+    instruction: "skills/ui-design/SKILL.md (Vrstva dílny a místa rozhodnutí; MUST Rule 13)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "Only projects whose state says places: true (made by init from 3.5.0, or places-on) are guarded; an older project is not, until places-on."
+    description: "P113 Step 2 - record-answer refuses place_verdict_missing for an accepting answer (choose, approve) of vision, identity, structure, direction or handover, and build-record for the motion place, unless the mapped place has an accepted (or accepted_with_reservation) verdict over its CURRENT bundle sha and every upstream place's current bundle sha still equals the target it was accepted over. A reroll or return passes. A project without motion passes only through a PM exception answer (place-record --place pohyb --without)."
+    recovery: "Rate the place (aid-ui-quality.py round --place <p>), decide it (aid-ui-critic.py place-verdict), record it (aid-ui-state.sh place-record), then answer again; after a change to an upstream place, rate that place and the ones on it again."
+    test_covers: "no verdict, a verdict over an older target, an upstream file changed, build-record without the motion verdict, a reroll passing; the without record from a PM exception only, never a bare flag, a client or agent answer or a return (test-aid-ui-state.bats gates: cases)."
+    test: "scripts/tests/bats/test-aid-ui-state.bats"
+  - id: aid_ui_place_incomplete
+    type: 12
+    source: "scripts/aid-ui-critic.py"
+    instruction: "skills/ui-design/SKILL.md (Vrstva dílny a místa rozhodnutí)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "That the directions in the bundle are the right ones to show: the check is that every role rated exactly the bundle's directions."
+    description: "P113 Step 2 - place-verdict refuses incomplete_place when a role's score is missing, when the finished web has fewer than its six scores (three rubrics per role), or when a role did not rate exactly the directions of the place's bundle (none missing, none made up)."
+    recovery: "Run the missing role's rating at the place, with every direction of the bundle."
+    test_covers: "web with five of six scores, one role only, a missing or made-up direction (test-aid-ui-critic.bats gates: cases)."
+    test: "scripts/tests/bats/test-aid-ui-critic.bats"
+  - id: aid_ui_place_verdict_handmade
+    type: 12
+    source: "scripts/aid-ui-critic.py"
+    instruction: "skills/ui-design/SKILL.md (Vrstva dílny a místa rozhodnutí)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "A round folder forged as a whole (answers and round.json written by hand with matching shas) is not detected; the check binds a verdict to the round the loop recorded."
+    description: "P113 Step 2 - place-record runs place-check: the verdict is re-derived from the place's last round (each role's answer.json must be the one round.json recorded by sha, re-scored with the frozen gates, decided with the recorded options) and its target must be the current bundle sha; any difference refuses place_verdict_handmade."
+    recovery: "Decide the place from its last round with aid-ui-critic.py place-verdict and record that output unchanged."
+    test_covers: "an edited chosen direction, an older target, an answer edited after the round, the real verdict recording (test-aid-ui-state.bats gates: decision without verdict)."
+    test: "scripts/tests/bats/test-aid-ui-state.bats"
+  - id: aid_ui_place_round_cap
+    type: 12
+    source: "scripts/aid-ui-quality.py"
+    instruction: "skills/ui-design/steps/8-quality.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "That the studio's fixes between rounds are real; the cap counts rounds, the evidence of a fix is the studio's word (fixed --evidence --method)."
+    description: "P113 Step 2 - the quality loop runs per decision place (rounds under .aid-ui/critic/rounds/<place>/, the finished web keeps rounds/<n>): the first rating plus at most three repair rounds per place, a fifth round refused while other places keep their own count; a reopen of one place resets only that place."
+    recovery: "At the cap the place stops (stop:round_cap): the PM decides, or reopens the place with a reason."
+    test_covers: "a fifth round at one place refused while the web has none; a reopen of one place leaves the web's rounds (test-aid-ui-quality.bats gates: place loop)."
+    test: "scripts/tests/bats/test-aid-ui-quality.bats"
+  - id: aid_ui_skeleton_redirect_outside_tree
+    type: 12
+    source: "scripts/lib/aid-ui-skeleton.py"
+    instruction: "skills/ui-design/references/local/struktura-postup.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "That the redirect table is complete: the check reads the redirects the structure lists, not the old site's sitemap."
+    description: "P113 Step 6 - aid-ui-serve.sh skeleton-check fails on a redirect whose target is not a page of the tree, a skeleton page without exactly one H1 (the SEO check's JSON, fail-closed) and a claim the facts register does not cover (the gate's facts_match row alone); the builder refuses a symlink under site/ and two urls on one file before any write and never moves a page it did not write."
+    recovery: "Point the redirect at a page of the structure (or add the page), fix the H1, put the fact into the register or take it out of the structure."
+    test_covers: "a redirect to a missing page, a stray phone number, two H1, a symlink, colliding urls, a foreign page left in place (test-aid-ui-serve.bats skeleton: cases)."
+    test: "scripts/tests/bats/test-aid-ui-serve.bats"
+  - id: aid_ui_sources_nesdilet
+    type: 12
+    source: "scripts/aid-ui-sources.py"
+    instruction: "skills/ui-design/references/local/sdeleni-postup.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "A marking the rule does not know (another word, a label outside the file name, its first lines and the folder README) is not seen."
+    description: "P113 Step 9 - a file whose name or first 5 lines say NESDÍLET (case and diacritics ignored), whose visible text does (HTML, PDF), or that lies under a folder whose README* (any case) says it in its first 10 lines is listed excluded: nesdilet and never used - no request and no approval brings it back, and the approved load checks it again."
+    recovery: "Nothing to do: the file stays out. Ask the client for a shareable version if the studio needs its content."
+    test_covers: "a folder README, a file name, the first lines, a Readme of another case, an HTML page's text, a request refused, the approved load dropping a file marked after the approval (test-aid-ui-sources.bats p113: cases)."
+    test: "scripts/tests/bats/test-aid-ui-sources.bats"
+  - id: aid_ui_launch_environment
+    type: 12
+    source: "scripts/aid-ui-launch.py"
+    instruction: "commands/aid-ui.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "That Playwright installs on first use where npm is present but node_modules is not yet there (aid-ui-tool.sh runs npm ci then)."
+    description: "P113 Step 9 - aid-ui-serve.sh studio runs aid-ui-launch.py env-check before it writes anything: node, the Playwright package of lib/ui-fidelity (resolved, or npm to install it) and an executable Chromium ($CHROME when set, else the Playwright cache); a missing piece refuses the start with the install command."
+    recovery: "Run the command env-check prints (npm ci in lib/ui-fidelity, npx playwright install chromium, or fix CHROME), then start the studio."
+    test_covers: "env-check on this host, a CHROME pointing nowhere refused, the studio refusing to start without its tools and writing no token (test-aid-ui-launch.bats p113: cases)."
+    test: "scripts/tests/bats/test-aid-ui-launch.bats"
+  - id: aid_ui_image_budget
+    type: 12
+    source: "scripts/aid-ui-logo-gen.py"
+    instruction: "skills/ui-design/references/local/logo-postup.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "The list prices are the plugin's estimate; the real bill can differ. A timeout is booked as possibly billed."
+    description: "P113 Step 8 - before every image call the project's image budget (AID_UI_IMAGE_BUDGET_USD, default 2.00) is checked with the full price of the step (both calls of two_step), so a step that would cross it is refused before any request; the dry run prices both steps; gen.json is written after every image; another endpoint (AID_UI_IMAGE_BASE) gets only AID_UI_IMAGE_KEY; a safety-filter refusal is recorded refused: true and not retried."
+    recovery: "Stop generating: work with the concepts already paid for (gen.json lists them), or the PM raises the budget for this project."
+    test_covers: "no request made when the budget would be crossed, the two-step dry-run price, gen.json after an interrupted run, a refusal recorded once, the endpoint and key from the environment (test-aid-ui-logo-gen.bats p113: cases)."
+    test: "scripts/tests/bats/test-aid-ui-logo-gen.bats"
+  - id: aid_ui_client_memory_corrupt
+    type: 12
+    source: "scripts/lib/aid_ui_memory.py"
+    instruction: "skills/ui-design/critic/client-template.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "That the client role follows its memory; the memory is put in front of it, its use is the model's."
+    description: "P113 Step 3 - the client is one role with one memory: its ratings at every place, its own studio answers (history.jsonl by: client - answers sent with the agent token and X-AID-Role: client) and the PM's decisions apart (by: pm, only through the PM's page). A line of the studio history that is not JSON stops the rating or the answer naming the line instead of an empty memory; the blind audit (--fresh) reads none."
+    recovery: "Repair or remove the named line of .aid-ui/studio/history.jsonl, then rate or answer again."
+    test_covers: "the client's answer recorded by: client and seen by its next rating, earlier places in the first rating of a new place, the PM's decisions labelled, --fresh without memory, a corrupt line naming its number (test-aid-ui-client.bats one-client: cases)."
+    test: "scripts/tests/bats/test-aid-ui-client.bats"

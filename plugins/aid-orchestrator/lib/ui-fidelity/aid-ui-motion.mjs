@@ -28,6 +28,8 @@
 // style of the element at that moment, scenario, and for keyframes the frequency.
 // Identity: keyframes by name; transitions by (property, scenario) — the same canonical key
 // the inventory (aid-ui-motion.py) uses.
+//   node aid-ui-motion.mjs measure <url or .html> --variant <id> [--out-dir <dir>]   (P113) the logo animation's
+//     limits for the motion place's metrics gates: aid-ui-motion-measure.mjs
 // Exit: 0 written, 1 the page did not load, 2 usage.
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
@@ -36,6 +38,10 @@ import path from 'node:path';
 import http from 'node:http';
 
 const argv = process.argv.slice(2);
+if (argv[0] === 'measure') {   // P113: the limits of a logo animation for the motion place's metrics gates
+  await (await import('./aid-ui-motion-measure.mjs')).default(argv.slice(1));
+  process.exit(0);
+}
 const opt = { maxHover: 60, dirSha: null, settle: 8000, dir: null };
 for (let i = 0; i < argv.length;) {
   if (argv[i] === '--max-hover') { opt.maxHover = parseInt(argv[i + 1], 10); argv.splice(i, 2); }
