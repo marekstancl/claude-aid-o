@@ -4,9 +4,10 @@
   python3 aid-ui-logo-motion.py <spec.json> <out-dir>
 
 Input (JSON): {viewBox: "0 0 256 256", parts: [{id, d, fill?, strokes: [{d, width, delay, dur}]}],
-name: {text, x, y, size?, family?, fill?}, web_ms?: 900, video_ms?: 2500, overlap?: 14, ease?}.
+name: {text, x, y, size?, family?, fill?, paths?, transform?}, web_ms?: 900, video_ms?: 2500, overlap?: 14, ease?}.
 The short form of the plan is accepted too: parts [{id, d, stroke_order}] (the part drawn along its own outline, in
-that order, pen_width default 24) and name_text (the name at the bottom left). The name is required.
+that order, pen_width default 24) and name_text (the name at the bottom left). The name is required; a name set in
+outlines gives `paths` (path data) and `transform`, the text then only labels the mark.
 `parts` are the approved mark split into its pieces (their union is the approved SVG); each part is revealed by its
 pen strokes (a CSS mask: a stroke drawn along `d` with stroke-dasharray), in the order and relative timing of
 `delay`/`dur` (any unit; scaled). Writes:
@@ -24,6 +25,8 @@ Exit 0 written, 1 invalid spec, 2 usage.
 import html, json, os, re, sys
 
 WEB_MAX, VIDEO_MIN, VIDEO_MAX = 1000, 2000, 3000
+PATH_D = re.compile(r"[MmLlHhVvCcSsQqTtAaZz0-9eE.,+\-\s]+")
+TRANSFORM = re.compile(r"\s*(?:(?:matrix|translate|scale|rotate)\s*\([-+0-9.eE,\s]*\)\s*)+")
 EASE = "cubic-bezier(.35,.15,.25,1)"   # fast start, long settle; no spring (pohyb-znacky.md, tempo)
 
 
@@ -70,6 +73,11 @@ def check(spec):
     for k in ("x", "y", "size"):
         if k in nm:
             num(nm[k], "name." + k)
+    # P113 (Coufal): a name the brand set in outlines - its paths and one plain transform; the text stays as the label
+    if "paths" in nm and not (isinstance(nm["paths"], list) and nm["paths"] and all(isinstance(d, str) and PATH_D.fullmatch(d) for d in nm["paths"])):
+        die("name.paths: a list of path data (letters of the path commands, digits, signs, dots, commas, spaces)")
+    if "transform" in nm and not (isinstance(nm["transform"], str) and TRANSFORM.fullmatch(nm["transform"])):
+        die("name.transform: translate/scale/rotate/matrix with numbers only")
     ov = spec.get("overlap", 14)
     if not (isinstance(ov, (int, float)) and ov == ov and 0 < ov < 1e4):
         die(f"overlap {ov!r}: a positive number - the masks must overrun the straight ends (fix 63)")
@@ -105,7 +113,9 @@ def svg(spec, ver, times):
         masks.append(f'<mask id="m-{ver}-{p["id"]}" maskUnits="userSpaceOnUse">{ms}</mask>')
         paths.append(f'<path class="part" data-part="{p["id"]}" d="{html.escape(p["d"])}" fill="{html.escape(p.get("fill", "currentColor"))}" mask="url(#m-{ver}-{p["id"]})"/>')
     nm = spec.get("name") or {}
-    name = (f'<text class="name" x="{float(nm.get("x", 0)):g}" y="{float(nm.get("y", 0)):g}" font-size="{float(nm.get("size", 24)):g}" '
+    name = (f'<g class="name" transform="{html.escape(nm.get("transform", ""))}" fill="{html.escape(nm.get("fill", "currentColor"))}">'
+            + "".join(f'<path d="{html.escape(d)}"/>' for d in nm["paths"]) + "</g>") if nm.get("paths") else \
+        (f'<text class="name" x="{float(nm.get("x", 0)):g}" y="{float(nm.get("y", 0)):g}" font-size="{float(nm.get("size", 24)):g}" '
             f'font-family="{html.escape(nm.get("family", "system-ui, sans-serif"))}" fill="{html.escape(nm.get("fill", "currentColor"))}">{html.escape(nm["text"])}</text>'
             if nm.get("text") else "")
     return (f'<svg class="mark" viewBox="{vb}" role="img" aria-label="{html.escape(nm.get("text", "logo"))}" xmlns="http://www.w3.org/2000/svg">'

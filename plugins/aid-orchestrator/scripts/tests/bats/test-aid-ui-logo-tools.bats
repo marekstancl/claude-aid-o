@@ -109,3 +109,14 @@ PY
   run bash "$TOOL" motion measure "$T/script.html" --variant s --out-dir "$T/m"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.script_driven == true and .web_logo_draw_ms > 1000 and .web_logo_draw_ms < 3000 and .web_logo_name_visible_ms == null and (.not_applicable | not)' "$T/m/metrics-pohyb-s.json" >/dev/null || { cat "$T/m/metrics-pohyb-s.json"; return 1; }
 }
+
+@test "logo-tools: a name set in outlines (paths + transform) is drawn as the brand's paths, never animated; other markup in it is refused" {
+  jq '.name = {text: "Pekárna", paths: ["M0 0 L10 0 L10 10 Z", "M20 0 h5 v5 z"], transform: "translate(20 230) scale(0.5)", fill: "#17463A"}' "$T/motion.json" > "$T/m2.json"
+  run python3 "$MOT" "$T/m2.json" "$T/o2"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q '<g class="name" transform="translate(20 230) scale(0.5)" fill="#17463A"><path d="M0 0 L10 0 L10 10 Z"/>' "$T/o2/logo-animace.html"
+  ! grep -q '<text class="name"' "$T/o2/logo-animace.html"
+  jq '.name.paths = ["M0 0\"/><script>alert(1)</script>"]' "$T/m2.json" > "$T/m3.json"
+  run python3 "$MOT" "$T/m3.json" "$T/o3"; [ "$status" -eq 1 ]; [[ "$output" == *"name.paths"* ]]
+  jq '.name.transform = "url(javascript:1)"' "$T/m2.json" > "$T/m4.json"
+  run python3 "$MOT" "$T/m4.json" "$T/o4"; [ "$status" -eq 1 ]; [[ "$output" == *"name.transform"* ]]
+}
