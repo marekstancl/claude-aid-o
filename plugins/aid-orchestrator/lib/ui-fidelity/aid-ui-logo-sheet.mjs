@@ -21,7 +21,10 @@
 // 48/32/16 px and each enlarged x4 (`mid` = the 32-48 px cut, `small` = the 16 px cut, both falling back to `symbol`),
 // black on white, inverted, and every context the brand brief names (`contexts`: ["záložka prohlížeče", "vizitka",
 // "cedule", ...]) in a neutral frame. `inverse` (and `inverse_small`) name the brand's light variant for the inverted
-// panel; without them the panel turns black to white. No reasoning, no scores of the studio on a card. A non-square viewBox is
+// panel; without them the panel turns black to white. `mono` names the brand's one-colour lockup for the black-and-white
+// panel (P113, Coufal: a grayscale filter turned the terracotta triangle into grey beside the black C). Each context shows
+// the real mark in its usual form (tab, app tile on `tile` colour, round avatar, door plate and business card with
+// `lockup_sub` when given, signature). No reasoning, no scores of the studio on a card. A non-square viewBox is
 // accepted (the card fits it).
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
@@ -184,18 +187,38 @@ function roleCard(d) {   // P113: what the expert and the client rate - the mark
   // P113 (Coufal): a colour mark on black is not its inverse - `inverse` / `inverse_small` name the light variant the
   // brand supplies; without them only black is turned white, as before
   const cut = (src, px, lab) => `<figure><img src="${src}" style="width:${px}px;height:${px}px"><img src="${src}" style="width:${px * 4}px;height:${px * 4}px;image-rendering:pixelated"><figcaption>${lab}</figcaption></figure>`;
-  const ctx = (spec.contexts || []).map((c) => `<div class="ctxn"><div class="slot"><img src="${S}"><span>${esc(spec.name)}</span></div><figcaption>${esc(c)}</figcaption></div>`).join('');
+  // P113 (Coufal round 1: "the contexts are small labels in a system font, not the logo"): each context shows the real
+  // mark in its usual form and size - the 16 px cut in a tab, the symbol on an app tile and in a round avatar, the lockup
+  // (with subtitle when `lockup_sub` is given) on a door plate and a business card, the lockup small in a signature
+  const LU = uri(d.lockup, false, true), LS = d.lockup_sub ? uri(d.lockup_sub, false, true) : LU, bg = esc(d.tile || '#fff');
+  const shape = (c) => {
+    const k = c.toLowerCase();
+    if (/záložk|zalozk|favicon|tab/.test(k)) return `<div class="tab"><img src="${Sm}" style="width:16px;height:16px"><span>${esc(spec.name)}</span></div>`;
+    if (/ikon|telefon|aplik|plocha/.test(k)) return `<div class="tile" style="background:${bg}"><img src="${S}"></div>`;
+    if (/avatar|profil|sociál|social/.test(k)) return `<div class="ava"><img src="${S}"></div>`;
+    if (/dve|cedul|tabul|door/.test(k)) return `<div class="plate"><img src="${LS}"></div>`;
+    if (/vizit|card/.test(k)) return `<div class="vcard"><img src="${LS}"></div>`;
+    if (/podpis|e-mail|email/.test(k)) return `<div class="sig"><p>S pozdravom</p><img src="${LU}"></div>`;
+    return `<div class="hdr"><img src="${LU}"></div>`;
+  };
+  const ctx = (spec.contexts || []).map((c) => `<div class="ctxn">${shape(c)}<figcaption>${esc(c)}</figcaption></div>`).join('');
   return `<!doctype html><html><head>${head}<style>.rc{width:1400px;padding:24px;box-sizing:border-box;display:grid;grid-template-columns:1fr 1fr;gap:18px}
   .rc section{border:1px solid #ddd;border-radius:10px;padding:16px}.rc h3{margin:0 0 10px;font-size:12px;color:#666;letter-spacing:.06em}
   .lkw .lk{height:120px;width:auto;max-width:100%}.big img{width:360px;height:360px;object-fit:contain}
   .cuts{display:flex;gap:22px;align-items:flex-end}.cuts figure{margin:0;display:flex;flex-direction:column;align-items:center;gap:6px}
   .bw{filter:grayscale(1) contrast(1.4)}.inv{background:#111}.ctxs{display:flex;flex-wrap:wrap;gap:14px}
-  .ctxn{border:1px solid #e3e3e3;border-radius:8px;padding:10px;width:200px}.ctxn .slot{display:flex;gap:8px;align-items:center}.ctxn img{width:32px;height:32px}
+  .ctxn{border:1px solid #e3e3e3;border-radius:8px;padding:10px;width:300px;display:flex;flex-direction:column;align-items:flex-start;gap:8px}.ctxn>*{flex:none}
+  .tab{display:flex;gap:6px;align-items:center;height:30px;box-sizing:border-box;background:#e9e9e9;border-radius:8px 8px 0 0;padding:6px 10px;font:12px system-ui;width:170px}
+  .tile{width:60px;height:60px;border-radius:14px;display:grid;place-items:center;box-shadow:0 0 0 1px #ddd}.tile img{width:42px;height:42px}
+  .ava{width:72px;height:72px;border-radius:50%;overflow:hidden;display:grid;place-items:center;box-shadow:0 0 0 1px #ddd}.ava img{width:52px;height:52px}
+  .plate{background:#f4f4f2;border:1px solid #bbb;padding:14px;width:270px;box-sizing:border-box}.plate img{width:100%;height:auto}
+  .vcard{width:255px;height:155px;border:1px solid #ccc;border-radius:4px;display:grid;place-items:center;padding:10px;box-sizing:border-box}.vcard img{max-width:100%;max-height:90px}
+  .sig{font:12px system-ui;color:#444}.sig p{margin:0 0 6px}.sig img{height:22px;width:auto}.hdr img{height:32px;width:auto}
   figcaption{font-size:11px;color:#666}</style></head><body><div class="rc">
   <section class="lkw" style="grid-column:1/3"><h3>LOGO S NÁZVEM</h3>${L}</section>
   <section class="big"><h3>ZNAČKA ZVĚTŠENÁ</h3><img src="${S}"></section>
   <section><h3>ŘEZY 48 / 32 / 16 PX (A ×4)</h3><div class="cuts">${cut(M, 48, '48 px (střední řez)')}${cut(M, 32, '32 px (střední řez)')}${cut(Sm, 16, '16 px (malý řez)')}</div></section>
-  <section class="bw"><h3>ČERNOBÍLE</h3>${L}</section>
+  ${d.mono ? `<section><h3>ČERNOBÍLE</h3>${inlineSvg(d.mono, 'mn')}</section>` : `<section class="bw"><h3>ČERNOBÍLE</h3>${L}</section>`}
   <section class="inv"><h3 style="color:#aaa">INVERZNĚ</h3><img src="${Si}" style="width:120px;height:120px"> <img src="${Smi}" style="width:32px;height:32px"></section>
   ${ctx ? `<section style="grid-column:1/3"><h3>KONTEXTY ZE ZADÁNÍ ZNAČKY</h3><div class="ctxs">${ctx}</div></section>` : ''}
   </div></body></html>`;

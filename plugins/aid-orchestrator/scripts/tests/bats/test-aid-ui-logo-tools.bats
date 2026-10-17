@@ -48,6 +48,12 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; }
   echo '{"name": "X", "directions": [{"id": "c", "title": "C", "lockup": "marks/a-lockup.svg", "symbol": "marks/c-symbol.svg", "inverse": "marks/c-white.svg"}]}' > "$P/s1.json"
   bash "$TOOL" logo-sheet --cards "$P/s1.json" --root "$P" >/dev/null
   ! cmp -s "$T/without.png" "$P/.aid-ui/logo/cards/c.png"
+  # the brand's one-colour lockup for the black-and-white panel and each context as the real mark (tab, tile, avatar,
+  # door plate, business card, signature) render
+  cp "$P/.aid-ui/logo/cards/c.png" "$T/with-inverse.png"
+  echo '{"name": "X", "contexts": ["záložka prohlížeče", "ikona na ploše telefonu", "avatar Google profilu", "dveře ambulance", "vizitka", "e-mailový podpis", "hlavička webu"], "directions": [{"id": "c", "title": "C", "lockup": "marks/a-lockup.svg", "symbol": "marks/c-symbol.svg", "inverse": "marks/c-white.svg", "mono": "marks/b-lockup.svg", "lockup_sub": "marks/b-lockup.svg", "tile": "#EEF1EF"}]}' > "$P/s2.json"
+  run bash "$TOOL" logo-sheet --cards "$P/s2.json" --root "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  ! cmp -s "$T/with-inverse.png" "$P/.aid-ui/logo/cards/c.png"
 }
 
 @test "logo-tools: a direction without lockup or symbol, or with a raster symbol, is refused" {
