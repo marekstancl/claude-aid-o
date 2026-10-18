@@ -333,9 +333,11 @@ a zastaví na prvním neúspěchu.
 
 Od 3.6.0 studio končí předávacím balíkem `docs/ui/predani.json`. Z něj
 `aid-ui-package.py zadani docs/ui/predani.json --plan-id P<NNN>` (nebo `/aid-plan`
-s balíkem) napíše zadání plánu nasazení; brána běhu `check_ui_handover` pak pustí
-na doménu jen předaný web bez otevřeného kritického bodu a `aid-ui-quality.py
-launch` ohodnotí ostrou adresu ve vlastní smyčce. Plán bez balíku bránu přeskočí.
+s balíkem) napíše zadání plánu nasazení. Brána běhu `check_ui_handover` má dvě
+fáze: před nasazením ověří balík, web a kritické body; po zápisu
+`docs/ui/nasazeni.json` (a vždy s `--launch`, bod zadání) i soubory na hostingu,
+formuláře a kontrolu UI nad ostrou adresou. `aid-ui-quality.py launch` ohodnotí
+ostrou adresu ve vlastní smyčce. Plán bez balíku bránu přeskočí.
 
 ### Topic: status
 

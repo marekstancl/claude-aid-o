@@ -102,5 +102,11 @@
  ],
  "launch_only": [
   "tech.bezpecnost_spusteni"
- ]
+ ],
+ "handover": {
+  "verdict": "prevzit",
+  "rating": "8-10",
+  "answer": "h1",
+  "comment": "Bereme, IČO dodáme."
+ }
 }

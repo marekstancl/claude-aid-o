@@ -49,12 +49,14 @@ Studio navrhuje s PM a klientem, plán a běh AIDu web nasazují a ověřují; m
 2. **Zadání plánu nasazení.** `aid-ui-package.py zadani docs/ui/predani.json --plan-id P<NNN>` (nebo `/aid-plan`
    s balíkem jako vstupem) napíše zadání: bod hotovo za každý úkol zákazníka, krok spuštění
    (`references/local/spusteni.md`: nasadit přesně balík, HTTPS, hlavičky, 404, citlivé soubory, DNS, e-mail,
-   katalogy, přesměrování), podklad ke spuštění, otevřený bod (kritický blokuje) a hodnocení po nasazení.
+   katalogy, přesměrování), podklad ke spuštění (pokud už ho nenese otevřený bod), otevřený bod (kritický blokuje)
+   a hodnocení po nasazení.
    Hosting je práce plánu, ne studia.
 3. **Brána běhu `check_ui_handover`.** Plán z balíku nese `ui_package:`; brána ho bez balíku, se zastaralým nebo
-   upraveným balíkem a s otevřeným kritickým bodem zastaví. Po zápisu `docs/ui/nasazeni.json` (`url` a `listing`
-   hostingu) pustí jen přesně soubory balíku, formulář, který hosting přijme, a kontrolu UI studia nad ostrou
-   adresou. Plán bez balíku bránu přeskočí s důvodem.
+   upraveným balíkem a s otevřeným kritickým bodem zastaví. Před nasazením tím končí („před nasazením“); po zápisu
+   `docs/ui/nasazeni.json` (`url` a `listing` hostingu) a vždy s `--launch` (bod zadání) pustí jen přesně soubory
+   balíku, všechny formuláře na vlastní adresu webu, které hosting přijme, a kontrolu UI studia nad ostrou adresou.
+   Plán bez balíku bránu přeskočí s důvodem.
 4. **Hodnocení po nasazení.** `aid-ui-quality.py launch <project> --url <ostrá adresa>` - vlastní smyčka
    v `.aid-ui/critic/launch/` (kritéria `launch_only` se hodnotí), hodnocení stavby zůstane; `launch-status
    --package docs/ui/predani.json` je bod zadání.

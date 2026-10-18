@@ -225,7 +225,7 @@ def make(proj, dry):
         "open_items": ois,
         "launch_inputs": inputs,
         "launch_only": launch_only_of(proj, launch),
-    } | ({} if dry else {"handover": handover_of(state)})
+    } | ({} if dry else {"handover": handover_of(state)})   # --dry runs before the PM's answer is used: no verdict yet
 
 
 def schema_errors(pkg):
@@ -264,7 +264,7 @@ def cmd_build(proj, dry):
         pkg = make(proj, dry)
     except Refused as e:
         die("package: " + str(e))
-    errs = schema_errors(pkg)
+    errs = [e for e in schema_errors(pkg) if not (dry and "'handover'" in e)]   # --dry: everything but the verdict to come
     if errs:
         die("package: chybí " + "; ".join(errs[:5]))
     if dry:

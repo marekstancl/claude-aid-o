@@ -6,7 +6,7 @@
   "$defs": {"id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "description": "goes into generated commands of the brief: letters, digits, . _ - only"}},
   "type": "object",
   "additionalProperties": false,
-  "required": ["version", "project", "created_at", "site", "gate", "chapters", "places", "customer_tasks", "open_items", "launch_inputs", "launch_only"],
+  "required": ["version", "project", "created_at", "site", "gate", "chapters", "places", "customer_tasks", "open_items", "launch_inputs", "launch_only", "handover"],
   "properties": {
     "version": {"const": 1},
     "project": {"type": "string", "minLength": 1},
@@ -85,7 +85,7 @@
     },
     "handover": {
       "type": "object",
-      "description": "the PM's handover verdict and comment (absent only in build --dry, before the answer is used)",
+      "description": "the PM's handover verdict and comment (build --dry checks a package before the answer is used and writes none)",
       "additionalProperties": false,
       "required": ["verdict", "rating", "answer", "comment"],
       "properties": {"verdict": {"type": "string", "minLength": 1}, "rating": {"type": ["string", "null"]}, "answer": {"type": "string"}, "comment": {"type": "string"}}
