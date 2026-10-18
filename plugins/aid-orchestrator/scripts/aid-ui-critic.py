@@ -94,7 +94,7 @@ APP_WHAT = {
            "app_states, keyboard_flows, task_recovery, axe) a soubory aplikace v pracovním adresáři (jen ke čtení).",
 }
 APP_FILES = {"web": [("site/**", True), (".aid-ui/verify/result.json", False)],   # the built app and the gate's result
-             "struktura": [("docs/design/screens.json", True), (".aid-ui/baseline/tasks.json", False), ("zadani.md", False),
+             "struktura": [("docs/design/screens.json", True), (".aid-ui/precheck/result.json", False), (".aid-ui/baseline/tasks.json", False), ("zadani.md", False),
                            ("docs/plans/roadmap.md", False)]}
 APP_SKIP = {"sdeleni": "aplikace slogan ani hlavní sdělení nepotřebuje (aplikace-postup.md, oddíl 0)",
             "pohyb": "aplikace pohyb značky nemá, dokud o něj PM výslovně nepožádá",

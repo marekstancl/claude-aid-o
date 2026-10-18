@@ -248,6 +248,8 @@ APP_JS = """(function(){var q=new URLSearchParams(location.search),st=q.get('sta
 document.querySelectorAll('main [data-aid-state]').forEach(function(e){if(e.dataset.aidState===st)ok=true;});
 if(!ok)st='filled';document.querySelectorAll('main [data-aid-state]').forEach(function(e){e.hidden=e.dataset.aidState!==st;});
 document.querySelectorAll('[data-aid-stav-link]').forEach(function(a){if(a.dataset.aidStavLink===st)a.setAttribute('aria-current','true');});
+document.querySelectorAll('[data-aid-back]').forEach(function(a){a.addEventListener('click',function(ev){if(document.referrer&&new URL(document.referrer).origin===location.origin){ev.preventDefault();history.back();}});});
+var an=document.querySelector('[data-aid-stav-oznameni]');if(an&&q.get('stav'))an.textContent='Zobrazen stav: '+(document.querySelector('[data-aid-stav-link="'+st+'"]')||{}).textContent;
 document.querySelectorAll('[data-aid-result]').forEach(function(e){e.hidden=done.indexOf(e.dataset.aidResult)<0;});
 document.querySelectorAll('dialog[data-aid-confirm]').forEach(function(d){d.close();var b=document.querySelector('[data-aid-action="'+d.dataset.aidConfirm+'"]');
 if(b)b.addEventListener('click',function(){d.showModal();d.querySelector('[data-aid-confirm-no]').focus();});
@@ -291,7 +293,8 @@ def actions_html(m, scr, url, fields, ends):
     for a in scr["actions"]:
         da = f'data-aid-action="{esc(sid)}.{esc(a["id"])}"'
         if a["kind"] == "navigate":
-            acts.append(f'<a class="akce" href="{esc(url[a["to"]])}{tail(a)}" {da}>{esc(a["label"])}</a>')
+            back = " data-aid-back" if a.get("back") else ""
+            acts.append(f'<a class="akce" href="{esc(url[a["to"]])}{tail(a)}" {da}{back}>{esc(a["label"])}</a>')
         elif a["kind"] == "submit":
             v = f' name="vysledek" value="{esc(",".join(ends[a["id"]]))}"' if ends.get(a["id"]) else ""
             btns.append(f'<button type="submit" formaction="{esc(url[a["to"]])}"{v} {da}>{esc(a["label"])}</button>')
@@ -302,7 +305,17 @@ def actions_html(m, scr, url, fields, ends):
                         f'<a href="{esc(url[a["to"]])}{tail(a)}" data-aid-confirm-yes="{k}">Potvrdit</a> <button type="button" data-aid-confirm-no>Zrušit</button></dialog>')
     form = ""
     if btns:
-        inputs = "".join(f'<p><label>{esc(n)} <input name="{esc(n)}"></label></p>' for n in fields)
+        spec = {f["name"]: f for f in scr.get("fields") or []}
+        def field(n):
+            f = spec.get(n) or {"name": n, "label": n}
+            hid = f"h-{esc(sid)}-{esc(n)}"
+            hint = f' aria-describedby="{hid}"' if f.get("hint") else ""
+            note = f'<span id="{hid}" class="napoveda">{esc(f["hint"])}</span>' if f.get("hint") else ""
+            if f.get("choices"):
+                opts = "".join(f'<option value="{esc(c["value"])}">{esc(c["label"])}</option>' for c in f["choices"])
+                return f'<p><label for="f-{esc(sid)}-{esc(n)}">{esc(f["label"])}</label> <select id="f-{esc(sid)}-{esc(n)}" name="{esc(n)}"{hint}>{opts}</select> {note}</p>'
+            return f'<p><label for="f-{esc(sid)}-{esc(n)}">{esc(f["label"])}</label> <input id="f-{esc(sid)}-{esc(n)}" name="{esc(n)}"{hint}> {note}</p>'
+        inputs = "".join(field(n) for n in fields)
         first = next(a for a in scr["actions"] if a["kind"] == "submit")
         form = (f'<form method="get" action="{esc(url[first["to"]])}" data-aid-form>{inputs}'
                 f'<p class="chyba" role="alert" tabindex="-1" data-aid-error hidden>{esc(scr["states"]["error"])}</p>{"".join(btns)}</form>')
@@ -319,11 +332,16 @@ def app_page(m, scr, approved, fields, results, ends, shell):
     cur = ' aria-current="page"'
     nav = "".join(f'<li><a href="{esc(url[x["id"]])}"{cur if x["id"] == sid else ""}>{esc(x["title"])}</a></li>'
                   for x in m["screens"] if x["nav"] and not x.get("shell"))
-    bar = "".join(f'<div class="lista" data-aid-screen="{esc(x["id"])}" aria-label="{esc(x["title"])}">'
+    bar = "".join(f'<div class="lista" role="region" data-aid-screen="{esc(x["id"])}" aria-label="{esc(x["title"])}">'
+                  f'<p class="lista-stav" role="status">{esc(x["states"]["filled"])}</p>'   # what the bar shows, not only its buttons
                   f'{actions_html(m, x, url, shell[x["id"]][0], shell[x["id"]][1])}</div>' for x in m["screens"] if x.get("shell"))
     switch = "".join(f'<a href="?stav={k}" data-aid-stav-link="{k}">{t}</a> ' for k, t in STATES)
     res = "".join(f'<p class="vysledek" role="status" data-aid-result="{esc(t)}">{esc(e)}</p>' for t, e in results)
-    states = "".join(f'<section class="stav" data-aid-state="{k}"><h2>{t}</h2><p>{esc(scr["states"][k])}</p></section>' for k, t in STATES)
+    retry = f'<p><a class="akce" href="{esc(url[sid])}">Zkusit znovu</a></p>'
+    sample = ("" if not scr.get("sample") else '<figure class="ukazka"><figcaption>Ukázka (ne skutečná data)</figcaption><ul>'
+              + "".join(f"<li>{esc(x)}</li>" for x in scr["sample"]) + "</ul></figure>")
+    states = "".join(f'<section class="stav" data-aid-state="{k}"><h2>{t}</h2><p>{esc(scr["states"][k])}</p>{sample if k == "filled" else ""}'
+                     f'{retry if k == "error" and not scr["states"][k].lower().startswith("nenastává") else ""}</section>' for k, t in STATES)
     mine = [t for t in m["tasks"] if any(st["screen"] == sid for st in t["steps"])]
     tasks = ("" if not mine else '<details class="ulohy"><summary>Stavy úloh na této obrazovce</summary>' + "".join(
         f'<h3>{esc(t["title"])}</h3><ul>' + "".join(f"<li>{n}: {esc(t['states'][k])}</li>" for k, n in STATE_NAMES) + "</ul>" for t in mine)
@@ -339,14 +357,14 @@ def app_page(m, scr, approved, fields, results, ends, shell):
     banner = "" if approved else '<p class="navrh" role="status" data-aid-draft>Návrh: model čeká na schválení vlastníkem.</p>'
     return (f'<!doctype html>\n<html lang="cs" {MARK} data-aid-app>\n<head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(scr["title"])} · {esc(m.get("app") or "aplikace")}</title>'
-            '<style>body{font:16px/1.5 system-ui,sans-serif;margin:0}header,main{padding:16px;max-width:1100px;margin:auto}'
+            '<style>body{font:16px/1.5 system-ui,sans-serif;margin:0}header,main,footer{padding:16px;max-width:1100px;margin:auto}'
             'nav ul{display:flex;flex-wrap:wrap;gap:12px;list-style:none;padding:0}.stav{border:1px solid #888;padding:12px;margin:12px 0}'
             '.navrh{background:#fe9;padding:8px 16px;margin:0}.chyba{border:2px solid #b00;padding:8px}.lista{border-bottom:2px solid #333;padding:8px 0}'
             'a,button,summary,input{min-height:44px}a,button{display:inline-block;margin:4px 8px 4px 0}'
             ':focus-visible{outline:3px solid #06c;outline-offset:2px}</style></head>\n<body>\n'
             f'{banner}<header><p class="znacka">{esc(m.get("app") or "")}</p>{bar}<nav aria-label="Aplikace"><ul>{nav}</ul></nav></header>\n'
             f'<main data-aid-screen="{esc(sid)}"><h1>{esc(scr["title"])}</h1><p class="ucel">{esc(scr["purpose"])}</p>'
-            f'<nav class="stavy" aria-label="Stav obrazovky">{switch}</nav>{res}{states}<p class="chyba" role="alert" tabindex="-1" data-aid-error-global hidden>{esc(scr["states"]["error"])}</p>{actions_html(m, scr, url, fields, ends)}{data}{tasks}</main>\n'
+            f'<nav class="stavy" aria-label="Stav obrazovky">{switch}</nav><p class="oznameni" role="status" aria-live="polite" data-aid-stav-oznameni></p>{res}{states}<p class="chyba" role="alert" tabindex="-1" data-aid-error-global hidden>{esc(scr["states"]["error"])}</p>{actions_html(m, scr, url, fields, ends)}{data}{tasks}</main>\n'
             + (f'<footer>{foot}</footer>\n' if foot else "") + f'<script>{APP_JS}</script>\n</body>\n</html>\n')
 
 

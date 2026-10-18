@@ -48,9 +48,12 @@ async function tabTo(page, css) {
 }
 async function fill(page, s, input, kb) {
   for (const [n, v] of Object.entries(input || {})) {
-    const css = `${S(s)} [name="${n}"]`;
-    if (kb) { await tabTo(page, css); await page.keyboard.press('Control+A'); await page.keyboard.type(v); }
-    else await page.locator(css).first().fill(v);
+    const css = `${S(s)} [name="${n}"]`, el = page.locator(css).first();
+    const select = await el.evaluate(e => e.tagName === 'SELECT').catch(() => false);
+    if (kb) await tabTo(page, css);   // reached by Tab; a choice is then set on the focused select
+    if (select) await el.selectOption(v);
+    else if (kb) { await page.keyboard.press('Control+A'); await page.keyboard.type(v); }
+    else await el.fill(v);
   }
 }
 async function press(page, s, a, kb) {

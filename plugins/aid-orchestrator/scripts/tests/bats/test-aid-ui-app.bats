@@ -527,3 +527,28 @@ app_handover() {
   run python3 "$SCR" check "$APP"
   [ "$status" -eq 1 ]; [[ "$output" == *"lišta (shell: true) je jen jedna"* ]]
 }
+
+@test "merge-path: the skeleton shows the model's fields, samples, data sources, trace, glossary, the bar's content, Zkusit znovu and Zpět" {
+  SK="$BATS_TEST_DIRNAME/../../lib/aid-ui-skeleton.py"
+  mkdir -p "$APP/.aid-ui"; echo '{"type": "webapp", "brand": "none", "local": false}' > "$APP/.aid-ui/variant.json"
+  printf 'Poznámky\nZaložit poznámku\n' > "$APP/zadani.md"
+  mutate '.requirements = [{id: "z1", source: "zadani.md:2", text: "Založit poznámku", covered_by: ["task:zalozit"]}, {id: "z2", source: "zadani.md:1", text: "Export", out_of_scope: "později"}]
+    | .glossary = [{term: "Poznámka", meaning: "jeden zápis"}] | .out_of_scope = [{what: "Export", why: "později"}]
+    | .screens[1].fields = [{name: "nazev", label: "Název poznámky", hint: "do 80 znaků"}]
+    | .screens[0].sample = ["Nákup · 18. 10."] | .screens[0].data = [{what: "seznam", source: "databáze", freshness: "při načtení"}]
+    | .screens[2].actions[1].back = true
+    | .screens += [{id: "lista", title: "Lišta", purpose: "Nahoře.", nav: false, shell: true, actions: [], states: {empty: "nenastává, protože vždy", loading: "nenastává, protože vždy", error: "nenastává, protože vždy", filled: "3 poznámky"}}]'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  run python3 "$SK" build "$APP"; [ "$status" -eq 0 ]
+  f="$APP/site/formular/index.html"; s="$APP/site/seznam/index.html"; d="$APP/site/detail/index.html"
+  grep -q '<label for="f-formular-nazev">Název poznámky</label> <input id="f-formular-nazev" name="nazev" aria-describedby="h-formular-nazev">' "$f"
+  grep -q 'Ukázka (ne skutečná data)' "$s"; grep -q 'seznam: databáze; při načtení' "$s"
+  grep -q 'z1 (zadani.md:2): Založit poznámku → task:zalozit' "$s"; grep -q 'mimo rozsah: později' "$s"; grep -q '<b>Poznámka</b>: jeden zápis' "$s"
+  grep -q 'class="lista-stav" role="status">3 poznámky' "$d"
+  grep -q '>Zkusit znovu</a>' "$s"; grep -q 'data-aid-action="detail.zpet" data-aid-back' "$d"
+  # a requirement without a cover or with a wrong source is refused by the check
+  mutate '.requirements[0].source = "zadani.md:9"'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"zadani.md:9 není soubor:řádek v projektu"* ]]
+  mutate '.requirements[0].source = "zadani.md:2" | .requirements[0].covered_by = ["task:nikdy"]'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"task:nikdy není úloha modelu"* ]]
+}

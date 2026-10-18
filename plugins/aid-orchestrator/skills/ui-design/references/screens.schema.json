@@ -45,10 +45,17 @@
                 "label": {"$ref": "#/$defs/text"},
                 "to": {"$ref": "#/$defs/id", "description": "cílová obrazovka; akce, která zůstává, míří na svou obrazovku"},
                 "kind": {"enum": ["navigate", "submit", "destructive"]},
-                "confirm": {"$ref": "#/$defs/text", "description": "otázka potvrzení; povinná u destructive"}
+                "confirm": {"$ref": "#/$defs/text", "description": "otázka potvrzení; povinná u destructive"},
+                "back": {"type": "boolean", "description": "true = vede zpět tam, odkud uživatel přišel (Zpět prohlížeče); to je cíl, když historie není"}
               }
             }
           },
+          "sample": {"type": "array", "description": "ukázkové řádky naplněného stavu (označené jako ukázka, nikdy skutečná data): jak vypadá pozice, signál, položka", "items": {"$ref": "#/$defs/text"}},
+          "fields": {"type": "array", "description": "pole formuláře obrazovky: lidský popisek, nápověda (meze) a pevné volby místo volného textu",
+                     "items": {"type": "object", "required": ["name", "label"], "additionalProperties": false,
+                               "properties": {"name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$"}, "label": {"$ref": "#/$defs/text"},
+                                              "hint": {"$ref": "#/$defs/text"}, "choices": {"type": "array", "minItems": 2, "items": {"type": "object", "required": ["value", "label"], "additionalProperties": false,
+                                              "properties": {"value": {"type": "string"}, "label": {"$ref": "#/$defs/text"}}}}}}},
           "data": {"type": "array", "description": "čísla a stavy na obrazovce: odkud jsou, jak čerstvá a co uživatel uvidí, když zastarají",
                    "items": {"type": "object", "required": ["what", "source", "freshness"], "additionalProperties": false,
                              "properties": {"what": {"$ref": "#/$defs/text"}, "source": {"$ref": "#/$defs/text"}, "freshness": {"$ref": "#/$defs/text"}}}},
