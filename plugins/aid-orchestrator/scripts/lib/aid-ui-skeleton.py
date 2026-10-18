@@ -243,11 +243,14 @@ def write_pages(p, site, entries):
 
 
 # --- P116: the skeleton of a web application, from docs/design/screens.json -------------------------------------
-STATES = (("filled", "Naplněno"), ("empty", "Prázdno"), ("loading", "Načítání"), ("error", "Chyba"))
+STATES = (("empty", "Prázdno"), ("loading", "Načítání"), ("error", "Chyba"), ("filled", "Naplněno"))   # the model's order
 APP_JS = """(function(){var q=new URLSearchParams(location.search),st=q.get('stav')||'filled',ok=false;
 document.querySelectorAll('[data-aid-state]').forEach(function(e){if(e.dataset.aidState===st)ok=true;});
 if(!ok)st='filled';document.querySelectorAll('[data-aid-state]').forEach(function(e){e.hidden=e.dataset.aidState!==st;});
 document.querySelectorAll('[data-aid-stav-link]').forEach(function(a){if(a.dataset.aidStavLink===st)a.setAttribute('aria-current','true');});
+document.querySelectorAll('dialog[data-aid-confirm]').forEach(function(d){d.close();var b=document.querySelector('[data-aid-action="'+d.dataset.aidConfirm+'"]');
+if(b)b.addEventListener('click',function(){d.showModal();d.querySelector('[data-aid-confirm-yes]').focus();});
+d.querySelector('[data-aid-confirm-no]').addEventListener('click',function(){d.close();if(b)b.focus();});});
 var f=document.querySelector('form[data-aid-form]'),err=document.querySelector('[data-aid-error]');
 if(f)f.addEventListener('submit',function(ev){ev.preventDefault();var b=ev.submitter,to=(b&&b.getAttribute('formaction'))||f.getAttribute('action');
 var u=to+'?'+new URLSearchParams(new FormData(f)).toString();f.setAttribute('aria-busy','true');if(b)b.disabled=true;
@@ -292,9 +295,11 @@ def app_page(m, scr, approved, fields, results):
             acts.append(f'<a class="akce" href="/{esc(a["to"])}/" {da}>{esc(a["label"])}</a>')
         elif a["kind"] == "submit":
             form_btns.append(f'<button type="submit" formaction="/{esc(a["to"])}/" {da}>{esc(a["label"])}</button>')
-        else:   # destructive: behind a native disclosure with the confirm question (works without JS, by keyboard)
-            acts.append(f'<details class="potvrzeni"><summary {da}>{esc(a["label"])}</summary><p>{esc(a["confirm"])}</p>'
-                        f'<a href="/{esc(a["to"])}/" data-aid-confirm-yes>Potvrdit</a></details>')
+        else:   # destructive: the button opens its confirm dialog; without JS the dialog stands open under it
+            k = f'{esc(sid)}.{esc(a["id"])}'
+            acts.append(f'<button type="button" {da} aria-haspopup="dialog">{esc(a["label"])}</button>'
+                        f'<dialog open class="potvrzeni" data-aid-confirm="{k}" aria-label="{esc(a["confirm"])}"><p>{esc(a["confirm"])}</p>'
+                        f'<a href="/{esc(a["to"])}/" data-aid-confirm-yes="{k}">Potvrdit</a> <button type="button" data-aid-confirm-no>Zrušit</button></dialog>')
     form = ""
     if form_btns:
         inputs = "".join(f'<p><label>{esc(n)} <input name="{esc(n)}"></label></p>' for n in fields)
@@ -357,6 +362,9 @@ def build_app(p):
                 lambda x=x: app_page(m, x, approved, fields.get(x["id"], []), results.get(x["id"], []))) for x in m["screens"]]
     entries.append((os.path.join(site, "index.html"), lambda: app_page(m, home, approved, fields.get(home["id"], []), results.get(home["id"], []))))
     out = write_pages(p, site, entries)
+    if not approved and out["kept"]:   # a built page is never rewritten: it cannot carry the banner; the gate refuses the model
+        warn("built pages kept without the draft banner (the model is not approved): " + ", ".join(out["kept"])
+             + "; the gate refuses until the PM approves this model")
     print(json.dumps(out | {"model_sha256": sha, "approved": approved}, ensure_ascii=False))
 
 

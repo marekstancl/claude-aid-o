@@ -369,7 +369,7 @@ J
   P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
   "$SERVE" skeleton "$P" >/dev/null
   for s in seznam formular detail; do
-    [ "$(grep -o 'data-aid-state="[a-z]*"' "$P/site/$s/index.html" | sort | tr '\n' ' ')" = 'data-aid-state="empty" data-aid-state="error" data-aid-state="filled" data-aid-state="loading" ' ]
+    [ "$(grep -o 'data-aid-state="[a-z]*"' "$P/site/$s/index.html" | tr '\n' ' ')" = 'data-aid-state="empty" data-aid-state="loading" data-aid-state="error" data-aid-state="filled" ' ]   # the model's order
     ! grep -qE 'data-aid-state="[a-z]+"[^>]*hidden' "$P/site/$s/index.html"   # hidden only by the script: without JS all show
   done
   [ "$(states_seen http://127.0.0.1:39918/seznam/)" = filled ]
@@ -382,8 +382,19 @@ J
 @test "app-skeleton: a destructive action stands behind its confirm question; the draft banner goes once the PM approved this model" {
   P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
   "$SERVE" skeleton "$P" >/dev/null
-  grep -q '<details class="potvrzeni"><summary data-aid-action="detail.smazat">Smazat</summary><p>Opravdu smazat poznámku?</p><a href="/seznam/" data-aid-confirm-yes>' "$P/site/detail/index.html"
+  grep -q '<button type="button" data-aid-action="detail.smazat" aria-haspopup="dialog">Smazat</button><dialog open class="potvrzeni" data-aid-confirm="detail.smazat"' "$P/site/detail/index.html"
+  grep -q '<a href="/seznam/" data-aid-confirm-yes="detail.smazat">Potvrdit</a>' "$P/site/detail/index.html"
   ! grep -q 'data-aid-action="detail.smazat" href' "$P/site/detail/index.html"   # never a plain link
+  # in a browser: the action opens the dialog (closed before), Potvrdit leads to the target screen
+  cat > "$BATS_TEST_TMPDIR/del.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); await pg.goto('http://127.0.0.1:39918/detail/');
+const before = await pg.locator('[data-aid-confirm-yes="detail.smazat"]').isVisible();
+await pg.click('[data-aid-action="detail.smazat"]'); await pg.click('[data-aid-confirm-yes="detail.smazat"]'); await pg.waitForLoadState();
+console.log(before + ' ' + await pg.getAttribute('main', 'data-aid-screen')); await b.close();
+J
+  [ "$(node "$BATS_TEST_TMPDIR/del.mjs")" = "false seznam" ]
   for s in seznam formular detail; do grep -q 'data-aid-draft' "$P/site/$s/index.html"; done
   # approved: the state names this model's sha -> no banner; a changed model -> the banner again
   sha="$(sha256sum "$P/docs/design/screens.json" | cut -d' ' -f1)"
@@ -403,7 +414,8 @@ J
   jq '(.screens[0].actions) |= map(select(.id != "otevrit")) | del(.screens[2]) | .tasks = [.tasks[0] | .done_when = {screen: "formular", expect: "x"} | .steps[1].action = "zpet" | .steps |= .[:1] | .done_when.screen = "formular" | .failure_paths = [] | .states.failure = "nenastává, protože bez odeslání"]
       | (.screens[1].actions) |= map(select(.to != "detail"))' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
   run python3 "$BATS_TEST_DIRNAME/../../aid-ui-screens.py" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  "$SERVE" skeleton "$P" >/dev/null
+  run "$SERVE" skeleton "$P"
+  [ "$status" -eq 0 ]; [[ "$output" == *"built pages kept without the draft banner"*"seznam/index.html"* ]]   # the model is not approved
   [ ! -e "$P/site/detail/index.html" ]; [ -f "$P/.aid-ui/skeleton/removed/detail/index.html" ]
   grep -q postaveno "$P/site/seznam/index.html"
   "$SERVE" stop skeleton
