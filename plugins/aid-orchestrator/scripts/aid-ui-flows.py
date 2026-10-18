@@ -108,7 +108,8 @@ def scenario(mod, m, t, sha):
         "variants": {v["state"]: {"at_step": v["at_step"], "kind": v["kind"], "recover": v["recover"], "generated": v["generated"]}
                      for v in mod.failure_variants(m, t)},
     }
-    return (f"{MARK}\n// task {t['id']}: {t['title']}\nexport const model_sha256 = {json.dumps(sha)};\n"
+    # model text only as JSON (ASCII-escaped): a title with a line break can never end the comment and inject code
+    return (f"{MARK}\n// task {t['id']}: {json.dumps(t['title'])}\nexport const model_sha256 = {json.dumps(sha)};\n"
             f"const T = {json.dumps(plan, ensure_ascii=False)};\n{RUNTIME.lstrip()}")
 
 

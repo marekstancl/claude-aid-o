@@ -282,6 +282,10 @@ ans_by() {
   mutate '.tasks[0].failure_paths = [] | .tasks[0].states.failure = "nenastává, protože ukládá jen do prohlížeče"'
   python3 "$FL" generate "$APP" >/dev/null
   t zalozit | jq -e '.variants["fail-1"] == {at_step: 2, kind: "network", recover: "ulozit", generated: true}' >/dev/null
+  # a title with a line break stays inside the generated comment: nothing of the model becomes code
+  mutate '.tasks[0].title = "x\nprocess.exit(7) //\u2028y"'
+  python3 "$FL" generate "$APP" >/dev/null
+  ! grep -q '^process.exit' "$APP/.aid-ui/scenarios/zalozit.mjs"; node --check "$APP/.aid-ui/scenarios/zalozit.mjs"
   # an invalid model writes nothing
   mutate 'del(.tasks[0].done_when)'
   run python3 "$FL" generate "$APP"
