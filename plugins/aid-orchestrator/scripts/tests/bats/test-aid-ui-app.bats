@@ -241,3 +241,19 @@ ans_by() {
   [ "$(st stranky)" != skipped ]; [ "$(st obrazovky)" = skipped ]; [ "$(st vychozi-stav)" = skipped ]
 }
 
+@test "merge-path: app skeleton refuses an invalid model and a webapp without a model, naming why, nothing written" {
+  SK="$BATS_TEST_DIRNAME/../../lib/aid-ui-skeleton.py"
+  mkdir -p "$APP/.aid-ui"; echo '{"type": "webapp", "brand": "none", "local": false}' > "$APP/.aid-ui/variant.json"
+  mutate 'del(.screens[2].actions[0].confirm)'
+  run python3 "$SK" build "$APP"
+  [ "$status" -eq 2 ]; [[ "$output" == *"the model fails aid-ui-screens.py check"*"bez potvrzení"* ]]
+  [ ! -e "$APP/site" ]
+  rm "$M"
+  run python3 "$SK" build "$APP"
+  [ "$status" -eq 2 ]; [[ "$output" == *"no docs/design/screens.json"*"Obrazovky a úlohy"* ]]
+  # the valid model builds one page per screen and the home page, all as a draft
+  cp "$FIXA/docs/design/screens.json" "$M"
+  run python3 "$SK" build "$APP"
+  [ "$status" -eq 0 ]; [[ "$output" == *'"approved": false'* ]]
+  [ "$(ls "$APP"/site/*/index.html | wc -l)" -eq 3 ]; grep -q data-aid-draft "$APP/site/index.html"
+}

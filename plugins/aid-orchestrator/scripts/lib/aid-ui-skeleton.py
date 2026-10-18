@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""aid-ui-skeleton.py - the live skeleton of a web from its structure (P113 step 6; struktura-postup.md).
+"""aid-ui-skeleton.py - the live skeleton of a web from its structure (P113 step 6; struktura-postup.md), or of a web
+application from its model of screens and tasks (P116, build_app; aplikace-postup.md) - one builder, a branch on the
+kind (variant.type webapp in docs/design/brand-state.json, else .aid-ui/variant.json).
 
   build <project>
       Writes one page per entry of .aid-ui/structure.json into <project>/site/ (url "/" -> site/index.html,
@@ -154,6 +156,8 @@ def write_atomic(f, text):
 
 
 def build(p):
+    if app_kind(p):
+        return build_app(p)
     s, facts = load(p)
     site = os.path.join(p, "site")
     no_symlinks(p, "site", ".aid-ui/skeleton")
@@ -168,14 +172,36 @@ def build(p):
     for r in s.get("redirects") or []:
         if not (isinstance(r, dict) and isinstance(r.get("from"), str) and r["from"].strip() and isinstance(r.get("to"), str) and r["to"].startswith("/")):
             die(f"redirect {r!r}: needs from (non-empty) and to (a site path starting with /)", 2)
-    os.makedirs(site, exist_ok=True)
-    real = os.path.realpath(site)
     if not s.get("nav"):
         warn("structure.json has no nav: the page order is the navigation")
     lang = s.get("lang") or "cs"
-    want, missing, kept, written = set(), set(), [], []
-    for pg in s["pages"]:
-        f = page_file(site, pg.get("url") or "/")
+    missing = set()
+    out = write_pages(p, site, [(page_file(site, pg.get("url") or "/"), lambda pg=pg: render(s, facts, pg, lang, missing)) for pg in s["pages"]])
+    rd = os.path.join(p, ".aid-ui", "skeleton")
+    rf = os.path.join(rd, "redirects.csv")
+    if s.get("redirects"):
+        import io
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["from", "to"])
+        for r in s["redirects"]:
+            w.writerow([r["from"], r["to"]])
+        write_atomic(rf, buf.getvalue())
+    elif os.path.exists(rf):
+        os.remove(rf)
+    for k in sorted(missing):
+        warn(f"fact {k} is not in docs/content/facts.yaml: shown as čeká na klienta")
+    print(json.dumps(out | {"missing_facts": sorted(missing)}, ensure_ascii=False))
+
+
+def write_pages(p, site, entries):
+    """Write [(file, render)] under site/: a page without the skeleton's mark is a built page and kept; a page the
+    skeleton wrote before (manifest) that is no longer wanted moves to .aid-ui/skeleton/removed/. Shared by the web
+    and the app skeleton (P116)."""
+    os.makedirs(site, exist_ok=True)
+    real = os.path.realpath(site)
+    want, kept, written = set(), [], []
+    for f, render_page in entries:
         if not os.path.realpath(os.path.dirname(f)).startswith(real) and os.path.exists(os.path.dirname(f)):
             die(f"{f} resolves outside {site}", 2)
         want.add(os.path.relpath(f, site))
@@ -183,7 +209,7 @@ def build(p):
             kept.append(os.path.relpath(f, site))   # a built page: the skeleton never overwrites it
             continue
         os.makedirs(os.path.dirname(f), exist_ok=True)
-        write_atomic(f, render(s, facts, pg, lang, missing))
+        write_atomic(f, render_page())
         written.append(os.path.relpath(f, site))
     rd = os.path.join(p, ".aid-ui", "skeleton")
     os.makedirs(rd, exist_ok=True)
@@ -213,20 +239,125 @@ def build(p):
         os.replace(src, dst)
         removed.append(rel)
     write_atomic(mf, json.dumps({"pages": sorted(want)}, ensure_ascii=False))
-    rf = os.path.join(rd, "redirects.csv")
-    if s.get("redirects"):
-        import io
-        buf = io.StringIO()
-        w = csv.writer(buf)
-        w.writerow(["from", "to"])
-        for r in s["redirects"]:
-            w.writerow([r["from"], r["to"]])
-        write_atomic(rf, buf.getvalue())
-    elif os.path.exists(rf):
-        os.remove(rf)
-    for k in sorted(missing):
-        warn(f"fact {k} is not in docs/content/facts.yaml: shown as čeká na klienta")
-    print(json.dumps({"written": written, "kept": kept, "removed": removed, "missing_facts": sorted(missing)}, ensure_ascii=False))
+    return {"written": written, "kept": kept, "removed": removed}
+
+
+# --- P116: the skeleton of a web application, from docs/design/screens.json -------------------------------------
+STATES = (("filled", "Naplněno"), ("empty", "Prázdno"), ("loading", "Načítání"), ("error", "Chyba"))
+APP_JS = """(function(){var q=new URLSearchParams(location.search),st=q.get('stav')||'filled',ok=false;
+document.querySelectorAll('[data-aid-state]').forEach(function(e){if(e.dataset.aidState===st)ok=true;});
+if(!ok)st='filled';document.querySelectorAll('[data-aid-state]').forEach(function(e){e.hidden=e.dataset.aidState!==st;});
+document.querySelectorAll('[data-aid-stav-link]').forEach(function(a){if(a.dataset.aidStavLink===st)a.setAttribute('aria-current','true');});
+var f=document.querySelector('form[data-aid-form]'),err=document.querySelector('[data-aid-error]');
+if(f)f.addEventListener('submit',function(ev){ev.preventDefault();var b=ev.submitter,to=(b&&b.getAttribute('formaction'))||f.getAttribute('action');
+var u=to+'?'+new URLSearchParams(new FormData(f)).toString();f.setAttribute('aria-busy','true');if(b)b.disabled=true;
+fetch(u).then(function(r){if(!r.ok)throw new Error(r.status);location.href=u;}).catch(function(){f.removeAttribute('aria-busy');if(b)b.disabled=false;
+err.hidden=false;err.focus();});});})();"""
+
+
+def app_kind(p):
+    """True for a webapp project: the recorded variant, else the studio's .aid-ui/variant.json."""
+    for f, key in ((os.path.join(p, "docs", "design", "brand-state.json"), "variant"), (os.path.join(p, ".aid-ui", "variant.json"), None)):
+        try:
+            d = json.load(open(f, encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        v = d.get(key) if key else d
+        if isinstance(v, dict) and v.get("type"):
+            return v["type"] == "webapp"
+    return False
+
+
+def screens_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("aid_ui_screens", os.path.join(HERE, "..", "aid-ui-screens.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def app_page(m, scr, approved, fields, results):
+    sid = scr["id"]
+    cur = ' aria-current="page"'
+    nav = "".join(f'<li><a href="/{esc(x["id"])}/"{cur if x["id"] == sid else ""}>{esc(x["title"])}</a></li>'
+                  for x in m["screens"] if x["nav"])
+    switch = "".join(f'<a href="?stav={k}" data-aid-stav-link="{k}">{t}</a> ' for k, t in STATES)
+    res = "".join(f'<p class="vysledek" data-aid-result="{esc(t)}">{esc(e)}</p>' for t, e in results)
+    states = "".join(f'<section class="stav" data-aid-state="{k}"><h2>{t}</h2><p>{esc(scr["states"][k])}</p>{res if k == "filled" else ""}</section>'
+                     for k, t in STATES)
+    acts, form_btns = [], []
+    for a in scr["actions"]:
+        da = f'data-aid-action="{esc(sid)}.{esc(a["id"])}"'
+        if a["kind"] == "navigate":
+            acts.append(f'<a class="akce" href="/{esc(a["to"])}/" {da}>{esc(a["label"])}</a>')
+        elif a["kind"] == "submit":
+            form_btns.append(f'<button type="submit" formaction="/{esc(a["to"])}/" {da}>{esc(a["label"])}</button>')
+        else:   # destructive: behind a native disclosure with the confirm question (works without JS, by keyboard)
+            acts.append(f'<details class="potvrzeni"><summary {da}>{esc(a["label"])}</summary><p>{esc(a["confirm"])}</p>'
+                        f'<a href="/{esc(a["to"])}/" data-aid-confirm-yes>Potvrdit</a></details>')
+    form = ""
+    if form_btns:
+        inputs = "".join(f'<p><label>{esc(n)} <input name="{esc(n)}"></label></p>' for n in fields)
+        first = next(a for a in scr["actions"] if a["kind"] == "submit")
+        form = (f'<form method="get" action="/{esc(first["to"])}/" data-aid-form>{inputs}'
+                f'<p class="chyba" role="alert" tabindex="-1" data-aid-error hidden>{esc(scr["states"]["error"])}</p>{"".join(form_btns)}</form>')
+    banner = "" if approved else '<p class="navrh" role="status" data-aid-draft>Návrh: model čeká na schválení vlastníkem.</p>'
+    return (f'<!doctype html>\n<html lang="cs" {MARK} data-aid-app>\n<head><meta charset="utf-8">'
+            f'<meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(scr["title"])} · {esc(m.get("app") or "aplikace")}</title>'
+            '<style>body{font:16px/1.5 system-ui,sans-serif;margin:0}header,main{padding:16px;max-width:1100px;margin:auto}'
+            'nav ul{display:flex;flex-wrap:wrap;gap:12px;list-style:none;padding:0}.stav{border:1px solid #888;padding:12px;margin:12px 0}'
+            '.navrh{background:#fe9;padding:8px 16px;margin:0}.chyba{border:2px solid #b00;padding:8px}'
+            'a,button,summary,input{min-height:44px}a,button{display:inline-block;margin:4px 8px 4px 0}'
+            ':focus-visible{outline:3px solid #06c;outline-offset:2px}</style></head>\n<body>\n'
+            f'{banner}<header><p class="znacka">{esc(m.get("app") or "")}</p><nav aria-label="Aplikace"><ul>{nav}</ul></nav></header>\n'
+            f'<main data-aid-screen="{esc(sid)}"><h1>{esc(scr["title"])}</h1><p class="ucel">{esc(scr["purpose"])}</p>'
+            f'<nav class="stavy" aria-label="Stav obrazovky">{switch}</nav>{states}{form}<div class="akce">{"".join(acts)}</div></main>\n'
+            f'<script>{APP_JS}</script>\n</body>\n</html>\n')
+
+
+def build_app(p):
+    """One page per screen at site/<screen>/index.html (site/index.html = the first screen in the navigation): the
+    navigation, the screen's four states (?stav=, all visible without JS), its actions with data-aid-action, the
+    submit actions in one form whose fields are the inputs the model's tasks give there (sent with fetch: a failing
+    request shows the error state and keeps the input), destructive actions behind their confirm question, and on the
+    screen where a task ends the text its done_when expects. A model not approved by the PM (or changed since) is
+    built with the draft banner on every page."""
+    mf = os.path.join(p, "docs", "design", "screens.json")
+    if not os.path.isfile(mf):
+        die("no docs/design/screens.json: the app skeleton is built from the model of screens and tasks "
+            "(step Obrazovky a úlohy, references/local/aplikace-postup.md)", 2)
+    mod = screens_module()
+    try:
+        m = mod.load(p)
+    except ValueError as e:
+        die(f"docs/design/screens.json is not JSON ({e})", 2)
+    bad = mod.violations(m, p)
+    if bad:
+        die("the model fails aid-ui-screens.py check:\n" + "\n".join("screens: " + b for b in bad), 2)
+    site = os.path.join(p, "site")
+    no_symlinks(p, "site", ".aid-ui/skeleton")
+    import hashlib
+    sha = hashlib.sha256(open(mf, "rb").read()).hexdigest()
+    try:
+        approved = (json.load(open(os.path.join(p, "docs", "design", "brand-state.json"), encoding="utf-8")).get("app") or {}).get("approved_model_sha") == sha
+    except (OSError, ValueError):
+        approved = False
+    fields = {}
+    for t in m["tasks"]:
+        for st in t["steps"]:
+            for n in st.get("input") or {}:
+                fields.setdefault(st["screen"], [])
+                if n not in fields[st["screen"]]:
+                    fields[st["screen"]].append(n)
+    results = {}
+    for t in m["tasks"]:
+        results.setdefault(t["done_when"]["screen"], []).append((t["id"], t["done_when"]["expect"]))
+    home = next(x for x in m["screens"] if x["nav"])
+    entries = [(os.path.join(site, x["id"], "index.html"),
+                lambda x=x: app_page(m, x, approved, fields.get(x["id"], []), results.get(x["id"], []))) for x in m["screens"]]
+    entries.append((os.path.join(site, "index.html"), lambda: app_page(m, home, approved, fields.get(home["id"], []), results.get(home["id"], []))))
+    out = write_pages(p, site, entries)
+    print(json.dumps(out | {"model_sha256": sha, "approved": approved}, ensure_ascii=False))
 
 
 def facts_row(p, site, pages, facts, tmp):
@@ -266,6 +397,15 @@ def facts_row(p, site, pages, facts, tmp):
 
 
 def check(p):
+    if app_kind(p):   # P116: an app's skeleton stands on its model; the web's tree, H1 and facts rows do not apply
+        mod = screens_module()
+        bad = mod.violations(mod.load(p), p) if os.path.isfile(os.path.join(p, "docs", "design", "screens.json")) else ["no docs/design/screens.json"]
+        for b in bad:
+            print("FAIL " + b)
+        if bad:
+            sys.exit(1)
+        print("skeleton-check: OK (aplikace: model obrazovek a úloh prošel kontrolou)")
+        return
     s, facts = load(p)
     site = os.path.join(p, "site")
     no_symlinks(p, "site", ".aid-ui/skeleton")

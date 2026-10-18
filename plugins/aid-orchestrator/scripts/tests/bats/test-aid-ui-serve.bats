@@ -326,3 +326,85 @@ import json, sys; p = sys.argv[1] + "/.aid-ui/structure.json"; s = json.load(ope
 PY
   run python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$Q"; [ "$status" -eq 2 ]; [[ "$output" == *"both become sluzby/index.html"* ]]; [ ! -e "$Q/site" ]
 }
+
+# ---------------------------------------------------------------- P116: the app skeleton from the model of screens
+app_skel() {   # app_skel <dir>: a webapp project with the fixture model (not approved)
+  local p="$1"; mkdir -p "$p/.aid-ui" "$p/docs/design"
+  cp "$BATS_TEST_DIRNAME/../fixtures/aid-ui/app/docs/design/screens.json" "$p/docs/design/"
+  echo '{"type": "webapp", "brand": "none", "local": false}' > "$p/.aid-ui/variant.json"
+}
+# states_seen <url> - the data-aid-state blocks a browser shows at <url> (JS on), comma-joined
+states_seen() {
+  local js="$BATS_TEST_TMPDIR/states.mjs"
+  cat > "$js" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); await pg.goto(process.argv[2]);
+console.log((await pg.\$\$eval('[data-aid-state]', es => es.filter(e => !e.hidden && e.offsetParent !== null).map(e => e.dataset.aidState))).join(','));
+await b.close();
+J
+  node "$js" "$1"
+}
+
+@test "app-skeleton: every screen at the fixed address with the navigation and its actions leading to their target screens" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  run "$SERVE" skeleton "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"URL: http://127.0.0.1:39918/"* ]]
+  for s in seznam formular detail; do
+    curl -sf --max-time 3 "http://127.0.0.1:39918/$s/" > "$BATS_TEST_TMPDIR/$s.html"
+    grep -q "data-aid-screen=\"$s\"" "$BATS_TEST_TMPDIR/$s.html"
+    grep -q '<nav aria-label="Aplikace"><ul><li><a href="/seznam/"' "$BATS_TEST_TMPDIR/$s.html"   # nav: only nav screens
+    ! grep -q 'aria-label="Aplikace"><ul>.*href="/detail/"' "$BATS_TEST_TMPDIR/$s.html"
+  done
+  grep -q 'href="/formular/" data-aid-action="seznam.novy"' "$BATS_TEST_TMPDIR/seznam.html"
+  grep -q 'href="/detail/" data-aid-action="seznam.otevrit"' "$BATS_TEST_TMPDIR/seznam.html"
+  grep -q 'formaction="/detail/" data-aid-action="formular.ulozit"' "$BATS_TEST_TMPDIR/formular.html"
+  grep -q '<input name="nazev">' "$BATS_TEST_TMPDIR/formular.html"
+  grep -q 'data-aid-result="zalozit">Nákup na sobotu' "$BATS_TEST_TMPDIR/detail.html"   # where the task ends, its result
+  [ "$(curl -sf --max-time 3 http://127.0.0.1:39918/ | grep -c 'data-aid-screen="seznam"')" -eq 1 ]   # home = first nav screen
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: each screen shows its four states - one at a time by ?stav=, all of them without JavaScript" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  "$SERVE" skeleton "$P" >/dev/null
+  for s in seznam formular detail; do
+    [ "$(grep -o 'data-aid-state="[a-z]*"' "$P/site/$s/index.html" | sort | tr '\n' ' ')" = 'data-aid-state="empty" data-aid-state="error" data-aid-state="filled" data-aid-state="loading" ' ]
+    ! grep -qE 'data-aid-state="[a-z]+"[^>]*hidden' "$P/site/$s/index.html"   # hidden only by the script: without JS all show
+  done
+  [ "$(states_seen http://127.0.0.1:39918/seznam/)" = filled ]
+  [ "$(states_seen 'http://127.0.0.1:39918/seznam/?stav=empty')" = empty ]
+  [ "$(states_seen 'http://127.0.0.1:39918/detail/?stav=error')" = error ]
+  [ "$(states_seen 'http://127.0.0.1:39918/detail/?stav=nesmysl')" = filled ]
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: a destructive action stands behind its confirm question; the draft banner goes once the PM approved this model" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  "$SERVE" skeleton "$P" >/dev/null
+  grep -q '<details class="potvrzeni"><summary data-aid-action="detail.smazat">Smazat</summary><p>Opravdu smazat poznámku?</p><a href="/seznam/" data-aid-confirm-yes>' "$P/site/detail/index.html"
+  ! grep -q 'data-aid-action="detail.smazat" href' "$P/site/detail/index.html"   # never a plain link
+  for s in seznam formular detail; do grep -q 'data-aid-draft' "$P/site/$s/index.html"; done
+  # approved: the state names this model's sha -> no banner; a changed model -> the banner again
+  sha="$(sha256sum "$P/docs/design/screens.json" | cut -d' ' -f1)"
+  echo "{\"variant\": {\"type\": \"webapp\"}, \"app\": {\"approved_model_sha\": \"$sha\"}}" > "$P/docs/design/brand-state.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  ! grep -q 'data-aid-draft' "$P/site/detail/index.html"
+  jq '.tasks[0].title = "Jinak"' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  grep -q 'data-aid-draft' "$P/site/detail/index.html"
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: a screen removed from the model leaves the fixed address; a page the build replaced is kept" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  "$SERVE" skeleton "$P" >/dev/null
+  echo '<html><main data-aid-screen="seznam">postaveno</main></html>' > "$P/site/seznam/index.html"
+  jq '(.screens[0].actions) |= map(select(.id != "otevrit")) | del(.screens[2]) | .tasks = [.tasks[0] | .done_when = {screen: "formular", expect: "x"} | .steps[1].action = "zpet" | .steps |= .[:1] | .done_when.screen = "formular" | .failure_paths = [] | .states.failure = "nenastává, protože bez odeslání"]
+      | (.screens[1].actions) |= map(select(.to != "detail"))' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  run python3 "$BATS_TEST_DIRNAME/../../aid-ui-screens.py" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  "$SERVE" skeleton "$P" >/dev/null
+  [ ! -e "$P/site/detail/index.html" ]; [ -f "$P/.aid-ui/skeleton/removed/detail/index.html" ]
+  grep -q postaveno "$P/site/seznam/index.html"
+  "$SERVE" stop skeleton
+}
