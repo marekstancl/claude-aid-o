@@ -124,7 +124,10 @@
 #   roles <project> bg=<c>,ink=<c>,accent=<c>,display=<t>,body=<t>
 #   chapter <project> <id> <ceka|navrh|schvaleno> [--by <who>]   schvaleno needs --answer <id>
 #   chapter-target <project> <id>        prints the target of a `schvaleno` answer for chapter <id>
-#   chapter-all <project> [--by <who>] --answer <id>   every chapter in navrh|schvaleno -> schvaleno
+#   chapter-all <project> [--by <who>] --answer <id>   every chapter in navrh|schvaleno -> schvaleno; (P115) ends by
+#                                        writing the handover package docs/ui/predani.json (aid-ui-package.py build),
+#                                        checked with --dry before the answer is used: a package that cannot be made
+#                                        (no gate, stale site) refuses the handover and leaves the answer unused
 #   chapter-all-target <project>         prints the target of that one handover answer
 #   reset-approvals <project> <id>...
 #   body <project> <id> --file <html>    replaces only what is between <!-- body:<id> -->
@@ -241,7 +244,7 @@ BRAND="$PROJECT/docs/brand"
 HTML="$BRAND/index.html"
 STATE="$PROJECT/docs/design/brand-state.json"
 OLD="$BRAND/state.json"   # P101 location, migrated by init
-if [[ "$VERB" != build-id && "$VERB" != exception-covered && "$VERB" != cycle ]]; then   # one mutation at a time (exception-covered only reads: gate-record's customer page calls it under the lock; cycle only calls verbs that lock themselves)
+if [[ "$VERB" != build-id && "$VERB" != exception-covered && "$VERB" != cycle && "$VERB" != chapter-target ]]; then   # one mutation at a time (exception-covered and chapter-target only read: gate-record's customer page and chapter-all's handover package call them under the lock; cycle only calls verbs that lock themselves)
   [[ "$VERB" != init ]] || mkdir -p "${STATE%/*}"
   if [[ -d "${STATE%/*}" ]]; then
     exec 9<"${STATE%/*}"   # read-only fd of the directory: a project symlink cannot make us write
@@ -1327,21 +1330,28 @@ case "$VERB" in
     # the PM's verdict by the card's value: prevzit (8-10) | vyhrada (6-7, with words) | vratit = no handover
     hv="$(jq -r '.choice as $c | ([.cards[] | select(.id == $c) | .value] | first) // "approve"' <<<"$LIVE_ANSWER")"
     [[ "$hv" != vratit ]] || die "chapter-all refused: the PM returned the web (vratit): fix what the comment names and ask again"
+    # P115: the handover package must be makeable before the answer is used (a refusal leaves it unused)
+    python3 "$HERE/aid-ui-package.py" build "$PROJECT" --dry >/dev/null ||
+      die "chapter-all refused (answer $ANSWER not used): the handover package docs/ui/predani.json cannot be made (see above)"
     hband="$(case "$hv" in prevzit) echo "8-10";; vyhrada) echo "6-7";; *) echo "";; esac)"
     # all or nothing: a failure part way restores index.html and the state as they were
     # (copied back into the same files, so their mode and inode stay; also on INT/TERM)
     bh="$(tmpfile index.html)"; bs="$(tmpfile brand-state.json)"; cp -p "$HTML" "$bh"; cp -p "$STATE" "$bs"
-    restore() { cat "$bh" > "$HTML"; cat "$bs" > "$STATE"; rm -f "$bh" "$bs"; }
+    # the previous handover package (P115) is part of the all or nothing
+    bp="$(tmpfile predani)"; rm -f "$bp"; mkdir -p "$bp"; cp -p "$PROJECT"/docs/ui/predani.json "$PROJECT"/docs/ui/predani.md "$bp/" 2>/dev/null || true
+    restore() { cat "$bh" > "$HTML"; cat "$bs" > "$STATE"; rm -f "$bh" "$bs"
+      local f; for f in predani.json predani.md; do if [[ -f "$bp/$f" ]]; then cp -p "$bp/$f" "$PROJECT/docs/ui/$f"; else rm -f "$PROJECT/docs/ui/$f"; fi; done; rm -rf "$bp"; }
     trap 'restore; exit 1' INT TERM
     ids="$(ready_chapters | jq -R . | jq -sc .)"
     if ! ( for id in $(jq -r '.[]' <<<"$ids"); do write_chapter "$id" schvaleno "$by"; done
            jq_write --arg q "$ANSWER" --argjson ids "$ids" \
-             'reduce $ids[] as $id (.; .chapters[$id].answer = $q) | .consumed += [$q]' ); then
-      trap - INT TERM; restore; die "chapter-all refused: a chapter could not be written; nothing changed"
+             'reduce $ids[] as $id (.; .chapters[$id].answer = $q) | .consumed += [$q]'
+           # the PM's verdict, then the handover package (P115) - the last write, so a failure restores everything
+           jq_write --arg v "$hv" --arg b "$hband" --arg q "$ANSWER" '.handover = {verdict: $v, rating: (if $b == "" then null else $b end), answer: $q}'
+           python3 "$HERE/aid-ui-package.py" build "$PROJECT" || exit 1 ); then
+      trap - INT TERM; restore; die "chapter-all refused: a chapter or the handover package could not be written; nothing changed"
     fi
-    trap - INT TERM; rm -f "$bh" "$bs"
-    # the PM's verdict, written once every chapter is taken over (a failed write leaves the state untouched)
-    jq_write --arg v "$hv" --arg b "$hband" --arg q "$ANSWER" '.handover = {verdict: $v, rating: (if $b == "" then null else $b end), answer: $q}'
+    trap - INT TERM; rm -rf "$bh" "$bs" "$bp"
     ;;
 
   chapter-all-target)

@@ -1,0 +1,106 @@
+{
+ "version": 1,
+ "project": "pekarna",
+ "created_at": "2026-10-18T08:00:00Z",
+ "site": {
+  "dir": "site",
+  "build_id": "347b88cdb2eb4c54ca555485e270fce761c34a1486d003c2f8f6a396aceec824",
+  "sha256": "01cd9557b2d14f104f60c9fa64050a0072c4b8ff4d925580230e62cb4157c634",
+  "files": [
+   {
+    "path": "index.html",
+    "sha256": "c329f79dfad5b4fe65e913552ecfa187e7b2492488d3d76fef2ab6cf54994775"
+   },
+   {
+    "path": "kontakt.html",
+    "sha256": "3e8ce3a6b443453c8953489b51f96e9095babce75334509bbc5277818d4ab9ab"
+   },
+   {
+    "path": "style.css",
+    "sha256": "ba789a2cc83d9609ed2e428e4bbe36241f4e256750dd7cf4f29534744d9ebf78"
+   }
+  ]
+ },
+ "gate": {
+  "run_at": "2026-10-18T07:50:00.000Z",
+  "result_file": ".aid-ui/verify/result.json",
+  "result_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "build_id": "347b88cdb2eb4c54ca555485e270fce761c34a1486d003c2f8f6a396aceec824",
+  "customer_page": "pass",
+  "customer_page_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+ },
+ "chapters": [
+  {
+   "id": "vize",
+   "target": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  },
+  {
+   "id": "barvy",
+   "target": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+  }
+ ],
+ "places": [
+  {
+   "place": "web",
+   "status": "accepted",
+   "target": "main"
+  }
+ ],
+ "customer_tasks": [
+  {
+   "id": "hours",
+   "text": "Kdy máte otevřeno",
+   "page": null
+  },
+  {
+   "id": "booking",
+   "text": "Objednej se",
+   "page": null,
+   "form": true
+  }
+ ],
+ "open_items": [
+  {
+   "id": "oi-1",
+   "text": "IČO do patičky každé stránky",
+   "owner": "klient",
+   "due": "2026-11-01",
+   "critical": true,
+   "status": "open",
+   "evidence": "IČO v patičce každé stránky"
+  },
+  {
+   "id": "oi-2",
+   "text": "Fotka prodejny na úvod",
+   "owner": "klient",
+   "due": null,
+   "critical": false,
+   "status": "open",
+   "evidence": null
+  }
+ ],
+ "launch_inputs": [
+  {
+   "id": "company",
+   "name": "IČO a údaje firmy (název, sídlo)",
+   "status": "needed",
+   "critical": true
+  },
+  {
+   "id": "form",
+   "name": "Příjem zpráv z formuláře na hostingu",
+   "status": "client",
+   "critical": true,
+   "owner": "agent"
+  },
+  {
+   "id": "domain",
+   "name": "Doména a hosting",
+   "status": "client",
+   "critical": true
+  }
+ ],
+ "launch_only": [
+  "tech.bezpecnost_spusteni"
+ ]
+}
