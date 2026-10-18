@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aid:ui:screens:1",
+  "title": "Model obrazovek a úloh webové aplikace (docs/design/screens.json, P116)",
+  "description": "Jeden model, ze kterého studio staví kostru, scénáře toků brány a předávací balík. Úlohy mají sedm stavů standardu Úlohy a stavy webové aplikace (UA-1): běžná cesta = steps, ostatní šest ve states (text, nebo 'nenastává, protože …'). Křížová pravidla (cíle akcí, návaznost kroků, potvrzení destruktivní akce, selhání odesílající úlohy) kontroluje aid-ui-screens.py check.",
+  "type": "object",
+  "required": ["version", "screens", "tasks"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {"const": 1},
+    "app": {"type": "string"},
+    "screens": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "purpose", "nav", "actions", "states"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"$ref": "#/$defs/id"},
+          "title": {"$ref": "#/$defs/text"},
+          "purpose": {"$ref": "#/$defs/text"},
+          "nav": {"type": "boolean", "description": "true = obrazovka je v navigaci aplikace; false = dosažitelná jen akcí (detail)"},
+          "actions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "label", "to", "kind"],
+              "additionalProperties": false,
+              "properties": {
+                "id": {"$ref": "#/$defs/id"},
+                "label": {"$ref": "#/$defs/text"},
+                "to": {"$ref": "#/$defs/id", "description": "cílová obrazovka; akce, která zůstává, míří na svou obrazovku"},
+                "kind": {"enum": ["navigate", "submit", "destructive"]},
+                "confirm": {"$ref": "#/$defs/text", "description": "otázka potvrzení; povinná u destructive"}
+              }
+            }
+          },
+          "states": {
+            "type": "object",
+            "required": ["empty", "loading", "error", "filled"],
+            "additionalProperties": false,
+            "properties": {
+              "empty": {"$ref": "#/$defs/text"},
+              "loading": {"$ref": "#/$defs/text"},
+              "error": {"$ref": "#/$defs/text"},
+              "filled": {"$ref": "#/$defs/text"}
+            }
+          }
+        }
+      }
+    },
+    "tasks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "roles", "steps", "done_when", "states", "failure_paths"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"$ref": "#/$defs/id"},
+          "title": {"$ref": "#/$defs/text"},
+          "roles": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
+          "steps": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["screen", "action"],
+              "additionalProperties": false,
+              "properties": {
+                "screen": {"$ref": "#/$defs/id"},
+                "action": {"$ref": "#/$defs/id"},
+                "input": {"type": "object", "description": "jméno pole → hodnota, vyplní se před akcí", "additionalProperties": {"type": "string"}}
+              }
+            }
+          },
+          "done_when": {
+            "type": "object",
+            "required": ["screen", "expect"],
+            "additionalProperties": false,
+            "description": "ověřitelný výsledek: úloha skončila na obrazovce screen a ta ukazuje text expect",
+            "properties": {"screen": {"$ref": "#/$defs/id"}, "expect": {"$ref": "#/$defs/text"}}
+          },
+          "states": {
+            "type": "object",
+            "required": ["validation", "empty", "loading", "failure", "permission", "recovery"],
+            "additionalProperties": false,
+            "properties": {
+              "validation": {"$ref": "#/$defs/text"},
+              "empty": {"$ref": "#/$defs/text"},
+              "loading": {"$ref": "#/$defs/text"},
+              "failure": {"$ref": "#/$defs/text"},
+              "permission": {"$ref": "#/$defs/text"},
+              "recovery": {"$ref": "#/$defs/text"}
+            }
+          },
+          "failure_paths": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["at_step", "kind", "keeps_input", "recover"],
+              "additionalProperties": false,
+              "properties": {
+                "at_step": {"type": "integer", "minimum": 1, "description": "pořadí kroku (od 1), jehož akce selže"},
+                "kind": {"enum": ["validation", "network", "server"]},
+                "keeps_input": {"const": true},
+                "recover": {"$ref": "#/$defs/id", "description": "akce obrazovky selhaného kroku, která vede dál (Zkusit znovu)"}
+              }
+            }
+          },
+          "replaces": {"$ref": "#/$defs/id", "description": "id úlohy výchozího stavu (.aid-ui/baseline/tasks.json), kterou úloha nahrazuje"}
+        }
+      }
+    }
+  },
+  "$defs": {
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "text": {"type": "string", "minLength": 1, "pattern": "\\S"}
+  }
+}
