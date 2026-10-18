@@ -44,7 +44,7 @@ for (let i = 0; i < argv.length; i += 2) {
   if (!argv[i].startsWith('--') || argv[i + 1] === undefined) usage();
   opt[argv[i].slice(2)] = argv[i + 1];
 }
-function usage(m) { console.error('usage: aid-ui-verify.mjs --state <f> --checks <f> --site <dir> --base <url> --out <dir> --seo <py> [--project <dir>] [--facts <f>] [--copy-subject <out.json>]' + (m ? `\n${m}` : '')); process.exit(2); }
+function usage(m) { console.error('usage: aid-ui-verify.mjs --state <f> --checks <f> --site <dir> --base <url> --out <dir> --seo <py> [--project <dir>] [--facts <f>] [--copy-subject <out.json>] [--live 1]' + (m ? `\n${m}` : '')); process.exit(2); }
 for (const k of ['state', 'checks', 'site', 'base', 'out', 'seo']) if (!opt[k]) usage(`missing --${k}`);
 
 const readJson = f => JSON.parse(fs.readFileSync(f, 'utf8'));
@@ -874,6 +874,8 @@ async function formStates(browser, url, viewport) {
 // filled spam trap delivers nothing. No receiver (no form.json, or the endpoint down) = the form delivers nothing and
 // the row fails. No form on the site = N/A. The client's domain receiver is checked after deployment (not here).
 async function formDelivery(browser) {
+  // P115: over a live address (--live 1) the preview's receiver is not there; the run gate posts the deployed form itself
+  if (opt.live) return NA('live address: the deployed form is posted by the run gate (aid-ui-package.py gate, form_live)');
   const withForm = [];
   for (const p of pages) { try { if (/<form[\s>]/i.test(fs.readFileSync(path.join(site, p), 'utf8'))) withForm.push(p); } catch { /* not a file */ } }
   if (!withForm.length) return NA('no form on the site');

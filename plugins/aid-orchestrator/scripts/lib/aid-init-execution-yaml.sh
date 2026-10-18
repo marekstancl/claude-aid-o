@@ -71,6 +71,22 @@ render_targeted_tests_gate_block() {
 EOF
 }
 #
+#   render_ui_handover_gate_block
+#       P115: the `check_ui_handover:` gate entry (2-space indented, inside `gates:`): the run gate of a plan made
+#       from the /aid-ui handover package. Composed into every profile; the existing-project upgrade adds the
+#       entry and the profile items (execution_yaml_upgrade). Skips every plan without ui_package.
+render_ui_handover_gate_block() {
+  cat <<'EOF'
+  check_ui_handover:
+    required: true
+    type: deterministic
+    command: "bash {plugin_path}/scripts/aid-ui-verify.sh --package-gate {plan_path}"
+    timeout_seconds: 900
+    pass_criteria: "exit 0: pass, 'před nasazením', or 'přeskočeno: bez balíku' (a plan without ui_package)"
+    max_retries: 0
+EOF
+}
+#
 # Plugin path resolution order:
 #   1. $AID_PLUGIN_PATH env var (worktree dev workflow)
 #   2. $HOME/.claude/plugins/marketplaces/claude-aid-o/plugins/aid-orchestrator
@@ -265,6 +281,10 @@ render_gate_profiles_block() {
   if (( filter_active == 0 )) || [[ -n "${defined_gates[targeted_tests]:-}" ]]; then
     targeted_gate_names+=("targeted_tests")
   fi
+  # P115: the handover gate in every profile (it skips a plan without ui_package), under the same filter
+  if (( filter_active == 0 )) || [[ -n "${defined_gates[check_ui_handover]:-}" ]]; then
+    targeted_gate_names+=("check_ui_handover"); full_gate_names+=("check_ui_handover")
+  fi
 
   # P097 Step 4: the profiles are an ORDERED list, narrowest first — the
   # declaration index is the rank (lib/aid-gate-profile-select.sh). No
@@ -440,6 +460,8 @@ EOF
     # language stack.
     echo "  # === Targeted test selector (P069 Step 12) ==="
     render_targeted_tests_gate_block
+    echo "  # === The /aid-ui handover package (P115) ==="
+    render_ui_handover_gate_block
 
     # P061 E1 Step 5/6: generic gate_profiles substrate — only gate names the
     # stacks above actually defined go into include[]; empty when no stack
@@ -534,7 +556,9 @@ _eyu_locate() {
 #   write it only when <hash> matches the printed one. Exit 0 nothing to do or
 #   applied, 3 diff printed and not applied, 2 bad input or a choice the
 #   operator must make (no profile named standard, a stale hash, a file that
-#   does not parse). Never touches gates.<id>.command or a non-empty include[].
+#   does not parse). Never touches gates.<id>.command; of an include[] it only
+#   adds check_ui_handover (P115: the gate entry under `gates:` and the name in
+#   every profile that lacks it, so a plan from a handover package has its gate).
 execution_yaml_upgrade() {
   local file="${1:-}"; shift || true
   local confirm="" default_profile=""
@@ -592,6 +616,45 @@ execution_yaml_upgrade() {
       fi
     done < <(g="$id" yq '.gates[strenv(g)] | select(type == "!!map") | keys | .[]' "$file")
   done < <(yq '.gates | select(type == "!!map") | keys | .[]' "$file")
+
+  # P115: the handover gate - its entry as the first child of gates: (at the file's own indent), and its name in
+  # every profile's include (a flow list gets ", check_ui_handover", a block list a new item)
+  # (only where a profile table exists: a gate no profile names never runs)
+  if [[ "$(yq '.gates | type' "$file")" == "!!map" && "$(yq '.gate_profiles | type' "$file")" == "!!map" \
+        && "$(yq '.gates | has("check_ui_handover")' "$file")" == "false" ]]; then
+    local gl gpad
+    # line-based on purpose (see _eyu_locate); a layout it cannot edit safely is refused, never guessed
+    if ! grep -qE '^gates:[[:space:]]*(#.*)?$' "$file" || [[ "$(yq '.gates | length' "$file")" == "0" ]]; then
+      echo "[ERROR] ${file}: 'gates:' is not a block mapping with at least one gate (flow style or empty); add gates.check_ui_handover by hand (render_ui_handover_gate_block) and re-run" >&2
+      return 2
+    fi
+    gl="$(grep -n '^gates:' "$file" | head -1 | cut -d: -f1)"
+    gpad="$(awk -v s="$gl" 'NR > s && $0 !~ /^[ \t]*(#|$)/ { match($0, /^ */); print RLENGTH; exit }' "$file")"
+    ins_after+=("$gl"); ins_text+=("$(render_ui_handover_gate_block | sed -E "s/^  /$(printf '%*s' "${gpad:-2}" '')/")")
+    notes+=("- added gates.check_ui_handover (P115: the run gate of a plan from the /aid-ui handover package)")
+  fi
+  if [[ "$(yq '.gate_profiles | type' "$file")" == "!!map" ]]; then
+    local pn il iline
+    while IFS= read -r pn; do
+      [[ -n "$pn" ]] || continue
+      # an empty quick profile is removed below - nothing is added to it
+      [[ "$pn" != quick || "$(yq '.gate_profiles.quick.include // [] | length' "$file")" != "0" ]] || continue
+      [[ "$(p="$pn" yq '.gate_profiles[strenv(p)].include // [] | any_c(. == "check_ui_handover")' "$file")" == "false" ]] || continue
+      il="$(_eyu_locate "$file" "gate_profiles.${pn}.include")"
+      [[ -n "$il" ]] || { notes+=("- note: gate_profiles.${pn} has no include to add check_ui_handover to"); continue; }
+      iline="$(sed -n "${il% *}p" "$file")"
+      if [[ "$iline" =~ ^(.*include:[[:space:]]*\[)(.*)\][[:space:]]*(#.*)?$ ]]; then
+        local inner="${BASH_REMATCH[2]}"; inner="${inner%"${inner##*[![:space:]]}"}"
+        del_from+=("${il% *}"); del_to+=("${il% *}")
+        ins_after+=("$(( ${il% *} - 1 ))"); ins_text+=("${BASH_REMATCH[1]}${inner}${inner:+, }check_ui_handover]${BASH_REMATCH[3]:+  ${BASH_REMATCH[3]}}")
+      else
+        local ipad; ipad="$(sed -n "${il#* }p" "$file" | sed -E 's/^( *).*/\1/')"
+        [[ "${il% *}" != "${il#* }" ]] || ipad="$(sed -E 's/^( *).*/\1/' <<<"$iline")  "
+        ins_after+=("${il#* }"); ins_text+=("${ipad}- check_ui_handover")
+      fi
+      notes+=("- added check_ui_handover to gate_profiles.${pn}.include")
+    done < <(yq '.gate_profiles | keys | .[]' "$file")
+  fi
 
   # An empty quick profile.
   if [[ "$(yq '.gate_profiles | has("quick")' "$file")" == "true" \
@@ -724,7 +787,7 @@ execution_yaml_upgrade() {
 
 export -f detect_stacks compose_execution_yaml \
   stack_gate_names render_gate_profiles_block execution_yaml_has_gate_profiles \
-  append_gate_profiles_block render_targeted_tests_gate_block \
+  append_gate_profiles_block render_targeted_tests_gate_block render_ui_handover_gate_block \
   execution_yaml_default_when_paths execution_yaml_upgrade _eyu_locate
 
 # In-library main: `bash …/lib/aid-init-execution-yaml.sh upgrade <project root|file>

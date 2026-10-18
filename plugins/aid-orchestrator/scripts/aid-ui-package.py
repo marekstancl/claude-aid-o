@@ -18,6 +18,25 @@ handover: the deployment writes its own docs/ui/nasazeni.json.
   check <package> [--project <dir>]
       The package against the schema; with --project also against the project now: stale when the site's build id
       or dirsha, the recorded gate (run_at, result sha, build id) or the customer page differ. Exit 0, or 1 and why.
+  gate <plan or brief> [--launch]
+      The run gate check_ui_handover (aid-ui-verify.sh --package-gate; execution.yaml command). The plan's frontmatter
+      decides, never a file's presence: no ui_package -> "přeskočeno: bez balíku", exit 0. Otherwise (project = the git
+      top level of the plan) every one of these refuses, exit 1, naming why: the package missing, its sha not the
+      plan's ui_package_sha256 (the package is never edited after the handover), check --project failing (stale site,
+      another gate), a critical open item in the live state not done with evidence. Without docs/ui/nasazeni.json:
+      "před nasazením", exit 0 - but --launch (the brief's launch point) refuses. With it ({url, listing {type
+      ssh|sftp|local, host, root}}, both required): the gate builds the read-only listing itself (ssh find, sftp ls,
+      local walk; host and root validated, no shell metacharacters) and refuses a file on the hosting the package does
+      not have or a package file missing ("nelze ověřit" when the listing does not answer); fetches every package file
+      from url and compares its sha256 (20 s a request, 300 s in all - "nedoměřeno"); posts every POST form of the
+      pages to its live action with a test marker and refuses a non-2xx answer (form_live); then the studio's rows
+      over the live address (aid-ui-verify.sh <project> --base-url <url>). Exit 0 PASS.
+  live-row <package> <check> [--detail <text>]...
+      A point of the brief: the live result .aid-ui/verify-live (url and site sha of the deployment and the package
+      now) has rows of <check>, all pass, naming every --detail. Run from the project root.
+  live-redirects <redirects.csv>
+      A point of the brief: every row of the inventory answers 301/302/307/308 on the live address with Location = its
+      target (no file or no rows: no old site, exit 0). Run from the project root.
   zadani <package> --plan-id P<NNN> [--out <file>]
       The deployment brief in the six sections of defaults/templates/zadani.md, written to
       <project>/.aid-o/plans/P<NNN>-zadani.md (project = the directory holding docs/ui/predani.json) or --out.
@@ -489,6 +508,233 @@ def cmd_zadani(pkg_path, plan_id, out):
     return 0
 
 
+GATE = "check_ui_handover"
+SAFE_HOST = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]*")
+SAFE_ROOT = re.compile(r"/[A-Za-z0-9._~-]+(/[A-Za-z0-9._~-]+)*/?|/")   # absolute: a root starting with - would be a find expression
+LIVE_CEILING = 300   # seconds for every live request of one gate run
+
+
+def frontmatter(path):
+    """key: value pairs of the leading --- block (the plan's or the brief's)."""
+    out, lines = {}, open(path, encoding="utf-8").read().split("\n")
+    if not lines or lines[0] != "---":
+        return out
+    for ln in lines[1:]:
+        if ln == "---":
+            break
+        m = re.match(r"([A-Za-z0-9_]+):\s*(.*?)\s*$", ln)
+        if m:
+            out[m.group(1)] = m.group(2).strip("\"'")
+    return out
+
+
+def listing(lst):
+    """The hosting's own list of files under root, built by the gate from {type, host, root} - never a command string.
+    Returns (paths, why) - paths None when it cannot be read."""
+    t, host, root = lst.get("type"), lst.get("host") or "", lst.get("root") or ""
+    if t not in ("ssh", "sftp", "local"):
+        return None, f"listing.type {t!r} není ssh, sftp ani local"
+    if not SAFE_ROOT.fullmatch(root) or ".." in root.split("/"):
+        return None, f"listing.root {root!r} odmítnut (absolutní cesta, jen písmena, číslice, . _ ~ - a /, bez ..)"
+    if t != "local" and not SAFE_HOST.fullmatch(host):
+        return None, f"listing.host {host!r} odmítnut (jen písmena, číslice, . _ @ -)"
+    try:
+        if t == "local":
+            if not os.path.isdir(root):
+                return None, f"nelze ověřit: složka {root} neexistuje"
+            return sorted(f["path"] for f in site_files(root)), ""
+        if t == "ssh":
+            r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", host, "find", root, "-type", "f", "-printf", "'%P\\n'"],   # one string for the remote shell; root is validated
+                               capture_output=True, text=True, timeout=120)
+            if r.returncode != 0:
+                return None, f"nelze ověřit: ssh {host} neodpověděl ({(r.stderr or '').strip()[:160]})"
+            return sorted(x for x in r.stdout.split("\n") if x), ""
+        # sftp: walk the directories with `ls -la`, one batch per directory
+        out, todo = [], [""]
+        while todo:
+            rel = todo.pop()
+            d = root.rstrip("/") + ("/" + rel if rel else "")
+            r = subprocess.run(["sftp", "-q", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "-b", "-", host],
+                               input=f'ls -la "{d}"\n', capture_output=True, text=True, timeout=120)
+            if r.returncode != 0:
+                return None, f"nelze ověřit: sftp {host} neodpověděl ({(r.stderr or '').strip()[:160]})"
+            for ln in r.stdout.split("\n"):
+                parts = ln.split(None, 8)
+                if len(parts) < 9 or parts[8] in (".", ".."):
+                    continue
+                name = (rel + "/" if rel else "") + os.path.basename(parts[8])
+                if parts[0].startswith("d"):
+                    todo.append(name)
+                elif parts[0].startswith("-"):
+                    out.append(name)
+        return sorted(out), ""
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return None, f"nelze ověřit: výpis hostingu neodpověděl ({e})"
+
+
+def fetch(url, deadline, data=None, final=False):
+    """(status, body bytes[, final url]) of one request; redirects are followed; raises OSError."""
+    import urllib.error, urllib.request
+    left = deadline - __import__("time").time()
+    if left <= 0:
+        raise TimeoutError("nedoměřeno (strop %d s)" % LIVE_CEILING)
+    req = urllib.request.Request(url, data=data, headers={"User-Agent": "aid-ui-run-gate", "Accept-Encoding": "identity"})
+    try:
+        with urllib.request.urlopen(req, timeout=min(20, left)) as r:
+            return (r.status, r.read(), r.geturl()) if final else (r.status, r.read())
+    except urllib.error.HTTPError as e:
+        return (e.code, e.read(), e.geturl()) if final else (e.code, e.read())
+
+
+def forms_of(html):
+    """[(action, method, {name: value})] of every <form> of a page."""
+    from html.parser import HTMLParser
+
+    class P(HTMLParser):
+        def __init__(self):
+            super().__init__(); self.forms = []; self.cur = None
+
+        def handle_starttag(self, tag, attrs):
+            a = dict(attrs)
+            if tag == "form":
+                self.cur = [a.get("action") or "", (a.get("method") or "get").lower(), {}]; self.forms.append(self.cur)
+            elif self.cur is not None and tag in ("input", "textarea", "select") and a.get("name"):
+                t = (a.get("type") or "").lower()
+                if t in ("submit", "button", "reset", "file", "image"):
+                    return
+                v = a.get("value") if t in ("hidden", "checkbox", "radio") else ("aidtest@example.invalid" if t == "email" else "+420000000000" if t == "tel" else "AID test brány po nasazení - prosím ignorujte")
+                self.cur[2].setdefault(a["name"], v or "1")
+
+        def handle_endtag(self, tag):
+            if tag == "form":
+                self.cur = None
+    p = P(); p.feed(html)
+    return [tuple(f) for f in p.forms]
+
+
+def gate(plan, launch):
+    import time, urllib.parse
+    say = lambda m: print(f"{GATE}: {m}")
+    if not os.path.isfile(plan):   # {plan_path} is "null" for a run without a plan
+        say(f"přeskočeno: bez plánu ({plan})")
+        return 0
+    fm = frontmatter(plan)
+    if not fm.get("ui_package"):
+        say("přeskočeno: bez balíku (plán nemá ui_package)")
+        return 0
+    r = subprocess.run(["git", "-C", os.path.dirname(os.path.realpath(plan)), "rev-parse", "--show-toplevel"], capture_output=True, text=True)
+    if r.returncode != 0:
+        die(f"{GATE}: plán {plan} neleží v git repozitáři; projekt nejde určit")
+    proj = r.stdout.strip()
+    pkg_path = os.path.join(proj, fm["ui_package"])
+    if os.path.commonpath([os.path.realpath(pkg_path), os.path.realpath(proj)]) != os.path.realpath(proj):
+        die(f"{GATE}: ui_package {fm['ui_package']} leží mimo projekt")
+    if not os.path.isfile(pkg_path):
+        die(f"{GATE}: plán je z balíku, ale balík {fm['ui_package']} chybí")
+    if sha_file(pkg_path) != fm.get("ui_package_sha256"):
+        die(f"{GATE}: balík {fm['ui_package']} se změnil od zadání (sha {sha_file(pkg_path)[:12]}, plán {str(fm.get('ui_package_sha256'))[:12]}); balík se po převzetí nemění")
+    why = check(pkg_path, proj)
+    if why:
+        die(f"{GATE}: balík: " + "; ".join(why))
+    pkg = json.load(open(pkg_path, encoding="utf-8"))
+    state = json.load(open(os.path.join(proj, "docs", "design", "brand-state.json"), encoding="utf-8"))
+    live = {o.get("id"): o for o in state.get("open_items") or [] if isinstance(o, dict)}
+    gone = [o["id"] for o in pkg["open_items"] if o["critical"] and o["id"] not in live]   # the package remembers them
+    if gone:
+        die(f"{GATE}: kritický bod z balíku chybí ve stavu studia: {', '.join(gone)} (končí jen jako done s dokladem)")
+    crit = [o for o in live.values() if o.get("critical") and not (o.get("status") == "done" and (o.get("done_evidence") or "").strip())]
+    if crit:
+        die(f"{GATE}: otevřený kritický bod: " + "; ".join(f"{o['id']} ({o.get('owner')}): {str(o.get('text'))[:80]}" for o in crit))
+    nf = os.path.join(proj, "docs", "ui", "nasazeni.json")
+    if not os.path.isfile(nf):
+        if launch:
+            die(f"{GATE}: --launch bez docs/ui/nasazeni.json: web ještě není nasazený")
+        say(f"před nasazením: balík, web ({len(pkg['site']['files'])} souborů) a otevřené body sedí; ostrá adresa se ověří po zápisu docs/ui/nasazeni.json")
+        return 0
+    try:
+        dep = json.load(open(nf, encoding="utf-8"))
+    except ValueError as e:
+        die(f"{GATE}: docs/ui/nasazeni.json není JSON ({e})")
+    if not isinstance(dep, dict) or not isinstance(dep.get("listing"), dict) or not dep.get("url"):
+        die(f"{GATE}: docs/ui/nasazeni.json potřebuje url i listing {{type, host, root}}")
+    url = dep["url"]
+    if not re.fullmatch(r"https?://[^\s/]+(/\S*)?", url):
+        die(f"{GATE}: docs/ui/nasazeni.json url není http(s) adresa: {url!r}")
+    base = url.rstrip("/") + "/"
+    want = sorted(f["path"] for f in pkg["site"]["files"])
+    have, lwhy = listing(dep["listing"])
+    if have is None:
+        die(f"{GATE}: {lwhy}")
+    extra, missing = sorted(set(have) - set(want)), sorted(set(want) - set(have))
+    if extra or missing:
+        die(f"{GATE}: na hostingu nejsou přesně soubory balíku: navíc {extra[:8]}, chybí {missing[:8]}")
+    deadline = time.time() + LIVE_CEILING
+    for f in pkg["site"]["files"]:
+        try:
+            st, body = fetch(base + urllib.parse.quote(f["path"]), deadline)
+        except (OSError, ValueError) as e:
+            die(f"{GATE}: {base}{f['path']}: {e}")
+        if st != 200:
+            die(f"{GATE}: {base}{f['path']} odpověděl {st}")
+        if hashlib.sha256(body).hexdigest() != f["sha256"]:
+            die(f"{GATE}: na ostré adrese je jiný soubor než v balíku: {f['path']}")
+    say(f"ostrá adresa {url}: {len(want)} souborů shodných s balíkem, hosting nic navíc")
+    sent, skipped = 0, []
+    origin = urllib.parse.urlsplit(base)[:2]
+    for f in pkg["site"]["files"]:
+        if not f["path"].endswith(".html"):
+            continue
+        page = base + f["path"]
+        for action, method, fields in forms_of(open(os.path.join(pkg["site"]["dir"], f["path"]), encoding="utf-8", errors="replace").read()):
+            if method != "post":
+                continue
+            target = urllib.parse.urljoin(page, action or f["path"])
+            if urllib.parse.urlsplit(target)[:2] != origin:   # the gate posts test data only to the web's own address
+                skipped.append(f"{f['path']} -> {urllib.parse.urlsplit(target).netloc}")
+                continue
+            try:
+                st, body, final = fetch(target, deadline, urllib.parse.urlencode(fields).encode(), final=True)
+            except (OSError, ValueError) as e:
+                die(f"{GATE}: form_live {f['path']} -> {target}: {e}")
+            if not 200 <= st < 300:
+                die(f"{GATE}: form_live: formulář {f['path']} odeslaný na {target} odpověděl {st} (hosting ho nepřijímá)")
+            if urllib.parse.urlsplit(final)[:2] != origin:
+                die(f"{GATE}: form_live: formulář {f['path']} skončil mimo web ({final})")
+            sent += 1
+    say(f"form_live: {sent} formulářů odesláno na ostrou adresu, odpověď 2xx" if sent else "form_live: web nemá formulář s POST na vlastní adresu")
+    if skipped:   # a third-party receiver: its delivery is the launch input "Příjem zpráv z formuláře" (owner with evidence)
+        say("form_live: neověřeno (odesílá mimo web): " + ", ".join(skipped))
+    tool = subprocess.run(["bash", os.path.join(HERE, "aid-ui-verify.sh"), proj, "--base-url", url])
+    if tool.returncode != 0:
+        die(f"{GATE}: kontrola UI nad ostrou adresou neprošla (exit {tool.returncode}; .aid-ui/verify-live/result.json)")
+    say(f"PASS: nasazený web je předaný web ({url})")
+    return 0
+
+
+def cmd_live_row(pkg_path, check_id, details):
+    """The live result (.aid-ui/verify-live) is of the deployment and the package now, and its rows of check_id
+    pass and name every detail. Run from the project root."""
+    pkg = json.load(open(pkg_path, encoding="utf-8"))
+    live_dir = os.path.join(".aid-ui", "verify-live")
+    try:
+        lv = json.load(open(os.path.join(live_dir, "live.json"), encoding="utf-8"))
+        res = json.load(open(os.path.join(live_dir, "result.json"), encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        die(f"live-row: no live result ({e}); the launch point runs the gate over the live address first")
+    if (lv.get("url") or "").rstrip("/") != live_url("."):
+        die(f"live-row: the live result is of {lv.get('url')}, the deployment is {live_url('.')}")
+    if lv.get("site_sha256") != pkg["site"]["sha256"]:
+        die("live-row: the live result is of another web than the package")
+    rows = [r for r in res.get("rows") or [] if r.get("check") == check_id]
+    if not rows or any(r.get("status") != "pass" for r in rows):
+        die(f"live-row: {check_id}: {len(rows)} rows, not all pass")
+    miss = [d for d in details if not any(d in (r.get("detail") or "") for r in rows)]
+    if miss:
+        die(f"live-row: {check_id} does not name {miss}")
+    print(f"live-row: {check_id} pass ({len(rows)} rows)")
+    return 0
+
+
 def main(a):
     if not a:
         die("usage: aid-ui-package.py build <project> [--dry] | check <package> [--project <dir>] | zadani <package> --plan-id P<NNN> [--out <file>]", 2)
@@ -503,6 +749,10 @@ def main(a):
             die("package: " + "; ".join(why))
         print("PACKAGE OK")
         return 0
+    if cmd == "gate" and len(a) in (2, 3) and (len(a) == 2 or a[2] == "--launch"):
+        return gate(a[1], len(a) == 3)
+    if cmd == "live-row" and len(a) >= 3 and len(a) % 2 == 1 and all(a[i] == "--detail" for i in range(3, len(a), 2)):
+        return cmd_live_row(a[1], a[2], a[4::2])
     if cmd == "live-redirects" and len(a) == 2:
         return cmd_live_redirects(a[1])
     if cmd == "zadani" and len(a) in (4, 6) and a[2] == "--plan-id" and (len(a) == 4 or a[4] == "--out"):

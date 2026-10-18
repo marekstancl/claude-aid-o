@@ -184,7 +184,7 @@ EOF
   # was just truncated by the compose itself, so nothing to filter against) —
   # the full ts_test/ts_lint/ts_type_check set, never totally_unrelated_gate.
   run yq '.gate_profiles.full.include | join(",")' "$out"
-  [ "$output" == "ts_test,ts_lint,ts_type_check" ]
+  [ "$output" == "ts_test,ts_lint,ts_type_check,check_ui_handover" ]
   refute_grep -q "totally_unrelated_gate" "$out"
 
   # The unrelated CWD config is untouched.
@@ -216,7 +216,9 @@ EOF
     | (.gates // {})[] |= del(.required_when, .needs_services, .services, .quarantine, .baseline, .runtime_baseline)
     | del(.notifications.telegram)
     | del(.notifications | select(length == 0))'
-  local strip_added='del(.default_profile, .gate_profiles.full.when_paths)'
+  # P115: the handover gate - its entry and its name in every include[] - is the third addition
+  local strip_added='del(.default_profile, .gate_profiles.full.when_paths, .gates.check_ui_handover)
+    | with(select(.gate_profiles != null); .gate_profiles[] |= with(select(has("include")); .include -= ["check_ui_handover"]))'
   local name cfg out hash default_arg
   for name in acta agents aid-orchestrator aid-testbed krok sousto-na-miru vulcan wan; do
     cfg="$TEST_TMPDIR/$name.yaml"
@@ -229,7 +231,7 @@ EOF
     fi
     [ "$rc" -eq 3 ]
     # Every added line is default_profile or the when_paths block, nothing else.
-    run bash -c "printf '%s\n' \"\$1\" | grep -E '^\+[^+]' | grep -vE '^\+(default_profile: |    when_paths:|      - \"|    required: true$)'" _ "$out"
+    run bash -c "printf '%s\n' \"\$1\" | grep -E '^\+[^+]' | grep -vE '^\+(default_profile: |    when_paths:|      - \"|    required: true$)' | grep -vE '^\+ *(check_ui_handover:|description: \"A plan from the /aid-ui|required: true|type: deterministic|command: \"bash \{plugin_path\}/scripts/aid-ui-verify|timeout_seconds: 900|pass_criteria: \"exit 0: pass, .před|max_retries: 0|- check_ui_handover$|include: \[.*check_ui_handover\])'" _ "$out"
     [ "$status" -eq 1 ]
     [ -z "$output" ]
     hash="$(printf '%s\n' "$out" | sed -n 's/^diff_hash: //p')"

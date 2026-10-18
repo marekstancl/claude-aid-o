@@ -200,3 +200,169 @@ plan_from_brief() {
   run bash "$BATS_TEST_DIRNAME/../../aid-plan-lint.sh" "$FX/.aid-o/plans/P001-plan.md" --only zadani
   [ "$status" -eq 1 ]; [[ "$output" == *"ui_package_lost"* ]]
 }
+
+# ── ui-gate: the run gate check_ui_handover (aid-ui-verify.sh --package-gate) ─────────────────────────────────
+# deployed — a handed-over project without the studio server: build, gate and handover recorded by hand where they
+# need no PM, the package built, the project a git repo with plan P001 from the package, the web copied to $LIVE and
+# served by a small server (POST answers $FORM_STATUS, default 200), docs/ui/nasazeni.json written; the studio's rows
+# over the live address are a stub (AID_UI_TOOL) that passes, so no browser runs on the merge path
+deployed() {
+  echo '<html><form action="/odeslat" method="post"><input name="jmeno"><input type="email" name="mail"><button>Odeslat</button></form></html>' > "$SITE/kontakt.html"
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  result; "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null
+  end_order
+  "$SCRIPT" chapter "$PROJ" vize navrh
+  jqw '.chapters.vize.status = "schvaleno" | .handover = {verdict: "prevzit", rating: "8-10", answer: "h1"}'
+  python3 "$PKG" build "$PROJ" >/dev/null
+  git -C "$PROJ" init -q
+  PLAN="$PROJ/.aid-o/plans/P001-plan.md"; mkdir -p "${PLAN%/*}"
+  printf -- '---\nid: P001\nui_package: docs/ui/predani.json\nui_package_sha256: %s\n---\n# Plan\n' "$(sha256sum "$OUTP" | cut -d' ' -f1)" > "$PLAN"
+  LIVE="$T/live"; mkdir -p "$LIVE"; cp -r "$SITE/." "$LIVE/"
+  cat > "$T/srv.py" <<'PY'
+import http.server, os, sys
+class H(http.server.SimpleHTTPRequestHandler):
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        self.send_response(int(os.environ.get("FORM_STATUS", "200"))); self.end_headers(); self.wfile.write(b"ok")
+    def log_message(self, *a): pass
+http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), lambda *a: H(*a, directory=sys.argv[2])).serve_forever()
+PY
+  local port; port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  FORM_STATUS="${FORM_STATUS:-200}" python3 "$T/srv.py" "$port" "$LIVE" 3>&- & SPID=$!
+  LIVE_URL="http://127.0.0.1:$port"
+  local i; for i in $(seq 1 50); do curl -sf -o /dev/null "$LIVE_URL/index.html" && break; sleep 0.1; done
+  jq -n --arg u "$LIVE_URL" --arg r "$LIVE" '{url: $u, listing: {type: "local", root: $r}}' > "$PROJ/docs/ui/nasazeni.json"
+  printf '#!/usr/bin/env bash\nwhile (( $# )); do [[ "$1" == --out ]] && o="$2"; shift; done\necho %s > "$o/result.json"\n' \
+    "'{\"rows\":[{\"check\":\"task_test\",\"status\":\"pass\",\"detail\":\"hours 1440: index.html (0); hours 390: index.html (0)\"}]}'" > "$T/tool.sh"
+  export AID_UI_TOOL="$T/tool.sh"
+}
+GATE_SH() { run bash "$BATS_TEST_DIRNAME/../../aid-ui-verify.sh" --package-gate "$@"; }
+
+@test "ui-gate: a plan without ui_package is skipped with the reason; a plan from a package without the package fails" {
+  mkdir -p "$PROJ/.aid-o/plans"; git -C "$PROJ" init -q
+  printf -- '---\nid: P002\n---\n# Plan\n' > "$PROJ/.aid-o/plans/P002-plan.md"
+  GATE_SH "$PROJ/.aid-o/plans/P002-plan.md"
+  [ "$status" -eq 0 ]; [[ "$output" == *"přeskočeno: bez balíku"* ]]
+  GATE_SH null
+  [ "$status" -eq 0 ]; [[ "$output" == *"přeskočeno: bez plánu"* ]]
+  printf -- '---\nid: P003\nui_package: docs/ui/predani.json\nui_package_sha256: abc\n---\n' > "$PROJ/.aid-o/plans/P003-plan.md"
+  GATE_SH "$PROJ/.aid-o/plans/P003-plan.md"
+  [ "$status" -eq 1 ]; [[ "$output" == *"balík docs/ui/predani.json chybí"* ]]
+}
+
+@test "ui-gate: clean passes - the deployed files are the package's, the form is accepted, the live rows pass" {
+  deployed
+  GATE_SH "$PLAN" --launch
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"souborů shodných s balíkem"* ]]
+  [[ "$output" == *"form_live: 1 formulářů"* ]]
+  [[ "$output" == *"PASS"* ]]
+  [ "$(jq -r .url "$PROJ/.aid-ui/verify-live/live.json")" = "$LIVE_URL" ]
+  # the brief's task point reads that live result
+  (cd "$PROJ" && python3 "$PKG" live-row docs/ui/predani.json task_test --detail 'hours 1440:' --detail 'hours 390:')
+}
+
+@test "ui-gate: before the deployment the gate checks the package and says so; --launch without nasazeni.json fails" {
+  deployed
+  rm "$PROJ/docs/ui/nasazeni.json"
+  GATE_SH "$PLAN"
+  [ "$status" -eq 0 ]; [[ "$output" == *"před nasazením"* ]]
+  GATE_SH "$PLAN" --launch
+  [ "$status" -eq 1 ]; [[ "$output" == *"--launch bez docs/ui/nasazeni.json"* ]]
+}
+
+@test "ui-gate: a stale package (site changed after the handover) fails; a package edited after the handover fails" {
+  deployed
+  cp "$OUTP" "$T/pkg.orig"
+  jq '.created_at = "2026-01-01T00:00:00Z"' "$T/pkg.orig" > "$OUTP"
+  GATE_SH "$PLAN"
+  [ "$status" -eq 1 ]; [[ "$output" == *"se změnil od zadání"* ]]
+  cp "$T/pkg.orig" "$OUTP"
+  echo '<html>jiný</html>' > "$SITE/index.html"
+  GATE_SH "$PLAN"
+  [ "$status" -eq 1 ]; [[ "$output" == *"zastaralý"* ]]
+}
+
+@test "ui-gate: nasazeni.json with url but no listing, or listing but no url, is refused; a host with a shell metacharacter too" {
+  deployed
+  jq 'del(.listing)' "$PROJ/docs/ui/nasazeni.json" > "$T/n" && cp "$T/n" "$PROJ/docs/ui/nasazeni.json"
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"potřebuje url i listing"* ]]
+  jq -n --arg r "$LIVE" '{listing: {type: "local", root: $r}}' > "$PROJ/docs/ui/nasazeni.json"
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"potřebuje url i listing"* ]]
+  jq -n --arg u "$LIVE_URL" '{url: $u, listing: {type: "ssh", host: "web;touch /tmp/x", root: "/www"}}' > "$PROJ/docs/ui/nasazeni.json"
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"listing.host"*"odmítnut"* ]]
+  # a root that is not absolute (-delete would be an expression of the remote find) is refused before any call
+  jq -n --arg u "$LIVE_URL" '{url: $u, listing: {type: "ssh", host: "web", root: "-delete"}}' > "$PROJ/docs/ui/nasazeni.json"
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"listing.root"*"odmítnut"* ]]
+}
+
+@test "ui-gate: a swapped file on the live address fails naming it; an extra file on the hosting fails; a missing listing root fails nelze ověřit" {
+  deployed
+  echo 'body{color:red}' > "$LIVE/style.css"
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"jiný soubor než v balíku: style.css"* ]]
+  cp "$SITE/style.css" "$LIVE/style.css"; echo 'x' > "$LIVE/stary.html"
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"navíc ['stary.html']"* ]]
+  rm "$LIVE/stary.html"
+  jq --arg r "$T/nikde" '.listing.root = $r' "$PROJ/docs/ui/nasazeni.json" > "$T/n" && cp "$T/n" "$PROJ/docs/ui/nasazeni.json"
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"nelze ověřit"* ]]
+}
+
+@test "ui-gate: the live form answering 500 fails though the files are the package's" {
+  FORM_STATUS=500 deployed
+  GATE_SH "$PLAN"
+  [ "$status" -eq 1 ]; [[ "$output" == *"form_live"*"odpověděl 500"* ]]
+}
+
+@test "ui-gate: an open critical item fails; done with evidence the gate passes" {
+  deployed
+  "$SCRIPT" open-item "$PROJ" add --text "IČO do patičky" --owner klient --critical --evidence "IČO v patičce" >/dev/null
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"otevřený kritický bod: oi-1"* ]]
+  # done without evidence (a hand edit of the state) still blocks
+  jqw '.open_items[0].status = "done"'
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"otevřený kritický bod: oi-1"* ]]
+  "$SCRIPT" open-item "$PROJ" done oi-1 --evidence "IČO 12345678 v patičce" >/dev/null
+  GATE_SH "$PLAN"; [ "$status" -eq 0 ]
+}
+
+@test "ui-gate: a critical item of the package deleted from the live state fails" {
+  "$SCRIPT" open-item "$PROJ" add --text "Právní texty" --owner klient --critical --evidence "texty od právníka" >/dev/null
+  deployed
+  jq -e '.open_items[0].critical' "$OUTP" >/dev/null
+  jqw '.open_items = []'
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"kritický bod z balíku chybí ve stavu studia: oi-1"* ]]
+}
+
+@test "ui-gate: a form posting to another site is not posted by the gate and is named as not verified" {
+  echo '<html><form action="https://formspree.example/f/abc" method="post"><input name="m"></form></html>' > "$SITE/index.html"
+  deployed
+  GATE_SH "$PLAN"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"neověřeno (odesílá mimo web): index.html -> formspree.example"* ]]
+}
+
+@test "ui-gate: the live rows failing fail the gate" {
+  deployed
+  printf '#!/usr/bin/env bash\nwhile (( $# )); do [[ "$1" == --out ]] && o="$2"; shift; done\necho %s > "$o/result.json"\n' \
+    "'{\"rows\":[{\"check\":\"http_200\",\"status\":\"fail\",\"page\":\"index.html\",\"viewport\":\"390\",\"detail\":\"500\"}]}'" > "$T/tool.sh"
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"kontrola UI nad ostrou adresou neprošla"* ]]
+}
+
+@test "ui-gate: upgraded project has the check_ui_handover definition and every profile names it; a fresh composition too" {
+  E="$T/e.yaml"
+  printf 'gates:\n  py_test:\n    command: "pytest"\n    required: true\ndefault_profile: standard\ngate_profiles:\n  targeted:\n    include: [py_test]\n  standard:\n    include:\n      - py_test\n' > "$E"
+  L="$BATS_TEST_DIRNAME/../../lib/aid-init-execution-yaml.sh"
+  h="$(bash "$L" upgrade "$E" | sed -n 's/^diff_hash: //p')"
+  bash "$L" upgrade "$E" --confirm-upgrade "$h" >/dev/null
+  [ "$(yq '.gates.check_ui_handover.command' "$E")" = 'bash {plugin_path}/scripts/aid-ui-verify.sh --package-gate {plan_path}' ]
+  [ "$(yq -o=json -I0 '[.gate_profiles[].include | any_c(. == "check_ui_handover")] | all' "$E")" = true ]
+  run bash "$L" upgrade "$E"; [[ "$output" == *"nothing to upgrade"* ]]
+  # a commented flow include keeps its comment; a flow-style or empty gates: is refused, not guessed
+  printf 'gates:\n  a:\n    command: "x"\ngate_profiles:\n  standard:\n    include: [a]   # rank 1\n' > "$T/f.yaml"
+  h="$(bash "$L" upgrade "$T/f.yaml" | sed -n 's/^diff_hash: //p')"; bash "$L" upgrade "$T/f.yaml" --confirm-upgrade "$h" >/dev/null
+  grep -q 'include: \[a, check_ui_handover\]  # rank 1' "$T/f.yaml"
+  printf 'gates: {}\ngate_profiles:\n  standard:\n    include: [a]\n' > "$T/g.yaml"
+  run bash "$L" upgrade "$T/g.yaml"; [ "$status" -eq 2 ]; [[ "$output" == *"add gates.check_ui_handover by hand"* ]]
+  bash -c "source '$L'; compose_execution_yaml '$T' '$T/c.yaml' python" >/dev/null
+  [ "$(yq '.gates | has("check_ui_handover")' "$T/c.yaml")" = true ]
+  [ "$(yq -o=json -I0 '[.gate_profiles[].include | any_c(. == "check_ui_handover")] | all' "$T/c.yaml")" = true ]
+}
