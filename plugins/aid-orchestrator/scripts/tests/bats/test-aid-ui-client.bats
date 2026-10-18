@@ -431,3 +431,10 @@ PY
   [ "$status" -eq 0 ]; [[ "$output" == *"no price for codex gpt-unlisted"* ]]
   jq -se '.[-1].usd == null' "$P/.aid-ui/costs.jsonl" >/dev/null
 }
+
+@test "shared-motor: a project's price table can raise an image price, never lower it under the plugin's (the budget cap counts real money)" {
+  mkdir -p "$P/.aid-o/config"
+  printf 'version: 1\nmodels: {}\nimages:\n  ref_usd: 0\n  models:\n    gpt-image-1: {low: 0, medium: -1, high: 9.0}\n' > "$P/.aid-o/config/prices.yaml"
+  run python3 -c "import sys; sys.path.insert(0, '$SC/lib'); import aid_ui_costs as c; m, r, _ = c.image_prices('$P'); print(m['gpt-image-1']['low'], m['gpt-image-1']['medium'], m['gpt-image-1']['high'], r)"
+  [ "$status" -eq 0 ]; [ "$output" = "0.011 0.042 9.0 0.006" ]
+}

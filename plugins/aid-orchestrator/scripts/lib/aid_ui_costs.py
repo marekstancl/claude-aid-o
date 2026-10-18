@@ -41,10 +41,23 @@ def token_prices(provider, model, project=""):
 
 
 def image_prices(project=""):
-    """{model: {quality: USD per image}}, ref_usd and the list line of the shared table's images: section."""
+    """{model: {quality: USD per image}}, ref_usd and the list line of the images: section. The image budget is a cap on
+    real money, so a price is a finite number above zero and a project's table (or AID_REVIEW_PRICES) can only RAISE
+    the plugin's own price, never lower it (a zero price would let every image past the cap)."""
+    import math, yaml
     f, t = price_table(project)
+    with open(os.path.join(LIB, "..", "..", "defaults", "prices.yaml"), encoding="utf-8") as fh:
+        base = (yaml.safe_load(fh) or {}).get("images") or {}
     im = (t or {}).get("images") or {}
-    return im.get("models") or {}, float(im.get("ref_usd") or 0), "%s: images, as of %s" % (os.path.basename(f or "?"), im.get("as_of", "?"))
+    ok = lambda x: isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and x > 0
+    out = {}
+    for src in (base, im):
+        for m, qs in (src.get("models") or {}).items():
+            for q, v in (qs or {}).items() if isinstance(qs, dict) else ():
+                if ok(v):
+                    out.setdefault(m, {})[q] = max(v, out.get(m, {}).get(q, 0))
+    ref = max([x for x in (base.get("ref_usd"), im.get("ref_usd")) if ok(x)] or [0])
+    return out, ref, "%s: images, as of %s" % (os.path.basename(f or "prices.yaml"), im.get("as_of") or base.get("as_of", "?"))
 
 
 def image_budget():
