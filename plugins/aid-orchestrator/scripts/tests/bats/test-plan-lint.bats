@@ -390,6 +390,20 @@ _bound() { _plan p.md strict '- Modify: `src/a.ts` — edit'; }
   [ "$status" -eq 1 ]; [[ "$output" == *"path escapes the project"* ]]
 }
 
+# P115: a brief made from a handover package carries ui_package; a plan that drops it would have its run gate
+# check_ui_handover skipped (defect: a plan from a package deployed without the package check)
+@test "ui-package: lost mark refused" {
+  _bound
+  z="$(sed -n 's/^zadani: //p' p.md)"
+  sed -i '0,/^verze:/s//ui_package: docs\/ui\/predani.json\nui_package_sha256: abc\nverze:/' "$z"
+  sed -i "s/^zadani_sha256: .*/zadani_sha256: $(sha256sum "$z" | cut -d' ' -f1)/" p.md
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 1 ]; [[ "$output" == *"ui_package_lost"* ]]
+  sed -i '0,/^zadani:/s//ui_package: docs\/ui\/predani.json\nui_package_sha256: abc\nzadani:/' p.md
+  run "$LINT" p.md --only zadani
+  [ "$status" -eq 0 ]
+}
+
 @test "zadani-required: a lifecycle_strict plan without zadani: is refused, a legacy one only warned" {
   _bound
   sed -i '/^zadani/d' p.md

@@ -1,8 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "aid-ui/handover-package/1",
+  "$id": "urn:aid:ui:handover-package:1",
   "title": "The /aid-ui handover package (docs/ui/predani.json), version 1 (P115)",
-  "description": "Written by aid-ui-package.py build at the handover (aid-ui-state.sh chapter-all); never edited afterwards. The plan of the deployment reads it (aid-ui-package.py zadani) and the run gate ui_verify checks it (aid-ui-verify.sh --package-gate).",
+  "description": "Written by aid-ui-package.py build at the handover (aid-ui-state.sh chapter-all); never edited afterwards. The plan of the deployment reads it (aid-ui-package.py zadani) and the run gate check_ui_handover checks it (aid-ui-verify.sh --package-gate).",
+  "$defs": {"id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "description": "goes into generated commands of the brief: letters, digits, . _ - only"}},
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "project", "created_at", "site", "gate", "chapters", "places", "customer_tasks", "open_items", "launch_inputs", "launch_only"],
@@ -59,7 +60,7 @@
       "type": "array",
       "items": {
         "type": "object", "additionalProperties": false, "required": ["id", "text", "page"],
-        "properties": {"id": {"type": "string", "minLength": 1}, "text": {"type": "string", "minLength": 1}, "page": {"type": ["string", "null"]}, "form": {"type": "boolean"}}
+        "properties": {"id": {"$ref": "#/$defs/id"}, "text": {"type": "string", "minLength": 1}, "page": {"type": ["string", "null"]}, "form": {"type": "boolean"}}
       }
     },
     "open_items": {
@@ -68,7 +69,7 @@
       "items": {
         "type": "object", "additionalProperties": false, "required": ["id", "text", "owner", "due", "critical", "status"],
         "properties": {
-          "id": {"type": "string", "minLength": 1}, "text": {"type": "string", "minLength": 1}, "owner": {"type": "string", "minLength": 1},
+          "id": {"$ref": "#/$defs/id"}, "text": {"type": "string", "minLength": 1}, "owner": {"type": "string", "minLength": 1},
           "due": {"type": ["string", "null"]}, "critical": {"type": "boolean"}, "status": {"type": "string"},
           "evidence": {"type": ["string", "null"]}
         }
@@ -79,8 +80,15 @@
       "description": "the items of .aid-ui/launch.json (aid-ui-launch.py); [] when the project has none",
       "items": {
         "type": "object", "required": ["id", "name", "status", "critical"],
-        "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "status": {"type": "string"}, "critical": {"type": "boolean"}}
+        "properties": {"id": {"$ref": "#/$defs/id"}, "name": {"type": "string"}, "status": {"type": "string"}, "critical": {"type": "boolean"}, "item": {"$ref": "#/$defs/id"}}
       }
+    },
+    "handover": {
+      "type": "object",
+      "description": "the PM's handover verdict and comment (absent only in build --dry, before the answer is used)",
+      "additionalProperties": false,
+      "required": ["verdict", "rating", "answer", "comment"],
+      "properties": {"verdict": {"type": "string", "minLength": 1}, "rating": {"type": ["string", "null"]}, "answer": {"type": "string"}, "comment": {"type": "string"}}
     },
     "launch_only": {
       "type": "array",
