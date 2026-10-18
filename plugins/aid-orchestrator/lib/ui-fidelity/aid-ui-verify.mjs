@@ -1420,8 +1420,9 @@ for (const b of BRS) {
       // P116: every app row in a fresh context (one task's data or login never leaks into the next), with the project's
       // stored test login (.aid-ui/test-storage.json, Playwright storageState) when it has one
       const rctx = app ? await browser.newContext({ viewport: { width: Number(v), height: HEIGHT[v] || 900 }, ...(STORAGE ? { storageState: STORAGE } : {}) }) : ctx;
-      const r = await pageRows(rctx, rowUrl || (flow ? base : urlOf(m.page)), key, m.role, m.state, run, facts, brand, c => applies(c, m));
-      if (rctx !== ctx) await rctx.close();
+      let r;
+      try { r = await pageRows(rctx, rowUrl || (flow ? base : urlOf(m.page)), key, m.role, m.state, run, facts, brand, c => applies(c, m)); }
+      finally { if (rctx !== ctx) await rctx.close().catch(() => {}); }
       if (r.error) {
         for (const c of named) put(m, c, flow && (c === 'app_task_states' || c === app?.check) ? 'fail' : APP_CHECKS.includes(c) ? 'pass' : 'not_covered',
           APP_CHECKS.includes(c) && c !== app?.check ? `N/A: a row of ${app?.check || 'a flow'}` : `${flow ? 'scenario' : 'page'} failed: ${r.error}`, sha);

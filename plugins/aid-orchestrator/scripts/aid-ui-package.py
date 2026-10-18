@@ -209,8 +209,8 @@ def app_part(proj, state, g):
         mine = [r for r in rows if r.get("page") == t["id"]]
         results.append({"task": t["id"], "passed": bool(mine) and all(r.get("status") == "pass" for r in mine),
                         "run_at": g["run_at"], "model_sha256": sha, "verified_on": "skeleton"})
-    if not any(r["passed"] for r in results):
-        raise Refused("chybí úloha, která prošla bránou (app_flows)")
+    if not results or not all(r["passed"] for r in results):   # every task of the model, never a partial set
+        raise Refused("chybí úloha, která prošla bránou (app_flows): " + (", ".join(r["task"] for r in results if not r["passed"]) or "model nemá úlohy"))
     removed = []
     if os.path.isfile(os.path.join(proj, ".aid-ui", "baseline", "tasks.json")):   # an existing app keeps today's tasks
         r = subprocess.run([sys.executable, os.path.join(HERE, "aid-ui-baseline.py"), "compare", proj], capture_output=True, text=True)
@@ -350,6 +350,19 @@ def check(path, proj=None):
     errs = schema_errors(pkg)
     if errs:
         return errs
+    if pkg.get("kind") == "webapp":   # P116: what the schema cannot bind
+        tr = pkg["task_results"]
+        ids = [r["task"] for r in tr]
+        bad = [r["task"] for r in tr if not r["passed"] or r["model_sha256"] != pkg["screens"]["sha256"]]
+        if bad or len(set(ids)) != len(ids) or pkg["screens"]["sha256"] != pkg["screens"]["approved_sha256"]:
+            return [f"task_results: každá úloha jednou, prošlá, nad schváleným modelem (vadné: {', '.join(bad) or 'opakovaná úloha nebo neschválený model'})"]
+        if proj:
+            try:
+                want = [t["id"] for t in json.load(open(os.path.join(proj, pkg["screens"]["path"]), encoding="utf-8")).get("tasks") or []]
+            except (OSError, ValueError):
+                want = None
+            if want is not None and sorted(want) != sorted(ids):
+                return [f"task_results nejsou úlohy modelu (balík {sorted(ids)}, model {sorted(want)})"]
     paths = [f["path"] for f in pkg["site"]["files"]]
     bad = [x for x in paths if x.startswith("/") or "\\" in x or ".." in x.split("/") or "" in x.split("/")]
     if bad or len(set(paths)) != len(paths):

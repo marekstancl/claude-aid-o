@@ -444,6 +444,25 @@ app_handover() {
   [ "$status" -ne 0 ]; [[ "$output" == *"chybí úloha, která prošla bránou"* ]]; [ ! -e "$PROJ/docs/ui/predani.json" ]
 }
 
+@test "app-package: one task passed and one failed refuses the handover; check refuses a package edited to a failed or foreign result" {
+  app_handover '.rows |= map(if .check == "app_flows" and .page == "smazat" then .status = "fail" else . end)'
+  run python3 "$PKGPY" build "$PROJ" --dry
+  [ "$status" -eq 1 ]; [[ "$output" == *"chybí úloha, která prošla bránou (app_flows): smazat"* ]]
+}
+
+@test "app-package: check binds the task results to the model - failed, foreign, repeated or missing results are refused" {
+  app_handover
+  "$SCRIPT" chapter-all "$PROJ" --by PM --answer h1 >/dev/null
+  O="$PROJ/docs/ui/predani.json"
+  for f in '.task_results[1].passed = false' '.task_results[0].model_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"' \
+           '.task_results[1] = .task_results[0]'; do
+    jq "$f" "$O" > "$T/b.json"; run python3 "$PKGPY" check "$T/b.json"; [ "$status" -eq 1 ] || { echo "$f passed"; return 1; }
+  done
+  jq '.task_results |= .[:1]' "$O" > "$T/b.json"
+  run python3 "$PKGPY" check "$T/b.json"; [ "$status" -eq 0 ]   # alone the package cannot know the model's tasks
+  run python3 "$PKGPY" check "$T/b.json" --project "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"nejsou úlohy modelu"* ]]
+}
+
 @test "app-package: task results of an older model are refused" {
   app_handover '.rows |= map(if .check == "app_flows" then .model_sha256 = "0000000000000000000000000000000000000000000000000000000000000000" else . end)'
   run python3 "$PKGPY" build "$PROJ" --dry
