@@ -406,3 +406,11 @@ snap() { (cd "$P/.aid-ui/critic" && find . -path ./launch -prune -o -type f -pri
   run python3 "$Q" round "$P" --web "$W"
   [ "$status" -eq 1 ]; [[ "$output" == *"nad jinou verzí podkladů místa"* ]]
 }
+
+@test "self: a fix whose evidence carries a cut character is recorded, not crashed on" {
+  ans 6; qround "$P" --web "$W" >/dev/null
+  id="$(jq -r '.findings[0].id' "$P/.aid-ui/critic/rounds/1/round.json")"
+  python3 "$Q" triage "$P" "$id" accepted --expected x >/dev/null
+  run python3 "$Q" fixed "$P" "$id" --evidence "$(printf 'oprava \xc3')" --method "steps/6-build.md 3a"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}

@@ -785,8 +785,8 @@ def main(a):
             die("--place must be one of " + ", ".join(PLACES), 2)
     opts, rest, i = {}, [], 2
     while i < len(a):
-        if a[i].startswith("--") and i + 1 < len(a):
-            opts[a[i][2:]] = a[i + 1]
+        if a[i].startswith("--") and i + 1 < len(a):   # a broken character (a cut in the shell) never breaks the write
+            opts[a[i][2:]] = a[i + 1].encode("utf-8", "surrogateescape").decode("utf-8", "replace")
             i += 2
         else:
             rest.append(a[i])
