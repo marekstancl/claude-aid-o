@@ -139,6 +139,7 @@ def site_sha(p):
 
 
 # ---------------------------------------------------------------- the producer's own check before every round (PM 18. 10. 2026)
+LAUNCH = False   # set only by this command line (launch | --launch), never by the environment
 SELF_MIN = 9   # the version handed to the roles is complete: the producer rates it at 9+ on every criterion itself
 REQ_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
@@ -230,8 +231,16 @@ def self_problems(p, doc):
             bad.append("předběžná brána kostry neproběhla (aid-ui-verify.sh <projekt> --precheck)")
         elif res.get("model_sha256") != msha:
             bad.append("předběžná brána běžela nad jiným modelem; pusť ji znovu")
-        else:
-            red = [f"{r.get('check')} {r.get('page')} {r.get('state')}" for r in res.get("rows") or [] if r.get("status") != "pass"]
+        else:   # every row of the model's matrix present and passing, nothing else red
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("aid_ui_screens", os.path.join(HERE, "aid-ui-screens.py"))
+            mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+            rows = [r for r in res.get("rows") or [] if isinstance(r, dict)]
+            have = {(r.get("check"), r.get("page"), r.get("state")) for r in rows}
+            miss = [f"{x['check']} {x['page']} {x['state']}" for x in mod.matrix(model) if (x["check"], x["page"], x["state"]) not in have]
+            red = [f"{r.get('check')} {r.get('page')} {r.get('state')}" for r in rows if r.get("status") != "pass"]
+            if miss:
+                bad.append("předběžná brána kostry je neúplná, chybí řádky: " + "; ".join(miss[:5]))
             if red:
                 bad.append("předběžná brána kostry není zelená: " + "; ".join(red[:5]))
     return bad
@@ -503,7 +512,7 @@ def do_round(p, web):
     if PLACE in ("web", "struktura") and not web:
         die("--web <url>: the %s is rated live (%s)" % (LABEL_URL[PLACE], "the served site" if PLACE == "web" else "the skeleton address"), 2)
     same_loop(p, web)
-    if not os.environ.get("AID_UI_CRITIC_DIR"):   # every version goes to the roles complete: the producer's own check first
+    if not LAUNCH:   # every version goes to the roles complete: the producer's own check first (the launch rates a deployment)
         why = self_ok(p)
         if why:
             die("no round: the version is not ready for the roles - " + why)
@@ -761,8 +770,10 @@ def main(a):
         die("usage: round|triage|fixed|status|audit <project> ... (see the header)", 2)
     global PLACE
     cmd, p = a[0], os.path.abspath(a[1])
+    global LAUNCH
     if cmd == "launch" or "--launch" in a:   # P115: the launch loop in its own directory, for this script and every one it starts
         a = [x for x in a if x != "--launch"]
+        LAUNCH = True
         os.environ["AID_UI_CRITIC_DIR"] = memory.LAUNCH_DIR
     if "--place" in a:
         i = a.index("--place")

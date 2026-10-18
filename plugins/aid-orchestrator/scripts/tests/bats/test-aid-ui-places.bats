@@ -152,6 +152,9 @@ PY
   run python3 "$Q" self "$P" --place struktura --file "$P/self.json"
   [ "$status" -eq 1 ]; [[ "$output" == *"není zelená: task_recovery zalozit fail-1"* ]]
   echo "{\"model_sha256\": \"$sha\", \"rows\": [{\"check\": \"app_flows\", \"page\": \"zalozit\", \"state\": \"normal\", \"status\": \"pass\"}]}" > "$P/.aid-ui/precheck/result.json"
+  run python3 "$Q" self "$P" --place struktura --file "$P/self.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"neúplná, chybí řádky: keyboard_flows zalozit keyboard"* ]]   # one green row is not a green precheck
+  python3 "$SC/aid-ui-screens.py" matrix "$P" | jq --arg s "$sha" '{model_sha256: $s, rows: [.rows[] | {check, page, state, status: "pass"}]}' > "$P/.aid-ui/precheck/result.json"
   jq '.requirements[0].covered_by += ["task:nikdy"]' "$P/self.json" > "$P/s2.json"
   run python3 "$Q" self "$P" --place struktura --file "$P/s2.json"
   [ "$status" -eq 1 ]; [[ "$output" == *"task:nikdy není úloha ani obrazovka modelu"* ]]
