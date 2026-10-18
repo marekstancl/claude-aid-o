@@ -194,3 +194,122 @@ web-local.owner.web.gates.yaml:
   review_applied_by: author
   date: 2026-10-17
   sha256: "dc9682bcef03cefddd74869dadae5f7bfb5a0ceca48a9934c1e8d78d28d17f04"
+
+# P116 (18. 10. 2026): měřítka typu webapp. Autor napsal měřítko i brány ze zadání role (role-briefs/webapp-<role>.md +
+# webapp-common.md + pamet-hodnotitele.md + kopie standardu Úlohy a stavy), druhý autor zrevidoval, autor recenzi zapracoval
+# (odborník 17/17 nálezů, klient 14/14). brief_sha256 = otisk zadání role; common_sha256 = otisk společného rámce.
+webapp.tech.struktura.yaml:
+  author: "codex exec (default model), clean context (everything on stdin)"
+  brief: "role-briefs/webapp-tech.md + role-briefs/webapp-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "cb9028413ff3b05bd738b665b172f4314ce975f0b3f0cb384145bfa97e44752d"
+  common_sha256: "e611a56c12537aae2f6fc23c3c711428841053e2b34cf349f8476dc367b00e41"
+  reviewer: "Claude Opus subagent, clean context (read only the briefs and the rubrics)"
+  review_applied_by: author
+  date: 2026-10-18
+  sha256: "2afef8788ef8cb027a479d862ab1b1695bd39031c3ec52f355a74d9c774a076c"
+webapp.tech.struktura.gates.yaml:
+  author: "codex exec (default model), clean context (everything on stdin)"
+  brief: "role-briefs/webapp-tech.md + role-briefs/webapp-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "cb9028413ff3b05bd738b665b172f4314ce975f0b3f0cb384145bfa97e44752d"
+  common_sha256: "e611a56c12537aae2f6fc23c3c711428841053e2b34cf349f8476dc367b00e41"
+  reviewer: "Claude Opus subagent, clean context (read only the briefs and the rubrics)"
+  review_applied_by: author
+  date: 2026-10-18
+  sha256: "1db7bf16f646bcebaadd84bac23f9e136328a8ddb210d549b7d344b8b044026c"
+webapp.tech.vzhled.yaml:
+  author: "codex exec (default model), clean context (everything on stdin)"
+  brief: "role-briefs/webapp-tech.md + role-briefs/webapp-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "cb9028413ff3b05bd738b665b172f4314ce975f0b3f0cb384145bfa97e44752d"
+  common_sha256: "e611a56c12537aae2f6fc23c3c711428841053e2b34cf349f8476dc367b00e41"
+  reviewer: "Claude Opus subagent, clean context (read only the briefs and the rubrics)"
+  review_applied_by: author
+  date: 2026-10-18
+  sha256: "c3f957554d738f8a07cc9adfb18781a79d1ab9e208d4a6e2eafbb8821b736f0d"
+webapp.tech.vzhled.gates.yaml:
+  author: "codex exec (default model), clean context (everything on stdin)"
+  brief: "role-briefs/webapp-tech.md + role-briefs/webapp-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "cb9028413ff3b05bd738b665b172f4314ce975f0b3f0cb384145bfa97e44752d"
+  common_sha256: "e611a56c12537aae2f6fc23c3c711428841053e2b34cf349f8476dc367b00e41"
+  reviewer: "Claude Opus subagent, clean context (read only the briefs and the rubrics)"
+  review_applied_by: author
+  date: 2026-10-18
+  sha256: "7b2cda34f7c4b1df85a2ad510960a3deca8cb2c4e5a06c5e982e60064a1b8fd7"
+webapp.tech.yaml:
+  author: "codex exec (default model), clean context (everything on stdin)"
+  brief: "role-briefs/webapp-tech.md + role-briefs/webapp-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "cb9028413ff3b05bd738b665b172f4314ce975f0b3f0cb384145bfa97e44752d"
+  common_sha256: "e611a56c12537aae2f6fc23c3c711428841053e2b34cf349f8476dc367b00e41"
+  reviewer: "Claude Opus subagent, clean context (read only the briefs and the rubrics)"
+  review_applied_by: author
+  date: 2026-10-18
+  sha256: "766fdb24ea4a5de76da4a2fc55888373392b3db7479f1add6be4dabfe92f379c"
+webapp.tech.web.gates.yaml:
+  author: "codex exec (default model), clean context (everything on stdin)"
+  brief: "role-briefs/webapp-tech.md + role-briefs/webapp-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "cb9028413ff3b05bd738b665b172f4314ce975f0b3f0cb384145bfa97e44752d"
+  common_sha256: "e611a56c12537aae2f6fc23c3c711428841053e2b34cf349f8476dc367b00e41"
+  reviewer: "Claude Opus subagent, clean context (read only the briefs and the rubrics)"
+  review_applied_by: author
+  date: 2026-10-18
+  sha256: "973d4a32d6af19574131ab251044136581e9f98e0de64be8521b6dc794390cad"
+webapp.owner.struktura.yaml:
+  author: "Claude Opus subagent, clean context (read only the briefs and the standard)"
+  brief: "role-briefs/webapp-owner.md + role-briefs/webapp-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "c73d246ac67b0bb4f28173f93e8da6cf2bd7b1d1b003824eacd86bcf9094696e"
+  common_sha256: "e611a56c12537aae2f6fc23c3c711428841053e2b34cf349f8476dc367b00e41"
+  reviewer: "codex exec (default model), clean context (everything on stdin)"
+  review_applied_by: author
+  date: 2026-10-18
+  sha256: "8597ec2b705c771666b67339a08d4ae93776321e13980684b405ec324f114fc7"
+webapp.owner.struktura.gates.yaml:
+  author: "Claude Opus subagent, clean context (read only the briefs and the standard)"
+  brief: "role-briefs/webapp-owner.md + role-briefs/webapp-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "c73d246ac67b0bb4f28173f93e8da6cf2bd7b1d1b003824eacd86bcf9094696e"
+  common_sha256: "e611a56c12537aae2f6fc23c3c711428841053e2b34cf349f8476dc367b00e41"
+  reviewer: "codex exec (default model), clean context (everything on stdin)"
+  review_applied_by: author
+  date: 2026-10-18
+  sha256: "ad21cdc394c7f3ab0bc0265e91a9805c4b8fceed0e2835bf4c85c27ad0c38f4f"
+webapp.owner.vzhled.yaml:
+  author: "Claude Opus subagent, clean context (read only the briefs and the standard)"
+  brief: "role-briefs/webapp-owner.md + role-briefs/webapp-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "c73d246ac67b0bb4f28173f93e8da6cf2bd7b1d1b003824eacd86bcf9094696e"
+  common_sha256: "e611a56c12537aae2f6fc23c3c711428841053e2b34cf349f8476dc367b00e41"
+  reviewer: "codex exec (default model), clean context (everything on stdin)"
+  review_applied_by: author
+  date: 2026-10-18
+  sha256: "80d7ae355e5a473d03e60b36f663e4028c00748c3ab34e90d44566c9dc9d9ac2"
+webapp.owner.vzhled.gates.yaml:
+  author: "Claude Opus subagent, clean context (read only the briefs and the standard)"
+  brief: "role-briefs/webapp-owner.md + role-briefs/webapp-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "c73d246ac67b0bb4f28173f93e8da6cf2bd7b1d1b003824eacd86bcf9094696e"
+  common_sha256: "e611a56c12537aae2f6fc23c3c711428841053e2b34cf349f8476dc367b00e41"
+  reviewer: "codex exec (default model), clean context (everything on stdin)"
+  review_applied_by: author
+  date: 2026-10-18
+  sha256: "f076b33fe6591929941c0ea67e3cdf9038879a013e38a94c7270732bdee922da"
+webapp.owner.yaml:
+  author: "Claude Opus subagent, clean context (read only the briefs and the standard)"
+  brief: "role-briefs/webapp-owner.md + role-briefs/webapp-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "c73d246ac67b0bb4f28173f93e8da6cf2bd7b1d1b003824eacd86bcf9094696e"
+  common_sha256: "e611a56c12537aae2f6fc23c3c711428841053e2b34cf349f8476dc367b00e41"
+  reviewer: "codex exec (default model), clean context (everything on stdin)"
+  review_applied_by: author
+  date: 2026-10-18
+  sha256: "8ef771eab75e287f4944694f7b0af92b850bde599a1a5f02389074b7a4ad4655"
+webapp.owner.web.gates.yaml:
+  author: "Claude Opus subagent, clean context (read only the briefs and the standard)"
+  brief: "role-briefs/webapp-owner.md + role-briefs/webapp-common.md + role-briefs/pamet-hodnotitele.md"
+  brief_sha256: "c73d246ac67b0bb4f28173f93e8da6cf2bd7b1d1b003824eacd86bcf9094696e"
+  common_sha256: "e611a56c12537aae2f6fc23c3c711428841053e2b34cf349f8476dc367b00e41"
+  reviewer: "codex exec (default model), clean context (everything on stdin)"
+  review_applied_by: author
+  date: 2026-10-18
+  sha256: "f57a7871f100ad1380997250f6d86e41aa177439b05fbafd65640164dc422d83"
+webapp.yaml:
+  author: "the P116 builder (Claude Opus, the build session) - the type's common part, not a rubric: launch inputs of an app"
+  brief: "aplikace-postup.md + P116 plan step 6"
+  reviewer: "codex exec (step 6 review of the diff)"
+  review_applied_by: author
+  date: 2026-10-18
+  sha256: "0f0cf292e06cb0bce30797231e346fc5c70969ad3c191b70218b825fb07f3d50"

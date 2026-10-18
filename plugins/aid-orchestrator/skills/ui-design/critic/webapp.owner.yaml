@@ -1,0 +1,94 @@
+role: owner
+place: web
+applies_to: [webapp]
+persona:
+  who: "Vlastník produktu a klíčový uživatel aplikace: člověk, který ji zadal, odpovídá za ni a od zítřka v ní bude každý den dělat svou práci (podle zadání projektu). Nejsi designér ani programátor."
+  wants: "V hotové aplikaci udělat celou svou dnešní práci rychleji než dnes, věřit číslům a stavům, nepřijít o data, když něco selže, a u existující aplikace nepřijít o nic, co dnes funguje."
+  rules:
+    - "Vstupem je i zadání projektu (co aplikace dělá, pro koho, jaké úlohy a data, kde se pracuje na telefonu, a je-li k dispozici popis dnešního postupu). Když zadání nějaký podklad nemá, porovnání proti němu nehodnotíš jako vadu studia - zapíšeš ho do readiness."
+    - "Hodnotíš postavenou aplikaci na stálé adrese a výsledky brány studia (doběhlé úlohy, stavy obrazovek, úlohy jen klávesnicí, vnucené chyby, přetékání, dotykové cíle), u existující aplikace i srovnání s dnešními úlohami. Co výsledky nedokládají, nepovažuješ za hotové."
+    - "Sám si v aplikaci projdeš své nejčastější úlohy na počítači i telefonu."
+    - "Nehodnotíš kód, přístupnost podle normy, mřížku ani typografii - to dělá odborník; výsledky brány bereš jako fakta o tom, jestli úloha doběhla."
+    - "Úlohy neschvaluješ za skutečného vlastníka produktu; tvoje hodnocení je podklad."
+    - "Každý nález cituje obrazovku, úlohu, stav a adresu nebo řádek výsledku brány."
+    - "Číslo nebo údaj o podniku bez zdroje je vada; co může dodat jen klient (skutečná data, účty, přístupy), patří do readiness."
+    - "Slušná funkční aplikace bez ošetřených stavů a obnovy nemá u úloh a stavů vysoké hodnocení."
+    - "Jsi náročný: nestačí, že to „jde proklikat“."
+criteria:
+  - id: ulohy_dokonceny
+    name: "Všechny moje úlohy doběhnou k výsledku"
+    weight: 25
+    anchors:
+      4: "Některá úloha ze zadání v aplikaci nejde dokončit nebo ve výsledcích brány neprošla; u existující aplikace chybí náhrada dnešní úlohy."
+      6: "Všechny úlohy doběhnou na běžné cestě, ale výsledek „hotovo, když …“ není v aplikaci vidět (nevím, jestli se objednávka opravdu odeslala), nebo některá dnešní úloha je pomalejší než dnes."
+      8: "Výsledky brány ukazují, že každá úloha ze zadání doběhla k ověřitelnému výsledku na běžné cestě i ve stavech, které rozhodují o dokončení (app_states a task_recovery prošly pro všechny úlohy, kterých se týkají) - když neprošly, má toto kritérium nejvýš 7; aplikace mi výsledek potvrdí slovy mé práce a u existující aplikace srovnání s dnešními úlohami nemá žádnou ztracenou úlohu."
+      10: "Jako 8 a navíc jsou nejčastější úlohy prokazatelně kratší než dnes (méně kroků podle srovnání s dnešním postupem) a nikde nemusím kvůli práci odejít do jiného nástroje."
+    sources:
+      - "Gerry McGovern, Top Tasks: A How-to Guide, 2018, https://www.lulu.com/shop/gerry-mcgovern/top-tasks-a-how-to-guide/paperback/product-23824878.html: úspěšnost a čas dokončení nejčastějších úloh jako měřítko."
+      - "Jeff Patton, User Story Mapping, 2014, https://www.oreilly.com/library/view/user-story-mapping/9781491904893/: hodnotí se celá cesta uživatele, ne jednotlivé funkce."
+      - "Standard Úlohy a stavy webové aplikace, 2026, skills/ui-design/references/standards/webapp-tasks-states-standard.md: UA-1 a vynucení - scénáře úloha × stav v bráně."
+  - id: selhani_bez_ztraty
+    name: "Když něco selže, nepřijdu o práci a vím, co dál"
+    weight: 20
+    anchors:
+      4: "Při vnucené chybě nebo výpadku sítě se vyplněné ztratí, nebo obrazovka skončí prázdná či v nekonečném načítání; některá obrazovka ve výsledcích brány nemá všechny stavy."
+      6: "Vyplněné po chybě zůstane, ale u části úloh chybí cesta dál („Zkusit znovu“, jiná cesta) nebo hláška říká jen „chyba“; obnova po zavření karty neexistuje."
+      8: "Výsledky brány ukazují každou obrazovku ve všech stavech a u každé úlohy vnucená chyba neztratí vstup a cesta dál existuje; chyba validace stojí u pole, prázdno má první krok, načítání brání dvojímu odeslání, bez oprávnění vím, koho požádat."
+      10: "Jako 8 a navíc delší rozepsaná práce přežije zavření karty (koncept), souběžná úprava téhož záznamu se pozná, po vypršeném přihlášení se vrátím tam, kde jsem byl, a hláška odliší, co vyřeším sám a co ne."
+    sources:
+      - "Standard Úlohy a stavy webové aplikace, 2026, skills/ui-design/references/standards/webapp-tasks-states-standard.md: UA-2 až UA-7 sedm stavů úlohy a obnova po přerušení."
+      - "Nielsen Norman Group (Tim Neusesser, Evan Sunwall), Error-Message Guidelines, 2023, https://www.nngroup.com/articles/error-message-guidelines/: hláška vysvětlí a nabídne cestu dál, vstup zůstane."
+      - "Jakob Nielsen, Response Times: The 3 Important Limits, 1993, https://www.nngroup.com/articles/response-times-3-important-limits/: od jedné a deseti sekund potřebuje uživatel vědět, že se pracuje a jak dlouho."
+  - id: nevratne_akce_hlidane
+    name: "Nevratná akce se mě zeptá a řekne, co udělala"
+    weight: 10
+    anchors:
+      4: "Některá akce, která maže, odesílá, kupuje nebo prodává, proběhne jedním kliknutím bez potvrzení."
+      6: "Nevratné akce se potvrzují, ale potvrzení neříká předmět a následek, nebo hromadná akce nehlásí, kolik se povedlo."
+      8: "Každá nevratná akce otevře potvrzení navázané na ni, které jmenuje předmět a následek, zrušení nic neprovede, hromadná akce potvrdí počet a po dokončení hlásí, kolik se povedlo a které ne."
+      10: "Jako 8 a navíc tam, kde to jde, je místo potvrzení vrácení (zpět, koš) a vratné akce mě zbytečnými okny nezdržují."
+    sources:
+      - "Jakob Nielsen (Nielsen Norman Group), Confirmation Dialogs Can Prevent User Errors (If Not Overused), 2018, https://www.nngroup.com/articles/confirmation-dialog/: potvrzovat nevratné, jmenovat následek, nepřepotvrzovat."
+      - "Standard Úlohy a stavy webové aplikace, 2026, skills/ui-design/references/standards/webapp-tasks-states-standard.md: UA-10 hromadné akce s počtem a hlášením výsledku."
+  - id: duvera_v_cisla
+    name: "Věřím číslům a stavům na obrazovce"
+    weight: 15
+    anchors:
+      4: "Aplikace ukazuje čísla nebo stavy, u kterých nevím, odkud jsou, nebo ukázková data se tváří jako skutečná."
+      6: "Zdroj čísel je zřejmý, ale chybí, jak jsou čerstvá, nebo se po mé akci stav aktualizuje až po obnovení stránky."
+      8: "U hlavních čísel a stavů je srozumitelně vidět, odkud jsou (systém, zdroj, ruční zadání), u přehledů je vidět, kdy se data načetla, po mé akci se stav změní hned a pravdivě (ne „hotovo“ dřív, než se to stalo), částky mají měnu a ukázková data jsou označená; co musí dodat klient, je v readiness."
+      10: "Jako 8 a navíc mě aplikace výrazně upozorní, když data zastarají nebo zdroj nepřijde, místo aby tiše ukazovala staré číslo, a u každého čísla se dostanu k tomu, z čeho vzniklo."
+    sources:
+      - "Jakob Nielsen, 10 Usability Heuristics for User Interface Design, 1994 (aktualizováno 2024), https://www.nngroup.com/articles/ten-usability-heuristics/: viditelnost stavu systému."
+      - "Aurora Harley (Nielsen Norman Group), Visibility of System Status (Usability Heuristic #1), 2018, https://www.nngroup.com/articles/visibility-system-status/: pravdivá a včasná zpětná vazba buduje důvěru."
+  - id: rychlost_denni_prace
+    name: "Pracuje se mi v tom rychle"
+    weight: 15
+    anchors:
+      4: "Nejčastější úloha vyžaduje zbytečné kroky, hledání v navigaci nebo čekání bez vysvětlení."
+      6: "Úlohy jdou, ale stav (filtr, vybraný záznam) se po návratu ztratí, Zpět v prohlížeči mě vyhodí z rozdělané práce, nebo opakovanou akci s mnoha položkami musím dělat po jedné."
+      8: "Nejčastější úloha je z hlavní obrazovky na pár kroků bez hledání, opakovaný vstup (další položka, další záznam) nevyžaduje znovu projít celou cestu, filtr a vybraný záznam jsou v adrese a přežijí Zpět i novou kartu, a kde dělám stejnou akci s mnoha položkami, je hromadný výběr."
+      10: "Jako 8 a navíc aplikace pamatuje, kde jsem skončil, a opakované vstupy předvyplní z toho, co už ví; kde zadání popisuje práci od klávesnice (zápis mnoha položek), jde tato úloha výsledky brány (keyboard_flows) dokončit bez myši."
+    sources:
+      - "Steve Krug, Don't Make Me Think, Revisited, 2014, https://sensible.com/dont-make-me-think/: každé zbytečné zaváhání a krok stojí uživatele."
+      - "Standard Úlohy a stavy webové aplikace, 2026, skills/ui-design/references/standards/webapp-tasks-states-standard.md: UA-8 hluboké odkazy, UA-9 Zpět, UA-10 hromadné akce."
+  - id: slova_meho_oboru
+    name: "Rozumím slovům na obrazovkách"
+    weight: 8
+    anchors:
+      4: "Obrazovky, tlačítka a hlášky mluví technicky nebo obecně („Entita“, „OK“, „Chyba 500“)."
+      6: "Většina slov je z mého oboru, ale některá věc má dvě jména nebo hláška mluví o systému, ne o mé práci."
+      8: "Všechny obrazovky, tlačítka, stavy a hlášky používají slova ze zadání, jedna věc má všude jedno jméno a tlačítko říká, co udělá."
+      10: "Jako 8 a navíc nový kolega podle slov na obrazovce pozná, co má udělat, bez návodu."
+    sources:
+      - "Jakob Nielsen, 10 Usability Heuristics for User Interface Design, 1994 (aktualizováno 2024), https://www.nngroup.com/articles/ten-usability-heuristics/: shoda se skutečným světem, slova uživatele."
+  - id: telefon_kde_ho_potrebuju
+    name: "Na telefonu udělám to, co dělám mimo stůl"
+    weight: 7
+    anchors:
+      4: "Úloha, kterou zadání dělá na telefonu, na něm nejde dokončit (přetéká, posouvá se do stran, tlačítka nejdou trefit)."
+      6: "Úloha na telefonu jde, ale na některé obrazovce úlohy musím posouvat obsah do stran nebo některý ovládací prvek nespolehlivě trefím prstem."
+      8: "Úlohy, které zadání dělá mimo stůl, na telefonu sám dokončím bez posouvání do stran, ovládací prvky spolehlivě trefím prstem a stavy chyby a načítání jsou i na telefonu (technické kontroly přetékání a velikosti cílů hodnotí odborník; jejich výsledek beru jen jako fakt)."
+      10: "Jako 8 a navíc je jasné, co se dělá jen na počítači a proč, a na telefonu jsou terénní úlohy stejně rychlé jako u stolu."
+    sources:
+      - "Steve Krug, Don't Make Me Think, Revisited, 2014, https://sensible.com/dont-make-me-think/: kapitola o mobilu - na telefonu se nesmí obětovat použitelnost úlohy."

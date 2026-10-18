@@ -1,0 +1,16 @@
+# Typ „webová aplikace“ (P116, 18. 10. 2026): společná část obou rolí. Měřítka rolí: webapp.<role>.<místo>.yaml
+# (struktura, vzhled) a webapp.<role>.yaml (hotová aplikace); autoři v AUTHORS.yaml, zadání v role-briefs/webapp-*.md.
+# Místa aplikace: struktura, vzhled, web; logo jen u nové značky; sdělení a pohyb se vynechávají (aid-ui-critic.py APP_SKIP).
+type: webapp
+title: "Webová aplikace (interní nebo za přihlášením)"
+# Hodnotí se až nad aplikací v kódu projektu (brána běhu), ne ve studiu: nic - úlohy ověřuje brána, ne role.
+launch_only: {}
+# Úlohy aplikace jsou v modelu docs/design/screens.json; test úkolů prezentačního webu (task_test) se nepoužije.
+task_test: []
+# Podklady ke spuštění aplikace: karta hned po volbě druhu (aid-ui-launch.py card --type webapp).
+launch_inputs:
+  - {id: where_runs, name: "Kde aplikace poběží (adresa, síť, kdo ji spravuje)", public: false, critical: true, brief: "adresa pro bránu běhu (docs/ui/nasazeni.json) a správce"}
+  - {id: test_access, name: "Testovací přístup a role (účty jen pro test, nikdy skutečné)", public: false, critical: true, brief: "uložené přihlášení prohlížeče pro bránu (.aid-ui/test-credentials.json nebo storageState)"}
+  - {id: sample_data, name: "Ukázková nebo anonymizovaná data pro obrazovky", public: false, critical: true, brief: "aby úlohy a stavy šly ověřit bez skutečných dat"}
+  - {id: owner_decides, name: "Kdo za vlastníka produktu schvaluje úlohy", public: false, critical: false, owner: PM, brief: "výchozí PM; delegace jen odkazem na PM stránku studia a zápisem rozhodnutí"}
+components: []

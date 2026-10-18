@@ -506,7 +506,9 @@
     "skills/ui-design/references/local/struktura-postup.md",
     "skills/ui-design/critic/web-local.tech.struktura.yaml",
     "skills/ui-design/critic/web-local.owner.struktura.yaml",
-    "skills/ui-design/references/local/aplikace-postup.md"
+    "skills/ui-design/references/local/aplikace-postup.md",
+    "skills/ui-design/critic/webapp.tech.struktura.yaml",
+    "skills/ui-design/critic/webapp.owner.struktura.yaml"
    ],
    "receipt": true
   },
@@ -516,7 +518,9 @@
     "skills/ui-design/references/local/struktura-postup.md",
     "skills/ui-design/critic/web-local.tech.struktura.yaml",
     "skills/ui-design/critic/web-local.owner.struktura.yaml",
-    "skills/ui-design/references/local/aplikace-postup.md"
+    "skills/ui-design/references/local/aplikace-postup.md",
+    "skills/ui-design/critic/webapp.tech.struktura.yaml",
+    "skills/ui-design/critic/webapp.owner.struktura.yaml"
    ],
    "receipt": true
   },
@@ -571,7 +575,9 @@
     "skills/ui-design/references/local/vzhled-vzor/tokens.css",
     "skills/ui-design/references/local/pohyb-znacky.md",
     "skills/ui-design/critic/web-local.tech.vzhled.yaml",
-    "skills/ui-design/critic/web-local.owner.vzhled.yaml"
+    "skills/ui-design/critic/web-local.owner.vzhled.yaml",
+    "skills/ui-design/critic/webapp.tech.vzhled.yaml",
+    "skills/ui-design/critic/webapp.owner.vzhled.yaml"
    ],
    "receipt": true
   },
@@ -626,7 +632,9 @@
     "skills/ui-design/critic/web-local.tech.vzhled.yaml",
     "skills/ui-design/critic/web-local.owner.vzhled.yaml",
     "skills/ui-design/critic/web-local.tech.struktura.yaml",
-    "skills/ui-design/critic/web-local.owner.struktura.yaml"
+    "skills/ui-design/critic/web-local.owner.struktura.yaml",
+    "skills/ui-design/critic/webapp.tech.yaml",
+    "skills/ui-design/critic/webapp.owner.yaml"
    ],
    "receipt": false
   },

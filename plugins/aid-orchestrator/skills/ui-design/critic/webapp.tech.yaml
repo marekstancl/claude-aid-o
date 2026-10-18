@@ -1,0 +1,97 @@
+role: tech
+place: web
+applies_to: [webapp]
+persona:
+  who: "Nezávislý seniorní UX a interakční designér webových aplikací a technik kvality, který provádí poslední kontrolu hotové aplikace před klientem."
+  wants: "Prokázat, že uživatelé dokončí skutečné úlohy správně, přístupně a bez ztráty dat i při chybě, přerušení nebo omezeném oprávnění."
+  rules:
+    - "Hodnotí spuštěnou aplikaci, výsledky brány a kód; snímek šťastné cesty není důkaz funkčnosti."
+    - "Selhání automatického testu je nález, dokud není doložena jmenná a věcně platná výjimka."
+    - "Aplikace bez ošetřených stavů a obnovy nemůže v příslušných kritériích dosáhnout 8, i když běžná cesta funguje."
+    - "Skutečná data, produkční účty a jiné klientské dodávky patří do readiness; nesmějí být nahrazeny vymyšlenými tvrzeními vydávanými za skutečnost."
+    - "V dalších kolech nejprve ověří předchozí nálezy; nové stylistické drobnosti skóre nesnižují, věcné chyby ano. Věcnou chybou aplikace je také nedokončitelná úloha, ztráta či přepsání dat, nevratná akce bez ochrany, selhaný scénář brány nebo porušení WCAG 2.2 AA."
+criteria:
+  - id: verified_task_completion
+    name: "Dokončení úloh a ověřitelný výsledek"
+    weight: 22
+    anchors:
+      4: "Některá podstatná úloha nejde dokončit, její výsledek není ověřitelný, „app_flows“ selhává bez platné výjimky nebo u existující aplikace některá dnešní úloha v nové aplikaci nedoběhne. Jediná taková úloha znamená nejvýše 4."
+      6: "Běžné cesty většinou doběhnou, ale scénáře úloha × stav chybějí či selhávají, vedlejší role nebo krajní vstupy mají mezery nebo srovnání s dnešními úlohami není úplné."
+      8: "„app_flows“ a ruční průchody dokazují dokončení všech modelovaných úloh pro příslušné role i scénářů úloha × stav ze sedmi stavů UA-1; nepokrytý stav má jmennou výjimku PM, výsledek je viditelný a u existující aplikace doběhne srovnání každé dnešní úlohy s její náhradou."
+      10: "Aplikace navíc prokazuje správnost hraničních a souběžných scénářů, kritické změny mají auditní stopu a testy ověřují nejen zobrazené potvrzení, ale také skutečný uložený výsledek."
+    sources:
+      - "AID Platform, Úlohy a stavy webové aplikace UA-1, 2026, references/standards/webapp-tasks-states-standard.md: běžná cesta, sedm stavů a ověřitelný výsledek."
+      - "Jakob Nielsen, 10 Usability Heuristics for User Interface Design, 1994, https://www.nngroup.com/articles/ten-usability-heuristics/: viditelnost stavu a zpětná vazba."
+  - id: resilience_recovery
+    name: "Odolnost, chyby a obnova bez ztráty dat"
+    weight: 20
+    anchors:
+      4: "Vnucená chyba smaže vstup, zanechá aplikaci ve slepé uličce, umožní nechtěné dvojí provedení nebo „task_recovery“ selhává. Jediná vnucená chyba, která smaže vstup podstatné úlohy, znamená nejvýše 4."
+      6: "Běžná validace a opakování požadavku fungují, ale koncepty, výpadek, nejistý výsledek, souběžná změna nebo ochrana proti duplicitě nejsou spolehlivě ošetřeny."
+      8: "Validace ukazuje chybu u pole a drží data, provozní selhání nabízí bezpečnou další cestu, rozpracovaná práce přežije přerušení, opakování nevytvoří duplicitu, souběh nevede k tichému přepsání a „task_recovery“ prochází."
+      10: "Odolnost pokrývá částečné a opožděné výsledky, offline či kolísavé spojení, idempotentní opakování a obnovu napříč relacemi; testy i auditní stopa přesně dokládají, co bylo a nebylo uloženo."
+    sources:
+      - "AID Platform, Úlohy a stavy webové aplikace UA-2, UA-5 a UA-7, 2026, references/standards/webapp-tasks-states-standard.md: zachování vstupu, náprava, koncept a souběh."
+      - "Jakob Nielsen, Error-Message Guidelines, 2001, https://www.nngroup.com/articles/error-message-guidelines/: konkrétní vysvětlení a konstruktivní náprava."
+      - "Don Norman, The Design of Everyday Things, 2013, https://mitpress.mit.edu/9780262525671/the-design-of-everyday-things/: prevence chyb a bezpečné zotavení."
+  - id: states_permissions
+    name: "Stavy obrazovek, oprávnění a bezpečné akce"
+    weight: 15
+    anchors:
+      4: "Některá obrazovka má prázdnou plochu či nekonečné načítání, zakázaná role narazí na obecnou chybu nebo nevratná akce proběhne bez potvrzení či bezpečného vrácení. Jediná nevratná akce bez této ochrany znamená nejvýše 4."
+      6: "Většina stavů je přítomná, ale některé nemají první krok, vysvětlení, bezpečné opakování, blokování odeslání, oznámení průběhu nebo jasnou cestu pro uživatele bez oprávnění včetně návratu po přihlášení."
+      8: "„app_states“ dokládá prázdno, načítání, chybu a obsah každé obrazovky; načítání pojmenovává děj, oznamuje průběh a blokuje duplicitní akci, role vidí jen povolené možnosti, zakázaný vstup vysvětluje důvod i další kontakt, přihlášení vrací uživatele k úloze a nevratná akce uvádí předmět a dopad nebo nabízí bezpečné vrácení."
+      10: "Stavy zůstávají přesné při částečných datech a změně oprávnění za běhu, bezpečnost je vynucena také na serveru a testy dokazují správnou volbu potvrzení či vrácení podle skutečné vratnosti a rizika."
+    sources:
+      - "AID Platform, Úlohy a stavy webové aplikace UA-3, UA-4 a UA-6, 2026, references/standards/webapp-tasks-states-standard.md: první krok, průběh, role a cesta dál."
+      - "Scott Hurff, Why Your User Interface Is Awkward: You’re Ignoring the UI Stack, 2015, https://www.scotthurff.com/posts/why-your-user-interface-is-awkward-youre-ignoring-the-ui-stack/: úplná sada stavů včetně částečného výsledku."
+      - "Kate Kaplan, Designing Empty States in Complex Applications, 2020, https://www.nngroup.com/articles/empty-state-interface-design/: vysvětlení prázdna a první krok."
+      - "Jakob Nielsen, Confirmation Dialogs Can Prevent User Errors – If Not Overused, 2018, https://www.nngroup.com/articles/confirmation-dialog/: ochrana rizikových akcí."
+      - "W3C, WAI-ARIA Authoring Practices Guide, 2025, https://www.w3.org/WAI/ARIA/apg/: sémantika dialogů a dynamických stavů."
+  - id: navigation_data_operations
+    name: "Navigace, hromadné operace a důvěryhodná data"
+    weight: 13
+    anchors:
+      4: "Hluboký odkaz neobnoví stejný stav, Zpět ztratí práci či kontext, hromadná akce zatají rozsah nebo dílčí chyby nebo graf nemá shrnutí a tabulkovou náhradu. Jediná nevratná hromadná akce bez zobrazení počtu a dopadu znamená nejvýše 4."
+      6: "Základní navigace a datové operace fungují, ale filtry, stránkování, modalita, výběr více položek, částečný úspěch nebo grafické náhrady mají nedostatky."
+      8: "Sdílené stavy jsou v adrese a Zpět předvídatelně obnoví kontext; hromadné akce potvrzují počet a dopad a hlásí úspěšné i neúspěšné položky; grafy mají popisky, shrnutí a datovou tabulku a jejich výběr i hodnoty jsou zahrnuty v „keyboard_flows“."
+      10: "Aplikace obnovuje filtry a výběry i v dlouhých relacích, ukazuje zdroj a aktuálnost kritických dat, eviduje každou významnou hromadnou změnu a dovoluje zopakovat pouze neúspěšné položky bez opakování úspěšných."
+    sources:
+      - "AID Platform, Úlohy a stavy webové aplikace UA-8 až UA-11, 2026, references/standards/webapp-tasks-states-standard.md: hluboké odkazy, Zpět, hromadné akce a náhrada grafů."
+      - "Jenifer Tidwell, Charles Brewer a Aynne Valencia, Designing Interfaces, 2020, https://www.oreilly.com/library/view/designing-interfaces-3rd/9781492051954/: vzory seznamů, navigace a manipulace s více objekty."
+  - id: accessibility_keyboard
+    name: "WCAG 2.2 AA a dokončení úlohy klávesnicí"
+    weight: 15
+    anchors:
+      4: "Zásadní úlohu nelze dokončit klávesnicí, fokus je neviditelný či uvězněný nebo audit odhaluje závažné bariéry bez výjimky. Jediná klávesnicí nedokončitelná podstatná úloha znamená nejvýše 4."
+      6: "Běžná cesta klávesnicí funguje a axe nemá zásadní chyby, ale složitá komponenta, pořadí fokusu, návrat z dialogu, živá oznámení, reflow, graf, hromadný výběr nebo dotykové cíle mají mezery."
+      8: "„keyboard_flows“ prochází pro podstatné úlohy včetně hromadného výběru a hodnot grafu, fokus je viditelný a nezakrytý, sémantika a názvy jsou správné, dynamické změny jsou oznámené, reflow funguje, cíle splňují WCAG 2.5.8 a běžné dotykové cíle mají podle design systému nejméně 44 CSS px; axe nemá nevyřešené závažné nálezy."
+      10: "Ruční test se čtečkou a více vstupními režimy potvrzuje rovnocennou práci; aplikace zvládá zvětšení, vysoký kontrast a omezený pohyb a regresní testy pokrývají komponenty i úplné úlohy."
+    sources:
+      - "W3C, Web Content Accessibility Guidelines 2.2, 2023, https://www.w3.org/TR/WCAG22/: požadavky AA včetně klávesnice, reflow, chyb, fokusu podle 2.4.7 a 2.4.11 a cílové velikosti podle 2.5.8."
+      - "W3C, WAI-ARIA Authoring Practices Guide, 2025, https://www.w3.org/WAI/ARIA/apg/: klávesové vzory a správa fokusu."
+      - "AID Platform, Design systém aplikací, 2026, references/standards/webapp-design-system-standard.md: běžné dotykové cíle nejméně 44 CSS px."
+  - id: performance_feedback
+    name: "Odezva a stabilita rozhraní"
+    weight: 8
+    anchors:
+      4: "Po akci není vidět okamžitá změna stavu, ovládání dovolí nechtěné dvojí odeslání, čekání může zůstat bez vysvětlení nebo rozložení při načtení uskakuje tak, že uživatel aktivuje jiný prvek."
+      6: "Běžné akce dávají základní zpětnou vazbu, ale některá významná trasa při pomalejší síti či větším objemu dat na chvíli působí nečinně, dovolí opakovanou aktivaci nebo mění rozložení pracovních prvků."
+      8: "Na reprezentativních úlohových trasách běžící aplikace ihned potvrzuje přijetí akce, po dobu požadavku bezpečně blokuje dvojí odeslání, při delší operaci průběžně vysvětluje čekání a kostra pracovních prvků zůstává stabilní na počítači i telefonu při omezené síti."
+      10: "Automatické regresní scénáře sledují dobu odezvy a stabilitu po jednotlivých úlohách, velká data i kolísavé spojení mají předvídatelnou degradaci a provozní telemetrie spojuje prodlevu s konkrétní trasou bez narušení správnosti či přístupnosti."
+    sources:
+      - "Jakob Nielsen, Response Times: The 3 Important Limits, 1993, https://www.nngroup.com/articles/response-times-3-important-limits/: okamžitá odezva a průběžná zpětná vazba při čekání."
+      - "Raluca Budiu, Progress Indicators Make a Slow System Less Insufferable, 2014, https://www.nngroup.com/articles/progress-indicators/: srozumitelná informace během delší operace."
+      - "Google Chrome Team, Web Vitals, 2024, https://web.dev/articles/vitals: pozorovatelná odezva, interaktivita a stabilita rozložení."
+  - id: engineering_readiness
+    name: "Kód, kontrakty a provozní připravenost"
+    weight: 7
+    anchors:
+      4: "Kód obchází model, chybí smlouvy „data-aid-action“ či „data-aid-screen“, testovací režim není deterministický nebo skutečně vypadající podnikové údaje nemají zdroj ani označení jako testovací."
+      6: "Hlavní smlouvy a testy existují, ale pokrytí stavů, chyb, tras, rolí nebo oddělení klientských dodávek je neúplné."
+      8: "Kód odpovídá modelu, stabilní smlouvy a režim „?aid-test=1&stav=“ reprodukují testy úloh a stavů a readiness výslovně odděluje chybějící klientské vstupy od vad implementace a poskytuje bezpečné testovací náhrady."
+      10: "Kontrakty jsou verzované a automaticky kontrolované napříč modelem, UI a službami, observabilita váže provozní chyby na konkrétní úlohy a nasazení má ověřenou migraci i bezpečný návrat."
+    sources:
+      - "Ian Robinson, Consumer-Driven Contracts: A Service Evolution Pattern, 2006, https://martinfowler.com/articles/consumerDrivenContracts.html: automaticky ověřované smlouvy."
+      - "Sam Newman, Building Microservices, 2021, https://www.oreilly.com/library/view/building-microservices-2nd/9781492034018/: kontraktní testování, observabilita a odolné integrační hranice."
+      - "Google, Engineering Practices: How to Do a Code Review, 2025, https://google.github.io/eng-practices/review/reviewer/: kontrola správnosti a testů bez blokování stylistickými drobnostmi."

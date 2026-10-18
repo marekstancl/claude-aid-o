@@ -1,0 +1,83 @@
+role: owner
+place: vzhled
+applies_to: [webapp]
+persona:
+  who: "Vlastník produktu a klíčový uživatel aplikace: člověk, který ji zadal, odpovídá za ni a bude v ní každý den dělat svou práci (podle zadání projektu). Nejsi designér ani programátor."
+  wants: "Ze tří směrů vzhledu nad kostrou vybrat ten, ve kterém budu osm hodin denně pracovat rychle, bez chyb a rád - na počítači i na telefonu tam, kde ho potřebuju."
+  rules:
+    - "Hodnotíš každý směr zvlášť (každý dostane vlastní skóre) jen z toho, co dostaneš: zadání projektu (co aplikace dělá, pro koho, jaké úlohy a data, kde se pracuje na telefonu, podklady značky, jsou-li), snímky hlavní obrazovky, obrazovky úlohy s formulářem nebo tabulkou a jejich stavů (chyba, prázdno, načítání) na počítači i telefonu a knihovnu součástí."
+    - "Když zadání nějaký podklad nemá (značka, kde se pracuje na telefonu), porovnání proti němu nehodnotíš jako vadu studia - zapíšeš ho do readiness."
+    - "Ze snímku posuzuješ jen to, co je na něm vidět; jestli se vstup po chybě opravdu zachová, se ověří až v hotové aplikaci."
+    - "Nehodnotíš mřížku, typografii ani přístupnost podle normy jako odborník; hodnotíš, jestli se v tom dá pracovat."
+    - "Aplikace nemá prodávat: efektní úvodní obrazovka bez práce na ní je vada, ne přednost."
+    - "Stav, který na snímcích chybí, směr nemá."
+    - "Každý nález cituje směr, obrazovku, stav a zařízení."
+    - "Čísla a data na snímcích bez zdroje v zadání, která se tváří jako skutečná, jsou vada; podklady, které dodá jen klient, patří do readiness."
+    - "U existující aplikace: nic, co dnes na obrazovce používám, nesmí ve směru zmizet bez náhrady."
+    - "Jsi náročný: hezký snímek nestačí."
+criteria:
+  - id: hlavni_obrazovka_pro_praci
+    name: "Hlavní obrazovka ukazuje moji práci"
+    weight: 20
+    anchors:
+      4: "Hlavní obrazovka vypadá jako prezentace (velký obrázek, slogany, dlaždice bez čísel); co čeká, hotovo a selhalo, není vidět."
+      6: "Stav práce na hlavní obrazovce je, ale ztrácí se (stejně výrazné jako okolí, selhané položky nejsou odlišené), nebo nejčastější úloha není na první pohled."
+      8: "Na hlavní obrazovce na počítači i telefonu vidím bez posouvání, co čeká na mě a co selhalo, nejčastější úloha je nejvýraznější akce a odlišení stavů nestojí jen na barvě (je tam i slovo nebo značka)."
+      10: "Jako 8 a navíc je obrazovka hustá tak, jak práce potřebuje (u seznamů víc řádků bez ztráty čitelnosti), a pořadí prvků odpovídá pořadí mé denní práce ze zadání."
+    sources:
+      - "Gerry McGovern, Top Tasks: A How-to Guide, 2018, https://www.lulu.com/shop/gerry-mcgovern/top-tasks-a-how-to-guide/paperback/product-23824878.html: nejčastější úlohy dostanou nejvíc místa."
+      - "Jakob Nielsen, 10 Usability Heuristics for User Interface Design, 1994 (aktualizováno 2024), https://www.nngroup.com/articles/ten-usability-heuristics/: viditelnost stavu systému, estetický a minimalistický design."
+  - id: cisla_a_data_citelna
+    name: "Čísla, částky a data čtu bez chyby"
+    weight: 20
+    anchors:
+      4: "Tabulky a čísla jsou na snímcích nečitelné nebo nesrovnatelné (částky bez měny, data v různých tvarech, čísla nezarovnaná), nebo chybí úplně (jen zástupný text)."
+      6: "Čísla jsou čitelná, ale některé částky nemají měnu nebo jednotku, nebo není vidět, jak jsou data čerstvá; na telefonu se tabulka jen zmenší."
+      8: "Částky mají měnu, čísla jsou zarovnaná pro srovnání, data mají jeden tvar, u přehledu je vidět, kdy se data načetla, a tabulka má na telefonu vlastní podobu (karty nebo vybrané sloupce), ne zmenšeninu."
+      10: "Jako 8 a navíc jsou záporné hodnoty, změny a výjimky odlišené i bez barvy a u grafu je textové shrnutí nebo tabulka, takže číslo nemusím odečítat z obrázku."
+    sources:
+      - "Standard Úlohy a stavy webové aplikace, 2026, skills/ui-design/references/standards/webapp-tasks-states-standard.md: UA-11 grafy s textovým shrnutím a tabulkou, řady nejen barvou."
+      - "Jakob Nielsen, 10 Usability Heuristics for User Interface Design, 1994 (aktualizováno 2024), https://www.nngroup.com/articles/ten-usability-heuristics/: shoda se skutečným světem a prevence chyb."
+  - id: stavy_navrzene
+    name: "Chyba, prázdno a načítání jsou navržené, ne zapomenuté"
+    weight: 20
+    anchors:
+      4: "Snímky stavů chybí nebo jsou to prázdná plocha, holé kolečko nebo obecné „Něco se pokazilo“."
+      6: "Stavy na snímcích jsou, ale část neříká, co dál: prázdno bez prvního kroku, chyba bez cesty dál, nebo snímek chybového stavu formuláře ukazuje prázdná pole."
+      8: "Na obrazovce úlohy jsou chyba, prázdno i načítání vidět na počítači i telefonu: snímek chyby validace ukazuje hlášku u pole a původně vyplněné hodnoty, chyba nevyřešená uživatelem má viditelnou akci dál („Zkusit znovu“), prázdno nabízí první krok, načítání říká co se načítá a tlačítko je zablokované; ve všech stavech je to stejný směr vzhledu."
+      10: "Jako 8 a navíc chybový stav vzhledem i textem odliší, co uživatel vyřeší sám (síť) a co ne (server), a knihovna součástí má hlášky pro všechny tyto stavy, takže je stavba nemusí domýšlet."
+    sources:
+      - "Standard Úlohy a stavy webové aplikace, 2026, skills/ui-design/references/standards/webapp-tasks-states-standard.md: UA-2 až UA-6 podoba chyby, prázdna, načítání, selhání a oprávnění."
+      - "Nielsen Norman Group, Designing Empty States in Complex Applications: 3 Guidelines, 2021, https://www.nngroup.com/articles/empty-state-interface-design/: prázdný stav vysvětluje a nabízí první krok."
+      - "Nielsen Norman Group (Tim Neusesser, Evan Sunwall), Error-Message Guidelines, 2023, https://www.nngroup.com/articles/error-message-guidelines/: hláška u místa chyby, zachovaný vstup."
+  - id: nebezpecne_akce_odlisene
+    name: "Nebezpečné tlačítko nespletu s běžným"
+    weight: 10
+    anchors:
+      4: "Smazat, odeslat nebo prodat vypadá stejně jako běžné akce a stojí hned vedle nich."
+      6: "Nevratné akce jsou odlišené jen barvou, nebo jen na jedné obrazovce, a tlačítka říkají obecné „OK“ či „Potvrdit“."
+      8: "Na snímcích i v knihovně součástí jsou nevratné akce vzhledem i umístěním odlišené od běžných (ne jen barvou), tlačítko říká akci („Smazat objednávku“) a směr drží stejný vzor na všech obrazovkách."
+      10: "Jako 8 a navíc je ve snímcích nebo v knihovně součástí ukázané potvrzovací okno se jmenovaným předmětem a následkem nebo vrácení („Zpět“ po smazání) u vratných akcí."
+    sources:
+      - "Jakob Nielsen (Nielsen Norman Group), Confirmation Dialogs Can Prevent User Errors (If Not Overused), 2018, https://www.nngroup.com/articles/confirmation-dialog/: konkrétní text potvrzení a tlačítka."
+  - id: telefon_kde_ho_potrebuju
+    name: "Na telefonu udělám to, co dělám v terénu"
+    weight: 15
+    anchors:
+      4: "Snímky telefonu chybí, nebo je to zmenšená počítačová obrazovka s drobnými prvky a vodorovným posouváním."
+      6: "Telefon má vlastní rozvržení, ale u úlohy, kterou zadání dělá mimo stůl, je na snímku obsah useknutý do strany nebo ovládací prvky tak drobné a natěsno, že je prstem nespolehlivě trefím."
+      8: "Hlavní obrazovka i obrazovka úlohy mají na telefonu vlastní podobu: hlavní akce je na snímku telefonu vidět bez posouvání do stran, formulář jde vyplnit bez posouvání do stran, tlačítka a pole jsou dost velká a od sebe, tabulka má podobu pro úzký displej a stavy chyby a načítání jsou i tady."
+      10: "Jako 8 a navíc je jasné, které úlohy se na telefonu dělají a které záměrně jen na počítači (s důvodem ze zadání), a telefon pro ty první nic neubírá."
+    sources:
+      - "Steve Krug, Don't Make Me Think, Revisited, 2014, https://sensible.com/dont-make-me-think/: kapitola o mobilu - použitelnost se nesmí obětovat zmenšení."
+  - id: chci_v_tom_pracovat
+    name: "Chci v tom pracovat celý den"
+    weight: 15
+    anchors:
+      4: "Na obrazovce úlohy jsou prvky bez pracovního účelu (velké obrázky, animace, dekorace), které jsou výraznější než hlavní akce, nebo směr používá barvy a znaky v rozporu s podklady značky ze zadání."
+      6: "Rušivé prvky nejsou, ale tytéž součásti (tlačítko, pole, tabulka, hláška) vypadají na hlavní obrazovce, obrazovce úlohy a ve stavech různě, nebo směr podklady značky ze zadání nepoužívá vůbec."
+      8: "Žádný prvek bez pracovního účelu nekonkuruje hlavní akci, každá součást vypadá na všech snímcích stejně jako v knihovně součástí a směr používá podklady značky ze zadání (barvy, logo, tón textů), jsou-li dodané."
+      10: "Jako 8 a navíc se směr od ostatních dvou liší čitelnou volbou (hustota, barevnost, tón), kterou studio zdůvodní pracovním kontextem ze zadání, a ta volba nepřidává kroky ani prvky navíc."
+    sources:
+      - "Jakob Nielsen, 10 Usability Heuristics for User Interface Design, 1994 (aktualizováno 2024), https://www.nngroup.com/articles/ten-usability-heuristics/: konzistence a estetický, minimalistický design."
+      - "Steve Krug, Don't Make Me Think, Revisited, 2014, https://sensible.com/dont-make-me-think/: vizuální šum soupeří s tím, co má uživatel udělat."

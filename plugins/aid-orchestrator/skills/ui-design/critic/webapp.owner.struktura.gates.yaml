@@ -1,0 +1,10 @@
+role: owner
+place: struktura
+gates:
+  - {criterion: denni_ulohy_pokryte, min: 7, why: "Úloha, kterou nejde v kostře dokončit nebo nemá náhradu za dnešek, je nedokončitelná práce - to se později už jen draze dohání."}
+  - {criterion: prace_se_neztrati, min: 7, why: "Ztráta rozdělané práce je nevratná; když ji struktura neřeší, stavba ji nedomyslí."}
+  - {criterion: nevratne_akce_s_potvrzenim, min: 7, why: "Smazání, odeslání nebo nákup bez potvrzení je chyba, kterou nejde vzít zpět."}
+  - {criterion: stav_prace_na_prvni_pohled, min: 6, why: "Bez přehledu o čekající a selhané práci se aplikace denně nepoužívá, ale dá se doplnit ve vzhledu."}
+  - {criterion: duvera_v_data, min: 7, why: "Aplikace pracuje s penězi a daty; neurčený zdroj nebo ukázková data vydávaná za skutečná se v kostře snadno opraví, ve stavbě už ne. Chybějící přístup od klienta to nesnižuje (readiness)."}
+  - {criterion: slova_meho_oboru, min: 6, why: "Špatná slova se opraví levně, ale pod 6 už uživatel nerozumí, co dělá."}
+weighted_min: 7.5

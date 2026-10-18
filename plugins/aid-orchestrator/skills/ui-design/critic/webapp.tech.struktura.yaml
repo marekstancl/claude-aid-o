@@ -1,0 +1,83 @@
+role: tech
+place: struktura
+applies_to: [webapp]
+persona:
+  who: "Zkušený UX a interakční designér webových aplikací a technik kvality, který posuzuje model obrazovek, úloh a proklikávací kostru."
+  wants: "Ověřit, že každou podstatnou úlohu lze dokončit, ověřit její výsledek a bezpečně pokračovat po chybě nebo přerušení, aniž by implementační tým musel domýšlet chování."
+  rules:
+    - "Hodnotí pouze doložitelné chování v modelu, kostře a výsledcích testů, nikoli záměr autora ani klientovu spokojenost."
+    - "Každou úlohu kontroluje v sedmi stavech UA-1; nepoužitelný stav musí mít konkrétní odůvodnění „nenastává, protože …“."
+    - "Tvrzení o podniku, uživatelích nebo datech bez zdroje je nález; chybějící klientské účty či skutečná data se posuzují jako readiness, ne jako vada návrhu."
+    - "V dalších kolech nejprve ověří předchozí nálezy; nové stylistické drobnosti skóre nesnižují, věcné chyby ano. Věcnou chybou aplikace je také nedokončitelná úloha, ztráta či přepsání dat, nevratná akce bez ochrany, selhaný scénář brány nebo porušení WCAG 2.2 AA."
+criteria:
+  - id: task_model
+    name: "Úplnost úloh a ověřitelnost výsledků"
+    weight: 24
+    anchors:
+      4: "Model uvádí jen obrazovky či šťastné cesty, některá podstatná úloha nemá roli, kroky, ověřitelné „hotovo, když…“ nebo sedm stavů; u existující aplikace některá dnešní podstatná úloha nemá přiřazenou náhradu. Jediná taková nedokončitelná nebo nenahrazená úloha znamená nejvýše 4."
+      6: "Hlavní úlohy mají role, kroky a výsledky, ale pokrytí sedmi stavů je nepravidelné, důvody „nenastává“ jsou obecné nebo vazba mezi úlohou, akcí a cílovou obrazovkou není vždy jednoznačná."
+      8: "Všechny doložené podstatné úlohy mají roli, vstup, kroky, ověřitelný výsledek a všech sedm stavů s konkrétním chováním či jmennou výjimkou s věcným důvodem; u existující aplikace má každá dnešní úloha odkaz na svou novou náhradu a model umožňuje odvodit testovací scénáře."
+      10: "Mapa navíc pokrývá varianty rolí, hraniční situace a návazné úlohy, má strojově kontrolovatelnou vazbu požadavek–dnešní úloha–nová úloha–obrazovka–akce–výsledek–test a před implementací odhaluje rozpory."
+    sources:
+      - "AID Platform, Úlohy a stavy webové aplikace UA-1, 2026, references/standards/webapp-tasks-states-standard.md: mapa úloh, sedm stavů, ověřitelné výjimky a výsledky."
+      - "Alan Cooper a kol., About Face: The Essentials of Interaction Design, 2014, https://www.wiley.com/en-us/About+Face%3A+The+Essentials+of+Interaction+Design%2C+4th+Edition-p-9781118766576: návrh podle cílů a scénářů uživatelů."
+      - "Jakob Nielsen, 10 Usability Heuristics for User Interface Design, 1994, https://www.nngroup.com/articles/ten-usability-heuristics/: viditelnost stavu a shoda se skutečnou prací."
+  - id: failure_recovery
+    name: "Chyby, zachování dat a obnova práce"
+    weight: 20
+    anchors:
+      4: "Selhání končí obecnou hláškou, slepou uličkou nebo ztrátou vstupu; souběh, přerušení či opakované odeslání nejsou řešeny. Jediná vnucená chyba, která smaže rozpracovaný vstup podstatné úlohy, znamená nejvýše 4."
+      6: "Validace a část provozních chyb mají popis a další krok, ale zachování rozepsaných dat, koncept, souběžná změna nebo bezpečné opakování nejsou určeny pro všechny významné úlohy."
+      8: "Model pro každou významnou úlohu určuje místo chyby, zachovaný vstup, srozumitelnou nápravu, opakování bez duplicity, obnovu po přerušení a rozpoznání souběžné úpravy; kostra tato chování předvádí."
+      10: "Návrh navíc rozlišuje stav požadavku a skutečný výsledek operace, řeší nejistý výsledek, idempotenci a auditní stopu a reprodukovatelný test dokládá bezpečnou obnovu bez hádání, zda změna proběhla."
+    sources:
+      - "AID Platform, Úlohy a stavy webové aplikace UA-2, UA-5 a UA-7, 2026, references/standards/webapp-tasks-states-standard.md: zachování vstupu, cesta k nápravě a obnova po přerušení."
+      - "Jakob Nielsen, Error-Message Guidelines, 2001, https://www.nngroup.com/articles/error-message-guidelines/: konkrétní, viditelné a napravitelné chyby."
+      - "Don Norman, The Design of Everyday Things, 2013, https://mitpress.mit.edu/9780262525671/the-design-of-everyday-things/: prevence chyb, omezení a možnost zotavení."
+  - id: information_architecture
+    name: "Architektura obrazovek, navigace a bezpečnost akcí"
+    weight: 16
+    anchors:
+      4: "Navigace kopíruje databázové entity místo úloh, důležité cíle jsou slepé, Zpět či hluboké odkazy nejsou určeny nebo nevratná akce může proběhnout bez potvrzení či vrácení. Jediná nevratná individuální nebo hromadná akce bez této ochrany znamená nejvýše 4."
+      6: "Hlavní trasy jsou pochopitelné a destruktivní akce většinou chráněné, ale stav v adrese, návrat, modální historie, vedlejší akce nebo výsledek hromadné operace zůstávají nejasné."
+      8: "Obrazovky jsou uspořádány podle úloh, každá akce má cíl a druh přechodu, sdílené stavy mají hluboký odkaz a Zpět je předvídatelné. Potvrzení nevratné akce pojmenuje akci, předmět a dopad včetně počtu či částky a výchozí volba není nevratná; hromadná akce hlásí „povedlo se X, nepovedlo se Y“ a určí neúspěšné položky."
+      10: "Architektura drží orientaci ve složitých tocích, zachovává kontext seznamů, filtrů a výběrů, bezpečně řeší přímé vstupy i historii a doloženě nahrazuje potvrzení vratnou operací všude, kde je návrat skutečně bezpečný."
+    sources:
+      - "AID Platform, Úlohy a stavy webové aplikace UA-8, UA-9 a UA-10, 2026, references/standards/webapp-tasks-states-standard.md: hluboké odkazy, Zpět a bezpečný rozsah hromadných akcí."
+      - "Jenifer Tidwell, Charles Brewer a Aynne Valencia, Designing Interfaces, 2020, https://www.oreilly.com/library/view/designing-interfaces-3rd/9781492051954/: vzory navigace, pracovních prostorů a operací nad objekty."
+      - "Jakob Nielsen, Confirmation Dialogs Can Prevent User Errors – If Not Overused, 2018, https://www.nngroup.com/articles/confirmation-dialog/: ochrana rizikových akcí bez nadbytečných přerušení."
+  - id: skeleton_testability
+    name: "Proklikávací kostra a testovatelnost stavů"
+    weight: 18
+    anchors:
+      4: "Kostra chybí, není stabilně dostupná nebo je převážně statická; akce nevedou na cíle, stavy nelze cíleně vyvolat nebo navrženou ochranu nevratné akce nelze v kostře projít."
+      6: "Hlavní cesta je proklikávací a část stavů lze zobrazit, ale parametr stavů, role, ochranné dialogy nebo automatické scénáře nepokrývají celý model."
+      8: "Stálá kostra odpovídá modelu, všechny zásadní akce vedou na určené cíle, navržená potvrzení lze skutečně projít a každá obrazovka má deterministicky dostupné stavy přes „?stav=“ s výsledky automatických testů úloh."
+      10: "Kostra funguje jako spustitelná specifikace: automaticky kontroluje shodu modelu a tras, umí kombinace rolí a stavů, dokazuje výsledky i negativní cesty a každé selhání lze reprodukovat stejným vstupem."
+    sources:
+      - "AID Platform, Úlohy a stavy webové aplikace, Enforcement, 2026, references/standards/webapp-tasks-states-standard.md: scénáře „úloha × stav“ a jmenné výjimky."
+      - "Ian Robinson, Consumer-Driven Contracts: A Service Evolution Pattern, 2006, https://martinfowler.com/articles/consumerDrivenContracts.html: spustitelná a ověřitelná smlouva."
+      - "Sam Newman, Building Microservices, 2021, https://www.oreilly.com/library/view/building-microservices-2nd/9781492034018/: automatizované ověřování kontraktů a chování při selhání."
+  - id: interaction_accessibility
+    name: "Interakční smlouva a přístupnost kostry"
+    weight: 10
+    anchors:
+      4: "Některou podstatnou úlohu nelze v kostře dokončit pomocí Tab, Enter, Mezerníku a šipek podle použitého vzoru, ovládací prvek nemá přístupný název nebo dialog uvězní či ztratí fokus."
+      6: "Základní úlohy klávesnicí fungují, ale složitá komponenta, návrat fokusu, orientační oblast, nadpis nebo oznámení přepnutého stavu zůstává chybné či nedoložené."
+      8: "Každá zásadní úloha má v kostře úplný klávesový průchod; stránky mají orientační oblasti a nadpisy, prvky přístupné názvy, fokus je viditelný a logický, dialog jej drží a vrací a „?stav=“ oznamuje změnu pomocí odpovídajícího „aria-live“ nebo „aria-busy“."
+      10: "Scénáře pro klávesnici a čtečku navíc ověřují fokus po chybě, otevření a zavření dialogu i změně trasy; automatické podmínky přijetí kontrolují názvy, pořadí a oznámení a ruční test potvrzuje srozumitelný výsledek bez vizuální nápovědy."
+    sources:
+      - "W3C, Web Content Accessibility Guidelines 2.2, 2023, https://www.w3.org/TR/WCAG22/: požadavky AA na klávesnici, názvy, strukturu, chyby a viditelný či nezakrytý fokus podle 2.4.7 a 2.4.11."
+      - "W3C, WAI-ARIA Authoring Practices Guide, 2025, https://www.w3.org/WAI/ARIA/apg/: klávesové vzory, přístupné názvy a správa fokusu složitých komponent."
+  - id: implementation_readiness
+    name: "Připravenost specifikace a datová důvěryhodnost"
+    weight: 12
+    anchors:
+      4: "Chybí identifikátory obrazovek či akcí, datové významy si odporují, graf nemá v modelu textové shrnutí a tabulku nebo návrh vydává domněnky za skutečná podniková fakta; implementace by vyžadovala zásadní produktové rozhodování."
+      6: "Jádro lze implementovat, ale část smluv „data-aid-screen“ a „data-aid-action“, stavů, oprávnění, formátů, grafických náhrad nebo závislostí není jednoznačná; chybějící klientské vstupy nejsou vždy označeny."
+      8: "Obrazovky a akce mají stabilní smlouvy, významy dat, oprávnění, formáty a stavové přechody jsou konzistentní; každý graf má textové shrnutí a datovou tabulku, neověřená tvrzení chybějí a klientské dodávky jsou oddělené v readiness seznamu s náhradou pro test."
+      10: "Specifikace je verzovatelná a strojově kontrolovatelná, obsahuje bezpečné testovací reprezentace bez předstírání reálných dat a její kontrakty, grafické náhrady a podmínky přijetí umožňují implementaci bez skrytých rozhodnutí."
+    sources:
+      - "AID Platform, Úlohy a stavy webové aplikace UA-11, 2026, references/standards/webapp-tasks-states-standard.md: graf má popisky, shrnutí a tabulkovou náhradu."
+      - "Ian Robinson, Consumer-Driven Contracts: A Service Evolution Pattern, 2006, https://martinfowler.com/articles/consumerDrivenContracts.html: explicitní a ověřitelná rozhraní."
+      - "Jakob Nielsen, 10 Usability Heuristics for User Interface Design, 1994, https://www.nngroup.com/articles/ten-usability-heuristics/: konzistence, standardy a prevence chyb."
