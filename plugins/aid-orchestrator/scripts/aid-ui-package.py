@@ -209,6 +209,11 @@ def app_part(proj, state, g):
         mine = [r for r in rows if r.get("page") == t["id"]]
         results.append({"task": t["id"], "passed": bool(mine) and all(r.get("status") == "pass" for r in mine),
                         "run_at": g["run_at"], "model_sha256": sha, "verified_on": "skeleton"})
+    APP = ("app_flows", "app_states", "keyboard_flows", "task_recovery")
+    red = sorted({f"{r.get('check')} {r.get('page')} {r.get('state')}" for r in res.get("rows") or []
+                  if isinstance(r, dict) and r.get("check") in APP and r.get("status") != "pass"})
+    if red:   # a lost input, a missing state or a keyboard dead end in the gate never reaches a package
+        raise Refused("úlohy aplikace v bráně neprošly: " + "; ".join(red[:6]))
     if not results or not all(r["passed"] for r in results):   # every task of the model, never a partial set
         raise Refused("chybí úloha, která prošla bránou (app_flows): " + (", ".join(r["task"] for r in results if not r["passed"]) or "model nemá úlohy"))
     removed = []

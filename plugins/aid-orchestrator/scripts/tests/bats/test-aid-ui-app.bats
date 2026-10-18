@@ -451,7 +451,7 @@ app_handover() {
 @test "app-package: one task passed and one failed refuses the handover; check refuses a package edited to a failed or foreign result" {
   app_handover '.rows |= map(if .check == "app_flows" and .page == "smazat" then .status = "fail" else . end)'
   run python3 "$PKGPY" build "$PROJ" --dry
-  [ "$status" -eq 1 ]; [[ "$output" == *"chybí úloha, která prošla bránou (app_flows): smazat"* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"úlohy aplikace v bráně neprošly: app_flows smazat normal"* ]]
 }
 
 @test "app-package: check binds the task results to the model - failed, foreign, repeated or missing results are refused" {
@@ -465,6 +465,12 @@ app_handover() {
   jq '.task_results |= .[:1]' "$O" > "$T/b.json"
   run python3 "$PKGPY" check "$T/b.json"; [ "$status" -eq 0 ]   # alone the package cannot know the model's tasks
   run python3 "$PKGPY" check "$T/b.json" --project "$PROJ"; [ "$status" -eq 1 ]; [[ "$output" == *"nejsou úlohy modelu"* ]]
+}
+
+@test "app-package: a lost input in the gate (task_recovery fail) refuses the package" {
+  app_handover '.rows += [{check: "task_recovery", page: "zalozit", state: "fail-1", viewport: "1440", browser: "chromium", role: "", status: "fail", detail: "krok 2: po selhání (network) se ztratil vstup nazev"}]'
+  run python3 "$PKGPY" build "$PROJ" --dry
+  [ "$status" -eq 1 ]; [[ "$output" == *"úlohy aplikace v bráně neprošly: task_recovery zalozit fail-1"* ]]
 }
 
 @test "app-package: task results of an older model are refused" {
