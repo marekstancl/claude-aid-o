@@ -16,8 +16,9 @@ references/copy-rules.md, the guides copy-<lang>.md of the languages present, th
 docs/content/product-context.md and docs/content/facts.yaml, the subject (copy of every page, made
 by aid-ui-verify.sh --copy-subject), prompt.md and MANIFEST (sha256 of each file).
 
-run: Codex reads the bundle read-only (codex exec --skip-git-repo-check -s read-only -C <run dir>
--o answer.json, prompt.md on stdin) and run.json records provider, model, command, rc and times.
+run: Codex reads the bundle read-only through AID's transport (lib/aid-codex-transport.sh _run_codex_isolated in the
+run dir, prompt.md on stdin, the last message -> answer.json, its events and stderr -> codex.log; P115) and run.json
+records provider, model, command, rc and times.
 When Codex gives no answer, the run is recorded as a failed attempt (exit 1). Only then does
 --stand-in accept an answer from a Claude subagent with a clean context, and only when the run
 directory's timeline.jsonl holds a complete dispatch bracket (aid-emit-dispatch.sh start/complete
@@ -261,18 +262,31 @@ def run(a):
         die(f"{early[0]} exists before the review ran; bundle again")
     if os.path.exists(ans):
         os.remove(ans)   # only an answer written by this run counts
-    model = os.environ.get("AID_UI_COPY_CODEX_MODEL", "")
     env = {k: v for k, v in os.environ.items() if k not in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")}   # text never on the API key (PM 12. 10. 2026)
-    cmd = ["codex", "exec", "--json", "--skip-git-repo-check", "-s", "read-only", "-C", d, "-o", ans] + (["-m", model] if model else []) + ["-"]
+    env["AID_CODEX_ISOLATED_TIMEOUT_SECONDS"] = os.environ.get("AID_UI_COPY_TIMEOUT", "1800")
+    env.pop("AID_C3_TIMEOUT_SECONDS", None)   # the older name wins in the transport; the copy review's own timeout counts
+    if os.environ.get("AID_UI_COPY_CODEX_MODEL"):
+        env["CODEX_MODEL"] = os.environ["AID_UI_COPY_CODEX_MODEL"]
+    # P115: one Codex path - AID's transport (binary choice, model, read-only fresh process); its events and stderr
+    # are kept in codex.log as before, the answer is its last message
+    transport = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib", "aid-codex-transport.sh")
+    model = subprocess.run(["bash", "-c", 'source "$1" && printf "%s" "$CODEX_MODEL"', "_", transport], capture_output=True, text=True, env=env).stdout.strip()
     started = now()
 
     def attempt(mode):
+        ev, er = os.path.join(d, ".codex-events"), os.path.join(d, ".codex-stderr")
         try:
-            with open(os.path.join(d, "prompt.md"), encoding="utf-8") as fin, open(os.path.join(d, "codex.log"), mode) as log:
-                return subprocess.run(cmd, stdin=fin, stdout=log, stderr=subprocess.STDOUT, env=env,
-                                      timeout=int(os.environ.get("AID_UI_COPY_TIMEOUT", "1800"))).returncode
-        except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-            return 127 if isinstance(e, FileNotFoundError) else 124
+            rc = subprocess.run(["bash", "-c", 'source "$1" && _run_codex_isolated "$2" "$3" "$4" "$5" "$6"', "_", transport, d,
+                                 os.path.join(d, "prompt.md"), ev, er, ans], env=env, stdin=subprocess.DEVNULL,
+                                timeout=int(env["AID_CODEX_ISOLATED_TIMEOUT_SECONDS"]) + 60).returncode
+        except subprocess.TimeoutExpired:
+            rc = 124
+        with open(os.path.join(d, "codex.log"), mode, encoding="utf-8") as log:
+            for f in (ev, er):
+                if os.path.isfile(f):
+                    log.write(open(f, encoding="utf-8", errors="replace").read())
+                    os.remove(f)
+        return rc
 
     def readable():
         try:
@@ -288,7 +302,7 @@ def run(a):
         rc = attempt("a"); tries = 2
     no_answer = not (os.path.isfile(ans) and os.path.getsize(ans) > 0)
     book_codex(d, model)
-    rec = {"provider": None if (rc or no_answer) else "codex", "model": model or "codex-default", "command": " ".join(cmd),
+    rec = {"provider": None if (rc or no_answer) else "codex", "model": model or "codex-default", "command": "lib/aid-codex-transport.sh _run_codex_isolated",
            "rc": rc, "started_at": started, "ended_at": now(), "codex_attempt": {"rc": rc, "no_answer": no_answer, "at": started, "tries": tries}}
     wj(runf, rec)
     bad = None

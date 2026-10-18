@@ -5,6 +5,12 @@
 #   aid-ui-verify.sh <project>
 #   aid-ui-verify.sh <project> --copy-subject <out.json>   (P108) serves the recorded build and writes
 #     only the copy of every page for the copy review; the gate result in .aid-ui/verify stays untouched
+#   aid-ui-verify.sh --package-gate <plan or brief> [--launch]   (P115) the run gate check_ui_handover:
+#     aid-ui-package.py gate (see its header) - skipped for a plan without ui_package, else the package, the site,
+#     the open items and, once docs/ui/nasazeni.json exists, the deployed files, the live form and the rows below
+#   aid-ui-verify.sh <project> --base-url <url>   (P115) the rows over a live address: no local preview, no
+#     build-id check, no gate-record; form_delivery is N/A (the run gate posts the live form). Result in
+#     .aid-ui/verify-live/result.json + live.json {url, site_sha256, run_at}; exit 0 no open row, 3 open rows.
 #
 # 1. The recorded build (docs/design/brand-state.json .build): recomputes the build id of
 #    its site directory with `aid-ui-state.sh build-id` and refuses (exit 1) when it
@@ -32,20 +38,31 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COVERAGE_MAP="${AID_UI_COVERAGE_MAP:-$HERE/../skills/ui-design/coverage/map.yaml}"
 die() { echo "ERROR: aid-ui-verify.sh: $1" >&2; exit 1; }
 
-subject=""
+USAGE="usage: aid-ui-verify.sh <project> [--copy-subject <out.json> | --base-url <url>] | --package-gate <plan> [--launch]"
+TOOL="${AID_UI_TOOL:-$HERE/aid-ui-tool.sh}"   # tests point it at a stub (no browser on the merge path)
+if [[ "${1:-}" == --package-gate ]]; then   # P115: the run gate; parsed before the <project> forms
+  (( $# == 2 )) || { (( $# == 3 )) && [[ "$3" == --launch ]]; } || { echo "$USAGE" >&2; exit 2; }
+  exec python3 "$HERE/aid-ui-package.py" gate "${@:2}"
+fi
+subject=""; live=""
 if (( $# == 3 )) && [[ "$2" == --copy-subject ]]; then subject="$(realpath -m "$3")"
-elif (( $# != 1 )); then echo "usage: aid-ui-verify.sh <project> [--copy-subject <out.json>]" >&2; exit 2; fi
-[[ -d "$1" ]] || { echo "usage: aid-ui-verify.sh <project> [--copy-subject <out.json>]" >&2; exit 2; }
+elif (( $# == 3 )) && [[ "$2" == --base-url ]]; then live="$3"
+  [[ "$live" =~ ^https?://[^[:space:]]+$ ]] || { echo "$USAGE (--base-url is an http(s) address)" >&2; exit 2; }
+elif (( $# != 1 )); then echo "$USAGE" >&2; exit 2; fi
+[[ -d "$1" ]] || { echo "$USAGE" >&2; exit 2; }
 PROJECT="$(realpath "$1")"
 STATE="$PROJECT/docs/design/brand-state.json"
 [[ -f "$STATE" ]] || die "no $STATE; run aid-ui-state.sh init"
 read -r id dir < <(jq -r '"\(.build.id // "-") \(.build.dir // "")"' "$STATE")
 [[ -n "$dir" ]] || die "no build recorded; run aid-ui-state.sh build-record"
 [[ -d "$dir" ]] || die "the recorded site directory $dir is gone"
-now_id="$(bash "$HERE/aid-ui-state.sh" build-id "$dir")"
-[[ "$now_id" == "$id" ]] || die "the site in $dir changed since build-record (build id $now_id, recorded $id); rebuild and run build-record again"
+if [[ -z "$live" ]]; then   # binds the LOCAL gate to the recorded build; the run gate compares the deployed files instead
+  now_id="$(bash "$HERE/aid-ui-state.sh" build-id "$dir")"
+  [[ "$now_id" == "$id" ]] || die "the site in $dir changed since build-record (build id $now_id, recorded $id); rebuild and run build-record again"
+fi
 
 OUT="$PROJECT/.aid-ui/verify"
+[[ -z "$live" ]] || OUT="$PROJECT/.aid-ui/verify-live"
 if [[ -n "$subject" ]]; then OUT="$(mktemp -d)"; trap 'rm -rf "$OUT"' EXIT   # subject only: the gate result stays
 else rm -rf "$OUT"; mkdir -p "$OUT"; fi
 yq -o=json . "$(dirname "$COVERAGE_MAP")/checks.yaml" > "$OUT/checks.json" || die "cannot read checks.yaml"
@@ -64,6 +81,20 @@ if [[ -f "$PROJECT/docs/content/photos.yaml" ]]; then   # P113a: the photos the 
 fi
 
 export AID_UI_PROJECT="$PROJECT"
+if [[ -n "$live" ]]; then   # P115: the rows over the live address - no preview, nothing recorded in the state
+  bash "$TOOL" verify --state "$STATE" --checks "$OUT/checks.json" --site "$dir" \
+    --base "$live" --out "$OUT" --project "$PROJECT" --seo "$HERE/aid-ui-seo-check.py" --live 1 "${facts[@]}" \
+    || die "aid-ui-verify.mjs failed over $live; no live result"
+  jq -n --arg u "$live" --arg s "$(python3 "$HERE/aid-ui-motion.py" dirsha "$dir")" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{url: $u, site_sha256: $s, run_at: $at}' > "$OUT/live.json"
+  wo="$(jq -c '.warn_only // []' "$OUT/checks.json")"
+  openf='[.rows[] | select(.status == "fail" or .status == "not_covered" or (.status == "warn" and (.check | IN($wo[]) | not)))]'
+  open="$(jq --argjson wo "$wo" "$openf | length" "$OUT/result.json")"
+  echo "LIVE RESULT: $OUT/result.json over $live ($open open rows)"
+  (( open == 0 )) && exit 0
+  jq -r --argjson wo "$wo" "$openf"' | .[] | "  \(.status) \(.check) \(.page) \(.viewport): \((.detail // "")[0:160])"' "$OUT/result.json" | head -20
+  exit 3
+fi
 srv="$(AID_UI_PROJECT="$PROJECT" bash "$HERE/aid-ui-serve.sh" preview "$dir")" || exit 1   # the project: the form receiver reads .aid-ui/form.json
 plog="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}/$(sed -n 's/^JOB: //p' <<<"$srv")/stdout.log"   # form_delivery: no sent value in it
 [[ -f "$plog" ]] && facts+=(--preview-log "$plog")
@@ -71,14 +102,14 @@ trap 'AID_UI_PROJECT="$PROJECT" bash "$HERE/aid-ui-serve.sh" stop preview >/dev/
 url="$(sed -n 's/^URL: //p' <<<"$srv")"
 if [[ -n "$subject" ]]; then
   mkdir -p "$(dirname "$subject")"
-  bash "$HERE/aid-ui-tool.sh" verify --state "$STATE" --checks "$OUT/checks.json" --site "$dir" \
+  bash "$TOOL" verify --state "$STATE" --checks "$OUT/checks.json" --site "$dir" \
     --base "$url" --out "$OUT" --project "$PROJECT" --seo "$HERE/aid-ui-seo-check.py" --copy-subject "$subject" \
     || die "copy subject failed"
   echo "BRÁNA NEBĚŽELA (jen texty pro kontrolu textů; result.json beze změny)"
   exit 0
 fi
 
-bash "$HERE/aid-ui-tool.sh" verify --state "$STATE" --checks "$OUT/checks.json" --site "$dir" \
+bash "$TOOL" verify --state "$STATE" --checks "$OUT/checks.json" --site "$dir" \
   --base "$url" --out "$OUT" --project "$PROJECT" --seo "$HERE/aid-ui-seo-check.py" "${facts[@]}" \
   || die "aid-ui-verify.mjs failed; no result recorded"
 bash "$HERE/aid-ui-state.sh" gate-record "$PROJECT" "$OUT/result.json" || exit 1

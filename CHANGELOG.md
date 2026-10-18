@@ -3,6 +3,28 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.6.0] — 2026-10-18
+
+Studio `/aid-ui` předává plánu a běhu (P115): převzetí webu zapíše jeden předávací balík, z balíku vznikne jedním příkazem zadání plánu nasazení, brána běhu pustí na doménu jen předaný web bez otevřeného kritického bodu, ostrý web má vlastní hodnocení a studio používá Codex a ceník AIDu místo vlastních kopií. Ověřeno na testovacím projektu a v testbedu (dráha `ui_package_to_gate`); skutečný web se tímto vydáním nenasazoval (PM 3A).
+
+### Added
+- **Předávací balík `docs/ui/predani.json`** (+ čitelný `predani.md`, schéma `skills/ui-design/references/handover-package.schema.json`, verze 1): web se seznamem souborů a otisky, zaznamenaná brána, schválené kapitoly, verdikty míst, úkoly zákazníka, otevřené body, podklady ke spuštění, kritéria `launch_only` a verdikt PM. Zapíše ho převzetí (`aid-ui-state.sh chapter-all`); balík, který nejde sestavit (chybí brána, web se po bráně změnil, otevřený bod bez textu), převzetí odmítne se jménem chybějící části a odpověď PM zůstane nepoužitá. `aid-ui-package.py build|check`.
+- **Zadání plánu nasazení z balíku:** `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-package.py" zadani docs/ui/predani.json --plan-id P<NNN>` napíše zadání v šabloně a projde ho kontrolou; bod hotovo s vlastníkem (běh, klient, PM), příznakem „blokuje spuštění“ a příkazem k ověření za každý úkol zákazníka, krok spuštění (`references/local/spusteni.md`: nasadit přesně balík, HTTPS, bezpečnostní hlavičky, 404, citlivé soubory, DNS, e-mail, katalogy, přesměrování starých adres), podklad ke spuštění, otevřený bod a hodnocení po nasazení. `/aid-plan` bere balík jako vstup; kontrola plánu odmítne plán, který ztratí značku balíku (`ui_package_lost`).
+- **Brána běhu `check_ui_handover`** (výchozí `execution.yaml`, všechny profily z `/aid-init`, upgrade ji přidá i existujícím projektům): plán bez `ui_package` přeskočí s důvodem; plán z balíku zastaví chybějící, upravený nebo zastaralý balík a otevřený kritický bod. Po zápisu `docs/ui/nasazeni.json` (adresa a popis hostingu) si brána sama vypíše soubory hostingu a pustí jen přesně soubory balíku (nic navíc ani odkaz, nic chybějícího, žádný jiný obsah), formulář, který hosting přijme (odeslaný na vlastní adresu webu), a kontrolu UI studia nad ostrou adresou (`aid-ui-verify.sh --base-url`, bez náhledu a bez zápisu).
+- **Hodnocení po nasazení** ve vlastní smyčce: `aid-ui-quality.py launch <projekt> --url <ostrá adresa>` (a `--launch` u ostatních příkazů) v `.aid-ui/critic/launch/`, fáze `launch` hodnotí i kritéria, která čekala na nasazení; `launch-status --package docs/ui/predani.json` projde jen pro nasazenou adresu a web z balíku. Soubory hodnocení stavby se nemění.
+
+### Changed
+- **Jeden motor:** studio (`aid-ui-client.py`, `aid-ui-copy.py`) volá Codex přes `lib/aid-codex-transport.sh` (výběr instalace, model `CODEX_MODEL`, čtecí proces, snímky přes `AID_CODEX_IMAGES`, bez placených klíčů) a ceny tokenů i obrázků bere ze stejné tabulky jako revize (`defaults/prices.yaml` přes `aid_review_prices_file`, nově oddíl `images:`). Vlastní `TOKEN_PRICES` a ceník obrázků ve studiu zmizely; model, který tabulka nezná, má cenu `null` s varováním. Náhradní Claude teď stojí podle sdílené tabulky (Sonnet 2/10 USD za milion místo ručně zapsaných 3/15). Transport vždy předá `--skip-git-repo-check`.
+- Cena obrázku z tabulky projektu může cenu pluginu jen zvýšit, nikdy snížit (strop rozpočtu na placené obrázky počítá skutečné peníze).
+- Návod studia už neříká, že se do běhů nezapojuje; oddíl Předání popisuje jednu cestu studio → balík → plán → běh (`SKILL.md`, kroky 7 a 8, `/aid-ui`, `/aid-plan`, nápověda, Docusaurus).
+
+### Kód
+- Produkční kód +1446 / −89 řádků (bez testů): nový `aid-ui-package.py` (774 řádků: balík, zadání, brána, ostré body), zbytek napojení; `aid-ui-client.py` 810 → 833, `aid-ui-copy.py` 670 → 684, `lib/aid_ui_costs.py` 156 → 200 (čtení sdílené tabulky místo vlastní), `aid-ui-logo-gen.py` 392 → 390. Testy: nová sada `test-aid-ui-package.bats` (t1, 24 případů), případy `launch:` a `shared-motor:` v sadách studia, jeden případ se skutečným prohlížečem nad ostrou adresou (`test-aid-ui-verify.bats`).
+
+### Known limits
+- Formulář, který odesílá na cizí službu, brána neodesílá a jen ho jmenuje; jeho doručení ověřuje bod klienta „Příjem zpráv z formuláře“.
+- Kontrolu UI nad ostrou adresou spouští brána celou (všechny řádky studia); v testech na cestě k merge je to náhrada, skutečný prohlížeč je v noční sadě.
+
 ## [3.5.0] — 2026-10-17
 
 Studio `/aid-ui` podle dílny (P113): šest míst rozhodnutí, na každém hodnotí klient a odborník na Claude Opus s pamětí a postoupit pustí jen kód. Ověřeno na záznamech dílny (zasazené vady 13/13, brány loga 4/4) a během na Coufalovi: pohyb přijat, sdělení, logo, struktura a vzhled vrácené po vyčerpaných kolech; ověření hotového webu od nuly zůstává otevřené (`docs/reference/2026-10-p113-overeni-coufal.md`).

@@ -77,14 +77,10 @@ CONSTRAINTS_FULL = ("Logo design presentation by a top brand identity studio, aw
                     "every word spelled exactly as given. The mark must still read at small size. One clear idea, "
                     "unique, not a stock clipart. If reference images are attached, use them only as the measure of craft "
                     "and restraint - never copy their shapes or names.")
-PRICE_LIST = "OpenAI image pricing, read 2026-10-07, USD per 1024x1024 image"
-PRICE = {"gpt-image-1": {"low": 0.011, "medium": 0.042, "high": 0.167},
-         # token-billed models: estimate per 1024x1024 output (30 USD per 1M image-output tokens; measured
-         # 2026-10-08: sunburst high 1756 tokens, gpt-image-2 high 7024 tokens) + ~0.006 USD per reference image
-         "gpt-image-2": {"low": 0.06, "medium": 0.12, "high": 0.21},
-         "gpt-image-2.5-sunburst": {"low": 0.02, "medium": 0.04, "high": 0.06},
-         "gpt-image-2.5-flare": {"low": 0.02, "medium": 0.03, "high": 0.05}}
-REF_USD = 0.006
+# P115: the image prices live in the shared price table (`images:` of the table aid_review_prices_file picks - the
+# project's .aid-o/config/prices.yaml first; read in main once the project is known); the budget cap is unchanged.
+# An image model or quality without a price is refused: no paid call is sent that the budget cannot count.
+PRICE, REF_USD, PRICE_LIST = {}, 0.0, ""
 MAX_PER_SLOT, MAX_RUN, MAX_BODY = 10, 60, 8 * 1024 * 1024
 SLOT_ID = re.compile(r"^[A-Z]{1,3}$")
 
@@ -164,6 +160,8 @@ def main():
     if len(args) != 3 or args[1] != "--spec":
         die("usage: aid-ui-logo-gen.py <project> --spec <gen.json> [--dry-run] [--max-cost USD] [--force]", 2)
     project = os.path.realpath(args[0])
+    global PRICE, REF_USD, PRICE_LIST
+    PRICE, REF_USD, PRICE_LIST = costs.image_prices(project)
     spec_path = args[2] if os.path.isabs(args[2]) else os.path.join(project, args[2])
     try:
         with open(spec_path, encoding="utf-8") as f:

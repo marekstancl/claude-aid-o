@@ -309,6 +309,14 @@ _zadani_pass() {
   zsha="$(_aid_fm_get "$PLAN" zadani_sha256)"
   want="$(aid_zadani_sha256 "$zpath")"
   [[ "$zsha" == "$want" ]] || _zadani_err "" "zadani_sha256 '${zsha:-<absent>}' is not the sha of ${z} (${want}) — the brief changed: bump its verze and update the plan's zadani_sha256"
+  # P115: a plan made from a handover package keeps the brief's mark - the run gate check_ui_handover reads it, and a plan
+  # without it would have its gate skipped
+  local uk ub up
+  for uk in ui_package ui_package_sha256; do
+    ub="$(_aid_fm_get "$zpath" "$uk")"; up="$(_aid_fm_get "$PLAN" "$uk")"
+    [[ -z "$ub" || "$ub" == "$up" ]] ||
+      _zadani_err "" "ui_package_lost: the brief ${z} carries ${uk}: ${ub} and the plan ${up:-does not} - copy ${uk} from the brief into the plan's frontmatter (the run gate check_ui_handover reads it)"
+  done
   # the plan's criteria, by label (the SAME parser the brief is read with)
   while IFS= read -r rec; do
     [[ -n "$rec" ]] || continue

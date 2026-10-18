@@ -47,3 +47,15 @@ models:
     cache_write: 0
     source: "https://developers.openai.com/api/docs/pricing"
     as_of: "2026-09-19"
+# P115: the image models the /aid-ui studio pays per image (aid-ui-logo-gen.py through lib/aid_ui_costs.image_prices),
+# USD per 1024x1024 image by quality, plus ref_usd per reference image sent with it. The studio's token costs read
+# `models:` above like the revisions do (one table; a project's .aid-o/config/prices.yaml overrides both).
+images:
+  as_of: "2026-10-08"
+  source: "OpenAI image pricing, read 2026-10-07; the token-billed models estimated at 30 USD per 1M image-output tokens (measured 2026-10-08: sunburst high 1756 tokens, gpt-image-2 high 7024 tokens)"
+  ref_usd: 0.006
+  models:
+    gpt-image-1: {low: 0.011, medium: 0.042, high: 0.167}
+    gpt-image-2: {low: 0.06, medium: 0.12, high: 0.21}
+    gpt-image-2.5-sunburst: {low: 0.02, medium: 0.04, high: 0.06}
+    gpt-image-2.5-flare: {low: 0.02, medium: 0.03, high: 0.05}

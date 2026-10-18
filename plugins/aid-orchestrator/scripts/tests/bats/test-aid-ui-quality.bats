@@ -35,6 +35,7 @@ SH
   # codex answers as the role its prompt names (the tech rubric's first criterion is only in the tech prompt)
   cat > "$T/bin/codex" <<SH
 #!/usr/bin/env bash
+[[ "\$1" == --version ]] && exit 0
 p="\$(cat)"; role=owner; grep -q "$(yq -r '.criteria[0].id' "$K/web-local.tech.yaml")" <<<"\$p" && role=tech
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":100000,"cached_input_tokens":0,"output_tokens":1000}}))' "$T/ans-\$role.json"
 SH
@@ -51,7 +52,7 @@ ans() {
     local s="$1"; [[ $role == tech ]] && s="${2:-$1}"
     python3 - "$K/web-local.$role.yaml" "$s" "${3:-major}" > "$T/ans-$role.json" <<'PY'
 import sys, json, yaml
-r = yaml.safe_load(open(sys.argv[1])); _lo = (yaml.safe_load(open(__import__("re").sub(r"\.(owner|tech)\.yaml$", ".yaml", sys.argv[1]))).get("launch_only") or {}).get(__import__("re").search(r"\.(owner|tech)\.yaml$", sys.argv[1]).group(1)) or []; r["criteria"] = [c for c in r["criteria"] if c["id"] not in _lo]; s = int(sys.argv[2]); c0 = r["criteria"][0]["id"]
+r = yaml.safe_load(open(sys.argv[1])); _lo = (yaml.safe_load(open(__import__("re").sub(r"\.(owner|tech)\.yaml$", ".yaml", sys.argv[1]))).get("launch_only") or {}).get(__import__("re").search(r"\.(owner|tech)\.yaml$", sys.argv[1]).group(1)) or []; r["criteria"] = [c for c in r["criteria"] if c["id"] not in _lo or __import__("os").environ.get("ANS_LAUNCH")]; s = int(sys.argv[2]); c0 = r["criteria"][0]["id"]
 import os; _role = __import__("re").search(r"\.(owner|tech)\.yaml$", sys.argv[1]).group(1)   # P113: the web is rated with the look and structure rubrics too
 r["criteria"] += [dict(c, id=k + "." + c["id"]) for k in ("vzhled", "struktura") for c in yaml.safe_load(open(os.path.dirname(sys.argv[1]) + "/web-local.%s.%s.yaml" % (_role, k)))["criteria"]]
 a = None if s < 4 else max(x for x in (4, 6, 8, 10) if x <= s)
@@ -236,6 +237,7 @@ pcycle() { local n; n="$(python3 "$Q" status "$P" --place "$1" | jq -r .rounds)"
   # the codex stub tells the roles apart by the sdeleni tech rubric's first criterion
   cat > "$T/bin/codex" <<SH
 #!/usr/bin/env bash
+[[ "\$1" == --version ]] && exit 0
 p="\$(cat)"; role=owner; grep -q "### $(yq -r '.criteria[0].id' "$K/web-local.tech.sdeleni.yaml") " <<<"\$p" && role=tech
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
 SH
@@ -261,6 +263,7 @@ SH
   python3 "$SC/aid-ui-critic.py" freeze "$P" --type web-local --place sdeleni >/dev/null
   cat > "$T/bin/codex" <<SH
 #!/usr/bin/env bash
+[[ "\$1" == --version ]] && exit 0
 p="\$(cat)"; role=owner; grep -q "### $(yq -r '.criteria[0].id' "$K/web-local.tech.sdeleni.yaml") " <<<"\$p" && role=tech
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
 SH
@@ -269,6 +272,7 @@ SH
   # the web place goes on in its own folder meanwhile
   cat > "$T/bin/codex" <<SH
 #!/usr/bin/env bash
+[[ "\$1" == --version ]] && exit 0
 p="\$(cat)"; role=owner; grep -q "$(yq -r '.criteria[0].id' "$K/web-local.tech.yaml")" <<<"\$p" && role=tech
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
 SH
@@ -293,4 +297,66 @@ assert sorted(m.criteria_to_ten(two)) == ["a:myslenka", "b:myslenka"]
 assert m.criteria_to_ten(flat) == {"poznam_se": t}
 print("ok")' "$BATS_TEST_DIRNAME/../../aid-ui-quality.py"
   [ "$status" -eq 0 ] && [ "$output" = ok ] || { echo "$output"; return 1; }
+}
+
+# ── P115: the launch rating - the same loop over the live address in .aid-ui/critic/launch ──────────────────────────
+# snap — sha of every file of the build loop (everything under .aid-ui/critic but launch/)
+snap() { (cd "$P/.aid-ui/critic" && find . -path ./launch -prune -o -type f -print | sort | xargs sha256sum); }
+
+@test "launch: the launch loop writes only under launch/ and leaves the build loop's files byte-identical; frozen in phase launch rates the launch-only criteria" {
+  ans 6 7; python3 "$Q" round "$P" --web "$W" >/dev/null
+  before="$(snap)"
+  ANS_LAUNCH=1 ans 9 9 minor
+  run python3 "$Q" launch "$P" --url "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(snap)" = "$before" ]
+  L="$P/.aid-ui/critic/launch"
+  jq -e '.phase == "launch" and .type == "web-local"' "$L/frozen.json" >/dev/null
+  jq -e '[.roles.tech.rubrics[].criteria[]?.id] | index("bezpecnost_spusteni") != null' "$L/frozen.json" >/dev/null || \
+    jq -e 'tostring | contains("bezpecnost_spusteni")' "$L/frozen.json" >/dev/null
+  jq -e '.n == 1 and .web == "'"$W"'"' "$L/rounds/1/round.json" >/dev/null
+  # the build loop is still where it was: round 1 to triage
+  [ "$(dec)" = triage ]
+  [ "$(python3 "$Q" status "$P" --launch | jq -r .decision)" = triage ]
+}
+
+@test "launch: the verdict uses the web gates; launch-status passes for the deployment it rated" {
+  ANS_LAUNCH=1 ans 9 9 minor
+  python3 "$Q" launch "$P" --url "$W" >/dev/null
+  for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f1" rejected_with_reason --reason "v podkladech" --launch >/dev/null; done
+  [ "$(python3 "$Q" status "$P" --launch | jq -r .decision)" = audit ]
+  run python3 "$Q" audit "$P" --web "$W" --launch; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  L="$P/.aid-ui/critic/launch"
+  jq -e '.accepted == true and .url == "'"$W"'" and .owner >= 8.5 and .tech >= 8.5' "$L/launch-verdict.json" >/dev/null
+  [ ! -e "$P/.aid-ui/critic/verdict.json" ]   # the build's verdict is not written by the launch audit
+  run python3 "$Q" launch-status "$P"; [ "$status" -eq 0 ]
+  # the gates the launch verdict applied are the web place's gate files (aid-ui-critic.py verdict reads them from frozen)
+  jq -e '.roles.owner.gates == ("'"$(jq -c .roles.owner.gates "$P/.aid-ui/critic/frozen.json" | sed 's/"/\\"/g')"'" | fromjson)' "$L/frozen.json" >/dev/null
+  run python3 "$Q" launch "$P" --url "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"accepted already"* ]]
+  # another package than the project's own is refused; a directory the variable may not name is refused
+  echo '{"site": {"sha256": "x"}}' > "$T/jiny.json"
+  run python3 "$Q" launch-status "$P" --package "$T/jiny.json"; [ "$status" -eq 1 ]; [[ "$output" == *"docs/ui/predani.json"* ]]
+  AID_UI_CRITIC_DIR=/tmp run python3 "$Q" status "$P"; [ "$status" -ne 0 ]; [[ "$output" == *"may only be"* ]]
+}
+
+@test "launch: stale deployment - a verdict for another address or an older site is refused at the launch point" {
+  ANS_LAUNCH=1 ans 9 9 minor
+  python3 "$Q" launch "$P" --url "$W" >/dev/null
+  for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f1" rejected_with_reason --reason x --launch >/dev/null; done
+  mkdir -p "$P/docs/ui"; echo '{"site": {"sha256": "'"$(printf a%.0s {1..64})"'"}}' > "$P/docs/ui/predani.json"
+  python3 "$Q" audit "$P" --web "$W" --launch >/dev/null
+  jq -n --arg u "$W" '{url: $u}' > "$P/docs/ui/nasazeni.json"
+  run python3 "$Q" launch-status "$P" --package "$P/docs/ui/predani.json"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  echo '{"site": {"sha256": "'"$(printf b%.0s {1..64})"'"}}' > "$P/docs/ui/predani.json"
+  run python3 "$Q" launch-status "$P" --package "$P/docs/ui/predani.json"; [ "$status" -eq 1 ]; [[ "$output" == *"another web"* ]]
+  echo '{"site": {"sha256": "'"$(printf a%.0s {1..64})"'"}}' > "$P/docs/ui/predani.json"
+  jq -n '{url: "https://jinde.example/"}' > "$P/docs/ui/nasazeni.json"
+  run python3 "$Q" launch-status "$P" --package "$P/docs/ui/predani.json"; [ "$status" -eq 1 ]; [[ "$output" == *"rate the deployed address"* ]]
+}
+
+@test "launch: no --url is a usage error; an address that does not answer stops before any role call" {
+  run python3 "$Q" launch "$P"; [ "$status" -eq 2 ]
+  run python3 "$Q" launch "$P" --url "$W" --reopen "znovu"; [ "$status" -eq 2 ]; [[ "$output" == *"no launch rating to reopen"* ]]
+  printf '#!/usr/bin/env bash\necho "a role was called" >&2; exit 1\n' > "$T/bin/codex"
+  run python3 "$Q" launch "$P" --url "http://127.0.0.1:9/"; [ "$status" -eq 1 ]; [[ "$output" == *"does not answer"* ]]
+  [ ! -e "$P/.aid-ui/critic/launch/frozen.json" ]
 }

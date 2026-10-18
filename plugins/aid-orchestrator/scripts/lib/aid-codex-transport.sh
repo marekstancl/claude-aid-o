@@ -5,8 +5,9 @@
 # `aid_codex_probe` (is it usable now; cached per project) and
 # `_run_codex_isolated` (one fresh read-only process, raw captures out).
 # Callers: aid-review-round.sh dispatch, lib/aid-brainstorm-opponent.sh,
-# lib/aid-recovery-adjudicate.sh; aid-hook-verify.sh reads the binary only. A
-# change of the five-argument signature is checked against all of them.
+# lib/aid-recovery-adjudicate.sh, and the /aid-ui studio's aid-ui-client.py and
+# aid-ui-copy.py (P115, through `bash -c`); aid-hook-verify.sh reads the binary
+# only. A change of the five-argument signature is checked against all of them.
 
 # The model is configuration: a caller may repoint CODEX_MODEL before the call.
 CODEX_MODEL="${CODEX_MODEL:-${AID_C3_CODEX_MODEL:-gpt-6-sol}}"
@@ -117,19 +118,27 @@ aid_codex_probe() {
 #   `--output-schema` is deliberately NOT passed: Codex forwards it to strict
 #   structured output, which answers HTTP 400 to any `if`/`then`/`allOf`. The
 #   trusted check of an answer is the caller's own validator, never the backend.
+#
+#   AID_CODEX_IMAGES (P115, default empty): newline-separated image paths, one
+#   `-i` each (the studio's screenshots). `--skip-git-repo-check`: the studio's
+#   working directory is a bundle outside any repository; inside one the flag
+#   changes nothing. A caller that must keep paid API keys from Codex runs it
+#   with those variables removed from the environment (the studio does).
 _run_codex_isolated() {
   local project_root="$1" prompt_file="$2" events_out="$3" stderr_out="$4" last_out="$5"
-  local rc=0 bin
+  local rc=0 bin img
+  local -a images=()
+  while IFS= read -r img; do [[ -n "$img" ]] && images+=(-i "$img"); done <<< "${AID_CODEX_IMAGES:-}"
   [[ -r "$prompt_file" ]] || { echo "aid-codex-transport: cannot read prompt $prompt_file" >&2; return 2; }
   IFS=$'\t' read -r bin _ < <(aid_codex_binary) || bin=codex
   timeout "${AID_C3_TIMEOUT_SECONDS:-${AID_CODEX_ISOLATED_TIMEOUT_SECONDS:-900}}" \
-    "$bin" exec --json \
+    "$bin" exec --json --skip-git-repo-check \
       --cd "$project_root" \
       --sandbox read-only \
       -m "$CODEX_MODEL" \
       -c model_reasoning_effort="${CODEX_EFFORT:-medium}" \
       --output-last-message "$last_out" \
-      - < "$prompt_file" > "$events_out" 2> "$stderr_out" || rc=$?
+      "${images[@]}" - < "$prompt_file" > "$events_out" 2> "$stderr_out" || rc=$?
   return "$rc"
 }
 

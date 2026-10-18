@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 673 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 678 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
   # ── Plan amendments recorded here because this file is the TRACKED authority ──
   # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
   # `git check-ignore`; `docs/extending-aid.md` is the tracked exception), so an
@@ -4670,3 +4670,78 @@ enforcements:
     recovery: "Record the build again (aid-ui-state.sh build-record) so it lists every page, or remove the stray .html; fix the named rows and run the gate."
     test_covers: "every page x width visited, a page missing from the build, density from the file a 2x screen gets, rAF motion, metrics per motion variant, the workshop's planted set 13/13, one pass with the customer page (test-aid-ui-verify.bats all-pages: cases)."
     test: "scripts/tests/bats/test-aid-ui-verify.bats"
+  - id: aid_ui_package_refused
+    type: 1
+    source: "scripts/aid-ui-package.py (build, check) + scripts/aid-ui-state.sh (chapter-all)"
+    instruction: "skills/ui-design/SKILL.md (Předání) + skills/ui-design/steps/7-verify.md (bod 8)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "That the chapters, tasks and open items in the studio state are true of the business - the package records what the studio holds, it does not judge it."
+    description: "P115 Step 1 - the handover (chapter-all) ends by writing docs/ui/predani.json (+ predani.md) in the shape of skills/ui-design/references/handover-package.schema.json; it is built with --dry before the PM's answer is used, so a package that cannot be made (no gate, a gate without its customer page, a site changed since the gate, an open item without text or owner, no chapter) refuses the handover naming the part and leaves the answer unused; the package is written inside the handover's all-or-nothing block. check --project also compares the file list with the site and refuses unsafe paths."
+    recovery: "Run the gate again over the current site (aid-ui-verify.sh, gate-record), fix the named part, and use the same handover answer; aid-ui-package.py build <project> rewrites the package of a recorded handover."
+    test_covers: "complete package passes check, missing gate, stale site, a refused build leaves the answer and the state unchanged, a standalone rebuild, a lying file list (test-aid-ui-package.bats package: cases)."
+    test: "scripts/tests/bats/test-aid-ui-package.bats"
+  - id: aid_ui_package_lost
+    type: 1
+    source: "scripts/aid-plan-lint.sh (_zadani_pass, ui_package_lost) + scripts/aid-ui-package.py (zadani)"
+    instruction: "commands/aid-plan.md (Mode: Write Plan, input resolution)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "That the plan's steps really deploy - the lint holds the mark and the points; the gate and the points' commands check the deployment."
+    description: "P115 Step 2 - aid-ui-package.py zadani writes the deployment brief from the package (a point with owner, blocking flag and verification for every customer task, launch item, launch input no open item carries, open item, and the launch rating) and lints it; it refuses while the project's execution.yaml lacks the check_ui_handover gate in a profile. A plan whose brief carries ui_package / ui_package_sha256 must carry the same values, or aid-plan-lint.sh refuses ui_package_lost - a plan from a package cannot lose its run gate."
+    recovery: "Copy ui_package and ui_package_sha256 from the brief's frontmatter into the plan's; for a project without the gate run /aid-init (its upgrade adds it)."
+    test_covers: "the brief passes the lint with one point per item, an invalid package, no gate in the project, form and domain once, the lost mark (test-aid-ui-package.bats package-zadani: and merge-path: lost mark; test-plan-lint.bats ui-package:)."
+    test: "scripts/tests/bats/test-aid-ui-package.bats"
+  - id: aid_ui_run_gate
+    type: 1
+    source: "scripts/aid-ui-package.py (gate) + scripts/aid-ui-verify.sh (--package-gate) + defaults/execution.yaml (check_ui_handover) + scripts/lib/aid-init-execution-yaml.sh (render_ui_handover_gate_block, execution_yaml_upgrade)"
+    instruction: "skills/ui-design/SKILL.md (Předání) + commands/aid-plan.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "That the plan runs the gate at all when its project's execution.yaml was hand-edited to drop it after the brief was written - the brief's launch point runs the same command at plan close."
+    description: "P115 Step 3 - the run gate check_ui_handover (every /aid-init profile; the upgrade adds the entry and the profile items, refusing layouts it cannot edit line by line) decides by the plan's frontmatter: no ui_package -> skipped with the reason; with it the package missing, its sha not the plan's ui_package_sha256, check --project failing, or a critical open item (critical by the package or the state, done only with evidence, none deleted) fails; before docs/ui/nasazeni.json the result is 'před nasazením' and --launch fails."
+    recovery: "Restore or rebuild the package from a recorded handover, close the critical items with evidence, deploy and write docs/ui/nasazeni.json."
+    test_covers: "skipped without ui_package, no package, before the deployment, --launch without it, stale and edited package, nasazeni.json without url or listing, open and deleted critical items, the upgrade and a fresh composition (test-aid-ui-package.bats ui-gate: cases)."
+    test: "scripts/tests/bats/test-aid-ui-package.bats"
+  - id: aid_ui_live_identity
+    type: 1
+    source: "scripts/aid-ui-package.py (gate: listing, fetch, forms_of) + scripts/aid-ui-verify.sh (--base-url) + lib/ui-fidelity/aid-ui-verify.mjs (--live)"
+    instruction: "skills/ui-design/references/local/spusteni.md (nasadit_balik)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "That a form posting to another site delivers (it is not posted, it is named; its delivery is the launch input of the client), that a host serves the same bytes to every visitor (one fetch per file), and the studio's rows on the merge path (a stub there; the real rows over a live address are test-aid-ui-verify.bats P115 --base-url)."
+    description: "P115 Step 3 - with docs/ui/nasazeni.json {url, listing {type ssh|sftp|local, host, root}} the gate builds the hosting's read-only listing itself (absolute root and host validated, every entry but a directory counted, symlinks too) and fails on a file the package does not have or a package file missing ('nelze ověřit' when the listing does not answer); fetches every package file from url and fails on a different sha; posts every same-origin POST form with a test marker and fails on a non-2xx answer or an answer ending off the web; then the studio's rows over the live address (no preview, nothing recorded)."
+    recovery: "Deploy exactly the package's files (delete what is extra, a host that rewrites files is a launch blocker), fix the form endpoint on the host, then run the gate again."
+    test_covers: "clean pass, a swapped file, an extra file, a symlink, no listing, a shell metacharacter in host, a relative root, the live form answering 500, a cross-origin form, the live rows failing (test-aid-ui-package.bats ui-gate: cases)."
+    test: "scripts/tests/bats/test-aid-ui-package.bats"
+  - id: aid_ui_launch_rating
+    type: 1
+    source: "scripts/aid-ui-quality.py (launch, launch-status, --launch) + scripts/lib/aid_ui_memory.py (critic_dir)"
+    instruction: "skills/ui-design/steps/8-quality.md (Po nasazení)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "That the roles rate the live web fairly - the loop's thresholds hold, the judgement is the roles'."
+    description: "P115 Step 4 - the rating after the deployment is its own loop in .aid-ui/critic/launch (frozen in phase launch, so the launch_only criteria are rated; rounds, verdict, launch-verdict.json); the build loop's files are never touched. launch refuses an address that does not answer before any role call; launch-status passes only an accepted verdict of the deployed url and the package's site sha, and only for the project's own docs/ui/predani.json - a changed deployment needs a new rating."
+    recovery: "Rate the deployed address: aid-ui-quality.py launch <project> --url <url> (--reopen <reason> after an accepted verdict)."
+    test_covers: "the build loop byte-identical, the web gates, a stale deployment, an address that does not answer (test-aid-ui-quality.bats launch: cases; the t1 refusal is test-aid-ui-package.bats merge-path: stale launch verdict)."
+    test: "scripts/tests/bats/test-aid-ui-quality.bats"

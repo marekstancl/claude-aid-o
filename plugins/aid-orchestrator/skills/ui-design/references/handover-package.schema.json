@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:aid:ui:handover-package:1",
+  "title": "The /aid-ui handover package (docs/ui/predani.json), version 1 (P115)",
+  "description": "Written by aid-ui-package.py build at the handover (aid-ui-state.sh chapter-all); never edited afterwards. The plan of the deployment reads it (aid-ui-package.py zadani) and the run gate check_ui_handover checks it (aid-ui-verify.sh --package-gate).",
+  "$defs": {"id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "description": "goes into generated commands of the brief: letters, digits, . _ - only"}},
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "project", "created_at", "site", "gate", "chapters", "places", "customer_tasks", "open_items", "launch_inputs", "launch_only", "handover"],
+  "properties": {
+    "version": {"const": 1},
+    "project": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T"},
+    "site": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["dir", "build_id", "sha256", "files"],
+      "properties": {
+        "dir": {"type": "string", "minLength": 1},
+        "build_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "the dirsha rule of aid-ui-motion.py over dir"},
+        "files": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false, "required": ["path", "sha256"],
+            "properties": {"path": {"type": "string", "minLength": 1}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+          }
+        }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["run_at", "result_file", "result_sha256", "build_id", "customer_page", "customer_page_sha256"],
+      "properties": {
+        "run_at": {"type": "string", "minLength": 1},
+        "result_file": {"type": "string", "minLength": 1},
+        "result_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "build_id": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "customer_page": {"const": "pass"},
+        "customer_page_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "chapters": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id", "target"],
+        "properties": {"id": {"type": "string"}, "target": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}
+      }
+    },
+    "places": {
+      "type": "array",
+      "description": "the P113 place verdicts; [] for a studio from before P113",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["place", "status", "target"],
+        "properties": {"place": {"type": "string"}, "status": {"type": "string"}, "target": {"type": ["string", "null"]}}
+      }
+    },
+    "customer_tasks": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id", "text", "page"],
+        "properties": {"id": {"$ref": "#/$defs/id"}, "text": {"type": "string", "minLength": 1}, "page": {"type": ["string", "null"]}, "form": {"type": "boolean"}}
+      }
+    },
+    "open_items": {
+      "type": "array",
+      "description": "a snapshot at the handover; the run gate reads the live state",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["id", "text", "owner", "due", "critical", "status"],
+        "properties": {
+          "id": {"$ref": "#/$defs/id"}, "text": {"type": "string", "minLength": 1}, "owner": {"type": "string", "minLength": 1},
+          "due": {"type": ["string", "null"]}, "critical": {"type": "boolean"}, "status": {"type": "string"},
+          "evidence": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "launch_inputs": {
+      "type": "array",
+      "description": "the items of .aid-ui/launch.json (aid-ui-launch.py); [] when the project has none",
+      "items": {
+        "type": "object", "required": ["id", "name", "status", "critical"],
+        "properties": {"id": {"$ref": "#/$defs/id"}, "name": {"type": "string"}, "status": {"type": "string"}, "critical": {"type": "boolean"}, "item": {"$ref": "#/$defs/id"}}
+      }
+    },
+    "handover": {
+      "type": "object",
+      "description": "the PM's handover verdict and comment (build --dry checks a package before the answer is used and writes none)",
+      "additionalProperties": false,
+      "required": ["verdict", "rating", "answer", "comment"],
+      "properties": {"verdict": {"type": "string", "minLength": 1}, "rating": {"type": ["string", "null"]}, "answer": {"type": "string"}, "comment": {"type": "string"}}
+    },
+    "launch_only": {
+      "type": "array",
+      "description": "<role>.<criterion> of the type's launch_only: rated only after the deployment",
+      "items": {"type": "string", "pattern": "^(owner|tech)\\.[a-z0-9_]+$"}
+    }
+  }
+}

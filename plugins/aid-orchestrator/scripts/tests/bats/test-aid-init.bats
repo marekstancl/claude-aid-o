@@ -114,17 +114,18 @@ teardown() {
   # Profiles reference ONLY gate names the TypeScript stack fragment itself
   # defines (ts_test/ts_lint/ts_type_check) — never self-host bats_* names —
   # plus the stack-independent targeted_tests gate (P069 Step 12), which is
-  # added to `targeted` only, never `full`.
+  # added to `targeted` only, never `full`. P115: the handover gate check_ui_handover is in every profile (it
+  # skips a plan without ui_package).
   run yq '.gate_profiles.targeted.include | join(",")' .aid-o/config/execution.yaml
-  [ "$output" == "ts_test,targeted_tests" ]
+  [ "$output" == "ts_test,targeted_tests,check_ui_handover" ]
   run yq '.gate_profiles.full.include | join(",")' .aid-o/config/execution.yaml
-  [ "$output" == "ts_test,ts_lint,ts_type_check" ]
+  [ "$output" == "ts_test,ts_lint,ts_type_check,check_ui_handover" ]
 
   # standard and release reuse full's set.
   run yq '.gate_profiles.standard.include | join(",")' .aid-o/config/execution.yaml
-  [ "$output" == "ts_test,ts_lint,ts_type_check" ]
+  [ "$output" == "ts_test,ts_lint,ts_type_check,check_ui_handover" ]
   run yq '.gate_profiles.release.include | join(",")' .aid-o/config/execution.yaml
-  [ "$output" == "ts_test,ts_lint,ts_type_check" ]
+  [ "$output" == "ts_test,ts_lint,ts_type_check,check_ui_handover" ]
 
   # D3 consumer isolation (negative control): the composed file must never
   # contain self-host-only gate names, anywhere.
@@ -430,11 +431,13 @@ _p097_fixture_project() {  # <name> → project root with a copy of the fixture
   [ "$output" == "false" ]
   run yq '.gate_profiles.full.when_paths | length' "$cfg"
   [ "$output" -eq 14 ]
-  # Never touched: every command and every non-empty include[] survive verbatim.
+  # Never touched: every command and every non-empty include[] survive verbatim (P115: plus check_ui_handover).
   run yq '.gates.py_test.command' "$cfg"
   [ "$output" == "bash backend/scripts/run_py_test_gate.sh" ]
   run yq '.gate_profiles.release.include | length' "$cfg"
-  [ "$output" -eq 11 ]
+  [ "$output" -eq 12 ]
+  run yq '.gate_profiles.release.include[-1]' "$cfg"
+  [ "$output" == "check_ui_handover" ]
 }
 
 @test "P097 Step 3: a stale --confirm-upgrade hash refuses (exit 2), writes nothing and re-prints the current diff" {

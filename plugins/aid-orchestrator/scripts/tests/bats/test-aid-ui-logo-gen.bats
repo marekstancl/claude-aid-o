@@ -26,7 +26,7 @@ setup() {
   [[ "$pr" == *"single solid pure black"* && "$pr" == *"transparent background"* && "$pr" == *"No text"* ]]
   [[ "$pr" == *"Mark type: name+sign."* && "$pr" == *"Concept: a C whose counter is a tooth crown"* ]]
   [ "$(jq -r '.requested' "$P/.aid-ui/logo/gen/plan.json")" -eq 4 ]
-  [ "$(jq -r '.status + " " + .price_list' "$P/.aid-ui/logo/gen/plan.json")" = "planned $(python3 -c "import re;print(re.search(r'PRICE_LIST = \"([^\"]+)\"', open('$GEN').read()).group(1))")" ]
+  [ "$(jq -r '.status + " " + .price_list' "$P/.aid-ui/logo/gen/plan.json")" = "planned $(python3 -c "import sys; sys.path.insert(0, '$(dirname "$GEN")/lib'); import aid_ui_costs as c; print(c.image_prices('$P')[2])")" ]
   # full mode (the default): the complete logo in colour with the name, tagline and palette in the prompt; name required
   printf '{"n": 1, "name": "Firma s.r.o.", "tagline": "pekárna · Brno", "palette": "warm ochre", "slots": {"WC": "a loaf as a letter F"}}' > "$P/.aid-ui/logo/gen.json"
   run python3 "$GEN" "$P" --spec .aid-ui/logo/gen.json --dry-run; [ "$status" -eq 0 ] || { echo "$output"; return 1; }

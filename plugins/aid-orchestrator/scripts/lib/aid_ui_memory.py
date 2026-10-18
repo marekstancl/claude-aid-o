@@ -8,14 +8,25 @@ expert remembers one place; the client every place. The blind audit reads none o
 import json, os
 
 PLACES = ("sdeleni", "logo", "pohyb", "struktura", "vzhled", "web")
+LAUNCH_DIR = os.path.join(".aid-ui", "critic", "launch")
+
+
+def critic_dir(p):
+    """Where a loop keeps its frozen roles, rounds, runs and verdict: .aid-ui/critic, or the launch rating's own
+    .aid-ui/critic/launch when AID_UI_CRITIC_DIR says so (P115: aid-ui-quality.py --launch sets it for every script
+    it starts, so the rating after the deployment never touches the build's). The competitors stay in .aid-ui/critic."""
+    v = os.environ.get("AID_UI_CRITIC_DIR") or ""
+    if v and v != LAUNCH_DIR:   # one value only: never a path a stray environment could point anywhere
+        raise SystemExit("ERROR: AID_UI_CRITIC_DIR may only be %s (the launch rating), not %r" % (LAUNCH_DIR, v))
+    return os.path.join(p, v or os.path.join(".aid-ui", "critic"))
 
 
 def rounds_dir(p, place):
-    return os.path.join(p, ".aid-ui", "critic", "rounds", *([] if place == "web" else [place]))
+    return os.path.join(critic_dir(p), "rounds", *([] if place == "web" else [place]))
 
 
 def reopened_at(p, place):
-    f = os.path.join(p, ".aid-ui", "critic", "loop-reopened.json") if place == "web" else os.path.join(rounds_dir(p, place), "reopened.json")
+    f = os.path.join(critic_dir(p), "loop-reopened.json") if place == "web" else os.path.join(rounds_dir(p, place), "reopened.json")
     try:
         return json.load(open(f, encoding="utf-8"))[-1]["at"]
     except (OSError, ValueError, IndexError, KeyError):

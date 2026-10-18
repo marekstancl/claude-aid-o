@@ -110,19 +110,42 @@ def text_env():
     return {k: v for k, v in os.environ.items() if k not in PAID_KEYS}   # text never on a paid API, only subscriptions
 
 
-def codex(prompt, images, cwd, out):
-    cmd = ["codex", "exec", "--skip-git-repo-check", "-C", cwd, "-s", "read-only", "--json", "-c", "model_reasoning_effort=high"]
-    if os.environ.get("AID_UI_CODEX_MODEL"):
-        cmd += ["-m", os.environ["AID_UI_CODEX_MODEL"]]
-    for i in images:
-        cmd += ["-i", i]
+TRANSPORT = os.path.join(HERE, "lib", "aid-codex-transport.sh")
+
+
+def codex_isolated(prompt, images, cwd, out, effort):
+    """One Codex call through AID's transport (lib/aid-codex-transport.sh _run_codex_isolated, P115): its binary
+    choice, model (CODEX_MODEL; AID_UI_CODEX_MODEL picks another), read-only fresh process; the studio adds its
+    screenshots (AID_CODEX_IMAGES) and runs it without the paid API keys (text_env). Returns (rc, events text,
+    stderr text, last message, model)."""
+    os.makedirs(out, exist_ok=True)
+    tmp = tempfile.mkdtemp(prefix=".codex-", dir=out)
     try:
-        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, env=text_env(), timeout=TIMEOUT)
-    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
-        return {"provider": "codex", "rc": 127, "text": "", "usage": {}, "log": "codex not found" if isinstance(e, FileNotFoundError) else "codex timed out", "refused": False, "commands": []}
+        pf, ev, er, last = (os.path.join(tmp, x) for x in ("prompt.txt", "events.jsonl", "stderr.log", "last.txt"))
+        with open(pf, "w", encoding="utf-8") as f:
+            f.write(prompt)
+        env = dict(text_env(), CODEX_EFFORT=effort, AID_CODEX_ISOLATED_TIMEOUT_SECONDS=str(TIMEOUT), AID_CODEX_IMAGES="\n".join(images))
+        env.pop("AID_C3_TIMEOUT_SECONDS", None)   # the older name wins in the transport; the studio's own timeout counts
+        if os.environ.get("AID_UI_CODEX_MODEL"):
+            env["CODEX_MODEL"] = os.environ["AID_UI_CODEX_MODEL"]
+        r = subprocess.run(["bash", "-c", 'source "$1" && printf "%s\\n" "$CODEX_MODEL" && _run_codex_isolated "$2" "$3" "$4" "$5" "$6"',
+                            "_", TRANSPORT, cwd, pf, ev, er, last], capture_output=True, text=True, env=env, stdin=subprocess.DEVNULL, timeout=TIMEOUT + 60)
+        rd = lambda p: open(p, encoding="utf-8", errors="replace").read() if os.path.isfile(p) else ""
+        return r.returncode, rd(ev), rd(er) + (r.stderr or ""), rd(last), (r.stdout or "").strip().split("\n")[0]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+def codex(prompt, images, cwd, out):
+    try:
+        rc, events, stderr, _, model = codex_isolated(prompt, images, cwd, out, "high")
+    except subprocess.TimeoutExpired:
+        return {"provider": "codex", "rc": 124, "text": "", "usage": {}, "log": "codex timed out", "refused": False, "commands": []}
+    if rc == 127:
+        return {"provider": "codex", "model": model, "rc": 127, "text": "", "usage": {}, "log": "codex not found", "refused": False, "commands": []}
     text, usage, cmds, err = "", {}, [], ""
     with open(os.path.join(out, "events.jsonl"), "a", encoding="utf-8") as ev:
-        for line in (r.stdout or "").splitlines():
+        for line in events.splitlines():
             if not line.strip().startswith("{"):
                 continue
             try:
@@ -139,9 +162,9 @@ def codex(prompt, images, cwd, out):
                 usage = e.get("usage") or {}
             if e.get("type") in ("error", "turn.failed"):
                 err += json.dumps(e)[:400]
-    logtxt = (r.stderr or "")[-1500:] + err
-    return {"provider": "codex", "rc": r.returncode, "text": text, "commands": cmds, "log": logtxt,
-            "refused": bool(REFUSED.search(logtxt + (r.stdout or "")[-2000:])),
+    logtxt = stderr[-1500:] + err
+    return {"provider": "codex", "model": model, "rc": rc, "text": text, "commands": cmds, "log": logtxt,
+            "refused": bool(REFUSED.search(logtxt + events[-2000:])),
             "usage": {"input": usage.get("input_tokens"), "cached": usage.get("cached_input_tokens"), "output": usage.get("output_tokens")}}
 
 
@@ -352,7 +375,7 @@ def critic_place(project, web, audit, out, role, history, place, role_text, froz
     podklady/ (and the skeleton address at the structure), the png files of it as images."""
     files, bsha = place_bundle(project, place)
     kind = "audit" if audit else "critic"
-    out = out or os.path.join(project, ".aid-ui", "critic", "runs", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-%s-%s-%s" % (place, kind, role))
+    out = out or os.path.join(memory.critic_dir(project), "runs", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-%s-%s-%s" % (place, kind, role))
     bundle = os.path.join(out, "bundle")
     for rel in files:
         dst = os.path.join(bundle, "podklady", rel.replace(".aid-ui/", "").replace("docs/", ""))
@@ -419,7 +442,7 @@ def critic(project, web, audit, out, role, history=None, place="web"):
     if r.returncode:
         die("no usable frozen critic: " + (r.stderr or r.stdout).strip())
     role_text = r.stdout
-    frozen = json.load(open(os.path.join(project, ".aid-ui", "critic", "frozen.json" if place == "web" else os.path.join("frozen", place + ".json")), encoding="utf-8"))
+    frozen = json.load(open(os.path.join(memory.critic_dir(project), "frozen.json" if place == "web" else os.path.join("frozen", place + ".json")), encoding="utf-8"))
     if place != "web":
         return critic_place(project, web, audit, out, role, history, place, role_text, frozen)
     if not web:
@@ -428,7 +451,7 @@ def critic(project, web, audit, out, role, history=None, place="web"):
     if not os.path.isdir(site):
         die(f"no site directory {site}")
     kind = "audit" if audit else "critic"
-    out = out or os.path.join(project, ".aid-ui", "critic", "runs", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + kind + "-" + role)
+    out = out or os.path.join(memory.critic_dir(project), "runs", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + kind + "-" + role)
     man, comp = comp_shots(project) if role == "owner" else (None, [])
     if role == "owner":
         lp = os.path.join(project, ".aid-ui", "critic", "competitors.json")
@@ -622,7 +645,7 @@ class Studio:
 
 def client_role(project):
     import yaml
-    fz = os.path.join(project, ".aid-ui", "critic", "frozen.json")
+    fz = os.path.join(memory.critic_dir(project), "frozen.json")
     if os.path.isfile(fz):
         rub = json.load(open(fz, encoding="utf-8"))["rubric"]
     else:

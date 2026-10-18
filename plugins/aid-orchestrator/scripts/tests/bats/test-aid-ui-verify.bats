@@ -486,6 +486,24 @@ YML
   [ ! -f "$RES" ]
 }
 
+@test "P115 --base-url: the rows run over a live address without the preview and record nothing; form_delivery is N/A there" {
+  narrow http_200 form_delivery
+  cp -r "$FX/fixed/." "$SITE/"
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$SITE" >/dev/null
+  before="$(sha256sum "$PROJ/docs/design/brand-state.json")"
+  port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  python3 -m http.server "$port" --bind 127.0.0.1 --directory "$SITE" >/dev/null 2>&1 3>&- & HOLD=$!
+  for i in $(seq 1 50); do curl -sf -o /dev/null "http://127.0.0.1:$port/" && break; sleep 0.1; done
+  run bash "$SC/aid-ui-verify.sh" "$PROJ" --base-url "http://127.0.0.1:$port/"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  RES="$PROJ/.aid-ui/verify-live/result.json"
+  [ "$(st http_200 index.html)" == pass ]
+  jq -e '[.rows[] | select(.check == "form_delivery") | .detail] | all(startswith("N/A: live address"))' "$RES" >/dev/null
+  [ "$(jq -r .url "$PROJ/.aid-ui/verify-live/live.json")" == "http://127.0.0.1:$port/" ]
+  [ "$(sha256sum "$PROJ/docs/design/brand-state.json")" == "$before" ]   # no gate-record
+  [ ! -e "$PROJ/.aid-ui/verify/result.json" ]
+}
+
 @test "a page answering 404 is an http_200 failure" {
   mkdir -p "$T/out"
   echo '{"viewports":[390],"browsers":["chromium"],"checks":{"http_200":"x"}}' > "$T/ck.json"

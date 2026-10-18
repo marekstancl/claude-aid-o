@@ -201,6 +201,19 @@ gates:
     pass_criteria: "exit code 0 (no record present → auto-pass; record present → confirmed_by is non-empty string)"
     max_retries: 0
 
+  # P115: the run gate of a plan made from the /aid-ui handover package (docs/ui/predani.json). The plan's
+  # frontmatter decides: a plan without ui_package passes with "přeskočeno: bez balíku"; a plan from a package fails on
+  # a missing, edited or stale package, a critical open item, and - once docs/ui/nasazeni.json exists - on deployed
+  # files that are not the package's, a live form the host does not accept, or the studio's rows over the live address.
+  check_ui_handover:
+    description: "A plan from the /aid-ui handover package deploys exactly the web the client accepted (P115)"
+    required: true
+    type: deterministic
+    command: "bash {plugin_path}/scripts/aid-ui-verify.sh --package-gate {plan_path}"
+    timeout_seconds: 900
+    pass_criteria: "exit 0: pass, 'před nasazením', or 'přeskočeno: bez balíku' (a plan without ui_package)"
+    max_retries: 0
+
 # Python project gates (language-specific override example)
 # Uncomment and customize for Python-heavy projects:
 # gates_python:

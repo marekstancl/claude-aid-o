@@ -424,7 +424,18 @@ Write an exhaustive implementation plan from specification or topic.
 
 1. **Input resolution** — read spec file, detect format (brief/plan/free-form);
    a brief file (frontmatter `zadani:`, the six sections of `defaults/templates/zadani.md`)
-   IS the specification — lint it with `aid-plan-lint.sh --zadani <file>` and keep it
+   IS the specification — lint it with `aid-plan-lint.sh --zadani <file>` and keep it.
+   **A handover package of the `/aid-ui` studio** (`docs/ui/predani.json`, P115) is a
+   specification too: allocate the plan ID, then
+   `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-package.py" zadani docs/ui/predani.json --plan-id P{NNN}`
+   writes `.aid-o/plans/P{NNN}-zadani.md` (a point for every customer task, launch step,
+   launch input, open item and the launch rating, each with owner and verification) and
+   lints it; continue from that brief. It refuses while the project's execution.yaml has
+   no `check_ui_handover` gate in its profiles (run `/aid-init`, its upgrade adds it). The plan
+   copies `ui_package:` and `ui_package_sha256:` from the brief's frontmatter into its
+   own — `aid-plan-lint.sh` refuses `ui_package_lost` otherwise, and the run gate
+   `check_ui_handover` reads them (a plan without them skips the gate). Hosting is plan work
+   (PM 17. 10. 2026): the plan's steps deploy, they do not change the web.
 2. **Context** — read `config/project.yaml`, `work/active.md` (generated index — read-only), scan related plans
 3. **The brief, then the interim** — allocate plan ID; from a free-form specification
    FIRST write `.aid-o/plans/P{NNN}-zadani.md` from `defaults/templates/zadani.md` as
