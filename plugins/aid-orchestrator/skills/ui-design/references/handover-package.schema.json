@@ -1,14 +1,39 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:aid:ui:handover-package:1",
-  "title": "The /aid-ui handover package (docs/ui/predani.json), version 1 (P115)",
+  "$id": "urn:aid:ui:handover-package:2",
+  "title": "The /aid-ui handover package (docs/ui/predani.json), version 1 (P115, a web) or 2 (P116, a web application: kind webapp, screens, task_results)",
   "description": "Written by aid-ui-package.py build at the handover (aid-ui-state.sh chapter-all); never edited afterwards. The plan of the deployment reads it (aid-ui-package.py zadani) and the run gate check_ui_handover checks it (aid-ui-verify.sh --package-gate).",
   "$defs": {"id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$", "description": "goes into generated commands of the brief: letters, digits, . _ - only"}},
   "type": "object",
   "additionalProperties": false,
+  "allOf": [{
+    "if": {"required": ["kind"], "properties": {"kind": {"const": "webapp"}}},
+    "then": {"required": ["screens", "task_results"], "properties": {"version": {"const": 2}}},
+    "else": {"properties": {"version": {"const": 1}}, "not": {"anyOf": [{"required": ["screens"]}, {"required": ["task_results"]}, {"required": ["removed_tasks"]}]}}
+  }],
   "required": ["version", "project", "created_at", "site", "gate", "chapters", "places", "customer_tasks", "open_items", "launch_inputs", "launch_only", "handover"],
   "properties": {
-    "version": {"const": 1},
+    "version": {"enum": [1, 2]},
+    "kind": {"enum": ["web", "webapp"], "description": "P116: missing = web (every version 1 package)"},
+    "screens": {
+      "type": "object", "additionalProperties": false, "required": ["path", "sha256", "approved_sha256"],
+      "description": "P116: the model of screens and tasks the PM approved",
+      "properties": {"path": {"const": "docs/design/screens.json"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                     "approved_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+    },
+    "task_results": {
+      "type": "array", "minItems": 1,
+      "description": "P116: each task of the model in the last gate (its app_flows rows); verified_on skeleton = a design check in the studio, code = the run gate in the project's code",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["task", "passed", "run_at", "model_sha256", "verified_on"],
+        "properties": {"task": {"$ref": "#/$defs/id"}, "passed": {"type": "boolean"}, "run_at": {"type": "string", "minLength": 1},
+                       "model_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verified_on": {"enum": ["skeleton", "code"]}}
+      }
+    },
+    "removed_tasks": {
+      "type": "array", "description": "P116: baseline tasks of an existing app the PM approved to drop",
+      "items": {"type": "object", "additionalProperties": false, "required": ["id", "reason"], "properties": {"id": {"$ref": "#/$defs/id"}, "reason": {"type": "string"}}}
+    },
     "project": {"type": "string", "minLength": 1},
     "created_at": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T"},
     "site": {

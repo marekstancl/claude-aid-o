@@ -117,6 +117,9 @@ z něhož se staví kostra, testy úloh brány a předávací balík.
 - **Úlohy schvaluje jen vlastník produktu (PM):** odpověď na otázku `structure` (i `task_map`) aplikace se zapíše jen
   od PM a s cílem `docs/design/screens.json@<sha modelu teď>` (`app_tasks_need_owner`); totéž výjimky
   `baseline@…` a `task@…` (`app_owner_only`). Hodnocení klient-role je podklad, ne rozhodnutí.
+- **Předání aplikace:** balík verze 2 nese schválený model a výsledky úloh (`verified_on: skeleton`); `aid-ui-package.py zadani`
+  z něj napíše zadání změn kódu (bod za úlohu a za cestu selhání) a brána běhu `check_ui_handover` pustí scénáře úloh
+  proti běžící aplikaci projektu (`docs/ui/nasazeni.json`).
 
 ## Kroky a části (jak o nich mluvit)
 

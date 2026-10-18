@@ -381,6 +381,95 @@ replace() { mutate ".tasks[$1].replaces = \"$2\" | .tasks[$1].done_when.expect =
   [ "$status" -eq 0 ]
 }
 
+# ---------------------------------------------------------------- app-package: the handover of an app (P116)
+PKGPY="$BATS_TEST_DIRNAME/../../aid-ui-package.py"
+# app_handover [result jq filter] - a studio project of kind webapp: the fixture model approved by the PM, a recorded
+# gate whose result carries the app_flows rows of both tasks on that model, two chapters and the PM's handover
+app_handover() {
+  state_setup
+  jqw '.options = {vision: false, seo: false, identity: false}'
+  mkdir -p "$PROJ/docs/design"; cp "$FIXA/docs/design/screens.json" "$PROJ/docs/design/screens.json"
+  MSHA="$(sha256sum "$PROJ/docs/design/screens.json" | cut -d' ' -f1)"
+  "$SCRIPT" build-record "$PROJ" "$SITE" >/dev/null
+  result ".rows += ([\"zalozit\", \"smazat\"] | map({check: \"app_flows\", page: ., state: \"normal\", viewport: \"1440\", browser: \"chromium\", role: \"\", status: \"pass\", model_sha256: \"$MSHA\"})) | ${1:-.}"
+  "$SCRIPT" gate-record "$PROJ" "$RES" >/dev/null   # recorded while the variant is still a web's: the required matrix of pages
+  end_order; serve_200; "$SCRIPT" links "$PROJ" --web "$LINK_URL" --customer "$CUST_URL" >/dev/null
+  "$SCRIPT" chapter "$PROJ" vize navrh; "$SCRIPT" chapter "$PROJ" barvy navrh
+  ans h1 handover "$("$SCRIPT" chapter-all-target "$PROJ")"   # the helper rates the web place with the web's type: before the variant
+  jqw --arg s "$MSHA" '.variant = {type: "webapp", brand: "none", local: false} | .app = {approved_model_sha: $s, answer: "p1", at: "t"}' 
+  printf 'gates:\n  check_ui_handover:\n    command: "bash x"\ngate_profiles:\n  standard:\n    include: [check_ui_handover]\n' > "$PROJ/.aid-o/config/execution.yaml"
+}
+
+@test "app-package: the package of an app carries kind, the approved model and the task results, and passes check" {
+  app_handover
+  run "$SCRIPT" chapter-all "$PROJ" --by PM --answer h1
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  O="$PROJ/docs/ui/predani.json"
+  [ "$(jq -r '.version, .kind, .screens.sha256, .screens.approved_sha256' "$O" | tr '\n' ' ')" = "2 webapp $MSHA $MSHA " ]
+  [ "$(jq -c '[.task_results[] | [.task, .passed, .verified_on, .model_sha256 == $s]]' --arg s "$MSHA" "$O")" = '[["zalozit",true,"skeleton",true],["smazat",true,"skeleton",true]]' ]
+  run python3 "$PKGPY" check "$O" --project "$PROJ"
+  [ "$status" -eq 0 ]
+  # the model changed after the handover: the package is stale against the project
+  jq '.app = "jiná"' "$PROJ/docs/design/screens.json" > "$T/m.json" && mv "$T/m.json" "$PROJ/docs/design/screens.json"
+  run python3 "$PKGPY" check "$O" --project "$PROJ"
+  [ "$status" -eq 1 ]; [[ "$output" == *"model docs/design/screens.json není ten z předání"* ]]
+  # a version 1 package stays valid; a web package cannot carry an app's parts
+  run python3 "$PKGPY" check "$BATS_TEST_DIRNAME/../fixtures/aid-ui/package/docs/ui/predani.json"
+  [ "$status" -eq 0 ]
+  jq '.kind = "web" | .version = 1 | .x = 1 | del(.x)' "$O" > "$T/w.json"
+  run python3 "$PKGPY" check "$T/w.json"
+  [ "$status" -eq 1 ]
+}
+
+@test "app-package: the code-change brief passes the lint with the contract first, a point per task and per failure path" {
+  app_handover
+  "$SCRIPT" chapter-all "$PROJ" --by PM --answer h1 >/dev/null
+  run python3 "$PKGPY" zadani "$PROJ/docs/ui/predani.json" --plan-id P001
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"úlohy 2, selhání 1, smlouva 1, spuštění 1"* ]]
+  B="$PROJ/.aid-o/plans/P001-zadani.md"
+  run bash "$BATS_TEST_DIRNAME/../../aid-plan-lint.sh" --zadani "$B"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  grep -q '^- \[ \] AC1: Aplikace běží na adrese' "$B"; grep -q '^- \[ \] AC2: Smlouva stavby' "$B"
+  grep -q 'AC3: Úloha „Založit poznámku“ projde včetně výsledku' "$B"; grep -q 'AC4: Selhání network v kroku 2 úlohy „Založit poznámku“' "$B"
+  grep -q 'AC5: Úloha „Smazat poznámku“' "$B"
+  grep -q -- "--package-gate .aid-o/plans/P001-zadani.md --launch" "$B"
+  grep -q "live-row docs/ui/predani.json task_recovery --detail 'zalozit / fail-1: výsledek nastal'" "$B"
+  grep -q 'verified_on: skeleton' "$B"
+}
+
+@test "app-package: a gate without a passed task refuses the handover, nothing written" {
+  app_handover '.rows |= map(select(.check != "app_flows"))'
+  run "$SCRIPT" chapter-all "$PROJ" --by PM --answer h1
+  [ "$status" -ne 0 ]; [[ "$output" == *"chybí úloha, která prošla bránou"* ]]; [ ! -e "$PROJ/docs/ui/predani.json" ]
+}
+
+@test "app-package: task results of an older model are refused" {
+  app_handover '.rows |= map(if .check == "app_flows" then .model_sha256 = "0000000000000000000000000000000000000000000000000000000000000000" else . end)'
+  run python3 "$PKGPY" build "$PROJ" --dry
+  [ "$status" -eq 1 ]; [[ "$output" == *"z jiného modelu než schváleného"* ]]
+}
+
+@test "app-package: a model the PM did not approve (or changed since) is refused" {
+  app_handover
+  jqw '.app.approved_model_sha = "1111111111111111111111111111111111111111111111111111111111111111"'
+  run python3 "$PKGPY" build "$PROJ" --dry
+  [ "$status" -eq 1 ]; [[ "$output" == *"model docs/design/screens.json se změnil od schválení PM"* ]]
+  jqw 'del(.app)'
+  run python3 "$PKGPY" build "$PROJ" --dry
+  [ "$status" -eq 1 ]; [[ "$output" == *"PM neschválil"* ]]
+}
+
+@test "app-package: an existing app whose task of today has no replacement is refused at the handover" {
+  app_handover
+  mkdir -p "$PROJ/.aid-ui/baseline"; cp "$BATS_TEST_DIRNAME/../fixtures/aid-ui/app-existing/tasks.json" "$PROJ/.aid-ui/baseline/tasks.json"
+  b="$(sha256sum "$PROJ/.aid-ui/baseline/tasks.json" | cut -d' ' -f1)"
+  jqw --arg b "$b" '.app_baseline = {approved_sha: $b}'
+  echo "{\"tasks_sha256\": \"$b\", \"results\": []}" > "$PROJ/.aid-ui/baseline/result.json"
+  run python3 "$PKGPY" build "$PROJ" --dry
+  [ "$status" -eq 1 ]; [[ "$output" == *"regrese existující aplikace"* ]]
+}
+
 @test "baseline: a list approved by anyone but the PM is not approved; a capture where a task failed does not count" {
   base_proj; approve_list client; captured
   replace 0 prehled "3 objednávky čekají"; replace 1 hledat "Nalezeno: mouka"; gate_passed zalozit smazat

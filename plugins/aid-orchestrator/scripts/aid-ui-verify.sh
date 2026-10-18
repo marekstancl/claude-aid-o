@@ -65,7 +65,7 @@ if [[ -z "$live" ]]; then   # binds the LOCAL gate to the recorded build; the ru
 fi
 
 # P116: a webapp is gated only on the model the PM approved, with its task scenarios generated from that model now
-if [[ "$(jq -r '.variant.type // ""' "$STATE")" == webapp && -z "$subject" ]]; then
+if [[ "$(jq -r '.variant.type // ""' "$STATE")" == webapp ]]; then   # every mode: the copy subject and the live rows too
   bash "$HERE/aid-ui-state.sh" model-approved "$PROJECT" >/dev/null || die "the gate of an app runs only on the model the PM approved (see above)"
   python3 "$HERE/aid-ui-flows.py" generate "$PROJECT" >/dev/null || die "the task scenarios could not be generated from docs/design/screens.json (see above)"
 fi
@@ -95,7 +95,8 @@ if [[ -n "$live" ]]; then   # P115: the rows over the live address - no preview,
     --base "$live" --out "$OUT" --project "$PROJECT" --seo "$HERE/aid-ui-seo-check.py" --live 1 "${facts[@]}" \
     || die "aid-ui-verify.mjs failed over $live; no live result"
   jq -n --arg u "$live" --arg s "$(python3 "$HERE/aid-ui-motion.py" dirsha "$dir")" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{url: $u, site_sha256: $s, run_at: $at}' > "$OUT/live.json"
+    --arg m "$(jq -r '.model_sha256 // ""' "$OUT/result.json")" \
+    '{url: $u, site_sha256: $s, run_at: $at} + (if $m != "" then {model_sha256: $m} else {} end)' > "$OUT/live.json"   # P116: an app's live rows are of its model
   wo="$(jq -c '.warn_only // []' "$OUT/checks.json")"
   openf='[.rows[] | select(.status == "fail" or .status == "not_covered" or (.status == "warn" and (.check | IN($wo[]) | not)))]'
   open="$(jq --argjson wo "$wo" "$openf | length" "$OUT/result.json")"

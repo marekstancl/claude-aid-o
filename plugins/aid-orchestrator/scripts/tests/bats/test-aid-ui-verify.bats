@@ -881,3 +881,78 @@ detail() { jq -r --arg c "$1" --arg p "$2" --arg s "$3" '[.rows[] | select(.chec
   [ "$status" -eq 1 ]; [[ "$output" == *"changed since the PM approved it"* ]]; [[ "$output" == *"only on the model the PM approved"* ]]
   [ ! -f "$RES" ]
 }
+
+@test "app-gate: baseline capture plays each approved task of today's app with its stored login; an expired login names the task" {
+  EX="$BATS_TEST_DIRNAME/../fixtures/aid-ui/app-existing"
+  P="$T/old"; mkdir -p "$P/.aid-ui/baseline/storage" "$P/docs/design"
+  cp "$EX/tasks.json" "$P/.aid-ui/baseline/tasks.json"
+  sha="$(sha256sum "$P/.aid-ui/baseline/tasks.json" | cut -d' ' -f1)"
+  echo "{\"variant\": {\"type\": \"webapp\", \"existing\": true}, \"app_baseline\": {\"approved_sha\": \"$sha\", \"answer\": \"b1\"}, \"answers\": {\"b1\": {\"kind\": \"exception\", \"decision\": \"approve\", \"by\": \"pm\", \"target\": \"baseline@$sha\"}}}" > "$P/docs/design/brand-state.json"
+  port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  python3 -m http.server "$port" --bind 127.0.0.1 --directory "$EX/site" >/dev/null 2>&1 3>&- & HOLD=$!
+  for i in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$port/" && break; sleep 0.1; done
+  # the stored browser login (Playwright storageState): the cookie today's app wants
+  echo "{\"cookies\": [{\"name\": \"prihlasen\", \"value\": \"1\", \"domain\": \"127.0.0.1\", \"path\": \"/\", \"expires\": -1, \"httpOnly\": false, \"secure\": false, \"sameSite\": \"Lax\"}], \"origins\": []}" > "$T/login.json"
+  run python3 "$SC/aid-ui-baseline.py" capture "$P" --url "http://127.0.0.1:$port/" --login "$T/login.json"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e --arg s "$sha" '.tasks_sha256 == $s and ([.results[] | select(.passed)] | length) == 2' "$P/.aid-ui/baseline/result.json" >/dev/null
+  [ -f "$P/.aid-ui/baseline/shots/hledat-1.png" ] && [ -f "$P/.aid-ui/baseline/shots/prehled-2.png" ]
+  # without the login (it expired): the tasks do not reach their result and are named
+  run python3 "$SC/aid-ui-baseline.py" capture "$P" --url "http://127.0.0.1:$port/"
+  [ "$status" -eq 1 ]; [[ "$output" == *"prehled ("*"není vidět (bez přihlášení)"* ]]
+  # a task that would lead the browser and its login out of the app is refused at its step
+  jq '.[0].steps[0].url = "http://example.invalid/"' "$P/.aid-ui/baseline/tasks.json" > "$T/t.json" && mv "$T/t.json" "$P/.aid-ui/baseline/tasks.json"
+  sha="$(sha256sum "$P/.aid-ui/baseline/tasks.json" | cut -d' ' -f1)"
+  jq --arg s "$sha" '.app_baseline.approved_sha = $s | .answers.b1.target = "baseline@" + $s' "$P/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$P/docs/design/brand-state.json"
+  run python3 "$SC/aid-ui-baseline.py" capture "$P" --url "http://127.0.0.1:$port/" --login "$T/login.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"není adresa aplikace"* ]]
+}
+
+@test "app-gate: package gate runs the tasks - --package-gate --launch of an app's package passes on the app, fails when a task's result breaks" {
+  app_gate; gate_app
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  echo '{"type": "webapp", "items": [], "used_answers": []}' > "$PROJ/.aid-ui/launch.json"
+  "$SC/aid-ui-state.sh" chapter "$PROJ" vize navrh >/dev/null
+  # the package as the handover writes it (its own suite covers the handover answer): make + the PM's verdict
+  python3 - "$SC/aid-ui-package.py" "$PROJ" <<'PY'
+import importlib.util, json, os, sys
+spec = importlib.util.spec_from_file_location("pkg", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+p = m.make(sys.argv[2], True); p["handover"] = {"verdict": "prevzit", "rating": None, "answer": "h1", "comment": ""}
+os.makedirs(os.path.join(sys.argv[2], "docs/ui"), exist_ok=True)
+json.dump(p, open(os.path.join(sys.argv[2], "docs/ui/predani.json"), "w"), ensure_ascii=False)
+PY
+  run python3 "$SC/aid-ui-package.py" check "$PROJ/docs/ui/predani.json" --project "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  git -C "$PROJ" init -q; mkdir -p "$PROJ/.aid-o/plans"
+  printf -- '---\nid: P001\nui_package: docs/ui/predani.json\nui_package_sha256: %s\n---\n# plán\n' "$(sha256sum "$PROJ/docs/ui/predani.json" | cut -d' ' -f1)" > "$PROJ/.aid-o/plans/P001.md"
+  # before the deployment: the package and the model are right, --launch refuses
+  run bash "$SC/aid-ui-verify.sh" --package-gate "$PROJ/.aid-o/plans/P001.md"
+  [ "$status" -eq 0 ]; [[ "$output" == *"před nasazením"* ]]
+  run bash "$SC/aid-ui-verify.sh" --package-gate "$PROJ/.aid-o/plans/P001.md" --launch
+  [ "$status" -eq 1 ]
+  # the project's app running (here: the fixture app as the code's build), the address in nasazeni.json
+  cp -r "$AFX/site" "$T/code"
+  port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  python3 -m http.server "$port" --bind 127.0.0.1 --directory "$T/code" >/dev/null 2>&1 3>&- & HOLD=$!
+  for i in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$port/" && break; sleep 0.1; done
+  echo "{\"url\": \"http://127.0.0.1:$port\"}" > "$PROJ/docs/ui/nasazeni.json"
+  run bash "$SC/aid-ui-verify.sh" --package-gate "$PROJ/.aid-o/plans/P001.md" --launch
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"PASS: úlohy modelu"* ]]
+  (cd "$PROJ" && python3 "$SC/aid-ui-package.py" live-row docs/ui/predani.json app_flows --detail 'zalozit / normal: výsledek nastal')
+  # the code breaks one task's result: the gate fails and that task's point too
+  sed -i '/aid-break: result/s/.*/    void 0;/' "$T/code/app.js"
+  run bash "$SC/aid-ui-verify.sh" --package-gate "$PROJ/.aid-o/plans/P001.md" --launch
+  [ "$status" -eq 1 ]; [[ "$output" == *"úlohy aplikace nad"*"neprošly"* ]]
+  cd "$PROJ"; run python3 "$SC/aid-ui-package.py" live-row docs/ui/predani.json app_flows --detail 'zalozit / normal: výsledek nastal'
+  [ "$status" -eq 1 ]
+}
+
+@test "app-gate: each task row runs in a fresh browser context - data one task leaves behind never decides another's row" {
+  app_gate
+  # a detail page that marks the browser, and a list that hides its notes once marked: with a shared context the task
+  # that opens a note after another task visited a detail would fail
+  sed -i "s|  if (screen === 'detail') {|  if (screen === 'detail') { localStorage.setItem('navstiveno', '1');|" "$T/appsite/app.js"
+  sed -i "s|    notes.forEach(function (n, i) {|    if (localStorage.getItem('navstiveno')) notes = [];\n    notes.forEach(function (n, i) {|" "$T/appsite/app.js"
+  gate_app
+  [ "$status" -eq 0 ] || { jq -c '.rows[] | select(.status != "pass") | [.check, .page, .state, .detail]' "$RES" | head; return 1; }
+}

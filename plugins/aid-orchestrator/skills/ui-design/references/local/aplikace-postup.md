@@ -82,6 +82,8 @@ Postavená aplikace drží dvě věci, na kterých stojí testy úloh a předán
    neztratí obrazovku ani vstup, nabídne obnovu a úloha i tak dojde k výsledku). Řádky úloh a stavů běží na 1440
    a 390 px v Chromiu (`app_rows` v `coverage/checks.yaml`); každý výsledek nese otisk modelu (`model_sha256`).
    Scénář jiného modelu brána odmítne. Obrazovka se otevírá na své adrese (`url` v modelu, jinak `/<id>/`).
+   Každý řádek úlohy běží v čistém prohlížeči; aplikace za přihlášením dá bráně testovací přihlášení jako
+   `.aid-ui/test-storage.json` (uložený stav prohlížeče Playwright, jen testovací účet).
 3. Existující aplikace: `aid-ui-baseline.py compare <projekt>` - každá dnešní úloha má novou úlohu s `replaces`,
    která prošla poslední branou a končí stejným výsledkem (kromě úloh, jejichž zrušení PM schválil). Pouští ho sám
    balík při předání: bez toho se aplikace nepředá. Zadání změn kódu ho má jako bod nad výsledkem brány běhu.

@@ -1275,6 +1275,7 @@ const APPV = st.variant?.type === 'webapp' ? (() => {
   return JSON.parse(r.stdout);
 })() : null;
 const flows = isApp && !APPV ? (st.structure?.flows || []) : [];
+const STORAGE = APPV && fs.existsSync(path.join(project, '.aid-ui/test-storage.json')) ? path.join(project, '.aid-ui/test-storage.json') : null;
 const roles = (st.structure?.roles || []).map(r => String(r?.id ?? r));
 const matrix = [];
 for (const p of pages) for (const v of VPS) for (const b of BRS) matrix.push({ page: p, viewport: v, browser: b, role: '', state: '' });
@@ -1416,7 +1417,11 @@ for (const b of BRS) {
       }
       // page, role and state come from the project's state: one filename segment, no path separators or leading dots
       const key = [b, v, `${m.page}${m.role ? '.' + m.role : ''}${m.state ? '.' + m.state : ''}.png`.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+/, '_')];
-      const r = await pageRows(ctx, rowUrl || (flow ? base : urlOf(m.page)), key, m.role, m.state, run, facts, brand, c => applies(c, m));
+      // P116: every app row in a fresh context (one task's data or login never leaks into the next), with the project's
+      // stored test login (.aid-ui/test-storage.json, Playwright storageState) when it has one
+      const rctx = app ? await browser.newContext({ viewport: { width: Number(v), height: HEIGHT[v] || 900 }, ...(STORAGE ? { storageState: STORAGE } : {}) }) : ctx;
+      const r = await pageRows(rctx, rowUrl || (flow ? base : urlOf(m.page)), key, m.role, m.state, run, facts, brand, c => applies(c, m));
+      if (rctx !== ctx) await rctx.close();
       if (r.error) {
         for (const c of named) put(m, c, flow && (c === 'app_task_states' || c === app?.check) ? 'fail' : APP_CHECKS.includes(c) ? 'pass' : 'not_covered',
           APP_CHECKS.includes(c) && c !== app?.check ? `N/A: a row of ${app?.check || 'a flow'}` : `${flow ? 'scenario' : 'page'} failed: ${r.error}`, sha);
