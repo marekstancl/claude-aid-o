@@ -6,12 +6,13 @@ An existing app must keep every task that works today. The baseline is a list of
 model replaces each with a task of its own (`replaces` in docs/design/screens.json) that must end in the same result.
 
   list <project> --url <app>
-      A draft of today's tasks from the app's navigation (every link of its <nav>: open it, the result is that
-      page's heading) into .aid-ui/baseline/tasks.json - a draft for the agent to complete with inputs, actions and
-      the results people rely on. Refused when the file exists (the list is never overwritten silently).
+      A draft of today's tasks from the app's navigation (every link of its <nav>, query kept: open it, the result is
+      that page's heading) into .aid-ui/baseline/tasks.json - a draft the agent completes from the project's
+      documentation (tasks without a navigation link, inputs, actions, the results people rely on) before the PM
+      approves it. Refused when the file exists (the list is never overwritten silently).
   capture <project> --url <app> [--login <storage.json>]
-      Only the list the PM approved: the state's app_baseline.approved_sha (a PM answer of kind exception, target
-      baseline@<sha>) must be the sha256 of tasks.json now - a draft or a list changed since is refused before any
+      Only the list the PM approved: the state's app_baseline (stored by aid-ui-state.sh record-answer) must name a
+      recorded answer by pm, kind exception, decision approve, target baseline@<sha256 of tasks.json now> - a draft or a list changed since is refused before any
       browser starts. Plays every task through lib/ui-fidelity/aid-ui-baseline.mjs (Playwright; the task's login, else
       --login, as storageState) and writes .aid-ui/baseline/result.json {captured_at, url, tasks_sha256, results:
       [{id, passed, url, why}]} and shots/<task>-<n>.png. A task that does not reach its result today (an expired
@@ -109,7 +110,8 @@ def cmd_list(p, url):
             h = Nav(); h.feed(fetch(u)); expect = " ".join((h.h1 or "").split())
         except (OSError, ValueError):
             expect = ""
-        path = urllib.parse.urlsplit(u).path or "/"
+        sp = urllib.parse.urlsplit(u)
+        path = (sp.path or "/") + ("?" + sp.query if sp.query else "")   # /?hledat=1 is another screen than /
         tid = re.sub(r"[^a-z0-9]+", "-", (text or path).lower().encode("ascii", "ignore").decode()).strip("-")[:60] or f"uloha-{len(tasks) + 1}"
         tasks.append({"id": tid, "title": text or path, "steps": [{"url": path}], "login": None,
                       "result": {"url": path, "expect": expect or "(doplň, co má být vidět)"}})
@@ -126,9 +128,15 @@ def approved(p):
         return None, "bez výchozího stavu"
     sha = sha_file(f)
     try:
-        a = (json.load(open(os.path.join(p, "docs", "design", "brand-state.json"), encoding="utf-8")).get("app_baseline") or {}).get("approved_sha")
+        st = json.load(open(os.path.join(p, "docs", "design", "brand-state.json"), encoding="utf-8"))
     except (OSError, ValueError):
-        a = None
+        st = {}
+    # only the PM's recorded studio answer approves the list (aid-ui-state.sh record-answer refuses anyone else's);
+    # app_baseline is that answer's record and must name it
+    ab = st.get("app_baseline") or {}
+    ans = (st.get("answers") or {}).get(ab.get("answer") or "") or {}
+    ok = ans.get("by") == "pm" and ans.get("kind") == "exception" and ans.get("decision") == "approve" and ans.get("target") == f"baseline@{ab.get('approved_sha')}"
+    a = ab.get("approved_sha") if ok else None
     if not a:
         return sha, f"the PM has not approved the baseline list (exception baseline@{sha})"
     if a != sha:
@@ -148,11 +156,15 @@ def cmd_capture(p, url, login):
         if lg and (os.path.isabs(lg) or ".." in lg.split("/") or not os.path.isfile(os.path.join(bdir(p), lg))):
             die(f"capture refused: task {t['id']}: login {lg!r} is not a file under .aid-ui/baseline/")
     out = os.path.join(bdir(p), "capture.part")
+    import shutil
+    shutil.rmtree(out, ignore_errors=True)   # a crashed run's results are never read as this run's
     cmd = ["node", RUNNER, "--tasks", os.path.join(bdir(p), "tasks.json"), "--base", url, "--root", bdir(p), "--out", out]
     if login:
         cmd += ["--login", os.path.abspath(login)]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     try:
+        if r.returncode != 0:
+            raise ValueError(f"exit {r.returncode}")
         res = json.load(open(os.path.join(out, "results.json"), encoding="utf-8"))
     except (OSError, ValueError):
         die("capture: the browser run gave no results: " + (r.stderr or r.stdout)[-400:])
@@ -189,6 +201,12 @@ def cmd_compare(p, result=None):
         bad.append("the baseline is not captured (aid-ui-baseline.py capture)")
     if cap and cap.get("tasks_sha256") != sha:
         bad.append("the captured baseline is of another list than tasks.json now; capture again")
+    elif cap:   # every task of the list reached its result when captured, once
+        got = [x.get("id") for x in cap.get("results") or [] if isinstance(x, dict)]
+        okc = {x.get("id") for x in cap.get("results") or [] if isinstance(x, dict) and x.get("passed") is True}
+        miss = [b.get("id") for b in base if b.get("id") not in okc]
+        if miss or len(got) != len(set(got)) or set(got) - {b.get("id") for b in base}:
+            bad.append("the capture did not record every task of the list passing once (" + ", ".join(map(str, miss)) + "); capture again")
     try:
         m = json.load(open(os.path.join(p, "docs", "design", "screens.json"), encoding="utf-8"))
         msha = sha_file(os.path.join(p, "docs", "design", "screens.json"))

@@ -298,7 +298,8 @@ base_proj() {
   echo '{"variant": {"type": "webapp", "existing": true}, "answers": {}}' > "$APP/docs/design/brand-state.json"
 }
 st_set() { jq "$1" "$APP/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$APP/docs/design/brand-state.json"; }
-approve_list() { st_set ".app_baseline = {approved_sha: \"$BSHA\"}"; }
+# approve_list [by] - the state as record-answer leaves it after the PM's (or another's) approval of the list
+approve_list() { st_set ".app_baseline = {approved_sha: \"$BSHA\", answer: \"b1\"} | .answers.b1 = {kind: \"exception\", decision: \"approve\", by: \"${1:-pm}\", target: \"baseline@$BSHA\"}"; }
 captured() { echo "{\"tasks_sha256\": \"$BSHA\", \"results\": [{\"id\": \"prehled\", \"passed\": true}, {\"id\": \"hledat\", \"passed\": true}]}" > "$APP/.aid-ui/baseline/result.json"; }
 # gate_passed <task>... - the last gate's app_flows rows of these tasks pass on the model now
 gate_passed() {
@@ -314,11 +315,12 @@ replace() { mutate ".tasks[$1].replaces = \"$2\" | .tasks[$1].done_when.expect =
   run python3 "$BL" list "$APP" --url "file://$T/old/index.html"
   [ "$status" -eq 0 ]; [[ "$output" == *"BASELINE DRAFT"*"2 úloh z navigace"* ]]
   [ "$(jq -r '[.[].title] | join(",")' "$APP/.aid-ui/baseline/tasks.json")" = "Přehled,Hledání" ]
+  [ "$(jq -r '.[1].steps[0].url' "$APP/.aid-ui/baseline/tasks.json")" = "/?hledat=1" ]   # the query is another screen
   run python3 "$BL" list "$APP" --url "file://$T/old/index.html"
   [ "$status" -eq 1 ]; [[ "$output" == *"exists"* ]]   # never overwritten
   run python3 "$BL" capture "$APP" --url http://127.0.0.1:9/
   [ "$status" -eq 1 ]; [[ "$output" == *"the PM has not approved the baseline list (exception baseline@"* ]]
-  st_set ".app_baseline = {approved_sha: \"$(sha256sum "$APP/.aid-ui/baseline/tasks.json" | cut -d' ' -f1)\"}"
+  BSHA="$(sha256sum "$APP/.aid-ui/baseline/tasks.json" | cut -d' ' -f1)"; approve_list
   jq '.[0].result.expect = "jiný"' "$APP/.aid-ui/baseline/tasks.json" > "$T/t.json" && mv "$T/t.json" "$APP/.aid-ui/baseline/tasks.json"
   run python3 "$BL" capture "$APP" --url http://127.0.0.1:9/
   [ "$status" -eq 1 ]; [[ "$output" == *"changed since the PM approved it"* ]]
@@ -379,3 +381,15 @@ replace() { mutate ".tasks[$1].replaces = \"$2\" | .tasks[$1].done_when.expect =
   [ "$status" -eq 0 ]
 }
 
+@test "baseline: a list approved by anyone but the PM is not approved; a capture where a task failed does not count" {
+  base_proj; approve_list client; captured
+  replace 0 prehled "3 objednávky čekají"; replace 1 hledat "Nalezeno: mouka"; gate_passed zalozit smazat
+  run python3 "$BL" compare "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"has not approved the baseline list"* ]]
+  run python3 "$BL" capture "$APP" --url http://127.0.0.1:9/
+  [ "$status" -eq 1 ]; [[ "$output" == *"has not approved"* ]]
+  approve_list
+  echo "{\"tasks_sha256\": \"$BSHA\", \"results\": [{\"id\": \"prehled\", \"passed\": true}, {\"id\": \"hledat\", \"passed\": false}]}" > "$APP/.aid-ui/baseline/result.json"
+  run python3 "$BL" compare "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"did not record every task of the list passing once (hledat)"* ]]
+}

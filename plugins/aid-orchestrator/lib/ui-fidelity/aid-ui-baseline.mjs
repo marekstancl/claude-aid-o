@@ -31,8 +31,10 @@ for (const t of tasks) {
   try {
     for (const [i, st] of (t.steps || []).entries()) {
       const at = `krok ${i + 1}`;
-      if (st.url) {
-        const r = await page.goto(new URL(String(st.url).replace(/^\/+/, ''), base).href, { waitUntil: 'networkidle' });
+      if (st.url) {   // only the app's own addresses: a task never leads the browser (and its login) elsewhere
+        const u = new URL(String(st.url).replace(/^\/+/, ''), base);
+        if (u.origin !== new URL(base).origin) throw new Error(`${at}: ${st.url} není adresa aplikace (${new URL(base).origin})`);
+        const r = await page.goto(u.href, { waitUntil: 'networkidle' });
         if (!r || r.status() >= 400) throw new Error(`${at}: ${st.url} odpověděl ${r ? r.status() : 'nic'}`);
       }
       for (const [k, v] of Object.entries(st.input || {})) {
@@ -50,6 +52,7 @@ for (const t of tasks) {
     const exp = t.result?.expect;
     const seen = exp && await page.getByText(exp).first().waitFor({ state: 'visible', timeout: 5000 }).then(() => true, () => false);
     if (!seen) why = `výsledek „${exp}“ není vidět${login ? '' : ' (bez přihlášení)'}`;
+    else if (new URL(page.url()).origin !== new URL(base).origin) why = `úloha skončila mimo aplikaci (${new URL(page.url()).origin})`;
     else if (t.result?.url && new URL(page.url()).pathname !== new URL(String(t.result.url).replace(/^\/+/, ''), base).pathname)
       why = `úloha skončila na ${new URL(page.url()).pathname}, ne na ${t.result.url}`;
     await shot();
