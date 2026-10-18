@@ -179,6 +179,10 @@ ans_by() {
   [ "$(jq -r .answers.p1.by "$STATE")" = pm ]
   run "$SCRIPT" model-approved "$PROJ"
   [ "$status" -eq 0 ]; [[ "$output" == *"model approved: $MSHA"* ]]
+  # no recorded variant: the guard fails closed - a model in the project is an app's, whatever the agent's file says
+  jqw 'del(.variant)'; rm -f "$PROJ/.aid-ui/variant.json"
+  run ans_by client c2 structure "docs/design/screens.json@$MSHA"
+  [ "$status" -eq 1 ]; [[ "$output" == *"app_tasks_need_owner"* ]]
 }
 
 @test "app-path: a model changed after the PM approved it makes model-approved fail until the PM approves the new one" {

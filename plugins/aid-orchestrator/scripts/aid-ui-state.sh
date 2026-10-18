@@ -875,10 +875,15 @@ place_guard_answer() {   # <answer json>
 }
 
 json_sha() { printf 'sha256:%s' "$(jq -S -c -j . <<<"$1" | sha256sum | cut -d' ' -f1)"; }
-# P116: the kind of the project (the recorded variant, else the studio's .aid-ui/variant.json; web when neither says)
+# P116: the kind of the project. The recorded variant (the PM's answer) decides; before it is recorded the guards fail
+# closed - an app when .aid-ui/variant.json says webapp or a model docs/design/screens.json exists, so removing the
+# agent's file does not lift the owner rule.
 app_type() {
   local t; t="$(jq -r '.variant.type // empty' "$STATE" 2>/dev/null)"
-  [[ -n "$t" ]] || t="$(jq -r '.type // empty' "$PROJECT/.aid-ui/variant.json" 2>/dev/null)"
+  if [[ -z "$t" ]]; then
+    t="$(jq -r '.type // empty' "$PROJECT/.aid-ui/variant.json" 2>/dev/null)"
+    [[ "$t" == webapp || ! -f "$PROJECT/docs/design/screens.json" ]] || t=webapp
+  fi
   echo "${t:-web}"
 }
 model_sha() { [[ -f "$PROJECT/docs/design/screens.json" ]] && sha256sum "$PROJECT/docs/design/screens.json" | cut -d' ' -f1; }
