@@ -58,7 +58,8 @@ if (( $# == 2 )) && [[ "$2" == --precheck ]]; then   # P116: the app skeleton's 
   python3 "$HERE/aid-ui-flows.py" generate "$PROJECT" >/dev/null || die "the task scenarios could not be generated from docs/design/screens.json (see above)"
   OUT="$PROJECT/.aid-ui/precheck"; rm -rf "$OUT"; mkdir -p "$OUT"
   jq --argjson b "$(bash "$HERE/aid-ui-state.sh" build-json "$site")" --arg d "$site" '.build = ($b + {dir: $d})' "$STATE" > "$OUT/state.json"
-  yq -o=json . "$(dirname "$COVERAGE_MAP")/checks.yaml" | jq '.checks |= with_entries(select(.key | IN("app_flows", "app_states", "keyboard_flows", "task_recovery", "axe", "keyboard")))' > "$OUT/checks.json"
+  yq -o=json . "$(dirname "$COVERAGE_MAP")/checks.yaml" | jq '.checks |= with_entries(select(.key | IN("app_flows", "app_states", "keyboard_flows", "task_recovery", "axe", "keyboard")))
+    | .viewports = (.app_rows.viewports // .viewports) | .browsers = (.app_rows.browsers // .browsers)' > "$OUT/checks.json"   # a design check: the app rows' widths
   export AID_UI_PROJECT="$PROJECT"
   srv="$(bash "$HERE/aid-ui-serve.sh" preview "$site")" || exit 1
   trap 'AID_UI_PROJECT="$PROJECT" bash "$HERE/aid-ui-serve.sh" stop preview >/dev/null 2>&1 || true' EXIT

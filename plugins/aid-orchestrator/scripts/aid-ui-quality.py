@@ -180,10 +180,12 @@ def model_of(p):
 def self_problems(p, doc):
     """Why the producer's own check does not let the version go to the roles (empty = it does)."""
     bad = []
+    model = model_of(p)
     reqs = doc.get("requirements") if isinstance(doc, dict) else None
+    if not reqs and model:   # an app keeps its trace in the model (screens.json requirements), the one place of it
+        reqs = model.get("requirements")
     if not isinstance(reqs, list) or not reqs:
         return ["requirements: soupis požadavků ze zadání chybí (každý bod se zdrojem soubor:řádek)"]
-    model = model_of(p)
     refs = set()
     if model is not None:
         refs = {"task:" + t.get("id", "") for t in model.get("tasks") or []} | {"screen:" + x.get("id", "") for x in model.get("screens") or []}
@@ -255,11 +257,11 @@ def self_record(p, f):
     bad = self_problems(p, doc)
     if bad:
         die("self refused (verze ještě nejde ke kritikovi):\n  " + "\n  ".join(bad))
-    rec = {"place": PLACE, "bundle_sha": site_sha(p), "frozen_sha": frozen_sha(p), "requirements": doc["requirements"],
+    rec = {"place": PLACE, "bundle_sha": site_sha(p), "frozen_sha": frozen_sha(p), "requirements": doc.get("requirements") or (model_of(p) or {}).get("requirements"),
            "scores": doc["scores"], "at": now()}
     os.makedirs(os.path.dirname(self_path(p)), exist_ok=True)
     wj(self_path(p), rec)
-    print(f"SELF {PLACE}: {len(doc['requirements'])} požadavků, všechna kritéria ≥ {SELF_MIN}; kolo smí běžet nad {rec['bundle_sha'][:12]}")
+    print(f"SELF {PLACE}: {len(rec['requirements'])} požadavků, všechna kritéria ≥ {SELF_MIN}; kolo smí běžet nad {rec['bundle_sha'][:12]}")
 
 
 def self_ok(p):

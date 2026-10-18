@@ -251,7 +251,9 @@ document.querySelectorAll('[data-aid-stav-link]').forEach(function(a){if(a.datas
 document.querySelectorAll('[data-aid-result]').forEach(function(e){e.hidden=done.indexOf(e.dataset.aidResult)<0;});
 document.querySelectorAll('dialog[data-aid-confirm]').forEach(function(d){d.close();var b=document.querySelector('[data-aid-action="'+d.dataset.aidConfirm+'"]');
 if(b)b.addEventListener('click',function(){d.showModal();d.querySelector('[data-aid-confirm-no]').focus();});
-d.querySelector('[data-aid-confirm-no]').addEventListener('click',function(){d.close();if(b)b.focus();});});
+d.querySelector('[data-aid-confirm-no]').addEventListener('click',function(){d.close();if(b)b.focus();});
+var y=d.querySelector('[data-aid-confirm-yes]'),ge=document.querySelector('[data-aid-error-global]');y.addEventListener('click',function(ev){ev.preventDefault();
+fetch(y.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=y.href;}).catch(function(){d.close();ge.hidden=false;ge.focus();});});});
 document.querySelectorAll('form[data-aid-form]').forEach(function(f){var err=f.querySelector('[data-aid-error]');
 f.addEventListener('submit',function(ev){ev.preventDefault();var b=ev.submitter,to=(b&&b.getAttribute('formaction'))||f.getAttribute('action'),d=new URLSearchParams(new FormData(f));
 if(b&&b.name)d.set(b.name,b.value);var u=to+'?'+d.toString();f.setAttribute('aria-busy','true');if(b)b.disabled=true;
@@ -326,6 +328,14 @@ def app_page(m, scr, approved, fields, results, ends, shell):
     tasks = ("" if not mine else '<details class="ulohy"><summary>Stavy úloh na této obrazovce</summary>' + "".join(
         f'<h3>{esc(t["title"])}</h3><ul>' + "".join(f"<li>{n}: {esc(t['states'][k])}</li>" for k, n in STATE_NAMES) + "</ul>" for t in mine)
         + "</details>")
+    data = ("" if not scr.get("data") else '<details class="data"><summary>Odkud jsou data na obrazovce</summary><ul>' + "".join(
+        f'<li>{esc(d["what"])}: {esc(d["source"])}; {esc(d["freshness"])}</li>' for d in scr["data"]) + "</ul></details>")
+    li = lambda xs: "<ul>" + "".join(f"<li>{x}</li>" for x in xs) + "</ul>"
+    foot = "".join(f'<details><summary>{t}</summary>{li(xs)}</details>' for t, xs in (
+        ("Slovník pojmů", [f"<b>{esc(g['term'])}</b>: {esc(g['meaning'])}" for g in m.get("glossary") or []]),
+        ("Co aplikace záměrně nedělá", [f"{esc(o['what'])}: {esc(o['why'])}" for o in m.get("out_of_scope") or []]),
+        ("Stopa požadavků", [f"{esc(r['id'])} ({esc(r['source'])}): {esc(r['text'])} → " + esc(", ".join(r.get("covered_by") or []) or "mimo rozsah: " + str(r.get("out_of_scope")))
+                             for r in m.get("requirements") or []])) if xs)
     banner = "" if approved else '<p class="navrh" role="status" data-aid-draft>Návrh: model čeká na schválení vlastníkem.</p>'
     return (f'<!doctype html>\n<html lang="cs" {MARK} data-aid-app>\n<head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(scr["title"])} · {esc(m.get("app") or "aplikace")}</title>'
@@ -336,8 +346,8 @@ def app_page(m, scr, approved, fields, results, ends, shell):
             ':focus-visible{outline:3px solid #06c;outline-offset:2px}</style></head>\n<body>\n'
             f'{banner}<header><p class="znacka">{esc(m.get("app") or "")}</p>{bar}<nav aria-label="Aplikace"><ul>{nav}</ul></nav></header>\n'
             f'<main data-aid-screen="{esc(sid)}"><h1>{esc(scr["title"])}</h1><p class="ucel">{esc(scr["purpose"])}</p>'
-            f'<nav class="stavy" aria-label="Stav obrazovky">{switch}</nav>{res}{states}{actions_html(m, scr, url, fields, ends)}{tasks}</main>\n'
-            f'<script>{APP_JS}</script>\n</body>\n</html>\n')
+            f'<nav class="stavy" aria-label="Stav obrazovky">{switch}</nav>{res}{states}<p class="chyba" role="alert" tabindex="-1" data-aid-error-global hidden>{esc(scr["states"]["error"])}</p>{actions_html(m, scr, url, fields, ends)}{data}{tasks}</main>\n'
+            + (f'<footer>{foot}</footer>\n' if foot else "") + f'<script>{APP_JS}</script>\n</body>\n</html>\n')
 
 
 def build_app(p):

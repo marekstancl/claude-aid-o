@@ -148,6 +148,23 @@ def violations(m, proj):
         if "replaces" in t and not bwhy and t["replaces"] not in base:
             out.append(f"{at}/replaces: úloha výchozího stavu {t['replaces']} neexistuje"
                        + ("" if base else " (projekt nemá .aid-ui/baseline/tasks.json)"))
+    rids = set()
+    for i, r in enumerate(m.get("requirements") or []):   # the trace: every requirement covered by the model or out of scope
+        at = f"/requirements/{i}"
+        if r["id"] in rids:
+            out.append(f"{at}/id: požadavek {r['id']} je ve stopě dvakrát")
+        rids.add(r["id"])
+        if bool(r.get("covered_by")) == bool(r.get("out_of_scope")):
+            out.append(f"{at}: požadavek {r['id']} má buď covered_by (kde ho model pokrývá), nebo out_of_scope (proč ne), právě jedno")
+        for ref in r.get("covered_by") or []:
+            kind, rid = ref.split(":", 1)
+            if rid not in (tids if kind == "task" else ids):
+                out.append(f"{at}/covered_by: {ref} není {'úloha' if kind == 'task' else 'obrazovka'} modelu")
+        f = r["source"].rsplit(":", 1)
+        full = os.path.realpath(os.path.join(proj, f[0]))
+        if not full.startswith(os.path.realpath(proj) + os.sep) or not os.path.isfile(full) \
+                or not 1 <= int(f[1]) <= len(open(full, encoding="utf-8", errors="replace").read().splitlines()):
+            out.append(f"{at}/source: {r['source']} není soubor:řádek v projektu")
     return out
 
 

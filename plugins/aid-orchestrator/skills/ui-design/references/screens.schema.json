@@ -9,6 +9,17 @@
   "properties": {
     "version": {"const": 1},
     "app": {"type": "string"},
+    "requirements": {
+      "type": "array", "description": "stopa požadavků: každý bod zadání se zdrojem soubor:řádek a kde ho model pokrývá (task:<id>, screen:<id>), nebo proč je mimo rozsah",
+      "items": {"type": "object", "required": ["id", "source", "text"], "additionalProperties": false,
+                "properties": {"id": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$"}, "source": {"type": "string", "pattern": "^[^\\s:]+:[0-9]+$"},
+                               "text": {"$ref": "#/$defs/text"}, "covered_by": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^(task|screen):[a-z0-9][a-z0-9-]{0,63}$"}},
+                               "out_of_scope": {"$ref": "#/$defs/text"}}}
+    },
+    "glossary": {"type": "array", "description": "slovník pojmů ze zadání: jedna věc má všude jedno jméno",
+                 "items": {"type": "object", "required": ["term", "meaning"], "additionalProperties": false, "properties": {"term": {"$ref": "#/$defs/text"}, "meaning": {"$ref": "#/$defs/text"}}}},
+    "out_of_scope": {"type": "array", "description": "co aplikace záměrně nedělá a proč",
+                     "items": {"type": "object", "required": ["what", "why"], "additionalProperties": false, "properties": {"what": {"$ref": "#/$defs/text"}, "why": {"$ref": "#/$defs/text"}}}},
     "screens": {
       "type": "array",
       "minItems": 1,
@@ -38,6 +49,9 @@
               }
             }
           },
+          "data": {"type": "array", "description": "čísla a stavy na obrazovce: odkud jsou, jak čerstvá a co uživatel uvidí, když zastarají",
+                   "items": {"type": "object", "required": ["what", "source", "freshness"], "additionalProperties": false,
+                             "properties": {"what": {"$ref": "#/$defs/text"}, "source": {"$ref": "#/$defs/text"}, "freshness": {"$ref": "#/$defs/text"}}}},
           "states": {
             "type": "object",
             "required": ["empty", "loading", "error", "filled"],
@@ -63,6 +77,7 @@
           "id": {"$ref": "#/$defs/id"},
           "title": {"$ref": "#/$defs/text"},
           "roles": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
+          "frequency": {"$ref": "#/$defs/text", "description": "jak často úloha nastává (denně, při poruše…): nejčastější patří na hlavní obrazovku"},
           "steps": {
             "type": "array",
             "minItems": 1,
