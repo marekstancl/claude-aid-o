@@ -352,7 +352,7 @@ def critic_place(project, web, audit, out, role, history, place, role_text, froz
     podklady/ (and the skeleton address at the structure), the png files of it as images."""
     files, bsha = place_bundle(project, place)
     kind = "audit" if audit else "critic"
-    out = out or os.path.join(project, ".aid-ui", "critic", "runs", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-%s-%s-%s" % (place, kind, role))
+    out = out or os.path.join(memory.critic_dir(project), "runs", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-%s-%s-%s" % (place, kind, role))
     bundle = os.path.join(out, "bundle")
     for rel in files:
         dst = os.path.join(bundle, "podklady", rel.replace(".aid-ui/", "").replace("docs/", ""))
@@ -419,7 +419,7 @@ def critic(project, web, audit, out, role, history=None, place="web"):
     if r.returncode:
         die("no usable frozen critic: " + (r.stderr or r.stdout).strip())
     role_text = r.stdout
-    frozen = json.load(open(os.path.join(project, ".aid-ui", "critic", "frozen.json" if place == "web" else os.path.join("frozen", place + ".json")), encoding="utf-8"))
+    frozen = json.load(open(os.path.join(memory.critic_dir(project), "frozen.json" if place == "web" else os.path.join("frozen", place + ".json")), encoding="utf-8"))
     if place != "web":
         return critic_place(project, web, audit, out, role, history, place, role_text, frozen)
     if not web:
@@ -428,7 +428,7 @@ def critic(project, web, audit, out, role, history=None, place="web"):
     if not os.path.isdir(site):
         die(f"no site directory {site}")
     kind = "audit" if audit else "critic"
-    out = out or os.path.join(project, ".aid-ui", "critic", "runs", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + kind + "-" + role)
+    out = out or os.path.join(memory.critic_dir(project), "runs", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + kind + "-" + role)
     man, comp = comp_shots(project) if role == "owner" else (None, [])
     if role == "owner":
         lp = os.path.join(project, ".aid-ui", "critic", "competitors.json")
@@ -622,7 +622,7 @@ class Studio:
 
 def client_role(project):
     import yaml
-    fz = os.path.join(project, ".aid-ui", "critic", "frozen.json")
+    fz = os.path.join(memory.critic_dir(project), "frozen.json")
     if os.path.isfile(fz):
         rub = json.load(open(fz, encoding="utf-8"))["rubric"]
     else:

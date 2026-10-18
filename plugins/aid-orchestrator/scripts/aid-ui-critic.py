@@ -49,6 +49,8 @@ so `web` has six scores. Without --place every command means `web`.
       A missing required input exits 1 naming it.
 """
 import glob, hashlib, json, os, re, statistics, sys, time
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+from aid_ui_memory import critic_dir   # noqa: E402  (P115: the launch rating's own directory)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SKILL = os.path.join(HERE, "..", "skills", "ui-design")
@@ -120,11 +122,11 @@ def place_of(a):
 
 
 def frozen_path(proj, place="web"):
-    return os.path.join(proj, ".aid-ui", "critic", "frozen.json" if place == "web" else os.path.join("frozen", place + ".json"))
+    return os.path.join(critic_dir(proj), "frozen.json" if place == "web" else os.path.join("frozen", place + ".json"))
 
 
 def rounds_dir(proj, place="web"):
-    return os.path.join(proj, ".aid-ui", "critic", "rounds", *([] if place == "web" else [place]))
+    return os.path.join(critic_dir(proj), "rounds", *([] if place == "web" else [place]))
 
 
 def rubric_file(typ, role, key, place):

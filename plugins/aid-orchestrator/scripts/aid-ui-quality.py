@@ -37,6 +37,20 @@ rounds/<n>/{owner,tech}/ (the ratings), rounds/<n>/history-<role>.json (the memo
       once and without memory (aid-ui-client.py critic --audit), aid-ui-critic.py verdict per role -> verdict.json
       {accepted = both roles accepted, roles}. A failed rating decides nothing (exit 1). Not accepted: the auditors'
       findings become an audit round to triage (not counted as a repair round). Exit 0 accepted, 3 not, 1 refused.
+
+The launch rating (P115): the same loop over the LIVE address after the deployment, in its own directory
+.aid-ui/critic/launch/ (frozen.json in phase launch - the type's launch_only criteria are rated - rounds/, runs/,
+loop.json, verdict.json, launch-verdict.json); the build loop's files are never touched.
+  launch <project> --url <url> [--reopen <reason>]
+      Checks the URL answers 200 (else exit 1, before any role call), freezes the roles in phase launch the first time
+      (aid-ui-critic.py freeze --type <the build's type> --phase launch), then a round over the URL. An accepted
+      launch verdict is final unless --reopen <reason>.
+  --launch after any verb (round, triage, fixed, status, audit, reopen) works on the launch loop. The launch audit
+      also writes launch-verdict.json {url, site_sha256 (the package's site.sha256 when docs/ui/predani.json exists),
+      rounds, owner, tech, accepted, at}; its thresholds are the web gate files, as the build's audit.
+  launch-status <project> [--package <predani.json>]
+      Exit 0 when the launch verdict is accepted; with --package also only when its url is docs/ui/nasazeni.json's url
+      and its site_sha256 the package's site.sha256 (a changed deployment needs a new rating). Else exit 1 and why.
 """
 import hashlib, json, os, re, subprocess, sys, time
 
@@ -73,7 +87,7 @@ def now():
 
 
 def cdir(p):
-    return os.path.join(p, ".aid-ui", "critic")
+    return memory.critic_dir(p)   # .aid-ui/critic, or .aid-ui/critic/launch for --launch (P115)
 
 
 def wj(path, obj):
@@ -497,6 +511,8 @@ def audit(p, web):
          "publish_blocked_by": ready, "verdict": ("přijato" + (", zveřejnění blokuje: " + "; ".join(ready) if ready else ", připraveno ke zveřejnění")) if ok else "nepřijato",
          "site_sha": tgt["site_sha"], "round": tgt["n"], "at": now(), "ratings_dir": d}
     wj(os.path.join(cdir(p), "verdict.json"), v)
+    if os.environ.get("AID_UI_CRITIC_DIR") == memory.LAUNCH_DIR:
+        write_launch_verdict(p, web, v)
     if not ok:   # the auditors' findings become a round to triage; it is no repair round
         n = rs[-1]["n"] + 1
         crit = {"%s.%s" % (role, k): x for role in ROLES for k, x in vs[role]["criteria_median"].items()}
@@ -530,11 +546,81 @@ def reopen(p, reason):
     print("reopened -> %s" % write_loop(p)["decision"])
 
 
+def launch_verdict_file(p):
+    return os.path.join(p, memory.LAUNCH_DIR, "launch-verdict.json")
+
+
+def write_launch_verdict(p, web, v):
+    pf = os.path.join(p, "docs", "ui", "predani.json")
+    try:
+        sha = json.load(open(pf, encoding="utf-8"))["site"]["sha256"]
+    except (OSError, ValueError, KeyError):
+        sha = None
+    wj(launch_verdict_file(p), {"url": web, "site_sha256": sha, "rounds": len(rounds(p)), "owner": v["roles"]["owner"]["median_quality_score"],
+                                "tech": v["roles"]["tech"]["median_quality_score"], "accepted": v["accepted"], "verdict": v["verdict"], "at": v["at"]})
+
+
+def launch(p, url, reason):
+    import urllib.request
+    if not url:
+        die("launch needs --url <the live address>", 2)
+    lv = launch_verdict_file(p)
+    if os.path.isfile(lv) and json.load(open(lv, encoding="utf-8")).get("accepted") and not reason:
+        die("the launch rating is accepted already (%s); rate again with --reopen <reason>" % lv)
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "aid-ui-launch"}), timeout=20) as r:
+            ok = r.status == 200
+    except (OSError, ValueError) as e:
+        die("%s does not answer (%s); nothing rated, nothing paid" % (url, e))
+    if not ok:
+        die("%s does not answer 200; nothing rated" % url)
+    if reason:
+        if not os.path.isfile(lv):
+            die("--reopen: there is no launch rating to reopen", 2)
+        reopen(p, reason)
+        os.remove(lv)
+    if not os.path.isfile(os.path.join(cdir(p), "frozen.json")):
+        try:
+            typ = json.load(open(os.path.join(p, ".aid-ui", "critic", "frozen.json"), encoding="utf-8"))["type"]
+        except (OSError, ValueError, KeyError):
+            die("no frozen critic of the build (.aid-ui/critic/frozen.json) to take the type from")
+        r = subprocess.run([sys.executable, CRITIC, "freeze", p, "--type", typ, "--phase", "launch"], capture_output=True, text=True)
+        if r.returncode:
+            die("freeze --phase launch failed: " + (r.stderr or r.stdout).strip())
+    do_round(p, url)
+
+
+def launch_status(p, pkg):
+    lv = launch_verdict_file(p)
+    try:
+        v = json.load(open(lv, encoding="utf-8"))
+    except (OSError, ValueError):
+        die("no launch rating yet (%s): aid-ui-quality.py launch <project> --url <live address>" % lv)
+    if not v.get("accepted"):
+        die("the launch rating is not accepted (%s)" % v.get("verdict"))
+    if pkg:
+        if os.path.realpath(pkg) != os.path.realpath(os.path.join(p, "docs", "ui", "predani.json")):
+            die("--package must be the project's handover package docs/ui/predani.json, not %s" % pkg)
+        try:
+            want_sha = json.load(open(pkg, encoding="utf-8"))["site"]["sha256"]
+            want_url = json.load(open(os.path.join(p, "docs", "ui", "nasazeni.json"), encoding="utf-8"))["url"]
+        except (OSError, ValueError, KeyError) as e:
+            die("cannot read the package or docs/ui/nasazeni.json: %s" % e)
+        if (v.get("url") or "").rstrip("/") != want_url.rstrip("/"):
+            die("the launch rating is of %s, the deployment is %s: rate the deployed address" % (v.get("url"), want_url))
+        if v.get("site_sha256") != want_sha:
+            die("the launch rating is of another web (site %s), the package is %s: rate the deployed web again" % (str(v.get("site_sha256"))[:12], want_sha[:12]))
+    print("launch rating accepted: %s (owner %s, tech %s)" % (v.get("url"), v.get("owner"), v.get("tech")))
+
+
 def main(a):
     if len(a) < 2:
         die("usage: round|triage|fixed|status|audit <project> ... (see the header)", 2)
     global PLACE
     cmd, p = a[0], os.path.abspath(a[1])
+    if cmd == "launch" or "--launch" in a:   # P115: the launch loop in its own directory, for this script and every one it starts
+        a = [x for x in a if x != "--launch"]
+        os.environ["AID_UI_CRITIC_DIR"] = memory.LAUNCH_DIR
     if "--place" in a:
         i = a.index("--place")
         PLACE = a[i + 1] if i + 1 < len(a) else ""
@@ -557,6 +643,10 @@ def main(a):
         audit(p, opts["web"])
     elif cmd == "triage" and len(rest) == 2:
         triage(p, rest[0], rest[1], opts)
+    elif cmd == "launch":
+        launch(p, opts.get("url"), opts.get("reopen"))
+    elif cmd == "launch-status":
+        launch_status(p, opts.get("package"))
     elif cmd == "reopen":
         reopen(p, opts.get("reason"))
     elif cmd == "fixed" and len(rest) == 1:

@@ -539,12 +539,16 @@ def listing(lst):
     if t != "local" and not SAFE_HOST.fullmatch(host):
         return None, f"listing.host {host!r} odmítnut (jen písmena, číslice, . _ @ -)"
     try:
-        if t == "local":
+        if t == "local":   # every entry but a real directory: a symlink or a device is something on the hosting too
             if not os.path.isdir(root):
                 return None, f"nelze ověřit: složka {root} neexistuje"
-            return sorted(f["path"] for f in site_files(root)), ""
+            out = []
+            for d, dirs, files in os.walk(root):
+                for n in files + [x for x in dirs if os.path.islink(os.path.join(d, x))]:
+                    out.append(os.path.relpath(os.path.join(d, n), root).replace(os.sep, "/"))
+            return sorted(out), ""
         if t == "ssh":
-            r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", host, "find", root, "-type", "f", "-printf", "'%P\\n'"],   # one string for the remote shell; root is validated
+            r = subprocess.run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=20", host, "find", root, "!", "-type", "d", "-printf", "'%P\\n'"],   # one string for the remote shell; root is validated
                                capture_output=True, text=True, timeout=120)
             if r.returncode != 0:
                 return None, f"nelze ověřit: ssh {host} neodpověděl ({(r.stderr or '').strip()[:160]})"
@@ -562,10 +566,13 @@ def listing(lst):
                 parts = ln.split(None, 8)
                 if len(parts) < 9 or parts[8] in (".", ".."):
                     continue
-                name = (rel + "/" if rel else "") + os.path.basename(parts[8])
+                base_name = os.path.basename(parts[8].split(" -> ")[0])
+                if not re.fullmatch(r"[A-Za-z0-9._~ -]+", base_name):   # quotes or glob characters cannot be listed safely
+                    return None, f"nelze ověřit: na hostingu je jméno, které výpis neumí bezpečně přečíst: {base_name!r}"
+                name = (rel + "/" if rel else "") + base_name
                 if parts[0].startswith("d"):
                     todo.append(name)
-                elif parts[0].startswith("-"):
+                else:   # a file, a symlink or anything else is an entry the package must have
                     out.append(name)
         return sorted(out), ""
     except (OSError, subprocess.TimeoutExpired) as e:
@@ -642,7 +649,10 @@ def gate(plan, launch):
     gone = [o["id"] for o in pkg["open_items"] if o["critical"] and o["id"] not in live]   # the package remembers them
     if gone:
         die(f"{GATE}: kritický bod z balíku chybí ve stavu studia: {', '.join(gone)} (končí jen jako done s dokladem)")
-    crit = [o for o in live.values() if o.get("critical") and not (o.get("status") == "done" and (o.get("done_evidence") or "").strip())]
+    # critical by the package OR by the state: un-marking an item in the state does not lift its block
+    pcrit = {o["id"] for o in pkg["open_items"] if o["critical"]}
+    crit = [o for o in live.values() if (o.get("critical") or o.get("id") in pcrit)
+            and not (o.get("status") == "done" and (o.get("done_evidence") or "").strip())]
     if crit:
         die(f"{GATE}: otevřený kritický bod: " + "; ".join(f"{o['id']} ({o.get('owner')}): {str(o.get('text'))[:80]}" for o in crit))
     nf = os.path.join(proj, "docs", "ui", "nasazeni.json")

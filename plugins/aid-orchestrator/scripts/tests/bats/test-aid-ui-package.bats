@@ -330,6 +330,15 @@ GATE_SH() { run bash "$BATS_TEST_DIRNAME/../../aid-ui-verify.sh" --package-gate 
   jq -e '.open_items[0].critical' "$OUTP" >/dev/null
   jqw '.open_items = []'
   GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"kritický bod z balíku chybí ve stavu studia: oi-1"* ]]
+  # un-marked in the state: the package still holds it critical
+  "$SCRIPT" open-item "$PROJ" add --text "Právní texty" --owner klient >/dev/null
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"otevřený kritický bod: oi-1"* ]]
+}
+
+@test "ui-gate: a symlink on the hosting is an entry the package does not have" {
+  deployed
+  ln -s /etc/hostname "$LIVE/odkaz"
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"navíc ['odkaz']"* ]]
 }
 
 @test "ui-gate: a form posting to another site is not posted by the gate and is named as not verified" {
@@ -365,4 +374,20 @@ GATE_SH() { run bash "$BATS_TEST_DIRNAME/../../aid-ui-verify.sh" --package-gate 
   bash -c "source '$L'; compose_execution_yaml '$T' '$T/c.yaml' python" >/dev/null
   [ "$(yq '.gates | has("check_ui_handover")' "$T/c.yaml")" = true ]
   [ "$(yq -o=json -I0 '[.gate_profiles[].include | any_c(. == "check_ui_handover")] | all' "$T/c.yaml")" = true ]
+}
+
+@test "merge-path: stale launch verdict - the brief's rating point refuses a verdict of another address or another web" {
+  Q="$BATS_TEST_DIRNAME/../../aid-ui-quality.py"; L="$PROJ/.aid-ui/critic/launch"; mkdir -p "$L" "$PROJ/docs/ui"
+  sha="$(printf a%.0s {1..64})"
+  echo "{\"site\": {\"sha256\": \"$sha\"}}" > "$PROJ/docs/ui/predani.json"
+  echo '{"url": "https://web.example/"}' > "$PROJ/docs/ui/nasazeni.json"
+  echo "{\"url\": \"https://web.example\", \"site_sha256\": \"$sha\", \"accepted\": true, \"owner\": 9, \"tech\": 9}" > "$L/launch-verdict.json"
+  run python3 "$Q" launch-status "$PROJ" --package "$PROJ/docs/ui/predani.json"; [ "$status" -eq 0 ]
+  echo '{"url": "https://jinde.example/"}' > "$PROJ/docs/ui/nasazeni.json"
+  run python3 "$Q" launch-status "$PROJ" --package "$PROJ/docs/ui/predani.json"; [ "$status" -eq 1 ]
+  echo '{"url": "https://web.example/"}' > "$PROJ/docs/ui/nasazeni.json"
+  echo "{\"site\": {\"sha256\": \"$(printf b%.0s {1..64})\"}}" > "$PROJ/docs/ui/predani.json"
+  run python3 "$Q" launch-status "$PROJ" --package "$PROJ/docs/ui/predani.json"; [ "$status" -eq 1 ]
+  jq '.accepted = false' "$L/launch-verdict.json" > "$L/x" && mv "$L/x" "$L/launch-verdict.json"
+  run python3 "$Q" launch-status "$PROJ"; [ "$status" -eq 1 ]
 }
