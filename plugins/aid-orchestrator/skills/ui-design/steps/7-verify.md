@@ -176,7 +176,10 @@ a `references/standards/frontend-build-standard.md` (kopie v pluginu).
    v tomto pořadí - PM tím dává hodnocení (`handover.verdict` a `rating` ve stavu, pak ve
    `finish.json`); po `choose` prevzit nebo vyhrada
    `aid-ui-state.sh chapter-all <project> --by PM --answer <id otázky>`; `vratit` chapter-all
-   odmítne - oprav, co komentář jmenuje, a ptej se znovu.
+   odmítne - oprav, co komentář jmenuje, a ptej se znovu. Převzetí končí předávacím balíkem
+   `docs/ui/predani.json` (P115, SKILL.md oddíl Předání): když ho nejde sestavit (chybí brána, web se změnil
+   po bráně), `chapter-all` odmítne se jménem chybějící části a odpověď zůstane nepoužitá - oprav, pusť bránu
+   znovu a použij tutéž odpověď.
    `return` s komentářem → uprav jmenované kapitoly a otázku polož znovu
    (nový target). Změna těla kterékoli kapitoly po otevření otázky → otázka
    znovu. Jednotlivé `chapter <id> schvaleno` zůstává pro kapitolu, kterou

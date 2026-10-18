@@ -26,16 +26,38 @@ odpovědi se nic nerozhodne (vynucuje `aid-ui-state.sh`, ne jen tento text).
 
 Do NOT invoke for:
 
-- běhy AIDu (`/aid-run`, `/aid-plan`, `/aid-do`) - skill se do nich nezapojuje;
+- běhy AIDu samotné (`/aid-run`, `/aid-plan`, `/aid-do`) - studio do nich vstupuje jen předávacím balíkem (oddíl Předání);
 - backend, hosting, 3D, video.
 
 ---
 
 ## Hranice
 
-- Nezapojuje se do běhů AIDu; nic sám veřejně nevystavuje ani neposílá.
+- Plán a běh nevede: konec studia je předávací balík (oddíl Předání), nasazení dělá plán; nic sám veřejně nevystavuje ani neposílá.
 - Neobchází blokace galerií; cizí screenshoty nejdou do gitu ani zákazníkovi.
 - Stav `docs/design/brand-state.json` píše jen `aid-ui-state.sh`.
+
+## Předání (P115)
+
+Studio navrhuje s PM a klientem, plán a běh AIDu web nasazují a ověřují; mezi nimi je jeden soubor.
+
+1. **Balík.** Převzetí (`aid-ui-state.sh chapter-all`, krok 7 bod 8) zapíše jako poslední krok
+   `docs/ui/predani.json` (+ čitelný `predani.md`) podle `references/handover-package.schema.json`: web a jeho
+   soubory se sha256, zaznamenaná brána, schválené kapitoly, verdikty míst, úkoly zákazníka, otevřené body,
+   podklady ke spuštění, kritéria `launch_only`. Neúplný nebo zastaralý balík (web změněný po bráně) převzetí
+   odmítne se jménem chybějící části a odpověď PM zůstane nepoužitá. Po převzetí se balík nemění.
+2. **Zadání plánu nasazení.** `aid-ui-package.py zadani docs/ui/predani.json --plan-id P<NNN>` (nebo `/aid-plan`
+   s balíkem jako vstupem) napíše zadání: bod hotovo za každý úkol zákazníka, krok spuštění
+   (`references/local/spusteni.md`: nasadit přesně balík, HTTPS, hlavičky, 404, citlivé soubory, DNS, e-mail,
+   katalogy, přesměrování), podklad ke spuštění, otevřený bod (kritický blokuje) a hodnocení po nasazení.
+   Hosting je práce plánu, ne studia.
+3. **Brána běhu `check_ui_handover`.** Plán z balíku nese `ui_package:`; brána ho bez balíku, se zastaralým nebo
+   upraveným balíkem a s otevřeným kritickým bodem zastaví. Po zápisu `docs/ui/nasazeni.json` (`url` a `listing`
+   hostingu) pustí jen přesně soubory balíku, formulář, který hosting přijme, a kontrolu UI studia nad ostrou
+   adresou. Plán bez balíku bránu přeskočí s důvodem.
+4. **Hodnocení po nasazení.** `aid-ui-quality.py launch <project> --url <ostrá adresa>` - vlastní smyčka
+   v `.aid-ui/critic/launch/` (kritéria `launch_only` se hodnotí), hodnocení stavby zůstane; `launch-status
+   --package docs/ui/predani.json` je bod zadání.
 
 ## Start (každé spuštění)
 

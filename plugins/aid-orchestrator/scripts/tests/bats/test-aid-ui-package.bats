@@ -391,3 +391,18 @@ GATE_SH() { run bash "$BATS_TEST_DIRNAME/../../aid-ui-verify.sh" --package-gate 
   jq '.accepted = false' "$L/launch-verdict.json" > "$L/x" && mv "$L/x" "$L/launch-verdict.json"
   run python3 "$Q" launch-status "$PROJ"; [ "$status" -eq 1 ]
 }
+
+@test "merge-path: codex images - AID's transport hands AID_CODEX_IMAGES to Codex as one -i each, before the prompt on stdin" {
+  mkdir -p "$T/cbin"
+  printf '#!/usr/bin/env bash\n[[ "$1" == --version ]] && exit 0\nprintf "%%s\\n" "$@" > "%s/argv"; cat > /dev/null\n' "$T" > "$T/cbin/codex"; chmod +x "$T/cbin/codex"
+  echo prompt > "$T/p.md"
+  PATH="$T/cbin:$PATH" AID_CODEX_IMAGES="$(printf '%s\n%s' "$T/a.png" "$T/b 1.png")" \
+    bash -c "source '$BATS_TEST_DIRNAME/../../lib/aid-codex-transport.sh'; _run_codex_isolated '$T' '$T/p.md' '$T/ev' '$T/er' '$T/last'"
+  [ "$(grep -cxF -- -i "$T/argv")" -eq 2 ]
+  grep -qxF "$T/b 1.png" "$T/argv"
+  [ "$(tail -1 "$T/argv")" = - ]
+  grep -qxF -- --skip-git-repo-check "$T/argv"
+  # unset: no -i at all (every other caller of the transport)
+  PATH="$T/cbin:$PATH" bash -c "source '$BATS_TEST_DIRNAME/../../lib/aid-codex-transport.sh'; _run_codex_isolated '$T' '$T/p.md' '$T/ev' '$T/er' '$T/last'"
+  ! grep -qxF -- -i "$T/argv"
+}

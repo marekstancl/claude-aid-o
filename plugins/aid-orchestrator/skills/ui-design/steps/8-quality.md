@@ -34,8 +34,11 @@ nové zadání role, nového autora a revizi.
   (u technika `bezpecnost_spusteni`) se nehodnotí vůbec. Kritik je nedostane, nepíše k nim nálezy a do známky se
   nepočítají. Části jiných kotev, které jdou ověřit až na hostingu (přesměrování, komprese, ostré doručení), kritik
   v této fázi nepočítá. Doručení formuláře ověřené branou na náhledu platí jako plný důkaz.
-  **Při nasazení** začíná nová smyčka: přesuň `.aid-ui/critic/rounds`, `loop.json`, `verdict.json` a `frozen.json`
-  do `.aid-ui/critic/archive-<datum>-stavba/` a zmraz s `--phase launch` (backlog IMP-694: konfigurace hostingu).
+  **Po nasazení** (P115) má hodnocení vlastní smyčku: `aid-ui-quality.py launch <project> --url <ostrá adresa>`
+  zmrazí role ve fázi `launch` do `.aid-ui/critic/launch/` a hodnotí ostrou adresu; další kroky stejnými příkazy
+  s `--launch` (`triage`, `fixed`, `status`, `audit`). Soubory smyčky stavby se nemění, nic se nepřesouvá.
+  Audit zapíše `launch-verdict.json`; bod zadání nasazení je `launch-status --package docs/ui/predani.json`
+  (projde jen pro nasazenou adresu a web z balíku).
 - **Cesta k 10:** každé kritérium pod 10 nese `to_ten`, tedy konkrétní kroky rozdělené na „udělá studio“
   a „dodá klient“. Bez kroku je odpověď neplatná.
 - **Strop:** nejvýš tři kola oprav. Jakmile je kolo přijaté, opravy končí a přijde audit.

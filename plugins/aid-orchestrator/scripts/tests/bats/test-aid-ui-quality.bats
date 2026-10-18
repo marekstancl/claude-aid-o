@@ -35,6 +35,7 @@ SH
   # codex answers as the role its prompt names (the tech rubric's first criterion is only in the tech prompt)
   cat > "$T/bin/codex" <<SH
 #!/usr/bin/env bash
+[[ "\$1" == --version ]] && exit 0
 p="\$(cat)"; role=owner; grep -q "$(yq -r '.criteria[0].id' "$K/web-local.tech.yaml")" <<<"\$p" && role=tech
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":100000,"cached_input_tokens":0,"output_tokens":1000}}))' "$T/ans-\$role.json"
 SH
@@ -236,6 +237,7 @@ pcycle() { local n; n="$(python3 "$Q" status "$P" --place "$1" | jq -r .rounds)"
   # the codex stub tells the roles apart by the sdeleni tech rubric's first criterion
   cat > "$T/bin/codex" <<SH
 #!/usr/bin/env bash
+[[ "\$1" == --version ]] && exit 0
 p="\$(cat)"; role=owner; grep -q "### $(yq -r '.criteria[0].id' "$K/web-local.tech.sdeleni.yaml") " <<<"\$p" && role=tech
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
 SH
@@ -261,6 +263,7 @@ SH
   python3 "$SC/aid-ui-critic.py" freeze "$P" --type web-local --place sdeleni >/dev/null
   cat > "$T/bin/codex" <<SH
 #!/usr/bin/env bash
+[[ "\$1" == --version ]] && exit 0
 p="\$(cat)"; role=owner; grep -q "### $(yq -r '.criteria[0].id' "$K/web-local.tech.sdeleni.yaml") " <<<"\$p" && role=tech
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
 SH
@@ -269,6 +272,7 @@ SH
   # the web place goes on in its own folder meanwhile
   cat > "$T/bin/codex" <<SH
 #!/usr/bin/env bash
+[[ "\$1" == --version ]] && exit 0
 p="\$(cat)"; role=owner; grep -q "$(yq -r '.criteria[0].id' "$K/web-local.tech.yaml")" <<<"\$p" && role=tech
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
 SH

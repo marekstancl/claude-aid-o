@@ -25,7 +25,8 @@ EOF
   # stub codex: writes $CODEX_ANSWER (if set) to the -o path, exits $CODEX_RC
   cat > "$T/bin/codex" <<'EOF'
 #!/usr/bin/env bash
-out=""; while (( $# )); do [[ "$1" == -o ]] && { out="$2"; shift; }; shift; done
+[[ "$1" == --version ]] && exit 0
+out=""; while (( $# )); do [[ "$1" == -o || "$1" == --output-last-message ]] && { out="$2"; shift; }; shift; done   # P115: through AID's transport
 cat >/dev/null
 [[ -n "${CODEX_ANSWER:-}" && -n "$out" ]] && cp "$CODEX_ANSWER" "$out"
 echo '{"type":"turn.completed","usage":{"input_tokens":1000,"cached_input_tokens":400,"output_tokens":50}}'

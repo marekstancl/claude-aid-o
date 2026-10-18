@@ -331,6 +331,12 @@ Po opravě udělá strojovou část jeden příkaz `aid-ui-state.sh cycle <proje
 (pohyb, build, kontrola textů, měření, brána a stránka pro zákazníka, gate-check)
 a zastaví na prvním neúspěchu.
 
+Od 3.6.0 studio končí předávacím balíkem `docs/ui/predani.json`. Z něj
+`aid-ui-package.py zadani docs/ui/predani.json --plan-id P<NNN>` (nebo `/aid-plan`
+s balíkem) napíše zadání plánu nasazení; brána běhu `check_ui_handover` pak pustí
+na doménu jen předaný web bez otevřeného kritického bodu a `aid-ui-quality.py
+launch` ohodnotí ostrou adresu ve vlastní smyčce. Plán bez balíku bránu přeskočí.
+
 ### Topic: status
 
 `/aid-status` is the one place that answers "what is happening". Its overview

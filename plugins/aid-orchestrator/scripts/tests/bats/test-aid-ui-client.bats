@@ -43,9 +43,11 @@ EOF
   # codex: FAKE_CODEX = valid | limit | empty | invalid; records its prompt, cwd and whether it saw the key
   cat > "$T/bin/codex" <<'EOF'
 #!/usr/bin/env bash
+[[ "$1" == --version ]] && exit 0   # the transport ranks the installs; this stub claims no version, so it wins by PATH order
 n=$(( $(cat "$BATS_TEST_TMPDIR/codex-n" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$BATS_TEST_TMPDIR/codex-n"
 cat > "$BATS_TEST_TMPDIR/codex-prompt-$n"; echo "${OPENAI_API_KEY:-none}" > "$BATS_TEST_TMPDIR/codex-key"
-while (($#)); do [[ "$1" == -C ]] && echo "$2" > "$BATS_TEST_TMPDIR/codex-cwd"; shift; done
+printf '%s\n' "$@" > "$BATS_TEST_TMPDIR/codex-argv-$n"; env > "$BATS_TEST_TMPDIR/codex-env-$n"
+while (($#)); do [[ "$1" == -C || "$1" == --cd ]] && echo "$2" > "$BATS_TEST_TMPDIR/codex-cwd"; shift; done
 case "${FAKE_CODEX:-valid}" in
   limit) echo "ERROR: You've hit your usage limit" >&2; exit 1;;
   empty) exit 0;;
@@ -158,7 +160,7 @@ teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; [[ -z "${WE
   jq -e '.stand_in_reason == "no answer"' "$T/s-empty/run.json" >/dev/null
   jq -e '(.stand_in_reason | startswith("invalid answer twice")) and (.attempts | length) == 3' "$T/s-invalid/run.json" >/dev/null
   [ "$(cat "$T/codex-n")" = 2 ]   # an invalid answer goes back to Codex once before the stand-in
-  jq -se 'map(select(.provider == "claude")) | length == 3 and .[0].reported_usd == 0.02 and .[0].usd == 0.003' "$P/.aid-ui/costs.jsonl" >/dev/null
+  jq -se 'map(select(.provider == "claude")) | length == 3 and .[0].reported_usd == 0.02 and .[0].usd == 0.002' "$P/.aid-ui/costs.jsonl" >/dev/null
 }
 
 @test "critic: both providers failing, an answer off the frozen schema, or no frozen critic -> exit 1 with the record" {
@@ -399,4 +401,33 @@ PY
 @test "one-client: a test never reaches a real model - a provider found outside the test's folder stops the call" {
   unset AID_UI_ROLE_FIRST; rm "$T/bin/claude"
   run python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/g1"; [ "$status" -eq 3 ]; [[ "$output" == *"a test reached the real claude"* ]]
+}
+
+# ── P115: one engine - the studio's Codex goes through AID's transport, its prices come from AID's table ───────────
+@test "shared-motor: the call goes through AID's transport - its flags, CODEX_MODEL, the prompt on stdin" {
+  AID_UI_CODEX_MODEL=gpt-test-model run python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/m1"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  a="$T/codex-argv-1"
+  for x in exec --json --skip-git-repo-check --sandbox read-only --output-last-message model_reasoning_effort=high; do grep -qxF -- "$x" "$a"; done
+  grep -A1 -xF -- -m "$a" | tail -1 | grep -qx gpt-test-model
+  [ "$(tail -1 "$a")" = - ]   # the prompt on stdin, as every transport caller
+  grep -q "Pekárna" "$T/codex-prompt-1"
+  [ "$(cat "$T/codex-cwd")" = "$T/m1/bundle" ]
+  ! grep -rq '"codex", "exec"' "$SC"/aid-ui-*.py
+}
+
+@test "shared-motor: the screenshots reach Codex as -i arguments and no API key is in its environment" {
+  run python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/m2"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$(grep -cxF -- -i "$T/codex-argv-1")" -ge 2 ]
+  grep -A1 -xF -- -i "$T/codex-argv-1" | grep -q '\.png$'
+  ! grep -qE '^(OPENAI_API_KEY|ANTHROPIC_API_KEY|ANTHROPIC_AUTH_TOKEN)=' "$T/codex-env-1"
+}
+
+@test "shared-motor: the cost row's prices are the shared table's (AID_REVIEW_PRICES), and a model it does not list costs null" {
+  printf 'version: 1\nmodels:\n  gpt-test-model: {input: 7.0, output: 70.0, cache_read: 0.7, as_of: "2026-10-18"}\n' > "$T/prices.yaml"
+  AID_REVIEW_PRICES="$T/prices.yaml" AID_UI_CODEX_MODEL=gpt-test-model python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/m3" >/dev/null
+  jq -se '.[-1] | .unit_usd_per_1m == {input: 7.0, cached: 0.7, output: 70.0} and .model == "gpt-test-model" and (.price_list | contains("prices.yaml: gpt-test-model"))
+         and .usd == ((800 * 7.0 + 200 * 0.7 + 300 * 70.0) / 1e6 * 10000 | round / 10000)' "$P/.aid-ui/costs.jsonl" >/dev/null || { tail -1 "$P/.aid-ui/costs.jsonl"; return 1; }
+  AID_REVIEW_PRICES="$T/prices.yaml" AID_UI_CODEX_MODEL=gpt-unlisted run python3 "$CL" critic "$P" --role owner --web "$W" --out "$T/m4"
+  [ "$status" -eq 0 ]; [[ "$output" == *"no price for codex gpt-unlisted"* ]]
+  jq -se '.[-1].usd == null' "$P/.aid-ui/costs.jsonl" >/dev/null
 }

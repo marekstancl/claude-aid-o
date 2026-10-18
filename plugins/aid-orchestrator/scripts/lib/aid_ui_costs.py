@@ -5,14 +5,46 @@ equivalent of a call on a subscription), purpose, units, unit prices with the pr
 Paid API is only ever the image model (PM 12. 10. 2026); its total over the whole project is capped by
 image_budget() (AID_UI_IMAGE_BUDGET_USD, default 2.00) and checked before every image is sent.
 """
-import fcntl, json, os, time
+import fcntl, functools, json, os, subprocess, sys, time
 
-# USD per 1M tokens. ponytail: list prices typed in by hand; update the table and its date when a price moves
-TOKEN_PRICES = {
-    "codex": {"input": 1.25, "cached": 0.125, "output": 10.0, "list": "OpenAI gpt-5 list price, read 2026-10-08 (Codex default model, estimate)"},
-    "claude:sonnet": {"input": 3.0, "cached": 0.3, "output": 15.0, "list": "Anthropic Sonnet list price, read 2026-10-12"},
-    "claude:opus": {"input": 5.0, "cached": 0.5, "output": 25.0, "list": "Anthropic Opus list price, read 2026-10-12"},
-}
+LIB = os.path.dirname(os.path.abspath(__file__))
+
+
+@functools.lru_cache(maxsize=None)
+def price_table(project=""):
+    """(path, parsed YAML) of the ONE price table AID's revisions read (P115): aid_review_prices_file of
+    lib/aid-review-summary.sh - AID_REVIEW_PRICES, else <project>/.aid-o/config/prices.yaml, else defaults/prices.yaml.
+    (None, {}) when there is none."""
+    import yaml
+    r = subprocess.run(["bash", "-c", 'source "$1/aid-review-summary.sh" && aid_review_prices_file "$2"', "_", LIB, project or ""],
+                       capture_output=True, text=True, stdin=subprocess.DEVNULL)
+    f = r.stdout.strip()
+    if r.returncode or not f:
+        return None, {}
+    with open(f, encoding="utf-8") as fh:
+        return f, yaml.safe_load(fh) or {}
+
+
+def token_prices(provider, model, project=""):
+    """USD per 1M tokens {input, cached, output, list} of a call, from the shared table: Codex by its model name, Claude
+    by the table's own names (opus, sonnet - what the revisions price the Agent tool's calls by; a model id names its
+    family, claude-opus-5-5 is opus). None, with a warning, when it is not listed - never another model's price."""
+    f, t = price_table(project)
+    m = (model or "").lower()
+    key = model if provider == "codex" else ("sonnet" if "sonnet" in m else "opus" if "opus" in m or m in ("", "default") else m)
+    row = ((t.get("models") or {}).get(key) or {}) if t else {}
+    if not all(isinstance(row.get(k), (int, float)) for k in ("input", "output", "cache_read")):
+        print("WARN: aid_ui_costs: no price for %s %s in %s; the cost row says usd null" % (provider, key, f or "the price table"), file=sys.stderr)
+        return None
+    return {"input": row["input"], "cached": row["cache_read"], "output": row["output"],
+            "list": "%s: %s, as of %s" % (os.path.basename(f), key, row.get("as_of", "?"))}
+
+
+def image_prices(project=""):
+    """{model: {quality: USD per image}}, ref_usd and the list line of the shared table's images: section."""
+    f, t = price_table(project)
+    im = (t or {}).get("images") or {}
+    return im.get("models") or {}, float(im.get("ref_usd") or 0), "%s: images, as of %s" % (os.path.basename(f or "?"), im.get("as_of", "?"))
 
 
 def image_budget():
@@ -69,13 +101,13 @@ def reserve(project, row):
 
 def tokens(project, provider, model, usage, purpose, reported_usd=None):
     """A subscription call at its list-price equivalent; usage {input, cached, output} in tokens (input incl. cached)."""
-    key = "codex" if provider == "codex" else "claude:" + ("opus" if "opus" in (model or "") else "sonnet")
-    p = TOKEN_PRICES[key]
+    p = token_prices(provider, model, project)
     inp, cached, out = (int(usage.get(k) or 0) for k in ("input", "cached", "output"))
-    est = round((max(inp - cached, 0) * p["input"] + cached * p["cached"] + out * p["output"]) / 1e6, 4)
+    est = round((max(inp - cached, 0) * p["input"] + cached * p["cached"] + out * p["output"]) / 1e6, 4) if p else None
     return add(project, {"provider": provider, "model": model or "default", "billing": "subscription", "purpose": purpose,
                          "units": {"input": inp, "cached": cached, "output": out},
-                         "unit_usd_per_1m": {k: p[k] for k in ("input", "cached", "output")}, "price_list": p["list"],
+                         "unit_usd_per_1m": {k: p[k] for k in ("input", "cached", "output")} if p else None,
+                         "price_list": p["list"] if p else "not in the price table",
                          "usd": est, **({"reported_usd": reported_usd} if reported_usd is not None else {})})
 
 
@@ -144,12 +176,11 @@ def book_agent(project, purpose, session=None):
                 a["output"] += u.get("output_tokens") or 0
     out = []
     for mod, u in use.items():
-        key = "claude:" + ("sonnet" if "sonnet" in mod else "opus")   # ponytail: opus price for any other model (fable, haiku), add a row when it matters
-        p = TOKEN_PRICES[key]
-        est = round(((u["input"] - u["cached"]) * p["input"] + u["cached"] * p["cached"] + u["output"] * p["output"]) / 1e6, 4)
+        p = token_prices("claude", mod, project)
+        est = round(((u["input"] - u["cached"]) * p["input"] + u["cached"] * p["cached"] + u["output"] * p["output"]) / 1e6, 4) if p else None
         out.append(add(project, {"provider": "agent", "model": mod, "billing": "subscription", "purpose": purpose, "since": since,
-                                 "until": until, "units": u, "unit_usd_per_1m": {k: p[k] for k in ("input", "cached", "output")},
-                                 "price_list": p["list"] + " (estimate; cache writes at input price)", "usd": est}))
+                                 "until": until, "units": u, "unit_usd_per_1m": {k: p[k] for k in ("input", "cached", "output")} if p else None,
+                                 "price_list": (p["list"] + " (estimate; cache writes at input price)") if p else "not in the price table", "usd": est}))
     if not out:   # an empty interval still moves the mark
         out.append(add(project, {"provider": "agent", "model": None, "billing": "subscription", "purpose": purpose, "since": since,
                                  "until": until, "units": {}, "usd": 0.0}))
