@@ -11,6 +11,8 @@ state_setup() {
   cp "$PAGE/index.html" "$PROJ/docs/brand/"
   "$SCRIPT" init "$PROJ" >/dev/null
   places_copy "$PROJ"   # P113: the place verdicts a build and the place questions stand on
+  # P115: the launch inputs the type web-local asks after the brief (the handover package refuses without them)
+  echo '{"type": "web-local", "items": [{"id": "domain", "name": "Doména a hosting", "status": "client", "critical": true}], "used_answers": []}' > "$PROJ/.aid-ui/launch.json"
   "$SCRIPT" method "$PROJ" build >/dev/null   # P108: build-record wants the build method receipt
   STATE="$PROJ/docs/design/brand-state.json"
   HTML="$PROJ/docs/brand/index.html"

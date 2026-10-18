@@ -77,7 +77,7 @@ are recorded with `aid-ui-state.sh decide` and appear in the same list, marked A
 
 The studio ends with one package, `docs/ui/predani.json` (+ `predani.md`), written by the
 handover (`aid-ui-state.sh chapter-all`; an incomplete or stale package refuses the handover).
-`aid-ui-package.py zadani docs/ui/predani.json --plan-id P<NNN>` turns it into the deployment
+`python3 "$AID_PLUGIN_PATH/scripts/aid-ui-package.py" zadani docs/ui/predani.json --plan-id P<NNN>` turns it into the deployment
 brief that `/aid-plan` writes the plan from; the run gate `check_ui_handover` then lets through
 only the handed-over files with no critical item open; `aid-ui-quality.py launch` rates the live
 web in its own loop. Detail: `skills/ui-design/SKILL.md`, section Předání.

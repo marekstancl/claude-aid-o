@@ -45,8 +45,8 @@ Studio navrhuje s PM a klientem, plán a běh AIDu web nasazují a ověřují; m
    `docs/ui/predani.json` (+ čitelný `predani.md`) podle `references/handover-package.schema.json`: web a jeho
    soubory se sha256, zaznamenaná brána, schválené kapitoly, verdikty míst, úkoly zákazníka, otevřené body,
    podklady ke spuštění, kritéria `launch_only`. Neúplný nebo zastaralý balík (web změněný po bráně) převzetí
-   odmítne se jménem chybějící části a odpověď PM zůstane nepoužitá. Po převzetí se balík nemění.
-2. **Zadání plánu nasazení.** `aid-ui-package.py zadani docs/ui/predani.json --plan-id P<NNN>` (nebo `/aid-plan`
+   odmítne se jménem chybějící části a odpověď PM zůstane nepoužitá. Po převzetí se balík nemění; `aid-ui-package.py build` ho jen sestaví znovu (po chybě zápisu) a nový otisk pak znamená napsat zadání a plán znovu.
+2. **Zadání plánu nasazení.** `python3 "$AID_PLUGIN_PATH/scripts/aid-ui-package.py" zadani docs/ui/predani.json --plan-id P<NNN>` (nebo `/aid-plan`
    s balíkem jako vstupem) napíše zadání: bod hotovo za každý úkol zákazníka, krok spuštění
    (`references/local/spusteni.md`: nasadit přesně balík, HTTPS, hlavičky, 404, citlivé soubory, DNS, e-mail,
    katalogy, přesměrování), podklad ke spuštění (pokud už ho nenese otevřený bod), otevřený bod (kritický blokuje)
@@ -54,7 +54,7 @@ Studio navrhuje s PM a klientem, plán a běh AIDu web nasazují a ověřují; m
    Hosting je práce plánu, ne studia.
 3. **Brána běhu `check_ui_handover`.** Plán z balíku nese `ui_package:`; brána ho bez balíku, se zastaralým nebo
    upraveným balíkem a s otevřeným kritickým bodem zastaví. Před nasazením tím končí („před nasazením“); po zápisu
-   `docs/ui/nasazeni.json` (`url` a `listing` hostingu) a vždy s `--launch` (bod zadání) pustí jen přesně soubory
+   `docs/ui/nasazeni.json` (`url` a `listing` hostingu) ověří i ostrou adresu (`--launch`, bod zadání, bez něj neprojde) a pustí jen přesně soubory
    balíku, všechny formuláře na vlastní adresu webu, které hosting přijme, a kontrolu UI studia nad ostrou adresou.
    Plán bez balíku bránu přeskočí s důvodem.
 4. **Hodnocení po nasazení.** `aid-ui-quality.py launch <project> --url <ostrá adresa>` - vlastní smyčka

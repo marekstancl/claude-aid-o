@@ -87,6 +87,18 @@ handed_over() {
   [ -f "$OUTP" ]
 }
 
+@test "package: an open item without text, or no launch inputs for a type that asks them, refuses the handover naming it" {
+  handed_over
+  jqw '.open_items = [{id: "oi-1", text: "", owner: "klient", status: "open", critical: false}]'
+  before="$(sha256sum "$HTML" "$STATE")"
+  run "$SCRIPT" chapter-all "$PROJ" --by PM --answer h1
+  [ "$status" -eq 1 ]; [[ "$output" == *"chybí text otevřeného bodu"* ]]; [[ "$output" == *"answer h1 not used"* ]]
+  [ "$(sha256sum "$HTML" "$STATE")" = "$before" ]; [ ! -e "$OUTP" ]
+  jqw '.open_items = []'; rm "$PROJ/.aid-ui/launch.json"
+  run python3 "$PKG" build "$PROJ" --dry
+  [ "$status" -eq 1 ]; [[ "$output" == *"chybí podklady ke spuštění"* ]]
+}
+
 @test "package: a standalone build after a recorded handover rewrites the package; before a handover it is refused" {
   handed_over
   run python3 "$PKG" build "$PROJ"
@@ -281,6 +293,18 @@ GATE_SH() { run bash "$BATS_TEST_DIRNAME/../../aid-ui-verify.sh" --package-gate 
   echo '<html>jiný</html>' > "$SITE/index.html"
   GATE_SH "$PLAN"
   [ "$status" -eq 1 ]; [[ "$output" == *"zastaralý"* ]]
+}
+
+@test "ui-gate: the recorded gate changed after the handover (another run, another result file) fails" {
+  deployed
+  cp "$STATE" "$T/state.orig"
+  jqw '.gate.run_at = "2030-01-01T00:00:00.000Z"'
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"zaznamenaná brána není ta z předání"* ]]
+  cp "$T/state.orig" "$STATE"; cp "$RES" "$T/res2.json"
+  jqw --arg f "$T/res2.json" '.gate.result_file = $f'
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"zaznamenaná brána není ta z předání"* ]]
+  cp "$T/state.orig" "$STATE"; echo '{}' > "$RES"
+  GATE_SH "$PLAN"; [ "$status" -eq 1 ]; [[ "$output" == *"výsledek brány"*"změnil"* ]]
 }
 
 @test "ui-gate: nasazeni.json with url but no listing, or listing but no url, is refused; a host with a shell metacharacter too" {

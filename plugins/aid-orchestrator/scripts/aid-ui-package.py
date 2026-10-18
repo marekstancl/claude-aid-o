@@ -144,6 +144,17 @@ def chapter_target(proj, cid):
     return run("bash", STATE_SH, "chapter-target", proj, cid)
 
 
+def type_needs_launch_inputs(proj):
+    """True when the project's frozen type lists launch_inputs (web-local does; a type without them needs none)."""
+    fr = os.path.join(proj, ".aid-ui", "critic", "frozen.json")
+    try:
+        typ = json.load(open(fr, encoding="utf-8")).get("type")
+    except (OSError, ValueError):
+        return False
+    f = os.path.join(SKILL, "critic", f"{typ}.yaml")
+    return bool(typ and os.path.isfile(f) and (yaml_json(f) or {}).get("launch_inputs"))
+
+
 def launch_only_of(proj, launch):
     typ = (launch or {}).get("type")
     if not typ:
@@ -212,6 +223,8 @@ def make(proj, dry):
                     "critical": bool(o.get("critical")), "status": o["status"], "evidence": o.get("evidence")})
     lf = os.path.join(proj, ".aid-ui", "launch.json")
     launch = load_json(lf, ".aid-ui/launch.json") if os.path.isfile(lf) else {}
+    if not launch and type_needs_launch_inputs(proj):   # the type asks them right after the brief (aid-ui-launch.py card)
+        raise Refused("chybí podklady ke spuštění (.aid-ui/launch.json; aid-ui-launch.py card a confirm)")
     inputs = [dict(i, critical=bool(i.get("critical"))) for i in (launch.get("items") or []) if isinstance(i, dict)]
     return {
         "version": 1,
@@ -301,7 +314,7 @@ def check(path, proj=None):
         if bid != pkg["site"]["build_id"] or dirsha(d) != pkg["site"]["sha256"] or site_files(d) != pkg["site"]["files"]:
             why.append("web se změnil od předání (soubory nejsou ty z balíku)")
         g = state.get("gate") or {}
-        if any(g.get(k) != pkg["gate"][k] for k in ("run_at", "result_sha256", "build_id", "customer_page_sha256")):
+        if any(g.get(k) != pkg["gate"][k] for k in ("run_at", "result_file", "result_sha256", "build_id", "customer_page_sha256")):
             why.append("zaznamenaná brána není ta z předání")
         return ["zastaralý (" + "; ".join(why) + ")"] if why else []
     except Refused as e:
