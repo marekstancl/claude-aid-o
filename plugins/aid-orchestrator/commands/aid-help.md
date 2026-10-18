@@ -339,6 +339,14 @@ fáze: před nasazením ověří balík, web a kritické body; po zápisu
 formuláře a kontrolu UI nad ostrou adresou. `aid-ui-quality.py launch` ohodnotí
 ostrou adresu ve vlastní smyčce. Plán bez balíku bránu přeskočí.
 
+Od 3.7.0 má studio druhou cestu pro webové aplikace (druh `webapp`): místo stránek
+model obrazovek a úloh `docs/design/screens.json`, ze kterého se staví kostra se stavy,
+testy úloh brány a balík. Úlohy schvaluje jen PM (vlastník produktu); brána ověří, že každá
+úloha dojde k výsledku, každá obrazovka má své stavy, úloha jde jen klávesnicí a vnucená
+chyba neztratí vstup. Existující aplikace nesmí ztratit žádnou dnešní úlohu
+(`aid-ui-baseline.py`). Předání napíše zadání změn kódu; brána běhu pustí úlohy proti
+běžící aplikaci. Postup: `skills/ui-design/references/local/aplikace-postup.md`.
+
 ### Topic: status
 
 `/aid-status` is the one place that answers "what is happening". Its overview

@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 678 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 682 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
   # ── Plan amendments recorded here because this file is the TRACKED authority ──
   # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
   # `git check-ignore`; `docs/extending-aid.md` is the tracked exception), so an
@@ -4685,6 +4685,66 @@ enforcements:
     recovery: "Run the gate again over the current site (aid-ui-verify.sh, gate-record), fix the named part, and use the same handover answer; aid-ui-package.py build <project> rewrites the package of a recorded handover."
     test_covers: "complete package passes check, missing gate, stale site, a refused build leaves the answer and the state unchanged, a standalone rebuild, a lying file list (test-aid-ui-package.bats package: cases)."
     test: "scripts/tests/bats/test-aid-ui-package.bats"
+  - id: aid_ui_screens_model
+    type: 1
+    source: "scripts/aid-ui-screens.py (check, matrix) + skills/ui-design/references/screens.schema.json"
+    instruction: "skills/ui-design/references/local/aplikace-postup.md (oddíl 2) + skills/ui-design/steps/2-structure.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "That the model holds the tasks people really do - the check refuses a model a skeleton, a gate or a package could not stand on, the PM approves its content."
+    description: "P116 - docs/design/screens.json is checked against its schema and the cross rules: an action leading to no screen of the model, a task missing one of the seven UA-1 states, a task without done_when (or whose result is not where it ends), a destructive action without confirm, a submitting task with neither a failure path nor 'nenastává, protože …', steps that do not follow, a recover off the failing screen, an unknown replaced baseline task; the skeleton, the scenario generator and the package refuse a model that fails it."
+    recovery: "Fix the model per the violations (each with its JSON path) and run aid-ui-screens.py check again."
+    test_covers: "test-aid-ui-app.bats screens: and merge-path: cases (each refusal, a schema and a cross error together, an unreadable baseline, the skeleton and the generator refusing an invalid model)."
+    test: "scripts/tests/bats/test-aid-ui-app.bats"
+  - id: aid_ui_app_owner_approves
+    type: 1
+    source: "scripts/aid-ui-state.sh (record-answer app_owner_guard, model-approved, step app_skips_missing) + lib/aid-ui-studio/server.py (by pm, parts by kind)"
+    instruction: "skills/ui-design/SKILL.md (Dvě cesty) + skills/ui-design/references/local/aplikace-postup.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "That the person on the PM's studio page is the PM - the studio knows the PM only by the page's session; a delegate uses that page by the PM's decision."
+    description: "P116 - for a webapp the answer to its structure or task_map question is recorded only by pm and with target docs/design/screens.json@<sha of the model now> (app_tasks_need_owner); an exception for the baseline list or a baseline task's removal only by pm and only for the list now or a task of it (app_owner_only); before a variant is recorded the guard fails closed; model-approved fails on a model changed since; a webapp leaves step 1 only with a skip record for every part its options skip, and a new brand keeps its logo place."
+    recovery: "Put the question to the PM on the studio page; after a model change ask again; record the skip reasons with aid-ui-state.sh decide."
+    test_covers: "test-aid-ui-app.bats app-path: cases (client and agent answers refused, model change, baseline and task exceptions, skips, the web unchanged, parts by kind)."
+    test: "scripts/tests/bats/test-aid-ui-app.bats"
+  - id: aid_ui_app_gate
+    type: 1
+    source: "scripts/aid-ui-flows.py (generate) + lib/ui-fidelity/aid-ui-verify.mjs (app rows) + scripts/aid-ui-verify.sh (model-approved) + scripts/aid-ui-state.sh (required app matrix) + scripts/aid-ui-package.py (app package, code-change brief, run gate)"
+    instruction: "skills/ui-design/references/local/aplikace-postup.md (oddíly 4-6) + skills/ui-design/steps/7-verify.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    enforcement_degree: 2
+    not_guaranteed: "That a task's result text proves the right data - done_when checks the screen and the expected text the model names; the PM owns the model."
+    description: "P116 - the gate of a webapp runs only on the model the PM approved and generates its task scenarios from it: each task walked to its result (app_flows), by Tab and Enter only (keyboard_flows), a forced failure keeping the screen and every input and ending in the result after the recover action (task_recovery, a generated network failure for a submitting task without a failure path), every screen in its four states (app_states); every row runs in a fresh browser context and carries model_sha256; a scenario of another model fails its row; gate-record wants every app row; the package of an app needs every app row green and every task passed on the approved model, and its brief's points are verified by the run gate running the tasks against the project's app."
+    recovery: "Fix the app (or the skeleton) where the row names the step; regenerate nothing by hand - the gate generates the scenarios; after a model change the PM approves it again."
+    test_covers: "test-aid-ui-verify.bats app-gate: cases (result missing, a state missing, keyboard only, lost input, a recover that does nothing, the generated failure, an unapproved model, isolation, the run gate on the project's app); test-aid-ui-app.bats app-package: and merge-path: cases."
+    test: "scripts/tests/bats/test-aid-ui-verify.bats"
+  - id: aid_ui_app_regression
+    type: 1
+    source: "scripts/aid-ui-baseline.py (list, capture, compare) + lib/ui-fidelity/aid-ui-baseline.mjs + scripts/aid-ui-package.py (build runs compare)"
+    instruction: "skills/ui-design/references/local/aplikace-postup.md (oddíly 1 a 5)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    not_guaranteed: "That the baseline list holds every task people do today - the agent drafts it from the navigation and the documentation, the PM approves it."
+    description: "P116 - an existing app keeps every task of today: capture plays only the list the PM approved (a recorded answer by pm, target baseline@<sha of the list now>) with a stored login and stays on the app's origin; compare fails a baseline task without a new task replacing it (replaces) that passed the last gate on the model now and ends in the same result, unless the PM approved its removal (task@<id>), and fails a capture where a task did not pass; the handover of an existing app runs compare and refuses on a failure."
+    recovery: "Add the replacing task to the model (replaces + its done_when), run the gate, or put the removal to the PM; capture again after a change of the list."
+    test_covers: "test-aid-ui-app.bats baseline: cases and app-package: the existing app; test-aid-ui-verify.bats app-gate: baseline capture with a stored login."
+    test: "scripts/tests/bats/test-aid-ui-app.bats"
   - id: aid_ui_package_lost
     type: 1
     source: "scripts/aid-plan-lint.sh (_zadani_pass, ui_package_lost) + scripts/aid-ui-package.py (zadani)"
