@@ -8,6 +8,11 @@ user_invocable: false
 
 **Vrstva dílny (P113):** `references/local/kontrola-postup.md` má přednost před výběrem vzorku: brána jde přes každou stránku a každou šířku a doplňuje dnešní řádky, nenahrazuje je. Místo: `web`; předání (`handover`) jde jen s verdiktem místa `web`. Kolo místa: `aid-ui-quality.py round <projekt> --place web --web <url>`.
 
+**Webová aplikace (P116):** brána běží jen nad modelem, který PM schválil (`aid-ui-state.sh model-approved`), scénáře úloh si
+vygeneruje z modelu sama (`aid-ui-flows.py generate`) a přidá řádky `app_flows`, `app_states`, `keyboard_flows`
+a `task_recovery` (`references/local/aplikace-postup.md`, oddíl 5); řádky úloh a stavů běží na šířkách a prohlížečích
+`app_rows` z `coverage/checks.yaml` (1440 a 390 px, Chromium), stránky aplikace na celé matici.
+
 **Last Updated:** 2026-10-03
 
 ## Cíl

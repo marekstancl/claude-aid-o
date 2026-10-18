@@ -16,7 +16,14 @@ each a text or "nenastává, protože …").
       .aid-ui/baseline/tasks.json (no baseline = nothing to replace). Exit 0, 1 with every violation and its path,
       2 unreadable JSON or usage.
 
-Other scripts import load() and violations() from here (importlib), so there is one reading of the model.
+  matrix <project>
+      (the model passing check) {model_sha256, rows}: the app rows of the gate - every task x normal (check
+      app_flows), keyboard (keyboard_flows) and its failure variants fail-<n> (task_recovery: the model's failure
+      paths, else one generated network failure on the last submit of a submitting task), every screen x empty,
+      loading, error, filled (page "screen:<id>", check app_states, url = the screen's url or /<id>/).
+
+Other scripts import load(), violations(), failure_variants() and matrix() from here (importlib), so there is one
+reading of the model.
 """
 import json, os, sys
 
@@ -138,6 +145,35 @@ def violations(m, proj):
     return out
 
 
+def screen_url(s):
+    return s.get("url") or f"/{s['id']}/"
+
+
+def failure_variants(m, t):
+    """The failure variants of a task: its model's failure paths, else - for a task with a submit action - one generated
+    network failure on its last submit, recovered by the same action. [{state, at_step, kind, recover, generated}]"""
+    if t["failure_paths"]:
+        return [dict(fp, state=f"fail-{i}", generated=False) for i, fp in enumerate(t["failure_paths"], 1)]
+    kinds = {(s["id"], a["id"]): a["kind"] for s in m["screens"] for a in s["actions"]}
+    subs = [k for k, st in enumerate(t["steps"], 1) if kinds.get((st["screen"], st["action"])) == "submit"]
+    if not subs:
+        return []
+    k = subs[-1]
+    return [{"state": "fail-1", "at_step": k, "kind": "network", "keeps_input": True, "recover": t["steps"][k - 1]["action"], "generated": True}]
+
+
+def matrix(m):
+    """The app rows of the gate (one source for aid-ui-flows.py, aid-ui-verify.mjs and aid-ui-state.sh): every task x
+    normal | keyboard | its failure variants, every screen x its four states (page "screen:<id>")."""
+    rows = []
+    for t in m["tasks"]:
+        rows += [{"page": t["id"], "state": "normal", "check": "app_flows"}, {"page": t["id"], "state": "keyboard", "check": "keyboard_flows"}]
+        rows += [{"page": t["id"], "state": v["state"], "check": "task_recovery"} for v in failure_variants(m, t)]
+    for s in m["screens"]:
+        rows += [{"page": "screen:" + s["id"], "state": k, "check": "app_states", "url": screen_url(s)} for k in ("empty", "loading", "error", "filled")]
+    return rows
+
+
 def cmd_check(proj):
     try:
         m = load(proj)
@@ -160,7 +196,19 @@ def cmd_check(proj):
 def main(a):
     if len(a) == 2 and a[0] == "check" and os.path.isdir(a[1]):
         return cmd_check(a[1])
-    print("usage: aid-ui-screens.py check <project>", file=sys.stderr)
+    if len(a) == 2 and a[0] == "matrix" and os.path.isdir(a[1]):
+        rc = cmd_check(a[1]) if not os.path.isfile(model_path(a[1])) else 0
+        if rc:
+            return rc
+        m = load(a[1])
+        bad = violations(m, a[1])
+        if bad:
+            print("ERROR: aid-ui-screens.py: matrix: the model fails check: " + "; ".join(bad[:3]), file=sys.stderr)
+            return 1
+        import hashlib
+        print(json.dumps({"model_sha256": hashlib.sha256(open(model_path(a[1]), "rb").read()).hexdigest(), "rows": matrix(m)}, ensure_ascii=False))
+        return 0
+    print("usage: aid-ui-screens.py check|matrix <project>", file=sys.stderr)
     return 2
 
 

@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Poznámka · Poznámky</title><link rel="stylesheet" href="/app.css"></head>
+<body><header><a class="skip" href="#obsah">Přeskočit na obsah</a><nav aria-label="Aplikace"><a href="/seznam/">Poznámky</a></nav></header>
+<main id="obsah" data-aid-screen="detail"><h1>Poznámka</h1>
+<section data-aid-state="empty"><p>Poznámka neexistuje (nenastává: detail se otevírá z existující poznámky).</p></section>
+<section data-aid-state="loading" aria-busy="true"><p>Načítám poznámku…</p></section>
+<section data-aid-state="error" role="alert"><p>Poznámku se nepodařilo načíst. <a href="/seznam/">Zpět na seznam</a></p></section>
+<section data-aid-state="filled"><h2 data-nazev></h2></section>
+<p data-aid-error role="alert" hidden>Smazání selhalo, poznámka zůstala.</p>
+<p><button type="button" data-aid-action="detail.smazat">Smazat</button> <a href="/seznam/" data-aid-action="detail.zpet">Zpět na seznam</a></p>
+<dialog aria-label="Opravdu smazat poznámku?"><p>Opravdu smazat poznámku?</p><button type="button" data-aid-confirm-yes="detail.smazat">Smazat</button> <button type="button" data-ne>Zrušit</button></dialog>
+</main><script src="/app.js"></script></body></html>

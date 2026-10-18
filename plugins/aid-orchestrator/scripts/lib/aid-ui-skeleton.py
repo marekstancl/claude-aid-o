@@ -281,8 +281,9 @@ def screens_module():
 
 def app_page(m, scr, approved, fields, results):
     sid = scr["id"]
+    url = {x["id"]: (x.get("url") or f"/{x['id']}/") for x in m["screens"]}
     cur = ' aria-current="page"'
-    nav = "".join(f'<li><a href="/{esc(x["id"])}/"{cur if x["id"] == sid else ""}>{esc(x["title"])}</a></li>'
+    nav = "".join(f'<li><a href="{esc(url[x["id"]])}"{cur if x["id"] == sid else ""}>{esc(x["title"])}</a></li>'
                   for x in m["screens"] if x["nav"])
     switch = "".join(f'<a href="?stav={k}" data-aid-stav-link="{k}">{t}</a> ' for k, t in STATES)
     res = "".join(f'<p class="vysledek" data-aid-result="{esc(t)}">{esc(e)}</p>' for t, e in results)
@@ -292,19 +293,19 @@ def app_page(m, scr, approved, fields, results):
     for a in scr["actions"]:
         da = f'data-aid-action="{esc(sid)}.{esc(a["id"])}"'
         if a["kind"] == "navigate":
-            acts.append(f'<a class="akce" href="/{esc(a["to"])}/" {da}>{esc(a["label"])}</a>')
+            acts.append(f'<a class="akce" href="{esc(url[a["to"]])}" {da}>{esc(a["label"])}</a>')
         elif a["kind"] == "submit":
-            form_btns.append(f'<button type="submit" formaction="/{esc(a["to"])}/" {da}>{esc(a["label"])}</button>')
+            form_btns.append(f'<button type="submit" formaction="{esc(url[a["to"]])}" {da}>{esc(a["label"])}</button>')
         else:   # destructive: the button opens its confirm dialog; without JS the dialog stands open under it
             k = f'{esc(sid)}.{esc(a["id"])}'
             acts.append(f'<button type="button" {da} aria-haspopup="dialog">{esc(a["label"])}</button>'
                         f'<dialog open class="potvrzeni" data-aid-confirm="{k}" aria-label="{esc(a["confirm"])}"><p>{esc(a["confirm"])}</p>'
-                        f'<a href="/{esc(a["to"])}/" data-aid-confirm-yes="{k}">Potvrdit</a> <button type="button" data-aid-confirm-no>Zrušit</button></dialog>')
+                        f'<a href="{esc(url[a["to"]])}" data-aid-confirm-yes="{k}">Potvrdit</a> <button type="button" data-aid-confirm-no>Zrušit</button></dialog>')
     form = ""
     if form_btns:
         inputs = "".join(f'<p><label>{esc(n)} <input name="{esc(n)}"></label></p>' for n in fields)
         first = next(a for a in scr["actions"] if a["kind"] == "submit")
-        form = (f'<form method="get" action="/{esc(first["to"])}/" data-aid-form>{inputs}'
+        form = (f'<form method="get" action="{esc(url[first["to"]])}" data-aid-form>{inputs}'
                 f'<p class="chyba" role="alert" tabindex="-1" data-aid-error hidden>{esc(scr["states"]["error"])}</p>{"".join(form_btns)}</form>')
     banner = "" if approved else '<p class="navrh" role="status" data-aid-draft>Návrh: model čeká na schválení vlastníkem.</p>'
     return (f'<!doctype html>\n<html lang="cs" {MARK} data-aid-app>\n<head><meta charset="utf-8">'
@@ -358,9 +359,16 @@ def build_app(p):
     for t in m["tasks"]:
         results.setdefault(t["done_when"]["screen"], []).append((t["id"], t["done_when"]["expect"]))
     home = next(x for x in m["screens"] if x["nav"])
-    entries = [(os.path.join(site, x["id"], "index.html"),
+    files = {}
+    for x in m["screens"]:   # two screens on one address would overwrite each other silently
+        f = page_file(site, mod.screen_url(x))
+        if f in files:
+            die(f"screens {files[f]} and {x['id']} both become {os.path.relpath(f, site)}", 2)
+        files[f] = x["id"]
+    entries = [(page_file(site, mod.screen_url(x)),
                 lambda x=x: app_page(m, x, approved, fields.get(x["id"], []), results.get(x["id"], []))) for x in m["screens"]]
-    entries.append((os.path.join(site, "index.html"), lambda: app_page(m, home, approved, fields.get(home["id"], []), results.get(home["id"], []))))
+    if os.path.join(site, "index.html") not in files:   # no screen at "/": the home page is the first screen in the navigation
+        entries.append((os.path.join(site, "index.html"), lambda: app_page(m, home, approved, fields.get(home["id"], []), results.get(home["id"], []))))
     out = write_pages(p, site, entries)
     if not approved and out["kept"]:   # a built page is never rewritten: it cannot carry the banner; the gate refuses the model
         warn("built pages kept without the draft banner (the model is not approved): " + ", ".join(out["kept"])

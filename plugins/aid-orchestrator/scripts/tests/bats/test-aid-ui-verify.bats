@@ -787,3 +787,97 @@ vst() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .pag
   jq -e '.rows[] | select(.check == "seo" and .page == "o-nas/index.html") | .status == "fail" and (.detail | contains("brief-h1"))' "$RES" >/dev/null || { jq -c '.rows[] | select(.check == "seo")' "$RES"; return 1; }
   ! jq -r '.rows[] | select(.check == "seo" and .page != "o-nas/index.html") | .detail' "$RES" | grep -q 'brief-h1: expected'
 }
+
+# ---------------------------------------------------------------- P116: the gate of a web application
+# app_gate [model jq filter] - the verify project as a webapp with the fixture model (approved by the PM: the sha the
+# studio stores), the fixture app as the build, the gate narrowed to the four app checks at 1440 px in Chromium
+app_gate() {
+  AFX="$BATS_TEST_DIRNAME/../fixtures/aid-ui/app"
+  mkdir -p "$PROJ/docs/design"
+  jq "${1:-.}" "$AFX/docs/design/screens.json" > "$PROJ/docs/design/screens.json"
+  local sha; sha="$(sha256sum "$PROJ/docs/design/screens.json" | cut -d' ' -f1)"
+  jq --arg s "$sha" '.variant = {type: "webapp", brand: "none", local: false} | .app = {approved_model_sha: $s, answer: "t", at: "t"}' \
+    "$PROJ/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
+  rm -rf "$T/appsite"; cp -r "$AFX/site" "$T/appsite"
+  NARROW_VP=1440 narrow app_flows app_states keyboard_flows task_recovery
+  yq -i '.browsers = ["chromium"]' "$T/cov/checks.yaml"
+}
+gate_app() { "$SC/aid-ui-state.sh" build-record "$PROJ" "$T/appsite" >/dev/null; run bash "$SC/aid-ui-verify.sh" "$PROJ"; }
+# row <check> <page> <state> - status of that one row
+row() { jq -r --arg c "$1" --arg p "$2" --arg s "$3" '[.rows[] | select(.check == $c and .page == $p and .state == $s) | .status] | join(",")' "$RES"; }
+detail() { jq -r --arg c "$1" --arg p "$2" --arg s "$3" '[.rows[] | select(.check == $c and .page == $p and .state == $s) | .detail] | join(" | ")' "$RES"; }
+
+@test "app-gate: the app built from the model passes every task, state, keyboard and recovery row; each result carries the model's sha" {
+  app_gate; gate_app
+  [ "$status" -eq 0 ] || { echo "$output"; jq -c '.rows[] | select(.status != "pass") | [.check, .page, .state, .detail]' "$RES" | head; return 1; }
+  sha="$(sha256sum "$PROJ/docs/design/screens.json" | cut -d' ' -f1)"
+  for x in "app_flows zalozit normal" "app_flows smazat normal" "keyboard_flows zalozit keyboard" "keyboard_flows smazat keyboard" \
+           "task_recovery zalozit fail-1" "app_states screen:formular loading" "app_states screen:detail error"; do
+    set -- $x; [ "$(row "$1" "$2" "$3")" = pass ] || { echo "$x: $(row "$1" "$2" "$3")"; return 1; }
+  done
+  [ "$(jq -r .model_sha256 "$RES")" = "$sha" ]
+  jq -e --arg s "$sha" '[.rows[] | select(.check == "app_flows")] | length > 0 and all(.model_sha256 == $s)' "$RES" >/dev/null
+  # the scenarios were generated from that model by the gate itself
+  grep -q "export const model_sha256 = \"$sha\"" "$PROJ/.aid-ui/scenarios/zalozit.mjs"
+}
+
+@test "app-gate: a task that clicks through without its result fails app_flows (and the keyboard and recovery rows of it)" {
+  app_gate
+  sed -i '/aid-break: result/s/.*/    void 0;/' "$T/appsite/app.js"
+  gate_app
+  [ "$status" -eq 3 ] || { echo "$output"; return 1; }
+  [ "$(row app_flows zalozit normal)" = fail ]; [ "$(row app_flows smazat normal)" = pass ]
+  [[ "$(detail app_flows zalozit normal)" == *"výsledek nenastal"* ]]
+}
+
+@test "app-gate: a screen without one of its states fails app_states for that screen and state only" {
+  app_gate
+  sed -i '/data-aid-state="loading"/d' "$T/appsite/formular/index.html"
+  gate_app
+  [ "$status" -eq 3 ]
+  [ "$(row app_states screen:formular loading)" = fail ]; [ "$(row app_states screen:formular error)" = pass ]
+  [ "$(row app_states screen:seznam loading)" = pass ]
+}
+
+@test "app-gate: a task that cannot be finished by keyboard fails keyboard_flows while the mouse path passes" {
+  app_gate
+  sed -i 's|<button type="submit" data-aid-action="formular.ulozit">Uložit</button>|<span data-aid-action="formular.ulozit" onclick="this.closest('"'"'form'"'"').requestSubmit()">Uložit</span>|' "$T/appsite/formular/index.html"
+  gate_app
+  [ "$status" -eq 3 ]
+  [ "$(row keyboard_flows zalozit keyboard)" = fail ]; [ "$(row app_flows zalozit normal)" = pass ]
+  [[ "$(detail keyboard_flows zalozit keyboard)" == *"klávesnicí nedosažitelné"* ]]
+}
+
+@test "app-gate: a forced failure that loses the input fails task_recovery" {
+  app_gate
+  sed -i 's|/\* aid-break: lost-input \*/|form.reset();|' "$T/appsite/app.js"
+  gate_app
+  [ "$status" -eq 3 ]
+  [ "$(row task_recovery zalozit fail-1)" = fail ]; [ "$(row app_flows zalozit normal)" = pass ]
+  [[ "$(detail task_recovery zalozit fail-1)" == *"ztratil vstup nazev"* ]]
+}
+
+@test "app-gate: a recover action that does nothing fails task_recovery - the input stays, the result never comes" {
+  app_gate
+  sed -i 's|<button type="submit" data-aid-action="formular.znovu">|<button type="button" data-aid-action="formular.znovu">|' "$T/appsite/formular/index.html"
+  gate_app
+  [ "$status" -eq 3 ]; [ "$(row task_recovery zalozit fail-1)" = fail ]
+  [[ "$(detail task_recovery zalozit fail-1)" == *"výsledek nenastal"* ]]
+}
+
+@test "app-gate: a submitting task without a failure path in the model still gets the generated network failure" {
+  app_gate '.tasks[0].failure_paths = [] | .tasks[0].states.failure = "nenastává, protože ukládá jen do prohlížeče"'
+  sed -i 's|/\* aid-break: lost-input \*/|form.reset();|' "$T/appsite/app.js"
+  gate_app
+  [ "$status" -eq 3 ]
+  [ "$(row task_recovery zalozit fail-1)" = fail ]
+  jq -e '.variants["fail-1"] | .generated and .kind == "network" and .recover == "ulozit"' <(sed -n 's/^const T = \(.*\);$/\1/p' "$PROJ/.aid-ui/scenarios/zalozit.mjs") >/dev/null
+}
+
+@test "app-gate: the gate refuses a model the PM did not approve or that changed since; nothing is recorded" {
+  app_gate
+  jq '.app.approved_model_sha = "0000"' "$PROJ/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
+  gate_app
+  [ "$status" -eq 1 ]; [[ "$output" == *"changed since the PM approved it"* ]]; [[ "$output" == *"only on the model the PM approved"* ]]
+  [ ! -f "$RES" ]
+}

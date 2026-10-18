@@ -23,6 +23,9 @@
 #    and full-page screenshots under .aid-ui/verify/shots/. A browser that cannot launch
 #    (WebKit not installed) -> its rows not_covered with the install hint.
 # 4. `aid-ui-state.sh gate-record <project> <result.json>`.
+# A webapp (P116) first: `aid-ui-state.sh model-approved` (exit 1 on a model the PM did not approve or that changed
+# since) and `aid-ui-flows.py generate` (the task scenarios from that model); its rows app_flows, app_states,
+# keyboard_flows and task_recovery come from docs/design/screens.json (aid-ui-screens.py matrix).
 #
 # Inputs the checks read (all optional; missing -> the check's rows are not_covered):
 # docs/content/facts.yaml, docs/content/tasks.yaml (P113a task test), docs/content/photos.yaml (P113a photo slots), docs/design/brand-package/, .aid-ui/scenarios/<flow id>.mjs,
@@ -59,6 +62,12 @@ read -r id dir < <(jq -r '"\(.build.id // "-") \(.build.dir // "")"' "$STATE")
 if [[ -z "$live" ]]; then   # binds the LOCAL gate to the recorded build; the run gate compares the deployed files instead
   now_id="$(bash "$HERE/aid-ui-state.sh" build-id "$dir")"
   [[ "$now_id" == "$id" ]] || die "the site in $dir changed since build-record (build id $now_id, recorded $id); rebuild and run build-record again"
+fi
+
+# P116: a webapp is gated only on the model the PM approved, with its task scenarios generated from that model now
+if [[ "$(jq -r '.variant.type // ""' "$STATE")" == webapp && -z "$subject" ]]; then
+  bash "$HERE/aid-ui-state.sh" model-approved "$PROJECT" >/dev/null || die "the gate of an app runs only on the model the PM approved (see above)"
+  python3 "$HERE/aid-ui-flows.py" generate "$PROJECT" >/dev/null || die "the task scenarios could not be generated from docs/design/screens.json (see above)"
 fi
 
 OUT="$PROJECT/.aid-ui/verify"

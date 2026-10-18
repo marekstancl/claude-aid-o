@@ -21,6 +21,7 @@
           "title": {"$ref": "#/$defs/text"},
           "purpose": {"$ref": "#/$defs/text"},
           "nav": {"type": "boolean", "description": "true = obrazovka je v navigaci aplikace; false = dosažitelná jen akcí (detail)"},
+          "url": {"type": "string", "pattern": "^/[^\\s?#]*$", "description": "adresa obrazovky v aplikaci (výchozí /<id>/); brána na ní otevírá stavy a začíná úlohy"},
           "actions": {
             "type": "array",
             "items": {
@@ -115,7 +116,7 @@
     }
   },
   "$defs": {
-    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]*$"},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$", "description": "malá písmena, číslice a pomlčka; id úlohy je i jméno jejího scénáře brány"},
     "text": {"type": "string", "minLength": 1, "pattern": "\\S"}
   }
 }

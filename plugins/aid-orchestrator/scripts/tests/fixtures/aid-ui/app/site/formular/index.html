@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nová poznámka · Poznámky</title><link rel="stylesheet" href="/app.css"></head>
+<body><header><a class="skip" href="#obsah">Přeskočit na obsah</a><nav aria-label="Aplikace"><a href="/seznam/">Poznámky</a></nav></header>
+<main id="obsah" data-aid-screen="formular"><h1>Nová poznámka</h1>
+<section data-aid-state="empty"><p>Vyplňte název poznámky.</p></section>
+<section data-aid-state="loading" aria-busy="true"><p>Ukládám…</p></section>
+<section data-aid-state="error" role="alert"><p>Uložení selhalo, text zůstal ve formuláři.</p></section>
+<section data-aid-state="filled"><p>Formulář nové poznámky.</p></section>
+<form>
+<p><label for="nazev">Název</label> <input id="nazev" name="nazev" autocomplete="off"></p>
+<p data-validace role="alert" hidden>Název je povinný.</p>
+<div data-aid-error role="alert" tabindex="-1" hidden><p>Uložení selhalo, text zůstal ve formuláři.</p><button type="submit" data-aid-action="formular.znovu">Zkusit znovu</button></div>
+<p><button type="submit" data-aid-action="formular.ulozit">Uložit</button> <a href="/seznam/" data-aid-action="formular.zpet">Zpět na seznam</a></p>
+</form>
+</main><script src="/app.js"></script></body></html>

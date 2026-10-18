@@ -7,6 +7,9 @@
 viewports: [320, 390, 768, 1024, 1440]   # P113: every page at every width the workshop measured (fix 64)
 browsers: [chromium, webkit]
 warn_only: [lighthouse_mobile, coverage]   # measured and reported, never blocks (FB-13); coverage: only its "no standards map" warn (P113), a gap is still a fail
+# P116: the rows of a web application's model (task x normal|keyboard|fail-<n>, screen x four states) run at these
+# widths and browsers only - a task is walked on a desktop and a phone; its pages keep the full matrix above
+app_rows: {viewports: [1440, 390], browsers: [chromium]}
 # where a check applies (default: every page, viewport, browser and flow state); a
 # combination outside it needs no row. Keys: browsers and viewports (subsets), flows: false,
 # scope: project (one row: the home page, the last viewport, the first browser).
@@ -74,6 +77,10 @@ checks:
   coverage: the coverage map still matches the ecosystem standards (aid-ui-coverage.sh check exit 0; frontend-build-standard "Enforcement"); reads the standards from the docs tree the project declares (its standards map), else from the plugin's copies (references/standards/) with a warn row "projekt nemá mapu standardů"
   ai_search: AI search and citation readiness - the PM's AI robot policy in robots.txt, JSON-LD on every indexable page matching the facts register, main text in the HTML, no snippet bans, no llms.txt without a decision (seo-audit-agent-standard §3-4, seo/technicke-seo; aid-ui-seo-check.py --ai)
   app_task_states: an application's task x state scenarios from the task map pass (FB-11)
+  app_flows: "a web application's task (docs/design/screens.json) walked through its generated scenario ends in its verifiable result done_when - a click-through without the result fails (P116; webapp-tasks-states-standard UA-1, FB-11)"
+  app_states: "every screen of a web application shows each of its states (empty, loading, error, filled) in test mode ?aid-test=1&stav=<state> as a visible data-aid-state block with text (P116; UA-3, UA-4, design-system-standard Kontrola před nasazením)"
+  keyboard_flows: "every task of a web application can be finished with Tab and Enter only, its result showing (P116; design-system-standard Přístupnost, WCAG 2.1.1)"
+  task_recovery: "a failure forced in a task (network, server, validation; the model's failure paths, else a network failure on its last submit) keeps the step's screen and every input, offers the recover action, and the task still ends in its result (P116; UA-2, UA-5, UA-7)"
   no_overlap: no two visible texts, controls or images overlap (FB-21)
   brand_consistency: every text uses a webfont the site declares, and header and footer are the same on every page (FB-22)
   page_weight: a page transfers at most 1 MB, no render-blocking script in head, large raster images have srcset (FB-23)

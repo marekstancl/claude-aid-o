@@ -219,7 +219,9 @@
 #
 # Required matrix: every check of checks.yaml (next to the coverage map;
 # AID_UI_COVERAGE_MAP points it at a fixture) x every combination: pages x viewports x
-# browsers (role and state ""); for variant webapp|pwa also structure.flows[].id (as page)
+# browsers (role and state ""); for variant webapp the rows of its model (aid-ui-screens.py matrix: task x
+# normal|keyboard|fail-<n>, "screen:<id>" x empty|loading|error|filled; P116) x viewports x browsers; for pwa
+# structure.flows[].id (as page)
 # x its states x structure.roles (or "") x viewports x browsers. checks.yaml `applies.<check>`
 # narrows one check: `browsers: [..]` and `viewports: [..]` keep only those, `flows: false` drops
 # the flow rows, `scope: project` keeps one row (the home page index.html, else the first page,
@@ -577,6 +579,26 @@ def val(x):
 def fp_of(st, fps, page):   # a flow row has no file of its own: bound to the whole build
     return fps.get(page, "build:" + st["build"]["id"])
 
+APP_ROWS = {}
+
+def app_rows(st):   # P116: a webapp's flow rows are the rows of its model (aid-ui-screens.py matrix), never structure.flows
+    if "rows" not in APP_ROWS:
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("aid_ui_screens", os.environ["AID_UI_SCREENS_PY"])
+        mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+        proj = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(args[0]))))
+        try:
+            m = mod.load(proj)
+            why = mod.violations(m, proj)
+        except (OSError, ValueError) as e:
+            m, why = None, ["docs/design/screens.json: %s" % e]
+        if why:
+            bad.append("the app model fails aid-ui-screens.py check: " + "; ".join(why[:3]))
+            APP_ROWS["rows"] = []
+        else:
+            APP_ROWS["rows"] = mod.matrix(m)
+    return APP_ROWS["rows"]
+
 def combos(st, ck, fps, check=None):   # applies.<check>: browsers/viewports subset, flows false, scope project
     ap = (ck.get("applies") or {}).get(check) or {}
     vps, brs = [val(v) for v in ck.get("viewports") or []], [val(b) for b in ck.get("browsers") or []]
@@ -589,7 +611,13 @@ def combos(st, ck, fps, check=None):   # applies.<check>: browsers/viewports sub
         home = "index.html" if "index.html" in pages else (pages[:1] or [""])[0]
         return [(home, vps[-1], brs[0], "", "")] if home and vps and brs else []
     out = [(p, v, b, "", "") for p in pages for v in vps for b in brs]
-    if ((st.get("variant") or {}).get("type")) in ("webapp", "pwa") and ap.get("flows", True) is not False:
+    if ((st.get("variant") or {}).get("type")) == "webapp":
+        if ap.get("flows", True) is not False:
+            ar = ck.get("app_rows") or {}   # the widths and browsers of the app rows (checks.yaml app_rows)
+            avps = [v for v in vps if "viewports" not in ar or v in [val(x) for x in ar["viewports"] or []]]
+            abrs = [b for b in brs if "browsers" not in ar or b in [val(x) for x in ar["browsers"] or []]]
+            out += [(a["page"], v, b, "", a["state"]) for a in app_rows(st) for v in avps for b in abrs]
+    elif ((st.get("variant") or {}).get("type")) in ("webapp", "pwa") and ap.get("flows", True) is not False:
         s = st.get("structure") or {}
         roles = [val(r.get("id") if isinstance(r, dict) else r) for r in s.get("roles") or []] or [""]
         out += [(val(f.get("id")), v, b, r, val(x.get("id") if isinstance(x, dict) else x)) for f in s.get("flows") or [] for x in f.get("states") or []
@@ -635,7 +663,8 @@ if mode in ("build", "id"):
 st = load(args[0])
 if mode == "exfp":
     sel, fps = json.loads(args[1]), st["build"]["fingerprints"]
-    keys = list(fps) + [val(f.get("id")) for f in (st.get("structure") or {}).get("flows") or []]
+    keys = list(fps) + ([a["page"] for a in app_rows(st)] if (st.get("variant") or {}).get("type") == "webapp"
+                        else [val(f.get("id")) for f in (st.get("structure") or {}).get("flows") or []])
     print(json.dumps({k: fp_of(st, fps, k) for k in keys if sel["page"] in ("*", k)}, sort_keys=True))
 elif mode == "exreasons":   # the reasons of the gate's open rows this selector matches (page "*" exceptions)
     sel, res = json.loads(args[1]), (load(args[2]) if len(args) > 2 and os.path.isfile(args[2]) else {})
@@ -727,7 +756,7 @@ sys.exit(1 if bad else 0)
 PY
 )"
 
-bpy() { python3 -c "$BUILD_PY" "$@"; }
+bpy() { AID_UI_SCREENS_PY="$HERE/aid-ui-screens.py" python3 -c "$BUILD_PY" "$@"; }
 
 checks_json() {   # checks.yaml next to the coverage map, as JSON in a temp file
   local f; f="$(tmpfile checks.json)"

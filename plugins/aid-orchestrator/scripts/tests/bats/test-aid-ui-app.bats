@@ -257,3 +257,31 @@ ans_by() {
   [ "$status" -eq 0 ]; [[ "$output" == *'"approved": false'* ]]
   [ "$(ls "$APP"/site/*/index.html | wc -l)" -eq 3 ]; grep -q data-aid-draft "$APP/site/index.html"
 }
+
+@test "merge-path: generated scenario checks done_when - one per task, the model's sha, the result, the failure variants" {
+  FL="$BATS_TEST_DIRNAME/../../aid-ui-flows.py"
+  mkdir -p "$APP/.aid-ui/scenarios"
+  echo '// not generated' > "$APP/.aid-ui/scenarios/vlastni.mjs"
+  printf '%s\n%s\n' "// aid-ui-flows.py: generated from docs/design/screens.json - do not edit, run aid-ui-flows.py generate" 'x' > "$APP/.aid-ui/scenarios/stara.mjs"
+  run python3 "$FL" generate "$APP"
+  [ "$status" -eq 0 ]; [[ "$output" == *"FLOWS: 2 scenarios"* ]]; [[ "$output" == *"removed .aid-ui/scenarios/stara.mjs"* ]]
+  [ -f "$APP/.aid-ui/scenarios/vlastni.mjs" ] && [ ! -e "$APP/.aid-ui/scenarios/stara.mjs" ]   # a foreign file is never touched
+  sha="$(sha256sum "$M" | cut -d' ' -f1)"
+  grep -q "^export const model_sha256 = \"$sha\";" "$APP/.aid-ui/scenarios/zalozit.mjs"
+  t() { sed -n 's/^const T = \(.*\);$/\1/p' "$APP/.aid-ui/scenarios/$1.mjs"; }
+  [ "$(t zalozit | jq -c .done)" = '{"screen":"detail","expect":"Nákup na sobotu"}' ]
+  t zalozit | jq -e '.variants["fail-1"] == {at_step: 2, kind: "network", recover: "znovu", generated: false}' >/dev/null
+  t smazat | jq -e '.variants == {} and .kinds["detail.smazat"] == "destructive"' >/dev/null
+  # the runtime: a result is done only when the result screen shows the expected text; a missing state is refused
+  grep -q 'done: !!ok' "$APP/.aid-ui/scenarios/zalozit.mjs"; grep -q 'nemá stav scénáře' "$APP/.aid-ui/scenarios/zalozit.mjs"
+  node --check "$APP/.aid-ui/scenarios/zalozit.mjs"
+  # no failure path in the model: one generated network failure on the last submit, recovered by that action
+  mutate '.tasks[0].failure_paths = [] | .tasks[0].states.failure = "nenastává, protože ukládá jen do prohlížeče"'
+  python3 "$FL" generate "$APP" >/dev/null
+  t zalozit | jq -e '.variants["fail-1"] == {at_step: 2, kind: "network", recover: "ulozit", generated: true}' >/dev/null
+  # an invalid model writes nothing
+  mutate 'del(.tasks[0].done_when)'
+  run python3 "$FL" generate "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"fails aid-ui-screens.py check"* ]]
+}
+

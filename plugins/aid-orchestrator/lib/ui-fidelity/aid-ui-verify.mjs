@@ -16,6 +16,12 @@
 // `aid-ui-state.sh build-id` (same files -> same digests). Screenshots: <out>/shots/.
 // Browsers: chromium ($CHROME, else Playwright's), webkit (Playwright's); a launch failure
 // -> that browser's rows not_covered with the install hint.
+// Webapp (P116): the flows are the rows of aid-ui-screens.py matrix (docs/design/screens.json): every task x normal
+// (app_flows), keyboard (keyboard_flows), fail-<n> (task_recovery) through its generated scenario
+// .aid-ui/scenarios/<task>.mjs (aid-ui-flows.py; one of another model fails the row), which returns {response, done, why}
+// - the row passes only with done === true; every screen x empty|loading|error|filled (page "screen:<id>", app_states)
+// opened at <url>?aid-test=1&stav=<state>, passing when its data-aid-state block shows text. Every row of the four
+// checks and the result carry model_sha256. A pwa keeps structure.flows below.
 // App flows: <project>/.aid-ui/scenarios/<flow id>.mjs, default export
 // async ({page, base, role, state, credentials}) that drives the screen into that state and
 // throws on failure; credentials = <project>/.aid-ui/test-credentials.json[role] (test
@@ -329,7 +335,17 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
   let resp;
   try {
     resp = await page.goto(url, { waitUntil: 'networkidle' });
-    if (run) resp = (await run(page)) || resp;
+    if (run) {   // P116: an app scenario returns {response, done, why}; a web flow's plain return keeps working
+      const rv = await run(page);
+      if (rv && typeof rv === 'object' && 'done' in rv) { res.task = { done: rv.done === true, why: String(rv.why || '') }; resp = rv.response || resp; }
+      else resp = rv || resp;
+    }
+    if (!PAGE_ROW_CHECKS.some(want)) {   // P116: a gate that names no page check (a narrowed run) measures nothing more
+      for (const c of PAGE_ROW_CHECKS) res[c] = NA('not named in this checks.yaml');
+      Object.assign(res, { header: '', footer: '', html: await page.content() });
+      await page.close();
+      return res;
+    }
   } catch (e) {
     await page.close();
     return { error: String(e.message || e).slice(0, 200) };
@@ -1139,7 +1155,13 @@ const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls'
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
   'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
   'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'all_pages', 'copy_review', 'motion_settled', 'motion_fidelity',
-  'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots', 'form_delivery', 'text_clearance', 'a11y_basics', 'mobile_native'];
+  'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots', 'form_delivery', 'text_clearance', 'a11y_basics', 'mobile_native',
+  'app_flows', 'app_states', 'keyboard_flows', 'task_recovery'];
+// the checks pageRows measures on every row (PAGE_CHECKS) plus brand_consistency, which the caller also reads
+const PAGE_ROW_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed',
+  'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets', 'safe_area', 'privacy_before_consent',
+  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states', 'photo_slots', 'text_clearance', 'a11y_basics', 'mobile_native',
+  'brand_consistency'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -1243,12 +1265,25 @@ if (opt['copy-subject']) {
 }
 
 const isApp = ['webapp', 'pwa'].includes(st.variant?.type);
-const flows = isApp ? (st.structure?.flows || []) : [];
+// P116: a webapp's flows are the rows of its model (aid-ui-screens.py matrix: task x normal | keyboard | fail-<n>,
+// screen x four states); a pwa keeps structure.flows
+const APP_CHECKS = ['app_flows', 'app_states', 'keyboard_flows', 'task_recovery'];
+const APPV = st.variant?.type === 'webapp' ? (() => {
+  if (!project) { console.error('aid-ui-verify.mjs: a webapp gate needs --project (its model docs/design/screens.json)'); process.exit(1); }
+  const r = spawnSync('python3', [path.join(HERE, '../../scripts/aid-ui-screens.py'), 'matrix', project], { encoding: 'utf8' });
+  if (r.status !== 0) { console.error(`aid-ui-verify.mjs: the app model: ${(r.stderr || '').trim().split('\n').pop()}`); process.exit(1); }
+  return JSON.parse(r.stdout);
+})() : null;
+const flows = isApp && !APPV ? (st.structure?.flows || []) : [];
 const roles = (st.structure?.roles || []).map(r => String(r?.id ?? r));
 const matrix = [];
 for (const p of pages) for (const v of VPS) for (const b of BRS) matrix.push({ page: p, viewport: v, browser: b, role: '', state: '' });
 for (const f of flows) for (const s of f.states || []) for (const r of (roles.length ? roles : [''])) for (const v of VPS) for (const b of BRS)
   matrix.push({ page: String(f.id), viewport: v, browser: b, role: r, state: String(s?.id ?? s) });
+// checks.yaml app_rows: the widths and browsers the app rows run at (a task is walked on a desktop and a phone)
+const AVPS = ck.app_rows?.viewports ? VPS.filter(v => ck.app_rows.viewports.map(String).includes(v)) : VPS;
+const ABRS = ck.app_rows?.browsers ? BRS.filter(b => ck.app_rows.browsers.map(String).includes(b)) : BRS;
+for (const a of APPV?.rows || []) for (const v of AVPS) for (const b of ABRS) matrix.push({ page: a.page, viewport: v, browser: b, role: '', state: a.state });
 
 const rows = [];
 const AP = ck.applies || {};
@@ -1261,7 +1296,7 @@ const applies = (check, m) => { const a = AP[check] || {};
   if (!brs.includes(m.browser) || (m.viewport !== undefined && !vps.includes(m.viewport)) || (a.flows === false && m.state)) return false;
   return a.scope !== 'project' || m.page === undefined
     || (m.page === home && m.viewport === vps[vps.length - 1] && m.browser === brs[0] && !m.state); };
-const put = (m, check, status, detail) => { if (want(check) && applies(check, m)) rows.push({ check, ...m, status, detail: detail || '' }); };
+const put = (m, check, status, detail, more) => { if (want(check) && applies(check, m)) rows.push({ check, ...m, status, detail: detail || '', ...(more || {}) }); };
 const facts = factLeaves(), brand = brandFiles();
 const seo = want('seo') || want('ai_search') ? runSeo() : null;
 // ai: false -> the seo row (every finding not named ai-*), true -> the ai_search row. Site-wide
@@ -1332,9 +1367,8 @@ for (const p of pages) {
 let creds = {};
 if (project && fs.existsSync(path.join(project, '.aid-ui/test-credentials.json'))) creds = readJson(path.join(project, '.aid-ui/test-credentials.json'));
 
-const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed',
-  'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets', 'safe_area', 'privacy_before_consent',
-  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states', 'photo_slots', 'text_clearance', 'a11y_basics', 'mobile_native'];
+const PAGE_CHECKS = PAGE_ROW_CHECKS.filter(c => c !== 'brand_consistency');
+
 // brand_consistency also compares header and footer with the first page loaded in the same browser and viewport
 const firstShape = {};
 const visited = new Set();   // all_pages: every page load that answered, whichever checks are named
@@ -1352,9 +1386,19 @@ for (const b of BRS) {
     if (!browser) { for (const m of ms) for (const c of named) put(m, c, 'not_covered', why); continue; }
     const ctx = await browser.newContext({ viewport: { width: Number(v), height: HEIGHT[v] || 900 } });
     for (const m of ms) {
-      const flow = flows.find(f => String(f.id) === m.page && m.state);
-      let run = null;
-      if (flow) {
+      const app = APPV?.rows.find(a => a.page === m.page && a.state === m.state);
+      const flow = app || flows.find(f => String(f.id) === m.page && m.state);
+      let run = null, rowUrl = null;
+      const sha = APPV ? { model_sha256: APPV.model_sha256 } : undefined;
+      if (app && app.check === 'app_states') {   // the screen in test mode with ?stav=: its state block shows text
+        const scr = m.page.slice('screen:'.length);
+        rowUrl = new URL(`${app.url.replace(/^\/+/, '')}?aid-test=1&stav=${m.state}`, base).href;
+        run = async page => {
+          const loc = page.locator(`[data-aid-screen="${scr}"] [data-aid-state="${m.state}"]`).first();
+          const ok = (await loc.isVisible().catch(() => false)) && (await loc.innerText().catch(() => '')).trim().length > 0;
+          return { response: null, done: ok, why: ok ? '' : `obrazovka ${scr} v testovacím režimu (?aid-test=1&stav=${m.state}) neukazuje stav ${m.state} (viditelný data-aid-state s textem)` };
+        };
+      } else if (flow) {
         // flow ids come from the project's state: allowlisted, and the module must resolve inside .aid-ui/scenarios
         if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(m.page)) { for (const c of named) put(m, c, 'not_covered', `refused flow id ${JSON.stringify(m.page)}: must match ^[a-z0-9][a-z0-9-]{0,63}$; no scenario imported`); continue; }
         const scen = project && path.join(project, '.aid-ui/scenarios');
@@ -1362,15 +1406,26 @@ for (const b of BRS) {
         // a symlinked scenario must not lead outside the scenarios directory either
         if (script && fs.existsSync(script)) script = fs.statSync(script).isFile() && inside(fs.realpathSync(scen), path.basename(script)) === fs.realpathSync(script) ? script : null;
         if (!script || !fs.existsSync(script)) { for (const c of named) put(m, c, 'not_covered', `no scenario .aid-ui/scenarios/${m.page}.mjs`); continue; }
-        const { default: scenario } = await import(pathToFileURL(script).href);
+        const mod = await import(pathToFileURL(script).href), scenario = mod.default;
+        if (app && mod.model_sha256 !== APPV.model_sha256) {   // generated from another model: the row tests what the agent remembered
+          for (const c of named) put(m, c, APP_CHECKS.includes(c) && c === app.check ? 'fail' : 'not_covered',
+            `scénář .aid-ui/scenarios/${m.page}.mjs je z jiného modelu (${String(mod.model_sha256).slice(0, 12)}, model ${APPV.model_sha256.slice(0, 12)}); aid-ui-flows.py generate`, sha);
+          continue;
+        }
         run = async page => scenario({ page, base, role: m.role, state: m.state, credentials: creds[m.role] || null });
       }
       // page, role and state come from the project's state: one filename segment, no path separators or leading dots
       const key = [b, v, `${m.page}${m.role ? '.' + m.role : ''}${m.state ? '.' + m.state : ''}.png`.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+/, '_')];
-      const r = await pageRows(ctx, flow ? base : urlOf(m.page), key, m.role, m.state, run, facts, brand, c => applies(c, m));
+      const r = await pageRows(ctx, rowUrl || (flow ? base : urlOf(m.page)), key, m.role, m.state, run, facts, brand, c => applies(c, m));
       if (r.error) {
-        for (const c of named) put(m, c, flow && c === 'app_task_states' ? 'fail' : 'not_covered', `${flow ? 'scenario' : 'page'} failed: ${r.error}`);
+        for (const c of named) put(m, c, flow && (c === 'app_task_states' || c === app?.check) ? 'fail' : APP_CHECKS.includes(c) ? 'pass' : 'not_covered',
+          APP_CHECKS.includes(c) && c !== app?.check ? `N/A: a row of ${app?.check || 'a flow'}` : `${flow ? 'scenario' : 'page'} failed: ${r.error}`, sha);
         continue;
+      }
+      for (const c of APP_CHECKS) {   // P116: each app row decides its own check; every other row of the matrix has it N/A
+        if (app && c === app.check) put(m, c, r.task?.done ? 'pass' : 'fail',
+          r.task?.done ? `${m.page} / ${m.state}: výsledek nastal` : (r.task ? r.task.why || 'výsledek nenastal' : 'scénář nevrátil {done}'), sha);
+        else put(m, c, 'pass', app ? `N/A: a row of ${app.check}` : APPV ? 'N/A: a page, not a task' : 'N/A: not a web application (webapp)', sha);
       }
       if (!flow && r.http_200[0] === 'pass') visited.add(`${m.page}@${m.viewport}@${m.browser}`);
       for (const c of PAGE_CHECKS) put(m, c, ...r[c]);
@@ -1422,7 +1477,7 @@ if (want('all_pages')) {
   for (const m of matrix) put(m, 'all_pages', ...st2);
 }
 
-const result = { run_at: new Date().toISOString(), build_id: st.build?.id, matrix, rows, fingerprints: fps };
+const result = { run_at: new Date().toISOString(), build_id: st.build?.id, matrix, rows, fingerprints: fps, ...(APPV ? { model_sha256: APPV.model_sha256 } : {}) };
 fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 1));
 const count = rows.reduce((a, r) => (a[r.status] = (a[r.status] || 0) + 1, a), {});
 console.log(`VERIFY: ${JSON.stringify(count)} -> ${path.join(out, 'result.json')}`);

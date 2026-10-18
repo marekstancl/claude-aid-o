@@ -76,9 +76,12 @@ Postavená aplikace drží dvě věci, na kterých stojí testy úloh a předán
 1. `aid-ui-flows.py generate <projekt>` napíše z modelu do `.aid-ui/scenarios/` jeden test na úlohu (kroky, pak
    výsledek `done_when`) a jeden na každou cestu selhání (vnucená chyba, vstup zůstal, obnova, výsledek). Úloha, která
    odesílá data a cestu selhání v modelu nemá, dostane vygenerovanou chybu sítě na posledním odeslání.
-2. `aid-ui-verify.sh <projekt>` nejdřív ověří schválený model (`model-approved`), pak řádky `app_flows` (úloha
-   doběhne k výsledku), `app_states` (každá obrazovka ve všech stavech), `keyboard_flows` (úloha jen klávesnicí)
-   a `task_recovery` (vnucená chyba neztratí vstup a cesta dál existuje).
+2. `aid-ui-verify.sh <projekt>` nejdřív ověří schválený model (`model-approved`) a scénáře si z něj vygeneruje sama,
+   pak řádky `app_flows` (úloha doběhne k výsledku), `app_states` (každá obrazovka ve všech stavech, adresa obrazovky
+   s `?aid-test=1&stav=<stav>`), `keyboard_flows` (úloha jen klávesami Tab a Enter) a `task_recovery` (vnucená chyba
+   neztratí obrazovku ani vstup, nabídne obnovu a úloha i tak dojde k výsledku). Řádky úloh a stavů běží na 1440
+   a 390 px v Chromiu (`app_rows` v `coverage/checks.yaml`); každý výsledek nese otisk modelu (`model_sha256`).
+   Scénář jiného modelu brána odmítne. Obrazovka se otevírá na své adrese (`url` v modelu, jinak `/<id>/`).
 3. Existující aplikace: `aid-ui-baseline.py compare <projekt>` - každá dnešní úloha má novou úlohu s `replaces`
    a stejným výsledkem, jinak brána neprojde (kromě úloh, jejichž zrušení PM schválil).
 
