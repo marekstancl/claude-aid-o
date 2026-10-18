@@ -99,3 +99,15 @@ mutate() { jq "$1" "$M" > "$T/m.json" && mv "$T/m.json" "$M"; }
   run python3 "$SCR" check "$APP"
   [ "$status" -eq 2 ]; [[ "$output" == *"není JSON"* ]]
 }
+
+@test "screens: a schema error and a cross-rule error are both reported; an unreadable baseline is named, never read as empty" {
+  mutate 'del(.tasks[1].states.recovery) | .screens[0].actions[0].to = "nikam"'
+  run python3 "$SCR" check "$APP"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"/tasks/1/states: 'recovery' is a required property"* ]]
+  [[ "$output" == *"vede na neexistující obrazovku nikam"* ]]
+  cp "$FIXA/docs/design/screens.json" "$M"
+  mkdir -p "$APP/.aid-ui/baseline"; echo '{' > "$APP/.aid-ui/baseline/tasks.json"
+  run python3 "$SCR" check "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *".aid-ui/baseline/tasks.json nejde přečíst"* ]]
+}

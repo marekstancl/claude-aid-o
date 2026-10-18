@@ -41,23 +41,35 @@ def not_happening(text):
 
 
 def baseline_ids(proj):
+    """(ids of .aid-ui/baseline/tasks.json, why it cannot be read); no file = no baseline, nothing to replace."""
     p = os.path.join(proj, ".aid-ui", "baseline", "tasks.json")
+    if not os.path.exists(p):
+        return set(), ""
     try:
-        return {t.get("id") for t in json.load(open(p, encoding="utf-8")) if isinstance(t, dict)}
-    except (OSError, ValueError):
-        return set()
+        d = json.load(open(p, encoding="utf-8"))
+        if not isinstance(d, list):
+            raise ValueError("není seznam úloh")
+        return {t.get("id") for t in d if isinstance(t, dict)}, ""
+    except (OSError, ValueError) as e:
+        return set(), f".aid-ui/baseline/tasks.json nejde přečíst ({e})"
 
 
 def violations(m, proj):
     from jsonschema.validators import Draft202012Validator
     v = Draft202012Validator(json.load(open(SCHEMA, encoding="utf-8")))
-    errs = ["/" + "/".join(str(x) for x in e.absolute_path) + ": " + e.message for e in v.iter_errors(m)]
-    if errs:
-        return errs   # the cross rules assume the shape
-    out = []
+    raw = list(v.iter_errors(m))
+    out = ["/" + "/".join(str(x) for x in e.absolute_path) + ": " + e.message for e in raw]
+    if not (isinstance(m, dict) and isinstance(m.get("screens"), list) and isinstance(m.get("tasks"), list)):
+        return out   # no lists to cross-check
+    # the cross rules run over every screen and task the schema accepted; a broken one is reported above only
+    broken = {(list(e.absolute_path)[0], list(e.absolute_path)[1]) for e in raw if len(e.absolute_path) >= 2}
+    sid = lambda x: x.get("id") if isinstance(x, dict) and isinstance(x.get("id"), str) else None
+    ids = {sid(x) for x in m["screens"]} - {None}
+    good_s = [(i, s) for i, s in enumerate(m["screens"]) if ("screens", i) not in broken]
+    good_t = [(i, t) for i, t in enumerate(m["tasks"]) if ("tasks", i) not in broken]
+    unsure = {sid(x) for i, x in enumerate(m["screens"]) if ("screens", i) in broken} - {None}
     screens = {}
-    ids = {x["id"] for x in m["screens"]}
-    for i, s in enumerate(m["screens"]):
+    for i, s in good_s:
         if s["id"] in screens:
             out.append(f"/screens/{i}/id: obrazovka {s['id']} je v modelu dvakrát")
         screens[s["id"]] = s
@@ -71,12 +83,14 @@ def violations(m, proj):
                 out.append(f"{at}/to: akce {s['id']}.{a['id']} vede na neexistující obrazovku {a['to']}")
             if a["kind"] == "destructive" and not a.get("confirm"):
                 out.append(f"{at}: destruktivní akce {s['id']}.{a['id']} bez potvrzení (confirm)")
-    if not any(s["nav"] for s in m["screens"]):
+    if not any(isinstance(s, dict) and s.get("nav") is True for s in m["screens"]):
         out.append("/screens: žádná obrazovka není v navigaci (nav: true)")
-    acts = {(s["id"], a["id"]): a for s in m["screens"] for a in s["actions"]}
-    base = baseline_ids(proj)
+    acts = {(s["id"], a["id"]): a for _, s in good_s for a in s["actions"]}
+    base, bwhy = baseline_ids(proj)
+    if bwhy:
+        out.append("/tasks: " + bwhy)
     tids = set()
-    for i, t in enumerate(m["tasks"]):
+    for i, t in good_t:
         at = f"/tasks/{i}"
         if t["id"] in tids:
             out.append(f"{at}/id: úloha {t['id']} je v modelu dvakrát")
@@ -85,6 +99,9 @@ def violations(m, proj):
         submits = False
         for k, st in enumerate(t["steps"]):
             sa = f"{at}/steps/{k}"
+            if st["screen"] in unsure:
+                lead = None   # its screen failed the schema: reported there
+                continue
             if st["screen"] not in screens:
                 out.append(f"{sa}/screen: úloha {t['id']} krok {k + 1} stojí na neexistující obrazovce {st['screen']}")
                 lead = None
@@ -99,7 +116,9 @@ def violations(m, proj):
             submits = submits or a["kind"] == "submit"
             lead = a["to"]
         dw = t["done_when"]
-        if dw["screen"] not in screens:
+        if dw["screen"] in unsure:
+            pass
+        elif dw["screen"] not in screens:
             out.append(f"{at}/done_when/screen: výsledek úlohy {t['id']} na neexistující obrazovce {dw['screen']}")
         elif lead and dw["screen"] != lead:
             out.append(f"{at}/done_when/screen: úloha {t['id']} končí na {lead}, výsledek čeká na {dw['screen']}")
@@ -109,11 +128,11 @@ def violations(m, proj):
                 out.append(f"{fa}/at_step: úloha {t['id']} nemá krok {fp['at_step']}")
                 continue
             scr = t["steps"][fp["at_step"] - 1]["screen"]
-            if (scr, fp["recover"]) not in acts:
+            if scr not in unsure and (scr, fp["recover"]) not in acts:
                 out.append(f"{fa}/recover: obnova {fp['recover']} není akce obrazovky {scr} (úloha {t['id']})")
         if submits and not t["failure_paths"] and not not_happening(t["states"]["failure"]):
             out.append(f"{at}/states/failure: úloha {t['id']} odesílá data, ale nemá cestu selhání (failure_paths) ani \"{NOT_HAPPENING} …\"")
-        if "replaces" in t and t["replaces"] not in base:
+        if "replaces" in t and not bwhy and t["replaces"] not in base:
             out.append(f"{at}/replaces: úloha výchozího stavu {t['replaces']} neexistuje"
                        + ("" if base else " (projekt nemá .aid-ui/baseline/tasks.json)"))
     return out
