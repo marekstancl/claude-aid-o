@@ -120,7 +120,19 @@
 #   set <project> refs <json> --answer <id>      see Targets above
 #   set <project> options <json> --answer <id>   keys vision seo images (true|false), identity
 #                                        (false|"new"|"package"); only at step 0
-#   step <project> <0-7>                 a backward step clears `finished`
+#   step <project> <0-7>                 a backward step clears `finished`; (P116) a webapp goes past step 1 only with a
+#                                        skip record (decide --title přeskočeno --outcome "<part> přeskočena" --why …)
+#                                        for every part its options skip: vize, hledani, logo
+#   model-approved <project>             (P116) exit 0 when docs/design/screens.json is the model the PM approved
+#                                        (app.approved_model_sha); 1 naming why (never approved, changed since)
+#
+#   P116 app rules in record-answer: for a webapp (variant.type, else .aid-ui/variant.json) an answer of kind
+#   structure or task_map is recorded only when by pm (the PM's studio page) and with target
+#   docs/design/screens.json@<sha256 of the model now> (app_tasks_need_owner); an approve stores
+#   app {approved_model_sha, answer, at}. An exception answer whose target (or an item's) is baseline@<sha> or
+#   task@<id> is recorded only when by pm (app_owner_only), baseline@ only for the list now and task@ only for a task of
+#   it; an approved baseline@ stores app_baseline {approved_sha, answer, at}. variant may carry existing: true (an
+#   existing webapp). A webapp with brand new keeps its logo place (step refuses identity false).
 #   roles <project> bg=<c>,ink=<c>,accent=<c>,display=<t>,body=<t>
 #   chapter <project> <id> <ceka|navrh|schvaleno> [--by <who>]   schvaleno needs --answer <id>
 #   chapter-target <project> <id>        prints the target of a `schvaleno` answer for chapter <id>
@@ -244,7 +256,7 @@ BRAND="$PROJECT/docs/brand"
 HTML="$BRAND/index.html"
 STATE="$PROJECT/docs/design/brand-state.json"
 OLD="$BRAND/state.json"   # P101 location, migrated by init
-if [[ "$VERB" != build-id && "$VERB" != exception-covered && "$VERB" != cycle && "$VERB" != chapter-target ]]; then   # one mutation at a time (exception-covered and chapter-target only read: gate-record's customer page and chapter-all's handover package call them under the lock; cycle only calls verbs that lock themselves)
+if [[ "$VERB" != build-id && "$VERB" != exception-covered && "$VERB" != cycle && "$VERB" != chapter-target && "$VERB" != model-approved ]]; then   # one mutation at a time (exception-covered and chapter-target only read: gate-record's customer page and chapter-all's handover package call them under the lock; cycle only calls verbs that lock themselves)
   [[ "$VERB" != init ]] || mkdir -p "${STATE%/*}"
   if [[ -d "${STATE%/*}" ]]; then
     exec 9<"${STATE%/*}"   # read-only fd of the directory: a project symlink cannot make us write
@@ -863,6 +875,54 @@ place_guard_answer() {   # <answer json>
 }
 
 json_sha() { printf 'sha256:%s' "$(jq -S -c -j . <<<"$1" | sha256sum | cut -d' ' -f1)"; }
+# P116: the kind of the project (the recorded variant, else the studio's .aid-ui/variant.json; web when neither says)
+app_type() {
+  local t; t="$(jq -r '.variant.type // empty' "$STATE" 2>/dev/null)"
+  [[ -n "$t" ]] || t="$(jq -r '.type // empty' "$PROJECT/.aid-ui/variant.json" 2>/dev/null)"
+  echo "${t:-web}"
+}
+model_sha() { [[ -f "$PROJECT/docs/design/screens.json" ]] && sha256sum "$PROJECT/docs/design/screens.json" | cut -d' ' -f1; }
+
+# P116: the product owner decides an app's tasks. For a webapp the answer to its structure (and task_map) question
+# must be the PM's (by pm - the PM's page, aid-ui-studio server) and target docs/design/screens.json@<sha now>
+# (app_tasks_need_owner); an exception for the baseline list or a baseline task's removal (baseline@<sha>,
+# task@<id>) is the PM's in any project (app_owner_only). Prints the approved model sha for an approve.
+app_owner_guard() {   # <answer json>
+  local kind by tgt sha
+  kind="$(jq -r .kind <<<"$1")"; by="$(jq -r '.by // ""' <<<"$1")"; tgt="$(jq -r '.target // ""' <<<"$1")"
+  if [[ "$kind" == exception ]] && jq -e '[.target, (.items[]?.target)] | any(type == "string" and test("^(baseline|task)@"))' <<<"$1" >/dev/null; then
+    [[ "$by" == pm ]] || die "app_owner_only: the answer to $(jq -r .question <<<"$1") approves the baseline of an existing app or drops one of its tasks; only the PM's answer (the PM's studio page) counts, this one is by ${by:-nobody}; nothing recorded"
+    local bl="$PROJECT/.aid-ui/baseline/tasks.json" t
+    while IFS= read -r t; do
+      case "$t" in
+        baseline@*) [[ -f "$bl" && "$t" == "baseline@$(sha256sum "$bl" | cut -d' ' -f1)" ]] ||
+          die "app_owner_only: $t is not the baseline list now (baseline@<sha256 of .aid-ui/baseline/tasks.json>); nothing recorded" ;;
+        task@*) [[ -f "$bl" ]] && jq -e --arg i "${t#task@}" 'any(.[]?; .id == $i)' "$bl" >/dev/null 2>&1 ||
+          die "app_owner_only: $t names no task of .aid-ui/baseline/tasks.json; nothing recorded" ;;
+      esac
+    done < <(jq -r '[.target, (.items[]?.target)] | .[] | strings | select(test("^(baseline|task)@"))' <<<"$1")
+  fi
+  [[ "$kind" == structure || "$kind" == task_map ]] && [[ "$(app_type)" == webapp ]] || return 0
+  [[ "$by" == pm ]] || die "app_tasks_need_owner: the tasks and flows of an app are approved by the product owner (PM) on the PM's studio page; the answer to $(jq -r .question <<<"$1") is by ${by:-nobody} (the client role's rating is its input, not the decision); nothing recorded"
+  sha="$(model_sha)" || die "app_tasks_need_owner: no docs/design/screens.json to approve (step Obrazovky a úlohy writes it); nothing recorded"
+  [[ "$tgt" == "docs/design/screens.json@$sha" ]] || die "app_tasks_need_owner: the question of an app's tasks targets docs/design/screens.json@<sha of the model now> ($sha), not $tgt; nothing recorded"
+}
+
+# P116: before a webapp leaves step 1 every part its options skip (vize, hledani, logo) has a skip record
+# (decide --title přeskočeno --outcome "<part> přeskočena" --why <reason>) in the studio history
+app_skips_missing() {
+  local hist="$PROJECT/.aid-ui/studio/history.jsonl" part opt miss=()
+  for part in vize:vision hledani:seo logo:identity; do
+    opt="${part#*:}"; part="${part%%:*}"
+    jq -e --arg o "$opt" '(.options[$o] // false) | . == false' "$STATE" >/dev/null || continue
+    # the logo is skipped only for a brand that exists or is not wanted (LAN tool); a new brand keeps its logo place
+    if [[ "$part" == logo && "$(jq -r '.variant.brand // ""' "$STATE")" == new ]]; then miss+=("logo(brand:new)"); continue; fi
+    [[ -f "$hist" ]] && jq -e --arg x "$part přeskočena" 'select(.by == "agent" and .event.title == "přeskočeno" and .event.outcome == $x and ((.event.why // "") | length > 0))' "$hist" >/dev/null 2>&1 && continue
+    miss+=("$part")
+  done
+  echo "${miss[*]}"
+}
+
 
 # choice_target <json> — the target the answer must carry for this JSON. One proposal: the sha256 of
 # the JSON. Cards that each carry `value` (the JSON that card stands for): the sha256 of the map
@@ -961,6 +1021,7 @@ case "$VERB" in
         die "the studio's answer to $qid does not carry the listed items (sha $psha); nothing recorded"
     fi
     place_guard_answer "$ans"
+    app_owner_guard "$ans"
     at="$(jq -r .at <<<"$ans")"
     [[ "$(date -u -d "$at" +%s%N 2>/dev/null || echo 0)" -gt "$(date -u -d "$opened" +%s%N 2>/dev/null || echo 0)" ]] ||
       die "the answer to $qid ($at) is not newer than its round ($opened); nothing recorded"
@@ -973,6 +1034,16 @@ case "$VERB" in
                        comment: $a.comment, cards: $a.cards, cards_sha256: $a.cards_sha256,
                        answer_file: $f, answer_sha256: $sha, opened_at: $o, at: $a.at, by: $a.by}
                       + (if ($a.items | type) == "array" then {items: $a.items, items_sha256: $a.items_sha256} else {} end)'
+    if [[ "$(app_type)" == webapp ]] && jq -e '(.kind == "structure" or .kind == "task_map") and .decision == "approve"' <<<"$ans" >/dev/null; then
+      jq_write --arg q "$qid" --arg t "$(jq -r .target <<<"$ans")" --arg at "$(now)" \
+        '.app = {approved_model_sha: ($t | sub("^docs/design/screens.json@"; "")), answer: $q, at: $at}'
+      echo "APP MODEL APPROVED: $(jq -r .target <<<"$ans")"
+    fi
+    if jq -e '.kind == "exception" and .decision == "approve" and ((.target // "") | startswith("baseline@"))' <<<"$ans" >/dev/null; then
+      jq_write --arg q "$qid" --arg t "$(jq -r .target <<<"$ans")" --arg at "$(now)" \
+        '.app_baseline = {approved_sha: ($t | sub("^baseline@"; "")), answer: $q, at: $at}'
+      echo "APP BASELINE APPROVED: $(jq -r .target <<<"$ans")"
+    fi
     echo "ANSWER $qid: $(jq -c '{kind, target, decision, choice}' <<<"$ans")"
     ;;
 
@@ -1014,7 +1085,8 @@ case "$VERB" in
         key="${1//-/_}"
         case "$key" in
           variant) shape='type == "object" and IN(.type; "web", "webapp", "pwa") and IN(.brand; "new", "existing", "none")
-                          and (.local | type) == "boolean"' ;;
+                          and (.local | type) == "boolean" and ((.existing // false) | type) == "boolean"
+                          and (if .existing == true then .type == "webapp" else true end)' ;;
           structure) shape='type == "object" and (.pages | type) == "array" and all(.pages[]; (.id | type) == "string")
                           and ((.flows // []) | all(.[]; (.id | type) == "string" and (.states | type) == "array"))' ;;
           content_plan) shape='type == "array" and all(.[]; (.id | type) == "string"
@@ -1271,9 +1343,23 @@ case "$VERB" in
     echo "PLACE $pl: $(jq -r '.status + (if .chosen then " (" + .chosen + ")" else "" end)' <<<"$v")"
     ;;
 
+  model-approved)
+    need_state
+    a="$(jq -r '.app.approved_model_sha // ""' "$STATE")"
+    [[ -n "$a" ]] || die "model-approved: the app's model docs/design/screens.json is not approved by the PM (question structure, target docs/design/screens.json@<sha>)"
+    sha="$(model_sha)" || die "model-approved: no docs/design/screens.json"
+    [[ "$sha" == "$a" ]] || die "model-approved: docs/design/screens.json changed since the PM approved it (now ${sha:0:12}, approved ${a:0:12}); ask the PM again"
+    echo "model approved: $sha"
+    ;;
+
   step)
     need_state
     [[ "${1:-}" =~ ^[0-7]$ ]] || usage "step needs 0-7"
+    if (( $1 >= 2 )) && [[ "$(app_type)" == webapp ]]; then
+      miss="$(app_skips_missing)"
+      [[ "$miss" != *"logo(brand:new)"* ]] || die "step $1 refused: an app with a new brand (variant.brand new) keeps its logo place; options.identity must be new or package"
+      [[ -z "$miss" ]] || die "step $1 refused: the app skips $miss without a recorded reason; aid-ui-state.sh decide $PROJECT --step <step> --title přeskočeno --outcome \"<part> přeskočena\" --why <reason> for each"
+    fi
     jq_write --argjson n "$1" 'if $n < .step then .finished = null else . end | .step = $n'
     ;;
 

@@ -39,11 +39,15 @@ podle názvu projektu), zamítnuté návrhy.
 6. Brand balíček existuje → tělo kapitoly `logo` (logo a odkaz na balíček)
    do souboru v `.aid-ui/`, `aid-ui-state.sh body <project> logo --file <soubor>`,
    `aid-ui-state.sh chapter <project> logo navrh`.
+6a. **Webová aplikace (P116):** u `type: webapp` platí `references/local/aplikace-postup.md` (oddíly 0 a 1): `existing: true`
+   u aplikace, která už běží; volby `vision: false`, `seo: false`, `identity: false` u `brand: existing|none`;
+   každá vynechaná část dostane záznam `decide --title přeskočeno` s důvodem.
 7. Otázka `variant` ve studiu (`SKILL.md` „Jak se ptá PM"), s doporučením
    z inventury u každé volby:
    - `type`: `web` (prezentační web), `webapp` (aplikace s přihlášením),
      `pwa` (instalovatelná aplikace - manifest a ikony pro instalaci jsou
      povinné položky mapy pokrytí);
+   - `existing` (jen `webapp`): `true`, když aplikace už běží (část Výchozí stav aplikace);
    - `brand`: `new` (nová identita), `existing` (balíček existuje),
      `none` (interní nástroj - jen favicona, vize volitelná s důvodem);
    - `local`: `true`, když jde o místní firmu (adresa, otevírací doba);

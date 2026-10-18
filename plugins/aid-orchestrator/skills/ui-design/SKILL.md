@@ -102,6 +102,22 @@ vstup klienta není kritérium práce studia. Schválit otázku místa jde jen s
 i míst, na kterých stojí. Projekt bez pohybu značky jen výjimkou PM (`place-record --place pohyb --without <odpověď>`).
 `aid-ui-state.sh decide --step` bere přesný název kroku z `sections.json` (sdělení i logo patří do „Zadání a obsah“).
 
+## Dvě cesty: web a webová aplikace (P116, 18. 10. 2026)
+
+Druh `webapp` vede vlastní cestou podle `references/local/aplikace-postup.md` (vrstva s předností jako ostatní
+postupy); web a `pwa` jdou beze změny. Jedno studio a tytéž nástroje s větví podle druhu, nic se pro aplikaci
+nekopíruje. Základem aplikace je model obrazovek a úloh `docs/design/screens.json` (`aid-ui-screens.py check`),
+z něhož se staví kostra, testy úloh brány a předávací balík.
+
+- **Části podle druhu:** aplikace má místo „Stránky a jejich části“ část „Obrazovky a úlohy“ a existující aplikace
+  navíc „Výchozí stav aplikace“ (`sections.json`, `when: variant.app|variant.site|variant.existing`).
+- **Co aplikace vynechá, má důvod:** slogan, hledání a logo (u `brand: existing|none`) se vynechávají volbami kroku 0
+  a každá vynechaná část má záznam `decide --title přeskočeno --outcome "<část> přeskočena" --why …`; bez něj
+  `aid-ui-state.sh step` aplikaci za krok 1 nepustí.
+- **Úlohy schvaluje jen vlastník produktu (PM):** odpověď na otázku `structure` (i `task_map`) aplikace se zapíše jen
+  od PM a s cílem `docs/design/screens.json@<sha modelu teď>` (`app_tasks_need_owner`); totéž výjimky
+  `baseline@…` a `task@…` (`app_owner_only`). Hodnocení klient-role je podklad, ne rozhodnutí.
+
 ## Kroky a části (jak o nich mluvit)
 
 Jediný zdroj číslování a smyslu je mapa `sections.json`: šest kroků studia
@@ -334,7 +350,7 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
 |---|---|
 | 0 | `steps/0-start.md` - varianta, inventura, kontrola pokrytí |
 | 1 | `steps/1-product.md` (+ `steps/1p-sources.md`, `steps/1v-vision.md`, `steps/1i-identity.md`, `steps/1s-seo.md`) |
-| 2 | `steps/2-structure.md` - stránky, role, toky |
+| 2 | `steps/2-structure.md` - stránky, role, toky; aplikace: obrazovky a úlohy (`references/local/aplikace-postup.md`) |
 | 3 | `steps/3-content-plan.md` - obsah a fakta |
 | 4 | `steps/4-references.md` - vzory |
 | 5 | `steps/5-directions.md` - tři směry jako stránky |
