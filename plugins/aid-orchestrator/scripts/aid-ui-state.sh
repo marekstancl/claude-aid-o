@@ -123,6 +123,7 @@
 #   step <project> <0-7>                 a backward step clears `finished`; (P116) a webapp goes past step 1 only with a
 #                                        skip record (decide --title přeskočeno --outcome "<part> přeskočena" --why …)
 #                                        for every part its options skip: vize, hledani, logo
+#   build-json <dir>                     (P116) prints the build record of <dir> (id, fingerprints) without writing
 #   model-approved <project>             (P116) exit 0 when docs/design/screens.json is the model the PM approved
 #                                        (app.approved_model_sha); 1 naming why (never approved, changed since)
 #
@@ -258,7 +259,7 @@ BRAND="$PROJECT/docs/brand"
 HTML="$BRAND/index.html"
 STATE="$PROJECT/docs/design/brand-state.json"
 OLD="$BRAND/state.json"   # P101 location, migrated by init
-if [[ "$VERB" != build-id && "$VERB" != exception-covered && "$VERB" != cycle && "$VERB" != chapter-target && "$VERB" != model-approved ]]; then   # one mutation at a time (exception-covered and chapter-target only read: gate-record's customer page and chapter-all's handover package call them under the lock; cycle only calls verbs that lock themselves)
+if [[ "$VERB" != build-id && "$VERB" != exception-covered && "$VERB" != cycle && "$VERB" != chapter-target && "$VERB" != model-approved && "$VERB" != build-json ]]; then   # one mutation at a time (exception-covered and chapter-target only read: gate-record's customer page and chapter-all's handover package call them under the lock; cycle only calls verbs that lock themselves)
   [[ "$VERB" != init ]] || mkdir -p "${STATE%/*}"
   if [[ -d "${STATE%/*}" ]]; then
     exec 9<"${STATE%/*}"   # read-only fd of the directory: a project symlink cannot make us write
@@ -1375,6 +1376,10 @@ case "$VERB" in
     v="$(python3 "$HERE/aid-ui-critic.py" place-check "$PROJECT" --place "$pl" "$vf")" || die "place-record refused (see above)"
     jq_write --argjson v "$v" --arg p "$pl" '.place_verdicts[$p] = $v'
     echo "PLACE $pl: $(jq -r '.status + (if .chosen then " (" + .chosen + ")" else "" end)' <<<"$v")"
+    ;;
+
+  build-json)   # (P116) the build record of <dir> as JSON {id, fingerprints, shared?}, nothing written (the precheck)
+    bpy build "$PROJECT"
     ;;
 
   model-approved)

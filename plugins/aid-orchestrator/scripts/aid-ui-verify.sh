@@ -3,6 +3,9 @@
 # aid-ui-verify.sh — the /aid-ui verification gate (step 7) on the recorded build.
 #
 #   aid-ui-verify.sh <project>
+#   aid-ui-verify.sh <project> --precheck   (P116) a web application's skeleton (<project>/site) over the model now, before
+#     any role round: the app rows (app_flows, app_states, keyboard_flows, task_recovery) with axe and keyboard, on the
+#     unapproved model too; nothing recorded in the state; .aid-ui/precheck/result.json; exit 0 green, 3 open rows
 #   aid-ui-verify.sh <project> --copy-subject <out.json>   (P108) serves the recorded build and writes
 #     only the copy of every page for the copy review; the gate result in .aid-ui/verify stays untouched
 #   aid-ui-verify.sh --package-gate <plan or brief> [--launch]   (P115) the run gate check_ui_handover:
@@ -41,13 +44,32 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COVERAGE_MAP="${AID_UI_COVERAGE_MAP:-$HERE/../skills/ui-design/coverage/map.yaml}"
 die() { echo "ERROR: aid-ui-verify.sh: $1" >&2; exit 1; }
 
-USAGE="usage: aid-ui-verify.sh <project> [--copy-subject <out.json> | --base-url <url>] | --package-gate <plan> [--launch]"
+USAGE="usage: aid-ui-verify.sh <project> [--copy-subject <out.json> | --base-url <url> | --precheck] | --package-gate <plan> [--launch]"
 TOOL="${AID_UI_TOOL:-$HERE/aid-ui-tool.sh}"   # tests point it at a stub (no browser on the merge path)
 if [[ "${1:-}" == --package-gate ]]; then   # P115: the run gate; parsed before the <project> forms
   (( $# == 2 )) || { (( $# == 3 )) && [[ "$3" == --launch ]]; } || { echo "$USAGE" >&2; exit 2; }
   exec python3 "$HERE/aid-ui-package.py" gate "${@:2}"
 fi
 subject=""; live=""
+if (( $# == 2 )) && [[ "$2" == --precheck ]]; then   # P116: the app skeleton's own gate before any role round
+  PROJECT="$(realpath "$1")"; STATE="$PROJECT/docs/design/brand-state.json"
+  [[ "$(jq -r '.variant.type // ""' "$STATE" 2>/dev/null)" == webapp ]] || die "--precheck is for a web application (variant.type webapp)"
+  site="$PROJECT/site"; [[ -f "$site/index.html" ]] || die "no skeleton in $site (aid-ui-serve.sh skeleton <project>)"
+  python3 "$HERE/aid-ui-flows.py" generate "$PROJECT" >/dev/null || die "the task scenarios could not be generated from docs/design/screens.json (see above)"
+  OUT="$PROJECT/.aid-ui/precheck"; rm -rf "$OUT"; mkdir -p "$OUT"
+  jq --argjson b "$(bash "$HERE/aid-ui-state.sh" build-json "$site")" --arg d "$site" '.build = ($b + {dir: $d})' "$STATE" > "$OUT/state.json"
+  yq -o=json . "$(dirname "$COVERAGE_MAP")/checks.yaml" | jq '.checks |= with_entries(select(.key | IN("app_flows", "app_states", "keyboard_flows", "task_recovery", "axe", "keyboard")))' > "$OUT/checks.json"
+  export AID_UI_PROJECT="$PROJECT"
+  srv="$(bash "$HERE/aid-ui-serve.sh" preview "$site")" || exit 1
+  trap 'AID_UI_PROJECT="$PROJECT" bash "$HERE/aid-ui-serve.sh" stop preview >/dev/null 2>&1 || true' EXIT
+  bash "$TOOL" verify --state "$OUT/state.json" --checks "$OUT/checks.json" --site "$site" --base "$(sed -n 's/^URL: //p' <<<"$srv")" \
+    --out "$OUT" --project "$PROJECT" --seo "$HERE/aid-ui-seo-check.py" || die "the precheck run failed; no result"
+  open="$(jq '[.rows[] | select(.status != "pass")] | length' "$OUT/result.json")"
+  echo "PRECHECK: $OUT/result.json ($open open rows)"
+  jq -r '.rows[] | select(.status != "pass") | "  \(.status) \(.check) \(.page) \(.state) \(.viewport): \((.detail // "")[0:160])"' "$OUT/result.json" | head -20
+  (( open == 0 )) || exit 3
+  exit 0
+fi
 if (( $# == 3 )) && [[ "$2" == --copy-subject ]]; then subject="$(realpath -m "$3")"
 elif (( $# == 3 )) && [[ "$2" == --base-url ]]; then live="$3"
   [[ "$live" =~ ^https?://[^[:space:]]+$ ]] || { echo "$USAGE (--base-url is an http(s) address)" >&2; exit 2; }

@@ -244,18 +244,19 @@ def write_pages(p, site, entries):
 
 # --- P116: the skeleton of a web application, from docs/design/screens.json -------------------------------------
 STATES = (("empty", "Prázdno"), ("loading", "Načítání"), ("error", "Chyba"), ("filled", "Naplněno"))   # the model's order
-APP_JS = """(function(){var q=new URLSearchParams(location.search),st=q.get('stav')||'filled',ok=false;
-document.querySelectorAll('[data-aid-state]').forEach(function(e){if(e.dataset.aidState===st)ok=true;});
-if(!ok)st='filled';document.querySelectorAll('[data-aid-state]').forEach(function(e){e.hidden=e.dataset.aidState!==st;});
+APP_JS = """(function(){var q=new URLSearchParams(location.search),st=q.get('stav')||'filled',ok=false,done=(q.get('vysledek')||'').split(',');
+document.querySelectorAll('main [data-aid-state]').forEach(function(e){if(e.dataset.aidState===st)ok=true;});
+if(!ok)st='filled';document.querySelectorAll('main [data-aid-state]').forEach(function(e){e.hidden=e.dataset.aidState!==st;});
 document.querySelectorAll('[data-aid-stav-link]').forEach(function(a){if(a.dataset.aidStavLink===st)a.setAttribute('aria-current','true');});
+document.querySelectorAll('[data-aid-result]').forEach(function(e){e.hidden=done.indexOf(e.dataset.aidResult)<0;});
 document.querySelectorAll('dialog[data-aid-confirm]').forEach(function(d){d.close();var b=document.querySelector('[data-aid-action="'+d.dataset.aidConfirm+'"]');
-if(b)b.addEventListener('click',function(){d.showModal();d.querySelector('[data-aid-confirm-yes]').focus();});
+if(b)b.addEventListener('click',function(){d.showModal();d.querySelector('[data-aid-confirm-no]').focus();});
 d.querySelector('[data-aid-confirm-no]').addEventListener('click',function(){d.close();if(b)b.focus();});});
-var f=document.querySelector('form[data-aid-form]'),err=document.querySelector('[data-aid-error]');
-if(f)f.addEventListener('submit',function(ev){ev.preventDefault();var b=ev.submitter,to=(b&&b.getAttribute('formaction'))||f.getAttribute('action');
-var u=to+'?'+new URLSearchParams(new FormData(f)).toString();f.setAttribute('aria-busy','true');if(b)b.disabled=true;
+document.querySelectorAll('form[data-aid-form]').forEach(function(f){var err=f.querySelector('[data-aid-error]');
+f.addEventListener('submit',function(ev){ev.preventDefault();var b=ev.submitter,to=(b&&b.getAttribute('formaction'))||f.getAttribute('action'),d=new URLSearchParams(new FormData(f));
+if(b&&b.name)d.set(b.name,b.value);var u=to+'?'+d.toString();f.setAttribute('aria-busy','true');if(b)b.disabled=true;
 fetch(u).then(function(r){if(!r.ok)throw new Error(r.status);location.href=u;}).catch(function(){f.removeAttribute('aria-busy');if(b)b.disabled=false;
-err.hidden=false;err.focus();});});})();"""
+err.hidden=false;err.focus();});});});})();"""
 
 
 def app_kind(p):
@@ -279,45 +280,63 @@ def screens_module():
     return m
 
 
-def app_page(m, scr, approved, fields, results):
+def actions_html(m, scr, url, fields, ends):
+    """The actions of one screen (data-aid-action) and the form of its submit actions. ends: action id -> the tasks it
+    ends - a link, a submit button or a confirm carries ?vysledek=<tasks>, and the result shows only then."""
+    sid = scr["id"]
+    tail = lambda a: (f"?vysledek={esc(','.join(ends[a['id']]))}" if ends.get(a["id"]) else "")
+    acts, btns = [], []
+    for a in scr["actions"]:
+        da = f'data-aid-action="{esc(sid)}.{esc(a["id"])}"'
+        if a["kind"] == "navigate":
+            acts.append(f'<a class="akce" href="{esc(url[a["to"]])}{tail(a)}" {da}>{esc(a["label"])}</a>')
+        elif a["kind"] == "submit":
+            v = f' name="vysledek" value="{esc(",".join(ends[a["id"]]))}"' if ends.get(a["id"]) else ""
+            btns.append(f'<button type="submit" formaction="{esc(url[a["to"]])}"{v} {da}>{esc(a["label"])}</button>')
+        else:   # destructive: the button opens its confirm dialog (the focus on Zrušit); without JS it stands open under it
+            k = f'{esc(sid)}.{esc(a["id"])}'
+            acts.append(f'<button type="button" {da} aria-haspopup="dialog">{esc(a["label"])}</button>'
+                        f'<dialog open class="potvrzeni" data-aid-confirm="{k}" aria-label="{esc(a["confirm"])}"><p>{esc(a["confirm"])}</p>'
+                        f'<a href="{esc(url[a["to"]])}{tail(a)}" data-aid-confirm-yes="{k}">Potvrdit</a> <button type="button" data-aid-confirm-no>Zrušit</button></dialog>')
+    form = ""
+    if btns:
+        inputs = "".join(f'<p><label>{esc(n)} <input name="{esc(n)}"></label></p>' for n in fields)
+        first = next(a for a in scr["actions"] if a["kind"] == "submit")
+        form = (f'<form method="get" action="{esc(url[first["to"]])}" data-aid-form>{inputs}'
+                f'<p class="chyba" role="alert" tabindex="-1" data-aid-error hidden>{esc(scr["states"]["error"])}</p>{"".join(btns)}</form>')
+    return form + (f'<div class="akce">{"".join(acts)}</div>' if acts else "")
+
+
+STATE_NAMES = (("validation", "chyba validace"), ("empty", "prázdno"), ("loading", "načítání"), ("failure", "selhání"),
+               ("permission", "oprávnění"), ("recovery", "obnova po přerušení"))
+
+
+def app_page(m, scr, approved, fields, results, ends, shell):
     sid = scr["id"]
     url = {x["id"]: (x.get("url") or f"/{x['id']}/") for x in m["screens"]}
     cur = ' aria-current="page"'
     nav = "".join(f'<li><a href="{esc(url[x["id"]])}"{cur if x["id"] == sid else ""}>{esc(x["title"])}</a></li>'
-                  for x in m["screens"] if x["nav"])
+                  for x in m["screens"] if x["nav"] and not x.get("shell"))
+    bar = "".join(f'<div class="lista" data-aid-screen="{esc(x["id"])}" aria-label="{esc(x["title"])}">'
+                  f'{actions_html(m, x, url, shell[x["id"]][0], shell[x["id"]][1])}</div>' for x in m["screens"] if x.get("shell"))
     switch = "".join(f'<a href="?stav={k}" data-aid-stav-link="{k}">{t}</a> ' for k, t in STATES)
-    res = "".join(f'<p class="vysledek" data-aid-result="{esc(t)}">{esc(e)}</p>' for t, e in results)
-    states = "".join(f'<section class="stav" data-aid-state="{k}"><h2>{t}</h2><p>{esc(scr["states"][k])}</p>{res if k == "filled" else ""}</section>'
-                     for k, t in STATES)
-    acts, form_btns = [], []
-    for a in scr["actions"]:
-        da = f'data-aid-action="{esc(sid)}.{esc(a["id"])}"'
-        if a["kind"] == "navigate":
-            acts.append(f'<a class="akce" href="{esc(url[a["to"]])}" {da}>{esc(a["label"])}</a>')
-        elif a["kind"] == "submit":
-            form_btns.append(f'<button type="submit" formaction="{esc(url[a["to"]])}" {da}>{esc(a["label"])}</button>')
-        else:   # destructive: the button opens its confirm dialog; without JS the dialog stands open under it
-            k = f'{esc(sid)}.{esc(a["id"])}'
-            acts.append(f'<button type="button" {da} aria-haspopup="dialog">{esc(a["label"])}</button>'
-                        f'<dialog open class="potvrzeni" data-aid-confirm="{k}" aria-label="{esc(a["confirm"])}"><p>{esc(a["confirm"])}</p>'
-                        f'<a href="{esc(url[a["to"]])}" data-aid-confirm-yes="{k}">Potvrdit</a> <button type="button" data-aid-confirm-no>Zrušit</button></dialog>')
-    form = ""
-    if form_btns:
-        inputs = "".join(f'<p><label>{esc(n)} <input name="{esc(n)}"></label></p>' for n in fields)
-        first = next(a for a in scr["actions"] if a["kind"] == "submit")
-        form = (f'<form method="get" action="{esc(url[first["to"]])}" data-aid-form>{inputs}'
-                f'<p class="chyba" role="alert" tabindex="-1" data-aid-error hidden>{esc(scr["states"]["error"])}</p>{"".join(form_btns)}</form>')
+    res = "".join(f'<p class="vysledek" role="status" data-aid-result="{esc(t)}">{esc(e)}</p>' for t, e in results)
+    states = "".join(f'<section class="stav" data-aid-state="{k}"><h2>{t}</h2><p>{esc(scr["states"][k])}</p></section>' for k, t in STATES)
+    mine = [t for t in m["tasks"] if any(st["screen"] == sid for st in t["steps"])]
+    tasks = ("" if not mine else '<details class="ulohy"><summary>Stavy úloh na této obrazovce</summary>' + "".join(
+        f'<h3>{esc(t["title"])}</h3><ul>' + "".join(f"<li>{n}: {esc(t['states'][k])}</li>" for k, n in STATE_NAMES) + "</ul>" for t in mine)
+        + "</details>")
     banner = "" if approved else '<p class="navrh" role="status" data-aid-draft>Návrh: model čeká na schválení vlastníkem.</p>'
     return (f'<!doctype html>\n<html lang="cs" {MARK} data-aid-app>\n<head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(scr["title"])} · {esc(m.get("app") or "aplikace")}</title>'
             '<style>body{font:16px/1.5 system-ui,sans-serif;margin:0}header,main{padding:16px;max-width:1100px;margin:auto}'
             'nav ul{display:flex;flex-wrap:wrap;gap:12px;list-style:none;padding:0}.stav{border:1px solid #888;padding:12px;margin:12px 0}'
-            '.navrh{background:#fe9;padding:8px 16px;margin:0}.chyba{border:2px solid #b00;padding:8px}'
+            '.navrh{background:#fe9;padding:8px 16px;margin:0}.chyba{border:2px solid #b00;padding:8px}.lista{border-bottom:2px solid #333;padding:8px 0}'
             'a,button,summary,input{min-height:44px}a,button{display:inline-block;margin:4px 8px 4px 0}'
             ':focus-visible{outline:3px solid #06c;outline-offset:2px}</style></head>\n<body>\n'
-            f'{banner}<header><p class="znacka">{esc(m.get("app") or "")}</p><nav aria-label="Aplikace"><ul>{nav}</ul></nav></header>\n'
+            f'{banner}<header><p class="znacka">{esc(m.get("app") or "")}</p>{bar}<nav aria-label="Aplikace"><ul>{nav}</ul></nav></header>\n'
             f'<main data-aid-screen="{esc(sid)}"><h1>{esc(scr["title"])}</h1><p class="ucel">{esc(scr["purpose"])}</p>'
-            f'<nav class="stavy" aria-label="Stav obrazovky">{switch}</nav>{states}{form}<div class="akce">{"".join(acts)}</div></main>\n'
+            f'<nav class="stavy" aria-label="Stav obrazovky">{switch}</nav>{res}{states}{actions_html(m, scr, url, fields, ends)}{tasks}</main>\n'
             f'<script>{APP_JS}</script>\n</body>\n</html>\n')
 
 
@@ -355,20 +374,31 @@ def build_app(p):
                 fields.setdefault(st["screen"], [])
                 if n not in fields[st["screen"]]:
                     fields[st["screen"]].append(n)
-    results = {}
+    results, ends = {}, {}
     for t in m["tasks"]:
         results.setdefault(t["done_when"]["screen"], []).append((t["id"], t["done_when"]["expect"]))
-    home = next(x for x in m["screens"] if x["nav"])
+        last = t["steps"][-1]   # the actions that end the task: its last step's, and a recover of a failure at that step
+        acts = [last["action"]] + [fp["recover"] for fp in t["failure_paths"] if fp["at_step"] == len(t["steps"])]
+        for a in acts:
+            ends.setdefault(last["screen"], {}).setdefault(a, [])
+            if t["id"] not in ends[last["screen"]][a]:
+                ends[last["screen"]][a].append(t["id"])
+    shell = {x["id"]: (fields.get(x["id"], []), ends.get(x["id"], {})) for x in m["screens"] if x.get("shell")}
+    home = next(x for x in m["screens"] if x["nav"] and not x.get("shell"))
     files = {}
-    for x in m["screens"]:   # two screens on one address would overwrite each other silently
+    for x in m["screens"]:   # two screens on one address would overwrite each other silently; the shell has no page
+        if x.get("shell"):
+            continue
         f = page_file(site, mod.screen_url(x))
         if f in files:
             die(f"screens {files[f]} and {x['id']} both become {os.path.relpath(f, site)}", 2)
         files[f] = x["id"]
     entries = [(page_file(site, mod.screen_url(x)),
-                lambda x=x: app_page(m, x, approved, fields.get(x["id"], []), results.get(x["id"], []))) for x in m["screens"]]
+                lambda x=x: app_page(m, x, approved, fields.get(x["id"], []), results.get(x["id"], []), ends.get(x["id"], {}), shell))
+               for x in m["screens"] if not x.get("shell")]
     if os.path.join(site, "index.html") not in files:   # no screen at "/": the home page is the first screen in the navigation
-        entries.append((os.path.join(site, "index.html"), lambda: app_page(m, home, approved, fields.get(home["id"], []), results.get(home["id"], []))))
+        entries.append((os.path.join(site, "index.html"), lambda: app_page(m, home, approved, fields.get(home["id"], []), results.get(home["id"], []),
+                                                                         ends.get(home["id"], {}), shell)))
     out = write_pages(p, site, entries)
     if not approved and out["kept"]:   # a built page is never rewritten: it cannot carry the banner; the gate refuses the model
         warn("built pages kept without the draft banner (the model is not approved): " + ", ".join(out["kept"])

@@ -99,6 +99,10 @@ export default async function ({ page, base, state }) {
 
 def scenario(mod, m, t, sha):
     urls = {s["id"]: mod.screen_url(s) for s in m["screens"]}
+    home = next(s for s in m["screens"] if s["nav"] and not s.get("shell"))
+    shells = {s["id"] for s in m["screens"] if s.get("shell")}
+    for sid in shells:   # a task that starts on the bar starts on the home screen
+        urls[sid] = mod.screen_url(home)
     acts = {(s["id"], a["id"]): a for s in m["screens"] for a in s["actions"]}
     plan = {
         "id": t["id"],

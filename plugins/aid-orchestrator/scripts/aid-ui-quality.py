@@ -9,8 +9,18 @@ audited. At most three repair rounds. Everything lives in <project>/.aid-ui/crit
 rounds/<n>/{owner,tech}/ (the ratings), rounds/<n>/history-<role>.json (the memory each got), audits/<site sha>/a1..a3/
 {owner,tech}/, loop.json (the summary the studio shows, with every round's cost and time), verdict.json.
 
+  self <project> [--place <p>] --file <kontrola.json>
+      The producer's own check (PM 18. 10. 2026: the version that goes to the roles has everything of the brief and is
+      checked; the roles fine-tune it). kontrola.json {requirements: [{id, source "<file>:<line>" in the project, text,
+      covered_by: [where] | out_of_scope: <why>}], scores: {owner|tech: {<criterion>: {score, evidence}}}}: every
+      requirement of the brief with its source, covered or out of scope with a reason (a webapp's structure: covered_by
+      names task:<id> | screen:<id> of the model); every criterion of both frozen roles (the extra rubrics' ids with
+      their prefix) rated by the producer at 9 or more with evidence; a webapp's struktura and vzhled also a green
+      precheck of the skeleton on the model now (aid-ui-verify.sh --precheck). Refused naming each gap; recorded in
+      .aid-ui/critic/self/<place>.json bound to the place's bundle and frozen critic.
   round <project> --web <url>
-      One round on the current site. Refused while the previous round has a finding without a state, an accepted
+      One round on the current site. Refused without a self record over the bundle and the critic now (not in the
+      launch loop: it rates the deployment of a handed-over web). Refused while the previous round has a finding without a state, an accepted
       finding without --evidence, or the site fails `aid-ui-state.sh gate-check` (also for round 1), or when status
       says stop/audit. Books the agent's own work since the last round first (aid_ui_costs.book_agent: the Claude
       Code transcript of CLAUDE_CODE_SESSION_ID and its subagents). Findings get ids r<n>-<role>-<id>; findings a
@@ -126,6 +136,135 @@ def site_sha(p):
     m = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(m)
     return m.site_sha(os.path.join(p, "site"))
+
+
+# ---------------------------------------------------------------- the producer's own check before every round (PM 18. 10. 2026)
+SELF_MIN = 9   # the version handed to the roles is complete: the producer rates it at 9+ on every criterion itself
+REQ_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+def self_path(p):
+    return os.path.join(cdir(p), "self", PLACE + ".json")
+
+
+def frozen_rec(p):
+    f = os.path.join(cdir(p), "frozen.json" if PLACE == "web" else os.path.join("frozen", PLACE + ".json"))
+    try:
+        return json.load(open(f, encoding="utf-8"))
+    except (OSError, ValueError):
+        die("no frozen critic of place %s (aid-ui-critic.py freeze --place %s first)" % (PLACE, PLACE))
+
+
+def criteria_ids(rec, role):
+    out = []
+    for e in rec["roles"][role]["rubrics"]:
+        pre = "" if e["key"] == PLACE else e["key"] + "."
+        out += [pre + c["id"] for c in e["rubric"]["criteria"]]
+    return out
+
+
+def model_of(p):
+    try:
+        st = json.load(open(os.path.join(p, "docs", "design", "brand-state.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        st = {}
+    if (st.get("variant") or {}).get("type") != "webapp":
+        return None
+    try:
+        return json.load(open(os.path.join(p, "docs", "design", "screens.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def self_problems(p, doc):
+    """Why the producer's own check does not let the version go to the roles (empty = it does)."""
+    bad = []
+    reqs = doc.get("requirements") if isinstance(doc, dict) else None
+    if not isinstance(reqs, list) or not reqs:
+        return ["requirements: soupis požadavků ze zadání chybí (každý bod se zdrojem soubor:řádek)"]
+    model = model_of(p)
+    refs = set()
+    if model is not None:
+        refs = {"task:" + t.get("id", "") for t in model.get("tasks") or []} | {"screen:" + x.get("id", "") for x in model.get("screens") or []}
+    seen = set()
+    for i, r in enumerate(reqs):
+        at = f"requirements[{i}]"
+        if not isinstance(r, dict) or not REQ_ID.fullmatch(str(r.get("id") or "")) or r["id"] in seen:
+            bad.append(f"{at}: id chybí, není písmena/číslice/._- nebo se opakuje"); continue
+        seen.add(r["id"])
+        src = str(r.get("source") or "")
+        m = re.fullmatch(r"(.+):([0-9]+)", src)
+        f = os.path.realpath(os.path.join(p, m.group(1))) if m else ""
+        if not m or not f.startswith(os.path.realpath(p) + os.sep) or not os.path.isfile(f) \
+                or not 1 <= int(m.group(2)) <= len(open(f, encoding="utf-8", errors="replace").read().splitlines()):
+            bad.append(f"{r['id']}: zdroj {src!r} není soubor:řádek v projektu"); continue
+        if not str(r.get("text") or "").strip():
+            bad.append(f"{r['id']}: chybí text požadavku")
+        cov, oos = r.get("covered_by"), str(r.get("out_of_scope") or "").strip()
+        if bool(cov) == bool(oos):
+            bad.append(f"{r['id']}: buď covered_by (kde je pokrytý), nebo out_of_scope (proč ne), právě jedno"); continue
+        if cov and (not isinstance(cov, list) or not all(isinstance(x, str) and x.strip() for x in cov)):
+            bad.append(f"{r['id']}: covered_by je seznam míst"); continue
+        if cov and model is not None and PLACE == "struktura":   # an app's requirement lands on a task or a screen of the model
+            miss = [x for x in cov if x not in refs]
+            if miss:
+                bad.append(f"{r['id']}: {', '.join(miss)} není úloha ani obrazovka modelu (task:<id> | screen:<id>)")
+    rec = frozen_rec(p)
+    sc = doc.get("scores") or {}
+    for role in ("owner", "tech"):
+        got = sc.get(role) if isinstance(sc.get(role), dict) else {}
+        for c in criteria_ids(rec, role):
+            x = got.get(c) if isinstance(got.get(c), dict) else {}
+            if not isinstance(x.get("score"), (int, float)) or not str(x.get("evidence") or "").strip():
+                bad.append(f"{role}.{c}: chybí vlastní známka s důkazem")
+            elif x["score"] < SELF_MIN:
+                bad.append(f"{role}.{c}: {x['score']} pod {SELF_MIN} - oprav před kritikem ({str(x.get('evidence'))[:80]})")
+    if model is not None and PLACE in ("struktura", "vzhled"):   # an app's skeleton passed its own gate on this model first
+        pre = os.path.join(p, ".aid-ui", "precheck", "result.json")
+        try:
+            res = json.load(open(pre, encoding="utf-8"))
+        except (OSError, ValueError):
+            res = None
+        msha = hashlib.sha256(open(os.path.join(p, "docs", "design", "screens.json"), "rb").read()).hexdigest() if model else ""
+        if not res:
+            bad.append("předběžná brána kostry neproběhla (aid-ui-verify.sh <projekt> --precheck)")
+        elif res.get("model_sha256") != msha:
+            bad.append("předběžná brána běžela nad jiným modelem; pusť ji znovu")
+        else:
+            red = [f"{r.get('check')} {r.get('page')} {r.get('state')}" for r in res.get("rows") or [] if r.get("status") != "pass"]
+            if red:
+                bad.append("předběžná brána kostry není zelená: " + "; ".join(red[:5]))
+    return bad
+
+
+def self_record(p, f):
+    """aid-ui-quality.py self: the producer's own check of the version about to go to the roles, bound to the bundle."""
+    try:
+        doc = json.load(open(f, encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        die(f"self: {f} není čitelný JSON ({e})", 2)
+    bad = self_problems(p, doc)
+    if bad:
+        die("self refused (verze ještě nejde ke kritikovi):\n  " + "\n  ".join(bad))
+    rec = {"place": PLACE, "bundle_sha": site_sha(p), "frozen_sha": frozen_sha(p), "requirements": doc["requirements"],
+           "scores": doc["scores"], "at": now()}
+    os.makedirs(os.path.dirname(self_path(p)), exist_ok=True)
+    wj(self_path(p), rec)
+    print(f"SELF {PLACE}: {len(doc['requirements'])} požadavků, všechna kritéria ≥ {SELF_MIN}; kolo smí běžet nad {rec['bundle_sha'][:12]}")
+
+
+def self_ok(p):
+    """The round's precondition: a self record of this place over the bundle and the frozen critic now, still valid."""
+    try:
+        rec = json.load(open(self_path(p), encoding="utf-8"))
+    except (OSError, ValueError):
+        return "vlastní kontrola chybí (aid-ui-quality.py self <projekt> --place %s --file <kontrola.json>)" % PLACE
+    if rec.get("bundle_sha") != site_sha(p):
+        return "vlastní kontrola je nad jinou verzí podkladů místa; po opravě ji udělej znovu"
+    if rec.get("frozen_sha") != frozen_sha(p):
+        return "vlastní kontrola je nad jinými měřítky; udělej ji znovu"
+    bad = self_problems(p, rec)
+    return "; ".join(bad[:5]) if bad else ""
 
 
 def verdict(p):
@@ -364,6 +503,10 @@ def do_round(p, web):
     if PLACE in ("web", "struktura") and not web:
         die("--web <url>: the %s is rated live (%s)" % (LABEL_URL[PLACE], "the served site" if PLACE == "web" else "the skeleton address"), 2)
     same_loop(p, web)
+    if not os.environ.get("AID_UI_CRITIC_DIR"):   # every version goes to the roles complete: the producer's own check first
+        why = self_ok(p)
+        if why:
+            die("no round: the version is not ready for the roles - " + why)
     if PLACE == "web":   # the regression check guards the built site; earlier places have no build yet
         ok, msg = gate_ok(p)
         if not ok:
@@ -639,6 +782,8 @@ def main(a):
         print(json.dumps(write_loop(p) if rounds(p) else status(p), ensure_ascii=False))
     elif cmd == "round":
         do_round(p, opts.get("web"))
+    elif cmd == "self" and opts.get("file"):
+        self_record(p, opts["file"])
     elif cmd == "audit" and opts.get("web"):
         audit(p, opts["web"])
     elif cmd == "triage" and len(rest) == 2:

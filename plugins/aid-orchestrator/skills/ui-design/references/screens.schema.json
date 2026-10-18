@@ -21,6 +21,7 @@
           "title": {"$ref": "#/$defs/text"},
           "purpose": {"$ref": "#/$defs/text"},
           "nav": {"type": "boolean", "description": "true = obrazovka je v navigaci aplikace; false = dosažitelná jen akcí (detail)"},
+          "shell": {"type": "boolean", "description": "true = lišta aplikace: její akce jsou na každé obrazovce (STOP, Panika), vlastní stránku ani stavy nemá"},
           "url": {"type": "string", "pattern": "^/[^\\s?#]*$", "description": "adresa obrazovky v aplikaci (výchozí /<id>/); brána na ní otevírá stavy a začíná úlohy"},
           "actions": {
             "type": "array",

@@ -38,6 +38,10 @@ aplikaci nekopíruje: tytéž nástroje, větev podle druhu.
 4. Úlohu, která v nové podobě nebude, zruší jen PM: otázka `exception`, `target: task@<id>`, s důvodem v komentáři.
 
 ## 2. Obrazovky a úlohy (část „Obrazovky a úlohy", místo `struktura`)
+0. **Soupis požadavků dřív než model** (SKILL.md „Verze 1 je kompletní“): každý bod zadání projektu, plánu fáze
+   a podkladů UI se zdrojem `soubor:řádek`; každý dostane úlohu nebo obrazovku (`task:<id>`, `screen:<id>`), nebo
+   `out_of_scope` s důvodem. Úloha, kterou zadání výslovně jmenuje (zavřít pozici, potvrdit nebo zahodit), v modelu
+   nesmí chybět - pilot 18. 10. 2026: role ji našly v kole 1, protože soupis nebyl.
 1. **Úlohy první.** Z kódu a zadání projektu (zadání, plán, cesty API) sepiš, co uživatel v aplikaci dělá. Ke každé
    úloze sedm stavů standardu Úlohy a stavy webové aplikace (UA-1): běžná cesta = kroky, k tomu chyba validace,
    prázdno, načítání, selhání, oprávnění a obnova po přerušení. Stav, který nenastane, se píše
@@ -53,6 +57,10 @@ aplikaci nekopíruje: tytéž nástroje, větev podle druhu.
 5. Kostra: `aid-ui-serve.sh skeleton <projekt>` postaví z modelu proklikávací aplikaci na stálé adrese: navigace,
    každá obrazovka s přepínačem stavů (`?stav=empty|loading|error|filled`), akce vedou na své obrazovky, mazání přes
    potvrzení. Dokud PM model neschválí, nese každá stránka pruh „model čeká na schválení vlastníkem".
+5a. **Lišta aplikace** (STOP, Panika, režim - co je na každé obrazovce) je obrazovka s `shell: true`: její akce kostra
+   vykreslí na každé stránce, krok úlohy na ní smí stát odkudkoli.
+5b. **Před kolem rolí:** `aid-ui-verify.sh <projekt> --precheck` zelené nad modelem teď, vlastní projití obou měřítek
+   (každé kritérium ≥ 9 s důkazem) a `aid-ui-quality.py self <projekt> --place struktura --file <kontrola.json>`.
 6. Kolo místa `struktura` (`aid-ui-quality.py round <projekt> --place struktura --web <adresa kostry>`): role
    proklikávají kostru a čtou model. Klient-role je vlastník produktu a klíčový uživatel, postavená z kódu a zadání
    projektu. Její nálezy jdou PM na kartu jako podklad.

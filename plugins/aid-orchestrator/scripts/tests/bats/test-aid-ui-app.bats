@@ -511,3 +511,19 @@ app_handover() {
   run python3 "$BL" compare "$APP"
   [ "$status" -eq 1 ]; [[ "$output" == *"did not record every task of the list passing once (hledat)"* ]]
 }
+
+@test "screens: the bar (shell) - one only; a task step on it follows any screen; it has no state rows in the matrix" {
+  mutate '.screens += [{id: "lista", title: "Lišta", purpose: "Na každé obrazovce.", nav: false, shell: true,
+      actions: [{id: "stop", label: "STOP", to: "seznam", kind: "submit"}],
+      states: {empty: "nenastává, protože lišta je vždy", loading: "Zastavuji…", error: "STOP nedoběhl; Zkusit znovu.", filled: "Lišta."}}]
+    | .tasks += [{id: "zastavit", title: "Zastavit", roles: ["uživatel"], steps: [{screen: "seznam", action: "otevrit"}, {screen: "lista", action: "stop"}],
+      done_when: {screen: "seznam", expect: "Pozastaveno"}, states: .tasks[1].states, failure_paths: [{at_step: 2, kind: "network", keeps_input: true, recover: "stop"}]}]'
+  run python3 "$SCR" check "$APP"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  run python3 "$SCR" matrix "$APP"
+  [ "$(jq '[.rows[] | select(.page == "screen:lista")] | length' <<<"$output")" -eq 0 ]
+  [ "$(jq '[.rows[] | select(.page == "zastavit")] | length' <<<"$output")" -eq 3 ]
+  mutate '.screens += [.screens[-1] | .id = "lista2"]'
+  run python3 "$SCR" check "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"lišta (shell: true) je jen jedna"* ]]
+}

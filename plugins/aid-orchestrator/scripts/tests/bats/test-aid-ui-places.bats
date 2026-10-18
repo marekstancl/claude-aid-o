@@ -134,3 +134,27 @@ app_places_project() {
   run python3 "$C" freeze "$P" --type webapp --place struktura --force
   [ "$status" -eq 1 ]; [[ "$output" == *"no zadani.md"* ]]
 }
+
+@test "places: webapp - the own check before a round: every requirement lands on a task or a screen of the model, and the skeleton's precheck is green on the model now" {
+  app_places_project
+  python3 "$C" freeze "$P" --type webapp --place struktura >/dev/null
+  Q="$SC/aid-ui-quality.py"
+  python3 - "$P" > "$P/self.json" <<'PY'
+import json, sys
+p = sys.argv[1]; rec = json.load(open(p + "/.aid-ui/critic/frozen/struktura.json"))
+sc = {r: {c["id"]: {"score": 9, "evidence": "model a kostra"} for e in rec["roles"][r]["rubrics"] for c in e["rubric"]["criteria"]} for r in ("owner", "tech")}
+print(json.dumps({"requirements": [{"id": "z1", "source": "zadani.md:2", "text": "poznámky", "covered_by": ["task:zalozit", "screen:seznam"]}], "scores": sc}))
+PY
+  run python3 "$Q" self "$P" --place struktura --file "$P/self.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"předběžná brána kostry neproběhla"* ]]
+  sha="$(sha256sum "$P/docs/design/screens.json" | cut -d' ' -f1)"; mkdir -p "$P/.aid-ui/precheck"
+  echo "{\"model_sha256\": \"$sha\", \"rows\": [{\"check\": \"task_recovery\", \"page\": \"zalozit\", \"state\": \"fail-1\", \"status\": \"fail\"}]}" > "$P/.aid-ui/precheck/result.json"
+  run python3 "$Q" self "$P" --place struktura --file "$P/self.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"není zelená: task_recovery zalozit fail-1"* ]]
+  echo "{\"model_sha256\": \"$sha\", \"rows\": [{\"check\": \"app_flows\", \"page\": \"zalozit\", \"state\": \"normal\", \"status\": \"pass\"}]}" > "$P/.aid-ui/precheck/result.json"
+  jq '.requirements[0].covered_by += ["task:nikdy"]' "$P/self.json" > "$P/s2.json"
+  run python3 "$Q" self "$P" --place struktura --file "$P/s2.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"task:nikdy není úloha ani obrazovka modelu"* ]]
+  run python3 "$Q" self "$P" --place struktura --file "$P/self.json"
+  [ "$status" -eq 0 ]; [[ "$output" == *"SELF struktura: 1 požadavků"* ]]
+}

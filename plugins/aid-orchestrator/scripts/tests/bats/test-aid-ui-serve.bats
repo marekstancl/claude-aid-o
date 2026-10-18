@@ -358,7 +358,7 @@ J
   done
   grep -q 'href="/formular/" data-aid-action="seznam.novy"' "$BATS_TEST_TMPDIR/seznam.html"
   grep -q 'href="/detail/" data-aid-action="seznam.otevrit"' "$BATS_TEST_TMPDIR/seznam.html"
-  grep -q 'formaction="/detail/" data-aid-action="formular.ulozit"' "$BATS_TEST_TMPDIR/formular.html"
+  grep -q 'formaction="/detail/" name="vysledek" value="zalozit" data-aid-action="formular.ulozit"' "$BATS_TEST_TMPDIR/formular.html"
   grep -q '<input name="nazev">' "$BATS_TEST_TMPDIR/formular.html"
   grep -q 'data-aid-result="zalozit">Nákup na sobotu' "$BATS_TEST_TMPDIR/detail.html"   # where the task ends, its result
   [ "$(curl -sf --max-time 3 http://127.0.0.1:39918/ | grep -c 'data-aid-screen="seznam"')" -eq 1 ]   # home = first nav screen
@@ -383,7 +383,7 @@ J
   P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
   "$SERVE" skeleton "$P" >/dev/null
   grep -q '<button type="button" data-aid-action="detail.smazat" aria-haspopup="dialog">Smazat</button><dialog open class="potvrzeni" data-aid-confirm="detail.smazat"' "$P/site/detail/index.html"
-  grep -q '<a href="/seznam/" data-aid-confirm-yes="detail.smazat">Potvrdit</a>' "$P/site/detail/index.html"
+  grep -q '<a href="/seznam/?vysledek=smazat" data-aid-confirm-yes="detail.smazat">Potvrdit</a>' "$P/site/detail/index.html"
   ! grep -q 'data-aid-action="detail.smazat" href' "$P/site/detail/index.html"   # never a plain link
   # in a browser: the action opens the dialog (closed before), Potvrdit leads to the target screen
   cat > "$BATS_TEST_TMPDIR/del.mjs" <<J
@@ -418,5 +418,34 @@ J
   [ "$status" -eq 0 ]; [[ "$output" == *"built pages kept without the draft banner"*"seznam/index.html"* ]]   # the model is not approved
   [ ! -e "$P/site/detail/index.html" ]; [ -f "$P/.aid-ui/skeleton/removed/detail/index.html" ]
   grep -q postaveno "$P/site/seznam/index.html"
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: a task's result shows only after its last action; the confirm dialog opens on Zrušit; the bar is on every screen; each screen lists its tasks' states" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '.screens += [{id: "lista", title: "Lišta", purpose: "Na každé obrazovce.", nav: false, shell: true,
+        actions: [{id: "obnovit", label: "Obnovit", to: "seznam", kind: "navigate"}],
+        states: {empty: "nenastává, protože lišta je vždy", loading: "nenastává, protože lišta je vždy", error: "nenastává, protože lišta je vždy", filled: "Lišta."}}]' \
+    "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  run python3 "$BATS_TEST_DIRNAME/../../aid-ui-screens.py" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  "$SERVE" skeleton "$P" >/dev/null
+  # the bar: on every screen's page, no page of its own
+  for s in seznam formular detail; do grep -q 'data-aid-screen="lista"' "$P/site/$s/index.html"; grep -q 'data-aid-action="lista.obnovit"' "$P/site/$s/index.html"; done
+  [ ! -e "$P/site/lista" ]
+  # the actions that end a task carry it; its result is hidden until then
+  grep -q 'name="vysledek" value="zalozit" data-aid-action="formular.ulozit"' "$P/site/formular/index.html"
+  grep -q 'name="vysledek" value="zalozit" data-aid-action="formular.znovu"' "$P/site/formular/index.html"
+  grep -q 'href="/seznam/?vysledek=smazat" data-aid-confirm-yes="detail.smazat"' "$P/site/detail/index.html"
+  grep -q '<summary>Stavy úloh na této obrazovce</summary>' "$P/site/formular/index.html"; grep -q 'chyba validace: Prázdný název' "$P/site/formular/index.html"
+  cat > "$BATS_TEST_TMPDIR/res.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); const r = [];
+await pg.goto('http://127.0.0.1:39918/detail/'); r.push(await pg.locator('[data-aid-result="zalozit"]').isVisible());
+await pg.goto('http://127.0.0.1:39918/detail/?vysledek=zalozit'); r.push(await pg.locator('[data-aid-result="zalozit"]').isVisible());
+await pg.click('[data-aid-action="detail.smazat"]'); r.push(await pg.evaluate(() => document.activeElement.hasAttribute('data-aid-confirm-no')));
+console.log(r.join(' ')); await b.close();
+J
+  [ "$(node "$BATS_TEST_TMPDIR/res.mjs")" = "false true true" ]
   "$SERVE" stop skeleton
 }

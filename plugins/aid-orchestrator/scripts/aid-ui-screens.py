@@ -90,7 +90,9 @@ def violations(m, proj):
                 out.append(f"{at}/to: akce {s['id']}.{a['id']} vede na neexistující obrazovku {a['to']}")
             if a["kind"] == "destructive" and not a.get("confirm"):
                 out.append(f"{at}: destruktivní akce {s['id']}.{a['id']} bez potvrzení (confirm)")
-    if not any(isinstance(s, dict) and s.get("nav") is True for s in m["screens"]):
+    if sum(1 for s in m["screens"] if isinstance(s, dict) and s.get("shell") is True) > 1:
+        out.append("/screens: lišta (shell: true) je jen jedna")
+    if not any(isinstance(s, dict) and s.get("nav") is True and not s.get("shell") for s in m["screens"]):
         out.append("/screens: žádná obrazovka není v navigaci (nav: true)")
     acts = {(s["id"], a["id"]): a for _, s in good_s for a in s["actions"]}
     base, bwhy = baseline_ids(proj)
@@ -117,6 +119,10 @@ def violations(m, proj):
             if not a:
                 out.append(f"{sa}/action: akce {st['action']} není na obrazovce {st['screen']} (úloha {t['id']}, krok {k + 1})")
                 lead = None
+                continue
+            if screens[st["screen"]].get("shell"):   # the bar stands on every screen: a step on it follows any screen
+                submits = submits or a["kind"] == "submit"
+                lead = a["to"]
                 continue
             if lead and st["screen"] != lead:
                 out.append(f"{sa}/screen: úloha {t['id']} krok {k + 1} stojí na {st['screen']}, předchozí akce vede na {lead}")
@@ -170,6 +176,8 @@ def matrix(m):
         rows += [{"page": t["id"], "state": "normal", "check": "app_flows"}, {"page": t["id"], "state": "keyboard", "check": "keyboard_flows"}]
         rows += [{"page": t["id"], "state": v["state"], "check": "task_recovery"} for v in failure_variants(m, t)]
     for s in m["screens"]:
+        if s.get("shell"):   # the bar has no page of its own: it is checked on every screen's page
+            continue
         rows += [{"page": "screen:" + s["id"], "state": k, "check": "app_states", "url": screen_url(s)} for k in ("empty", "loading", "error", "filled")]
     return rows
 

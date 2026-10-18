@@ -220,19 +220,21 @@ def freeze(proj, typ, force, phase="build", place="web"):
     common = load_yaml(common_p)   # task_test, launch_inputs, components: the type's, both roles'
     ctx_parts = [("Kontext produktu", "docs/content/product-context.md"), ("Vize", "docs/product-vision.md"),
                  ("Zadání pro vyhledávání", "docs/seo/brief.md")]
-    if typ == "webapp":   # P116: the client of an app is its product owner and key user, built from the project's brief and code
-        if not read(os.path.join(proj, "zadani.md")):
-            die("no zadani.md in the project: the client role of an app stands on the project's brief and code (aplikace-postup.md)")
-        ctx_parts = [("Zadání projektu", "zadani.md"), ("Plán projektu", "docs/plans/roadmap.md")] + ctx_parts
     ctx = "\n\n".join(f"## {t}\n\n{read(os.path.join(proj, p))}" for t, p in ctx_parts if read(os.path.join(proj, p)))
-    if typ == "webapp" and api_routes(proj):
-        ctx += "\n\n## Cesty API v kódu projektu (co aplikace umí)\n\n" + "\n".join("- " + r for r in api_routes(proj))
-    if not ctx:
-        die("no project context (docs/content/product-context.md, docs/product-vision.md): the critic must know the business")
     leak = [ln.strip() for ln in ctx.splitlines() if LEAK.search(ln)]
     if leak:   # dropped, not refused: a loop must not stop on an old audit score in the vision
         ctx = "\n".join(ln for ln in ctx.splitlines() if not LEAK.search(ln))
         print(f"DROPPED {len(leak)} context line(s) about scores or acceptance: " + " | ".join(x[:80] for x in leak[:3]), file=sys.stderr)
+    if typ == "webapp":   # P116: the project's own brief and code, never filtered - its thresholds are the app's, not the studio's
+        if not read(os.path.join(proj, "zadani.md")):
+            die("no zadani.md in the project: the client role of an app stands on the project's brief and code (aplikace-postup.md)")
+        own = "\n\n".join(f"## {t}\n\n{read(os.path.join(proj, p))}" for t, p in (("Zadání projektu", "zadani.md"), ("Plán projektu", "docs/plans/roadmap.md"))
+                           if read(os.path.join(proj, p)))
+        if api_routes(proj):
+            own += "\n\n## Cesty API v kódu projektu (co aplikace umí)\n\n" + "\n".join("- " + r for r in api_routes(proj))
+        ctx = own + ("\n\n" + ctx if ctx else "")
+    if not ctx:
+        die("no project context (docs/content/product-context.md, docs/product-vision.md): the critic must know the business")
     lang = "sk"
     try:
         st = json.load(open(os.path.join(proj, "docs/design/brand-state.json"), encoding="utf-8"))

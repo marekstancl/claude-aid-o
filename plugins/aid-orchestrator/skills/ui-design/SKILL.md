@@ -102,6 +102,20 @@ vstup klienta není kritérium práce studia. Schválit otázku místa jde jen s
 i míst, na kterých stojí. Projekt bez pohybu značky jen výjimkou PM (`place-record --place pohyb --without <odpověď>`).
 `aid-ui-state.sh decide --step` bere přesný název kroku z `sections.json` (sdělení i logo patří do „Zadání a obsah“).
 
+## Verze 1 je kompletní, kritik jen dolaďuje (PM 18. 10. 2026, všechna místa)
+
+Kdo vyrábí verzi pro role, dodá ji **se vším ze zadání a ověřenou**: role ji mají nezávisle hodnotit 9-10 a najít jen
+detaily. Před každým kolem místa (`aid-ui-quality.py round`, všechna místa, web i aplikace):
+1. **Soupis požadavků** ze zadání projektu (zadání, plán fáze, podklady) - každý bod se zdrojem `soubor:řádek`, pokrytý
+   (`covered_by`: kde) nebo `out_of_scope` s důvodem. U aplikace na místě struktura míří `covered_by` na `task:<id>` nebo
+   `screen:<id>` modelu.
+2. **Návrh se píše proti nejvyšší kotvě** měřítek obou rolí místa (agent je čte v metodě kroku), ne proti „projde“.
+3. **Vlastní strojové kontroly zelené:** u aplikace `aid-ui-verify.sh <projekt> --precheck` nad kostrou (úlohy, stavy,
+   klávesnice, obnova, axe), u hotového webu brána a `gate-check`.
+4. **Vlastní projití všech kritérií** obou rolí: každé aspoň 9 s důkazem, pod 9 agent opraví sám.
+Zápis `aid-ui-quality.py self <projekt> --place <místo> --file <kontrola.json>` to ověří a váže na otisk podkladů místa;
+`round` bez platné vlastní kontroly nad touto verzí nespustí. Po každé opravě se kontrola dělá znovu.
+
 ## Dvě cesty: web a webová aplikace (P116, 18. 10. 2026)
 
 Druh `webapp` vede vlastní cestou podle `references/local/aplikace-postup.md` (vrstva s předností jako ostatní
