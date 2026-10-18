@@ -89,6 +89,9 @@ mutate() { jq "$1" "$M" > "$T/m.json" && mv "$T/m.json" "$M"; }
   cp "$FIXA/docs/design/screens.json" "$M"; mutate '.tasks[0].failure_paths[0].recover = "smazat"'
   run python3 "$SCR" check "$APP"
   [ "$status" -eq 1 ]; [[ "$output" == *"obnova smazat není akce obrazovky formular"* ]]
+  cp "$FIXA/docs/design/screens.json" "$M"; mutate '.tasks[0].steps[1].input = {"na\"zev": "x"}'   # a field name goes into a selector
+  run python3 "$SCR" check "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"/tasks/0/steps/1/input"* ]]
   cp "$FIXA/docs/design/screens.json" "$M"; mutate '.tasks[0].replaces = "stara"'
   run python3 "$SCR" check "$APP"
   [ "$status" -eq 1 ]; [[ "$output" == *"úloha výchozího stavu stara neexistuje (projekt nemá .aid-ui/baseline/tasks.json)"* ]]
@@ -283,5 +286,96 @@ ans_by() {
   mutate 'del(.tasks[0].done_when)'
   run python3 "$FL" generate "$APP"
   [ "$status" -eq 1 ]; [[ "$output" == *"fails aid-ui-screens.py check"* ]]
+}
+
+# ---------------------------------------------------------------- baseline: an existing app keeps every task (P116)
+BL="$BATS_TEST_DIRNAME/../../aid-ui-baseline.py"
+# base_proj - the fixture model in an existing-app project with the fixture baseline list (not approved)
+base_proj() {
+  mkdir -p "$APP/.aid-ui/baseline"
+  cp "$BATS_TEST_DIRNAME/../fixtures/aid-ui/app-existing/tasks.json" "$APP/.aid-ui/baseline/tasks.json"
+  BSHA="$(sha256sum "$APP/.aid-ui/baseline/tasks.json" | cut -d' ' -f1)"
+  echo '{"variant": {"type": "webapp", "existing": true}, "answers": {}}' > "$APP/docs/design/brand-state.json"
+}
+st_set() { jq "$1" "$APP/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$APP/docs/design/brand-state.json"; }
+approve_list() { st_set ".app_baseline = {approved_sha: \"$BSHA\"}"; }
+captured() { echo "{\"tasks_sha256\": \"$BSHA\", \"results\": [{\"id\": \"prehled\", \"passed\": true}, {\"id\": \"hledat\", \"passed\": true}]}" > "$APP/.aid-ui/baseline/result.json"; }
+# gate_passed <task>... - the last gate's app_flows rows of these tasks pass on the model now
+gate_passed() {
+  local s; s="$(sha256sum "$M" | cut -d' ' -f1)"; mkdir -p "$APP/.aid-ui/verify"
+  printf '%s\n' "$@" | jq -R --arg s "$s" '{check: "app_flows", page: ., state: "normal", status: "pass", model_sha256: $s}' | jq -s '{rows: .}' > "$APP/.aid-ui/verify/result.json"
+}
+# replace <new task index> <baseline id> <expect> - a model task replaces a baseline task with that result
+replace() { mutate ".tasks[$1].replaces = \"$2\" | .tasks[$1].done_when.expect = \"$3\""; }
+
+@test "baseline: list drafts today's tasks from the navigation; capture refuses the draft and a list changed after the PM approved it" {
+  mkdir -p "$T/old"; cp "$BATS_TEST_DIRNAME/../fixtures/aid-ui/app-existing/site/index.html" "$T/old/"
+  echo '{"variant": {"type": "webapp", "existing": true}}' > "$APP/docs/design/brand-state.json"
+  run python3 "$BL" list "$APP" --url "file://$T/old/index.html"
+  [ "$status" -eq 0 ]; [[ "$output" == *"BASELINE DRAFT"*"2 úloh z navigace"* ]]
+  [ "$(jq -r '[.[].title] | join(",")' "$APP/.aid-ui/baseline/tasks.json")" = "Přehled,Hledání" ]
+  run python3 "$BL" list "$APP" --url "file://$T/old/index.html"
+  [ "$status" -eq 1 ]; [[ "$output" == *"exists"* ]]   # never overwritten
+  run python3 "$BL" capture "$APP" --url http://127.0.0.1:9/
+  [ "$status" -eq 1 ]; [[ "$output" == *"the PM has not approved the baseline list (exception baseline@"* ]]
+  st_set ".app_baseline = {approved_sha: \"$(sha256sum "$APP/.aid-ui/baseline/tasks.json" | cut -d' ' -f1)\"}"
+  jq '.[0].result.expect = "jiný"' "$APP/.aid-ui/baseline/tasks.json" > "$T/t.json" && mv "$T/t.json" "$APP/.aid-ui/baseline/tasks.json"
+  run python3 "$BL" capture "$APP" --url http://127.0.0.1:9/
+  [ "$status" -eq 1 ]; [[ "$output" == *"changed since the PM approved it"* ]]
+}
+
+@test "baseline: a task of today's app without a replacing task with the same result fails" {
+  base_proj; approve_list; captured
+  replace 0 prehled "3 objednávky čekají"; gate_passed zalozit
+  run python3 "$BL" compare "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"FAIL hledat: žádná nová úloha ji nenahrazuje (replaces)"* ]]
+  [[ "$output" == *"OK   prehled: nahrazena úlohou zalozit"* ]]
+  # replaced, but with another result, or by a task that did not pass the gate
+  replace 1 hledat "Výsledek hledání"; gate_passed zalozit smazat
+  run python3 "$BL" compare "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"FAIL hledat: náhrada končí jiným výsledkem"* ]]
+  replace 1 hledat "Nalezeno: mouka (2 položky)"; gate_passed zalozit
+  run python3 "$BL" compare "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"FAIL hledat: náhrada neprošla poslední bránou"* ]]
+}
+
+@test "baseline: every task replaced with the same result passes; two new tasks for one old pass when either reproduces it" {
+  base_proj; approve_list; captured
+  replace 0 prehled "Dnes: 3 objednávky čekají"; replace 1 hledat "Nalezeno: mouka"; gate_passed zalozit smazat
+  run python3 "$BL" compare "$APP"
+  [ "$status" -eq 0 ]; [[ "$output" == *"compare: OK (2 úloh výchozího stavu)"* ]]
+  # results of an older model do not count
+  cp "$FIXA/docs/design/screens.json" "$M"; replace 0 prehled "3 objednávky čekají"; replace 1 hledat "Nalezeno: mouka"
+  gate_passed zalozit smazat; mutate '.tasks[1].title = "Smazat poznámku teď"'
+  run python3 "$BL" compare "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"neprošla poslední bránou"* ]]
+  # two tasks replace prehled: one with another result, one with the same - passes
+  cp "$FIXA/docs/design/screens.json" "$M"; replace 0 prehled "jiný souhrn"; replace 1 prehled "3 objednávky čekají"
+  mutate '.tasks += [.tasks[1] | .id = "najit" | .replaces = "hledat" | .done_when.expect = "Nalezeno: mouka"]'
+  gate_passed zalozit smazat najit
+  run python3 "$BL" compare "$APP"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "baseline: a task the PM approved to drop passes and is listed; a client's or an agent's drop does not" {
+  base_proj; approve_list; captured
+  replace 0 prehled "3 objednávky čekají"; gate_passed zalozit
+  st_set '.answers.c1 = {kind: "exception", decision: "approve", by: "client", target: "task@hledat", comment: "klient"}'
+  run python3 "$BL" compare "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"FAIL hledat"* ]]
+  st_set '.answers.p1 = {kind: "exception", decision: "approve", by: "pm", target: "task@hledat", comment: "hledání se ruší"}'
+  run python3 "$BL" compare "$APP"
+  [ "$status" -eq 0 ]; [[ "$output" == *"ZRUŠENA hledat: zrušení schválil PM (hledání se ruší)"* ]]
+}
+
+@test "baseline: no baseline passes with bez výchozího stavu; an unapproved or uncaptured baseline fails compare" {
+  run python3 "$BL" compare "$FIXA"
+  [ "$status" -eq 0 ]; [[ "$output" == *"bez výchozího stavu"* ]]
+  base_proj; replace 0 prehled "3 objednávky čekají"; replace 1 hledat "Nalezeno: mouka"; gate_passed zalozit smazat
+  run python3 "$BL" compare "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"has not approved the baseline list"* ]]; [[ "$output" == *"not captured"* ]]
+  approve_list; captured
+  run python3 "$BL" compare "$APP"
+  [ "$status" -eq 0 ]
 }
 

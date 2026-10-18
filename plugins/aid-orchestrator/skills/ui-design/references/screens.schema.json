@@ -72,7 +72,7 @@
               "properties": {
                 "screen": {"$ref": "#/$defs/id"},
                 "action": {"$ref": "#/$defs/id"},
-                "input": {"type": "object", "description": "jméno pole → hodnota, vyplní se před akcí", "additionalProperties": {"type": "string"}}
+                "input": {"type": "object", "description": "jméno pole (atribut name) → hodnota, vyplní se před akcí", "propertyNames": {"pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$"}, "additionalProperties": {"type": "string"}}
               }
             }
           },
