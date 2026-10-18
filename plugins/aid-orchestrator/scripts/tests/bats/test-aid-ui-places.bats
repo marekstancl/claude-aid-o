@@ -37,7 +37,7 @@ PLACES="sdeleni logo pohyb struktura vzhled web"
     b="$(basename "$g" .gates.yaml)"; rub="$K/$b.yaml"; [[ "$b" != *.web ]] || rub="$K/${b%.web}.yaml"
     [ -f "$rub" ] || { echo "no rubric for $g"; return 1; }
     ids="$(yq -r '.criteria[].id' "$rub")"
-    for id in $(yq -r '.gates[]? | (.criterion // empty), (.any_of[]? // empty)' "$g"); do
+    for id in $(yq -o=json '.gates // []' "$g" | jq -r '.[] | (.criterion // empty), (.any_of[]? // empty)'); do
       grep -qx "$id" <<<"$ids" || { echo "$(basename "$g"): $id is not a criterion of $(basename "$rub")"; return 1; }
     done
     for w in $(yq -r '.gates[]?.when // empty' "$g"); do [[ "$w" =~ ^(nove|oziveni|zavedeny_motiv)$ ]] || { echo "$g: when $w"; return 1; }; done
@@ -106,13 +106,15 @@ app_places_project() {
   [[ "$(python3 "$C" prompt "$P" --role owner --place struktura)" == *"Model obrazovek a úloh"* ]]
   # the struktura bundle of an app is its model
   [ "$(python3 "$C" bundle-files "$P" --place struktura | tr '\n' ' ')" = "docs/design/screens.json zadani.md " ]
+  mkdir -p "$P/.aid-ui/verify"; echo '{}' > "$P/.aid-ui/verify/result.json"
+  [ "$(python3 "$C" bundle-files "$P" --place web | tr '\n' ' ')" = ".aid-ui/verify/result.json site/index.html " ]
 }
 
 @test "places: webapp - every gate names a criterion of its rubric; the skipped places do not exist; no zadani.md, no client" {
   for g in "$K"/webapp.*.*.gates.yaml; do
     b="$(basename "$g" .gates.yaml)"; rub="$K/$b.yaml"; [[ "$b" != *.web ]] || rub="$K/${b%.web}.yaml"
     ids="$(yq -r '.criteria[].id' "$rub")"
-    for id in $(yq -r '.gates[]? | (.criterion // empty), (.any_of[]? // empty)' "$g"); do grep -qx "$id" <<<"$ids" || { echo "$g: $id"; return 1; }; done
+    for id in $(yq -o=json '.gates // []' "$g" | jq -r '.[] | (.criterion // empty), (.any_of[]? // empty)'); do grep -qx "$id" <<<"$ids" || { echo "$g: $id"; return 1; }; done
     yq -e '.weighted_min' "$g" >/dev/null
   done
   [ "$(ls "$K"/webapp.*.*.gates.yaml | wc -l)" -eq 6 ]
@@ -124,6 +126,10 @@ app_places_project() {
   # a new brand keeps the logo place
   jq '.variant.brand = "new"' "$P/docs/design/brand-state.json" > "$P/s" && mv "$P/s" "$P/docs/design/brand-state.json"
   run python3 "$C" place-guard "$P" --place logo; [ "$status" -eq 1 ]; [[ "$output" == *"place_verdict_missing"* ]]
+  run python3 "$C" freeze "$P" --type webapp --place logo; [ "$status" -eq 0 ] || { echo "$output"; return 1; }   # the web's logo rubrics
+  jq -e '.type == "webapp" and .place == "logo"' "$P/.aid-ui/critic/frozen/logo.json" >/dev/null
+  # the type and the recorded variant must agree
+  run python3 "$C" freeze "$P" --type web-local --place struktura; [ "$status" -eq 2 ]; [[ "$output" == *"recorded variant is webapp"* ]]
   rm "$P/zadani.md"
   run python3 "$C" freeze "$P" --type webapp --place struktura --force
   [ "$status" -eq 1 ]; [[ "$output" == *"no zadani.md"* ]]

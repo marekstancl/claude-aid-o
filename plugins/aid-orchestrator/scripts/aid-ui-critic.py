@@ -57,7 +57,7 @@ SKILL = os.path.join(HERE, "..", "skills", "ui-design")
 CRIT = os.path.join(SKILL, "critic")
 RATINGS = 3   # blind closing ratings of one place
 # what a role must not read: scores, thresholds, acceptance (the context docs are written by the agent)
-LEAK = re.compile(r"\b\d{1,2}(?:[.,]\d)?\s*/\s*10\b|quality_score|akcept|accept|threshold|\bprah|\bpráh|známk", re.I)
+LEAK = re.compile(r"\b\d{1,2}(?:[.,]\d)?\s*/\s*10\b|quality_score|akcept|accept|threshold|\bprah|\bpráh|\bznámk", re.I)   # \b: not "Poznámky"
 ROLES = ("owner", "tech")   # the client (owner) and the expert (tech)
 PLACES = ("sdeleni", "logo", "pohyb", "struktura", "vzhled", "web")
 LABEL = {"sdeleni": "sdělení", "logo": "logo", "pohyb": "pohyb", "struktura": "struktura", "vzhled": "vzhled", "web": "hotový web"}
@@ -93,7 +93,8 @@ APP_WHAT = {
     "web": "Hotová aplikace (nebo ověřovací stavba studia) na stálé adrese, výsledky brány studia (`podklady/overenie.json`: app_flows, "
            "app_states, keyboard_flows, task_recovery, axe) a soubory aplikace v pracovním adresáři (jen ke čtení).",
 }
-APP_FILES = {"struktura": [("docs/design/screens.json", True), (".aid-ui/baseline/tasks.json", False), ("zadani.md", False),
+APP_FILES = {"web": [("site/**", True), (".aid-ui/verify/result.json", False)],   # the built app and the gate's result
+             "struktura": [("docs/design/screens.json", True), (".aid-ui/baseline/tasks.json", False), ("zadani.md", False),
                            ("docs/plans/roadmap.md", False)]}
 APP_SKIP = {"sdeleni": "aplikace slogan ani hlavní sdělení nepotřebuje (aplikace-postup.md, oddíl 0)",
             "pohyb": "aplikace pohyb značky nemá, dokud o něj PM výslovně nepožádá",
@@ -162,11 +163,14 @@ def rounds_dir(proj, place="web"):
 
 
 def rubric_file(typ, role, key, place):
-    """The rubric a role rates with at a place: `web` keeps <type>.<role>.yaml; an extra rubric is its place's."""
+    """The rubric a role rates with at a place: `web` keeps <type>.<role>.yaml; an extra rubric is its place's. A web
+    application with a new brand rates its logo with the web's logo rubrics (P116: an app has none of its own)."""
+    typ = "web-local" if (typ, key) == ("webapp", "logo") else typ
     return os.path.join(CRIT, f"{typ}.{role}.yaml" if key == "web" else f"{typ}.{role}.{key}.yaml")
 
 
 def gates_file(typ, role, key):
+    typ = "web-local" if (typ, key) == ("webapp", "logo") else typ
     return os.path.join(CRIT, f"{typ}.{role}.{key}.gates.yaml")
 
 
@@ -197,6 +201,8 @@ def freeze(proj, typ, force, phase="build", place="web"):
         die(f"a quality loop has rounds in {rd}: the rubric cannot change under it (archive the rounds to start a new loop)")
     if phase not in ("build", "launch"):
         die("--phase is build (before the deployment) or launch", 2)
+    if (typ == "webapp") != (variant_of(proj).get("type") == "webapp"):   # the bundle follows the variant: they must agree
+        die(f"--type {typ} but the project's recorded variant is {variant_of(proj).get('type') or 'none'} (docs/design/brand-state.json)", 2)
     if typ == "webapp" and skipped_place(proj, place):
         die(f"place {place} does not exist for a web application: {skipped_place(proj, place)}", 2)
     common_p = os.path.join(CRIT, f"{typ}.yaml")
@@ -270,7 +276,7 @@ def freeze(proj, typ, force, phase="build", place="web"):
                          "zdůvodni.\n" if r == "owner" else "")
         role = tpl.format(persona_who=main["persona"]["who"], persona_wants=main["persona"]["wants"],
                           place_name="hotová aplikace" if typ == "webapp" and place == "web" else LABEL[place],
-                          place_what=(APP_WHAT if typ == "webapp" else WHAT)[place], directions_rule=directions_rule, client_memory=client_memory,
+                          place_what=(APP_WHAT if typ == "webapp" else WHAT).get(place, WHAT[place]), directions_rule=directions_rule, client_memory=client_memory,
                           persona_rules="\n".join("- " + x for x in persona_rules), criteria="\n\n".join(sections), context=ctx,
                           lang=lang, schema=schema)
         if phase == "build" and place == "web":
