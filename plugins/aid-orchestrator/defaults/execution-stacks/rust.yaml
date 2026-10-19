@@ -4,6 +4,7 @@ rust_test:
   # DEPENDENCY: cargo (rustup toolchain)
   command: "bash {plugin_path}/scripts/aid-run-gates.sh record-tests --glob '**/tests/**/*.rs' --evidence-file {evidence_dir}/gates/rust_test.evidence.json -- cargo test"
   runs_project_tests: true   # P110: it runs the project's tests and proves it (evidence file)
+  timeout_seconds: 900   # the whole suite; the default 60 s cut it silently (aidlab-apps 16. 10. 2026)
   required: true
 rust_clippy:
   # DEPENDENCY: clippy (rustup component add clippy)

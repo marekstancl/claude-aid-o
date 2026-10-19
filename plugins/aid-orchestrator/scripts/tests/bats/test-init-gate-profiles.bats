@@ -392,3 +392,14 @@ YAML
   printf 'project_tests: []\n' >> .aid-o/config/execution.yaml
   ! execution_yaml_lacks_project_tests .aid-o/config/execution.yaml
 }
+
+@test "a fresh python workspace gets the test gate a suite-sized timeout and the plan_diff gate every plan-final run owes (aidlab-apps 16. 10. 2026)" {
+  touch pyproject.toml
+  source "$HELPER"
+  mapfile -t stacks < <(detect_stacks "$PWD")
+  mkdir -p .aid-o/config
+  compose_execution_yaml "$PWD" .aid-o/config/execution.yaml "${stacks[@]}"
+  [ "$(yq '.gates.py_test.timeout_seconds' .aid-o/config/execution.yaml)" = 900 ]
+  [ "$(yq '.gates.plan_diff.required' .aid-o/config/execution.yaml)" = true ]
+  [[ "$(yq '.gates.plan_diff.command' .aid-o/config/execution.yaml)" == *"aid-plan-diff.sh --plan {plan_path}"*"--isolated --cwd ."* ]]
+}

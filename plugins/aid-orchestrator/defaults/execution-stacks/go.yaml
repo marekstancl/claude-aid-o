@@ -4,6 +4,7 @@ go_test:
   # DEPENDENCY: go toolchain (go test is built-in)
   command: "bash {plugin_path}/scripts/aid-run-gates.sh record-tests --glob '**/*_test.go' --evidence-file {evidence_dir}/gates/go_test.evidence.json -- go test ./..."
   runs_project_tests: true   # P110: it runs the project's tests and proves it (evidence file)
+  timeout_seconds: 900   # the whole suite; the default 60 s cut it silently (aidlab-apps 16. 10. 2026)
   required: true
 go_lint:
   # DEPENDENCY: golangci-lint must be installed (https://golangci-lint.run/usage/install)

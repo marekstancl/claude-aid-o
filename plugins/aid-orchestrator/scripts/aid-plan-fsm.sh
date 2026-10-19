@@ -6451,6 +6451,9 @@ cmd_plan_close() {
       # EPIC the review did not accept reads `verdict: administrative` there. The PM asked for it for two real cases: work developed
       # outside AID, and a plugin defect that strands a plan for hours.
       --administrative) _PFSM_ADMIN_CLOSE=1; shift ;;
+      # The close removes the execution worktree; changed or untracked files in it are refused
+      # first (WAN 19. 10. 2026 lost a PM document that way). This flag is the explicit opposite.
+      --discard-worktree-changes) _PFSM_DISCARD_WT=1; shift ;;
       --*) echo "ERROR: plan-close: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1"
@@ -6501,6 +6504,19 @@ cmd_plan_close() {
   # directory you are standing in strands the caller in a deleted cwd. No
   # redirect exists for this; refuse and name the one correct move.
   _pfsm_refuse_inside_plan_worktree "$plan_id" "$root" "plan-close" || exit 1
+
+  # Before anything changes: the worktree the close will remove holds no work of anyone's.
+  local _wt_close _wt_dirty; _wt_close="$(aid_plan_recorded_worktree "$root" "$plan_id" 2>/dev/null || true)"
+  if [[ -n "$_wt_close" && -d "$_wt_close" && "${_PFSM_DISCARD_WT:-0}" -ne 1 ]]; then
+    _wt_dirty="$(git -C "$_wt_close" status --porcelain --untracked-files=all 2>/dev/null | head -20 || true)"
+    if [[ -n "$_wt_dirty" ]]; then
+      echo "PRECONDITION FAIL: plan-close: REFUSED (plan_close_worktree_dirty): the execution worktree ${_wt_close} holds changes the close would delete:" >&2
+      sed 's/^/  /' <<< "$_wt_dirty" >&2
+      echo "next: commit them on the plan branch, or move them out of the worktree; to delete them on purpose: plan-close ${plan_id} --discard-worktree-changes" >&2
+      echo "(pipeline.md §When AID refuses: plan_close_worktree_dirty)" >&2
+      exit 1
+    fi
+  fi
 
   if [[ ! -f "$(plan_manifest_path "$plan_id")" ]]; then
     echo "PRECONDITION FAIL: plan-close: no plan-boundary-manifest for ${plan_id} — there is nothing to close." >&2

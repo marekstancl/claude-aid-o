@@ -75,6 +75,21 @@ EOF
 #       P115: the `check_ui_handover:` gate entry (2-space indented, inside `gates:`): the run gate of a plan made
 #       from the /aid-ui handover package. Composed into every profile; the existing-project upgrade adds the
 #       entry and the profile items (execution_yaml_upgrade). Skips every plan without ui_package.
+# render_plan_diff_gate_block — the plan-final run owes plan_diff whatever the profile says
+# (aid-plan-fsm.sh _pfsm_plan_required_floor); a project without the definition fails it as an
+# undefined gate (aidlab-apps 16. 10. 2026 added it by hand — this is that working wording).
+render_plan_diff_gate_block() {
+  cat <<'EOF'
+  plan_diff:
+    description: "Plan AC blocks materially satisfied in the candidate"
+    required: true
+    type: deterministic
+    command: "bash {plugin_path}/scripts/aid-plan-diff.sh --plan {plan_path} --evidence-dir .aid-o/work/evidence/{epic_id}/{run_id} --base-commit {base_commit} --isolated --cwd ."
+    timeout_seconds: 1900
+    pass_criteria: "exit 0 (all present); exit 2 legacy skip; exit 3 cwd_not_worktree is a failure"
+    max_retries: 0
+EOF
+}
 render_ui_handover_gate_block() {
   cat <<'EOF'
   check_ui_handover:
@@ -462,6 +477,8 @@ EOF
     render_targeted_tests_gate_block
     echo "  # === The /aid-ui handover package (P115) ==="
     render_ui_handover_gate_block
+    echo "  # === The plan's acceptance points at the close (owed by every plan-final run) ==="
+    render_plan_diff_gate_block
 
     # P061 E1 Step 5/6: generic gate_profiles substrate — only gate names the
     # stacks above actually defined go into include[]; empty when no stack
