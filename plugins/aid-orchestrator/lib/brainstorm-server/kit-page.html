@@ -5,75 +5,116 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
 <!-- The companion kit page (scripts/aid-companion.sh show). Fixed: the agent fills navrh.json, never this file.
-     Layout from the PM (WAN P110, 19. 10. 2026): one screen, three columns — points left, preview in the
-     middle, the open point right; the page itself never scrolls, a long column scrolls inside itself. -->
+     Layout (PM, 19. 10. 2026): everything to decide in one panel on the left, the preview takes the rest; the
+     variant tabs above the preview. The page itself never scrolls, a long panel scrolls inside itself. -->
 <style>
-:root{--ink:#1c1917;--mute:#57534e;--faint:#6b6560;--line:#e7e5e4;--bg:#fff;--soft:#f5f5f4;--rec:#0f766e;--new:#b45309}
+:root{
+  --bg:#f4f5f7; --panel:#ffffff; --ink:#1f2933; --text:#3e4c59; --mute:#52606d; --line:#e4e7eb; --soft:#f5f7fa;
+  --accent:#3b5bdb; --accent-soft:#edf2ff; --accent-line:#bac8ff; --rec:#0c7a5b; --rec-soft:#e6f6f0; --new:#9a4f00; --new-soft:#fff4e5;
+  --r:10px;
+}
 *{box-sizing:border-box}
-html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
-.ap{display:grid;grid-template-columns:230px minmax(0,1fr) 380px;height:100vh}
-.ap.text{grid-template-columns:230px minmax(0,1fr)}
-.ap.text .c{display:none}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;color:inherit}
+.ap{display:grid;grid-template-columns:420px minmax(0,1fr);height:100vh}
 .ap>*{min-height:0}
-.l{border-right:1px solid var(--line);padding:12px 14px;overflow:auto;display:flex;flex-direction:column;gap:2px}
-h4{margin:12px 0 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
-.l h4:first-child{margin-top:0}
-.nav{display:block;width:100%;text-align:left;border:0;background:none;border-radius:10px;padding:8px 10px;cursor:pointer;font:inherit}
-.nav:hover{background:var(--soft)}.nav.on{background:var(--ink);color:#fff}
-.nav small{display:block;font-size:12px;opacity:.7}
-.seg{display:flex;border:1px solid #d6d3d1;border-radius:999px;overflow:hidden}
-.seg button{flex:1;border:0;background:#fff;padding:7px 0;cursor:pointer;font:inherit;font-size:13px}
-.seg button.on{background:var(--ink);color:#fff}
-.small{font-size:12px;color:#6b6560;margin:6px 0 0}
-.send{margin-top:auto;background:var(--ink);color:#fff;border:0;border-radius:999px;padding:10px;font:inherit;cursor:pointer}
-.c{display:flex;flex-direction:column;padding:12px 16px;min-width:0}
-.tabs{display:flex;gap:6px;flex-wrap:wrap;padding:0 0 8px}
-.tab{border:1px solid #d6d3d1;background:#fff;border-radius:999px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer}
-.tab.on{background:var(--ink);color:#fff;border-color:var(--ink)}.tab.past{border-style:dashed}
-.pv{flex:1;min-height:0;overflow:auto;background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:10px;display:flex;justify-content:center;align-items:flex-start}
-.pv img{display:block;height:auto;border-radius:6px;box-shadow:0 1px 6px rgba(0,0,0,.1);cursor:zoom-in}
+
+/* ── the panel: everything to decide ── */
+.l{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.head{padding:16px 20px 12px;border-bottom:1px solid var(--line)}
+.kicker{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+#nav{display:flex;flex-direction:column;gap:4px;margin-top:10px;max-height:30vh;overflow:auto}
+.nav{display:flex;align-items:baseline;gap:10px;width:100%;text-align:left;border:1px solid transparent;background:none;border-radius:8px;padding:7px 10px;cursor:pointer}
+.nav:hover{background:var(--soft)}
+.nav.on{background:var(--accent-soft);border-color:var(--accent-line)}
+.nav .n{flex:none;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;background:var(--soft);color:var(--mute)}
+.nav.on .n{background:var(--accent);color:#fff}
+.nav .t{flex:1;color:var(--ink);font-weight:500}
+.nav small{flex:none;font-size:12px;color:var(--mute)}
+.rs{flex:1;min-height:0;overflow:auto;padding:18px 20px}
+.r h2{margin:0;font-size:19px;line-height:1.35;color:var(--ink)}
+.q{margin:8px 0 0;color:var(--text)}
+.sec{margin:18px 0 8px;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+.opt{display:block;width:100%;text-align:left;border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;background:#fff;cursor:pointer;margin-top:8px;transition:border-color .15s,background .15s}
+.opt:hover{border-color:var(--accent-line)}
+.opt.sel{border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.opt .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.opt .k{flex:none;width:24px;height:24px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;background:var(--soft);color:var(--ink)}
+.opt.sel .k{background:var(--accent);color:#fff}
+.opt b{font-size:15px;color:var(--ink)}
+.opt p{margin:6px 0 0;font-size:14px;color:var(--text)}
+.opt .z{font-size:13px;color:var(--mute)}
+.badge{display:inline-block;border-radius:999px;font-size:12px;font-weight:600;padding:1px 9px;background:var(--rec-soft);color:var(--rec)}
+.badge.new{background:var(--new-soft);color:var(--new)}
+.why{margin-top:14px;padding:12px 14px;border-radius:var(--r);background:var(--rec-soft);font-size:14px;color:var(--ink)}
+.why b{color:var(--rec)}
+.rules{margin-top:12px;padding:12px 14px;border-radius:var(--r);background:var(--soft);font-size:13px;color:var(--text)}
+.rules b{color:var(--ink)}
+.rules ul{margin:6px 0 0;padding-left:18px}
+.decided{margin-top:16px;font-size:13px;color:var(--mute)}
+.decided summary{cursor:pointer}
+.decided p{margin:4px 0 0}
+.rf{border-top:1px solid var(--line);padding:12px 20px 16px;background:var(--panel)}
+textarea{width:100%;min-height:62px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;font-size:14px;resize:vertical;color:var(--ink)}
+textarea:focus,.opt:focus-visible,.nav:focus-visible,button:focus-visible{outline:2px solid var(--accent-line);outline-offset:1px}
+.row{display:flex;gap:8px;margin-top:10px;align-items:center}
+.ghost{flex:1;border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px;cursor:pointer;color:var(--ink)}
+.ghost:hover:not(:disabled){border-color:var(--accent-line);color:var(--accent)}
+.ghost:disabled{opacity:.45;cursor:default}
+.send{flex:2;border:0;border-radius:8px;padding:9px 12px;cursor:pointer;background:var(--accent);color:#fff;font-weight:600}
+.send:hover{filter:brightness(1.08)}
+.small{font-size:12px;color:var(--mute);margin:8px 0 0}
+
+/* ── the preview: the rest of the screen ── */
+.c{display:flex;flex-direction:column;min-width:0;padding:14px 20px 12px}
+.bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-bottom:12px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;flex:1}
+.tab{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text)}
+.tab:hover{border-color:var(--accent-line)}
+.tab.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}
+.tab.past{border-style:dashed}
+.seg{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:#fff}
+.seg button{border:0;background:none;padding:6px 14px;cursor:pointer;font-size:14px;color:var(--text)}
+.seg button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.pv{flex:1;min-height:0;overflow:auto;background:#e9ecf0;border-radius:12px;padding:16px;display:flex;justify-content:center;align-items:flex-start}
+.pv img{display:block;height:auto;border-radius:6px;box-shadow:0 2px 12px rgba(31,41,51,.14);cursor:zoom-in;background:#fff}
 .pv.d img{max-width:min(100%,960px)}.pv.m img{max-width:min(100%,390px)}
 .pv.real img{max-width:none;cursor:zoom-out}
-.hint{font-size:12px;color:var(--faint);margin-top:6px}
-.r{border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
-.rs{flex:1;min-height:0;overflow:auto;padding:12px 16px 10px}
-.rf{border-top:1px solid var(--line);padding:8px 16px 12px;background:#fff}
-.r h2{margin:0;font-size:18px}.q{color:var(--mute);margin:4px 0 0}
-.opt{display:block;width:100%;text-align:left;border:1px solid #d6d3d1;border-radius:12px;padding:10px 12px;background:#fff;cursor:pointer;font:inherit;margin-top:8px}
-.opt.sel{border:2px solid var(--ink);padding:9px 11px}
-.opt b{font-size:14px}.opt p{margin:4px 0 0;color:var(--mute);font-size:13px}
-.opt .z{color:var(--faint);font-size:12px}
-.badge{display:inline-block;margin-left:6px;color:#fff;border-radius:999px;font-size:11px;padding:1px 7px;vertical-align:middle;background:var(--rec)}
-.badge.new{background:var(--new)}
-.why{font-size:13px;margin:10px 0 0}
-.rules{font-size:12px;color:var(--mute);margin:10px 0 0;padding:8px 10px;background:var(--soft);border-radius:8px}
-.rules ul{margin:4px 0 0;padding-left:16px}
-textarea{width:100%;min-height:64px;border:1px solid #d6d3d1;border-radius:10px;padding:8px;font:inherit;font-size:13px;resize:vertical}
-.pg{display:flex;gap:6px;margin-top:8px}.pg button{flex:1;border:1px solid #d6d3d1;background:#fff;border-radius:999px;padding:7px;cursor:pointer;font:inherit;font-size:13px}
-.pg button:disabled{opacity:.4;cursor:default}
+.hint{font-size:13px;color:var(--mute);margin:8px 2px 0}
+.empty{margin:auto;max-width:420px;text-align:center;color:var(--mute)}
+.ap.text .pv img{display:none}
+
 @media (max-width:900px){
   html,body{overflow:auto}
-  .ap,.ap.text{display:block;height:auto}
-  .l,.r{border:0}.c{padding:8px}.pv{max-height:70vh}
+  .ap{display:block;height:auto}
+  .l{border:0}.c{padding:10px}.pv{max-height:70vh}
 }
 </style>
 </head>
 <body>
 <div class="ap" id="ap">
  <aside class="l">
-  <h4 id="ptitle"></h4><div id="nav"></div>
-  <div id="viewbox"><h4>Zobrazení</h4><div class="seg"><button data-view="desktop">Počítač</button><button data-view="mobile">Telefon</button></div></div>
-  <div id="decided"></div>
-  <p class="small">↑ ↓ přepíná body. Klik na náhled ukáže skutečnou velikost.</p>
-  <button class="send" id="send">Odeslat volby a poznámky</button>
-  <p class="small" id="count"></p><p class="small" id="sent"></p>
+  <div class="head"><div class="kicker" id="ptitle"></div><div id="nav"></div></div>
+  <div class="rs r">
+   <h2 id="title"></h2><p class="q" id="q"></p>
+   <div class="sec">Možnosti</div><div id="opts"></div>
+   <div class="why" id="why"></div>
+   <div class="rules" id="rules"></div>
+   <div class="decided" id="decided"></div>
+  </div>
+  <div class="rf">
+   <textarea id="note" placeholder="Poznámka k tomuto bodu – co upravit, co se nelíbí (nepovinné)"></textarea>
+   <div class="row"><button class="ghost" id="prev">← Předchozí</button><button class="ghost" id="next">Další →</button></div>
+   <div class="row"><button class="send" id="send">Odeslat volby a poznámky</button></div>
+   <p class="small"><span id="count"></span> · ↑ ↓ přepíná body <span id="sent"></span></p>
+  </div>
  </aside>
- <section class="c"><div class="tabs" id="tabs"></div><div class="pv d" id="pv"><img id="img" alt="náhled" hidden></div><p class="hint" id="cap"></p></section>
- <aside class="r">
-  <div class="rs"><h2 id="title"></h2><p class="q" id="q"></p><div id="opts"></div><p class="why" id="why"></p><div class="rules" id="rules"></div></div>
-  <div class="rf"><h4 style="margin-top:0">Poznámka</h4><textarea id="note" placeholder="Co upravit, co se nelíbí (nepovinné)"></textarea>
-   <div class="pg"><button id="prev">← Předchozí</button><button id="next">Další →</button></div></div>
- </aside>
+ <section class="c">
+  <div class="bar"><div class="tabs" id="tabs"></div>
+   <div class="seg" id="viewbox"><button data-view="desktop">Počítač</button><button data-view="mobile">Telefon</button></div></div>
+  <div class="pv d" id="pv"><img id="img" alt="náhled" hidden><p class="empty" id="empty" hidden>Tento bod je otázka bez náhledu – odpověz vlevo.</p></div>
+  <p class="hint" id="cap"></p>
+ </section>
 </div>
 <script type="application/json" id="navrh">__DATA__</script>
 <script>
@@ -93,21 +134,22 @@ function render(){
   $('#ap').classList.toggle('text', !pointShots);
   $('#viewbox').style.display = (hasShots && VIEWS.length > 1) ? '' : 'none';
   $('#ptitle').textContent = D.plan + ' · kolo ' + D.kolo;
-  $('#nav').innerHTML = B.map((x, i) => `<button class="nav ${i===st.i?'on':''}" data-i="${i}">${i+1}. ${esc(x.title)}<small>zvoleno ${esc(st.pick[x.id] || '–')}${st.notes[x.id] ? ' · poznámka' : ''}</small></button>`).join('');
-  $('#decided').innerHTML = D.rozhodnuto.length ? '<h4>Už rozhodnuto</h4>' + D.rozhodnuto.map(t => `<p class="small">${esc(t)}</p>`).join('') : '';
+  $('#nav').innerHTML = B.map((x, i) => `<button class="nav ${i===st.i?'on':''}" data-i="${i}"><span class="n">${i+1}</span><span class="t">${esc(x.title)}</span><small>${st.pick[x.id] ? 'volba ' + esc(st.pick[x.id]) : '–'}${st.notes[x.id] ? ' · ✎' : ''}</small></button>`).join('');
+  $('#decided').innerHTML = D.rozhodnuto.length ? '<details><summary>Už rozhodnuto (' + D.rozhodnuto.length + ')</summary>' + D.rozhodnuto.map(t => `<p>${esc(t)}</p>`).join('') + '</details>' : '';
   document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x.dataset.view === st.view));
+  $('#empty').hidden = !!pointShots;
   if (pointShots) {
     const list = shotsOf(b), sc = list[Math.min(st.tab, Math.max(list.length - 1, 0))];
     $('#tabs').innerHTML = (b.minule.length ? `<button class="tab past ${st.past?'on':''}" data-past="1">Minulé kolo</button>` : '')
-      + (o ? o.snimky.map((x, k) => `<button class="tab ${!st.past && k===st.tab ? 'on' : ''}" data-tab="${k}">${esc(o.klic)}: ${esc(x.popisek)}</button>`).join('') : '');
+      + (o ? o.snimky.map((x, k) => `<button class="tab ${!st.past && k===st.tab ? 'on' : ''}" data-tab="${k}">${esc(o.klic)} · ${esc(x.popisek)}</button>`).join('') : '');
     $('#pv').className = 'pv ' + (st.view === 'desktop' ? 'd' : 'm') + (st.real ? ' real' : '');
     const src = sc ? sc.soubory[st.view] : '';
     if (src) $('#img').src = src; $('#img').hidden = !src;
-    $('#cap').textContent = sc ? (st.past ? 'Minulé kolo: ' : '') + sc.popisek + (src ? '' : ' (pro toto zobrazení snímek není)') : '';
-  }
-  $('#title').textContent = (st.i + 1) + '. ' + b.title; $('#q').textContent = b.otazka;
-  $('#opts').innerHTML = b.moznosti.map(x => `<button class="opt ${o && x.klic===o.klic ? 'sel' : ''}" data-k="${esc(x.klic)}"><b>${esc(x.klic)}) ${esc(x.nazev)}</b>${x.klic===b.doporuceni ? '<span class="badge">doporučuju</span>' : ''}${x.nove.map(n => `<span class="badge new" title="${esc(n.duvod)}">nová komponenta</span>`).join('')}<p>${esc(x.popis)}</p>${x.postaveno_z.length ? `<p class="z">Postaveno z: ${esc(x.postaveno_z.join(', '))}</p>` : ''}${x.nove.map(n => `<p class="z">Nová komponenta ${esc(n.komponenta)}: ${esc(n.duvod)}</p>`).join('')}</button>`).join('');
-  $('#why').innerHTML = `<b>Doporučuju ${esc(b.doporuceni)}:</b> ${esc(b.proc)}`;
+    $('#cap').textContent = sc ? (st.past ? 'Minulé kolo – ' : '') + sc.popisek + (src ? ' · klik na náhled ukáže skutečnou velikost' : ' (pro toto zobrazení snímek není)') : '';
+  } else { $('#tabs').innerHTML = ''; $('#cap').textContent = ''; $('#img').hidden = true; }
+  $('#title').textContent = b.title; $('#q').textContent = b.otazka;
+  $('#opts').innerHTML = b.moznosti.map(x => `<button class="opt ${o && x.klic===o.klic ? 'sel' : ''}" data-k="${esc(x.klic)}"><span class="top"><span class="k">${esc(x.klic)}</span><b>${esc(x.nazev)}</b>${x.klic===b.doporuceni ? '<span class="badge">doporučuju</span>' : ''}${x.nove.map(n => `<span class="badge new" title="${esc(n.duvod)}">nová komponenta</span>`).join('')}</span><p>${esc(x.popis)}</p>${x.postaveno_z.length ? `<p class="z">Postaveno z: ${esc(x.postaveno_z.join(', '))}</p>` : ''}${x.nove.map(n => `<p class="z">Nová komponenta ${esc(n.komponenta)}: ${esc(n.duvod)}</p>`).join('')}</button>`).join('');
+  $('#why').innerHTML = `<b>Doporučuju ${esc(b.doporuceni)}.</b> ${esc(b.proc)}`;
   $('#rules').innerHTML = b.soulad_s_pravidly.length ? '<b>Agent uvádí, z jakých pravidel vychází</b><ul>' + b.soulad_s_pravidly.map(r => `<li>${esc(r.pravidlo)}: ${esc(r.jak)}</li>`).join('') + '</ul>' : '';
   $('#rules').style.display = b.soulad_s_pravidly.length ? '' : 'none';
   $('#note').value = st.notes[b.id] || '';
@@ -129,7 +171,7 @@ document.addEventListener('click', e => {
   else if (t.id === 'send') {
     const sel = B.map(x => ({ bod: x.id, volba: st.pick[x.id] || null }));
     send({ type: 'confirm', selected: sel, notes: st.notes });
-    $('#sent').textContent = 'Odesláno. Napiš do terminálu „hotovo“.'; return;
+    $('#sent').textContent = '· odesláno, napiš do terminálu „hotovo“'; return;
   } else return;
   render();
 });

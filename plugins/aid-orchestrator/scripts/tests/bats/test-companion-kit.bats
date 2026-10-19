@@ -210,7 +210,7 @@ EOF
   [ "$(jq -r .count <<< "$output")" = "Zvoleno 2 z 2" ]; [ "$(jq -r .past <<< "$output")" = 1 ]
   [ "$(jq -r .counter2 <<< "$output")" = "Zvoleno 2 z 2" ]; [ "$(jq -r .badge <<< "$output")" -ge 1 ]; [ "$(jq -r .phoneMax <<< "$output")" = "min(100%, 390px)" ]
   [[ "$(jq -r .phone <<< "$output")" == *"pv m"* ]]
-  [ "$(jq -r .title <<< "$output")" = "2. Textová otázka" ]; [ "$(jq -r .textOnly <<< "$output")" = true ]
+  [ "$(jq -r .title <<< "$output")" = "Textová otázka" ]; [ "$(jq -r .textOnly <<< "$output")" = true ]
   [ "$(jq -r .real <<< "$output")" = true ]; [ "$(jq -r .pinned <<< "$output")" = true ]
 }
 
