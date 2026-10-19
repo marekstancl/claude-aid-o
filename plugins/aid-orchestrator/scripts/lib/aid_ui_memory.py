@@ -70,15 +70,66 @@ def supply_items(p, place):
     return items
 
 
+STUDIO_OUT = (".aid-ui/", "docs/design/", "docs/ui/", "site/")   # what the studio writes is never the client's source
+CLIENT_IN = (".aid-ui/sources/", ".aid-ui/old-site/")
+
+
+def source_ok(project, src, quote):
+    """None when <file>:<line>[-<line>] is a regular file of the project (no symlink on its path, not the studio's own
+    output) and the quote stands on those lines (whitespace folded); else why not."""
+    m = re.fullmatch(r"(\S+?):([1-9][0-9]*)(?:-([1-9][0-9]*))?", src or "")
+    if not m:
+        return "source %r is not <file>:<line> or <file>:<from>-<to>" % src
+    rel, a = m.group(1), int(m.group(2))
+    b = int(m.group(3) or a)
+    if os.path.isabs(rel) or os.path.normpath(rel) != rel or rel.startswith(".." + os.sep) or b < a or b - a > 40:   # ./site, a//b: not normal
+        return "source %s: a relative path in the project and at most 40 lines" % src
+    if rel.startswith(STUDIO_OUT) and not rel.startswith(CLIENT_IN):
+        return "source %s is what the studio wrote, not a fact of the client's files" % src
+    root = os.path.realpath(project)
+    f = os.path.join(root, rel)
+    if os.path.realpath(f) != os.path.normpath(f) or not os.path.isfile(f):
+        return "source %s is no regular file of the project" % src
+    try:
+        lines = open(f, encoding="utf-8").read().splitlines()
+    except (OSError, UnicodeDecodeError):
+        return "source %s is not a text file" % src
+    if b > len(lines):
+        return "source %s: the file has %d lines" % (src, len(lines))
+    q = " ".join(str(quote or "").split())
+    if len(q) < 8:
+        return "source %s needs the quoted text (at least 8 characters) in quote" % src
+    if q not in " ".join(" ".join(lines[a - 1:b]).split()):
+        return "the quote is not on %s" % src
+    return None
+
+
 def supply_records(p, place):
-    """{key: record} of the place; an unreadable file is no record (the loop asks again, never trusts a broken one)."""
+    """{key: record} of the place that still hold: written by a client run (its turn's answer has the same status,
+    answer, source and quote for the key) and, for a fact, the quote still on the cited lines. A file or record that
+    is broken, typed in or out of date is no record: the loop asks the client again."""
     try:
         d = json.load(open(supply_file(p, place), encoding="utf-8"))
-        return {k: v for k, v in (d.get("items") or {}).items() if isinstance(v, dict) and v.get("status") in ("supplied", "decided", "missing")
-                and re.fullmatch(r"\.aid-ui/client/turns/supply-[a-z]+-r[0-9]+-[0-9]+", str(v.get("turn") or ""))   # from a client run, not typed in
-                and os.path.isfile(os.path.join(p, v["turn"], "turn.json"))}
+        items = d.get("items") or {}
     except (OSError, ValueError, AttributeError):
         return {}
+    out, turns = {}, {}
+    for k, v in items.items() if isinstance(items, dict) else []:
+        t = str((v or {}).get("turn") or "") if isinstance(v, dict) else ""
+        if not re.fullmatch(r"\.aid-ui/client/turns/supply-[a-z]+-r[0-9]+-[0-9]+", t) or v.get("status") not in ("supplied", "decided", "missing"):
+            continue
+        if t not in turns:
+            try:
+                turns[t] = {x.get("key"): x for x in (json.load(open(os.path.join(p, t, "turn.json"), encoding="utf-8")).get("answer") or {}).get("items") or [] if isinstance(x, dict)}
+            except (OSError, ValueError, AttributeError):
+                turns[t] = {}
+        x = turns[t].get(k)
+        if not x or any(str(x.get(f) or "").strip() != str(v.get(f) or "") for f in ("status", "answer", "source", "quote", "decided_kind", "reason", "missing")):
+            continue
+        if v["status"] == "supplied" and source_ok(p, v.get("source"), v.get("quote")):
+            continue
+        out[k] = v
+    return out
 
 
 def unsupplied(p, place):

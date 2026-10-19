@@ -373,8 +373,9 @@ def status(p):
     if todo:
         return dict(out, decision="fix", why="accepted findings not fixed yet: " + ", ".join(todo))
     if not accepted_any:
+        wait = [f["id"] for f in last["findings"] if f.get("state") == "blocked" and f.get("blocked_by") == "client_supply"]
         return dict(out, decision="stop:stagnation", why=("the audit did not confirm the web and " if last.get("audit") else "below acceptance and ")
-                    + "no finding was accepted for a fix")
+                    + "no finding was accepted for a fix" + ("; the rest waits on what the client has not supplied (%s): aid-ui-client.py decided" % ", ".join(wait) if wait else ""))
     return dict(out, decision="round", why="fixes recorded; rate again")
 
 

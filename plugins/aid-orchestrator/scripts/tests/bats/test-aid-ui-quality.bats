@@ -77,7 +77,7 @@ p, pl = sys.argv[1], sys.argv[2]
 items = m.unsupplied(p, pl)
 if items:
     t = ".aid-ui/client/turns/supply-%s-r%d-1" % (pl.replace("-", ""), items[0]["round"]); os.makedirs(os.path.join(p, t), exist_ok=True)
-    json.dump({}, open(os.path.join(p, t, "turn.json"), "w"))
+    json.dump({"answer": {"items": [{"key": i["key"], "status": "missing", "missing": "klient dodá později"} for i in items]}}, open(os.path.join(p, t, "turn.json"), "w"))
     f = m.supply_file(p, pl); os.makedirs(os.path.dirname(f), exist_ok=True)
     cur = m.supply_records(p, pl)
     cur.update({i["key"]: dict(i, status="missing", missing="klient dodá později", turn=t) for i in items})
@@ -449,7 +449,7 @@ for i in m.supply_items(p, "web"):
         out.append({"key": i["key"], "status": "decided", "decided_kind": "naming", "answer": "Galerie", "reason": "tak tomu říkají zákazníci"})
     else:
         src = {"good": ("docs/content/product-context.md:2", "Kváskový chleba v Brně"), "badquote": ("docs/content/product-context.md:2", "Rohlíky z Prahy a okolí"),
-               "studio": ("site/index.html:1", "chleba</body>")}[how]
+               "studio": ("site/index.html:1", "chleba</body>"), "dotted": ("./site/index.html:1", "chleba</body>")}[how]
         out.append({"key": i["key"], "status": "supplied", "answer": "pečeme kváskový chleba", "source": src[0], "quote": src[1]})
 print(json.dumps({"items": out}))
 PY2
@@ -462,7 +462,7 @@ PY2
   [ "$(dec)" = supply ]; python3 "$Q" status "$P" | jq -r .why | grep -q "aid-ui-client.py supply"
   run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"supply"* ]]
   # a quote that is not on the cited line, or the studio's own output as the source: refused, nothing recorded
-  for how in badquote studio; do
+  for how in badquote studio dotted; do
     supply_ans "$how"; run python3 "$SC/aid-ui-client.py" supply "$P" --place web
     [ "$status" -eq 1 ]; [ ! -e "$P/.aid-ui/client/supplied/web.json" ]
   done
@@ -475,6 +475,11 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   supply_ans good; run python3 "$SC/aid-ui-client.py" supply "$P" --place web; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '[.items[] | .status] | sort == ["decided","missing","supplied"]' "$P/.aid-ui/client/supplied/web.json" >/dev/null
   jq -e '[.items[] | select(.status == "supplied")][0] | .source == "docs/content/product-context.md:2" and .provider == "codex" and (.turn | startswith(".aid-ui/client/turns/supply-web-r1-"))' "$P/.aid-ui/client/supplied/web.json" >/dev/null
+  # a record edited by hand (the client's run said otherwise) or a fact whose quote left its source is no record
+  F="$P/.aid-ui/client/supplied/web.json"; cp "$F" "$T/sup.json"
+  jq '(.items[] | select(.status == "supplied") | .answer) = "pečeme rohlíky"' "$T/sup.json" > "$F"; [ "$(dec)" = supply ]; cp "$T/sup.json" "$F"
+  cp "$P/docs/content/product-context.md" "$T/pc.md"; sed -i 's/Kváskový/Pšeničný/' "$P/docs/content/product-context.md"; [ "$(dec)" = supply ]
+  cp "$T/pc.md" "$P/docs/content/product-context.md"
   # answered client findings go back to the agent; the missing readiness stays the PM's and stops nothing
   [ "$(dec)" = triage ]; python3 "$Q" status "$P" | jq -r .why | grep -q "r1-owner-f2"
   run python3 "$SC/aid-ui-client.py" supply "$P" --place web; [[ "$output" == *"nothing left"* ]]
@@ -490,4 +495,11 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   [[ "$output" == *"Dodal z podkladů"*"zdroj docs/content/product-context.md:2: „Kváskový chleba v Brně“"* ]]
   [[ "$output" == *"Rozhodl jako vlastník"*"Galerie (naming; tak tomu říkají zákazníci)"* ]]
   [[ "$output" == *"Zbývá na PM"*"vlastní fotky → fotky dodá majitel"* ]]
+}
+
+@test "supply: a client finding the client could not supply stays blocked; with nothing else to fix the loop stops and says it waits on the client" {
+  ans 6 7; qround "$P" --web "$W" >/dev/null   # qround: the client answered every item as missing
+  for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f1" rejected_with_reason --reason "úvod je konkrétní" >/dev/null; done
+  run python3 "$Q" status "$P"
+  jq -e '.decision == "stop:stagnation" and (.why | contains("waits on what the client has not supplied (r1-owner-f2, r1-tech-f2)"))' <<<"$output" >/dev/null || { echo "$output"; return 1; }
 }

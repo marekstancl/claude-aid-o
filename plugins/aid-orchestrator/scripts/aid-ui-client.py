@@ -818,46 +818,16 @@ def answer_one(s, role, dry):
 SUPPLIED_NOTE = ("\n\nCo studio nechalo na klientovi a klient dodal, je v `{}`: `supplied` = fakt z podkladů projektu se zdrojem"
                  " a doslovnou citací (ověřenou kódem), `decided` = volba vlastníka (jméno, výchozí hodnota, pořadí, výběr z možností)"
                  " s důvodem, `missing` = zatím nedodáno. Dodané a rozhodnuté ber jako odpověď klienta; posuzuješ, jestli ji studio"
-                 " použilo, ne jestli ji měl klient dát.")
-STUDIO_OUT = (".aid-ui/", "docs/design/", "docs/ui/", "site/")   # what the studio writes is never the client's source
-CLIENT_IN = (".aid-ui/sources/", ".aid-ui/old-site/")
-
-
-def source_ok(project, src, quote):
-    """None when <file>:<line>[-<line>] is a regular file of the project (no symlink on its path, not the studio's own
-    output) and the quote stands on those lines (whitespace folded); else why not."""
-    m = re.fullmatch(r"(\S+?):([1-9][0-9]*)(?:-([1-9][0-9]*))?", src or "")
-    if not m:
-        return "source %r is not <file>:<line> or <file>:<from>-<to>" % src
-    rel, a = m.group(1), int(m.group(2))
-    b = int(m.group(3) or a)
-    if os.path.isabs(rel) or ".." in rel.split("/") or b < a or b - a > 40:
-        return "source %s: a relative path in the project and at most 40 lines" % src
-    if rel.startswith(STUDIO_OUT) and not rel.startswith(CLIENT_IN):
-        return "source %s is what the studio wrote, not a fact of the client's files" % src
-    root = os.path.realpath(project)
-    f = os.path.join(root, rel)
-    if os.path.realpath(f) != os.path.normpath(f) or not os.path.isfile(f):
-        return "source %s is no regular file of the project" % src
-    try:
-        lines = open(f, encoding="utf-8").read().splitlines()
-    except (OSError, UnicodeDecodeError):
-        return "source %s is not a text file" % src
-    if b > len(lines):
-        return "source %s: the file has %d lines" % (src, len(lines))
-    q = " ".join(str(quote or "").split())
-    if len(q) < 8:
-        return "source %s needs the quoted text (at least 8 characters) in quote" % src
-    if q not in " ".join(" ".join(lines[a - 1:b]).split()):
-        return "the quote is not on %s" % src
-    return None
+                 " použilo, ne jestli ji měl klient dát. Citace, která odpověď nedokládá, je nález (nepodložené tvrzení).")
+source_ok = memory.source_ok
 
 
 def supply_check(project, items, a):
     if not isinstance(a, dict) or not isinstance(a.get("items"), list):
         return "no items list in the JSON"
+    keys = [x.get("key") for x in a["items"] if isinstance(x, dict)]
+    errs = ["the answer must have each item's key exactly once, and no other" ] if sorted(keys) != sorted(i["key"] for i in items) else []
     got = {x.get("key"): x for x in a["items"] if isinstance(x, dict)}
-    errs = []
     for it in items:
         x = got.get(it["key"])
         if not x:
@@ -937,6 +907,9 @@ def supply(project, place, dry):
     os.makedirs(os.path.dirname(f), exist_ok=True)
     with open(f + ".lock", "w") as lk:
         fcntl.flock(lk, fcntl.LOCK_EX)
+        now_keys = {i["key"] for i in memory.supply_items(project, place)}
+        if not {i["key"] for i in items} <= now_keys:   # a new round came while the client answered: its items are another batch
+            die("SUPPLY %s: the place has a newer round than the one answered; run supply again" % place)
         cur = memory.supply_records(project, place)
         for it in items:
             x = got[it["key"]]
