@@ -63,6 +63,10 @@
             }
           },
           "sample": {"type": "array", "description": "ukázkové řádky naplněného stavu (označené jako ukázka, nikdy skutečná data): jak vypadá pozice, signál, položka", "items": {"$ref": "#/$defs/text"}},
+          "tables": {"type": "array", "description": "ukázkové tabulky naplněného stavu: datová tabulka místo grafu (úrovně obchodu), seznam s více sloupci; každý řádek má tolik buněk, kolik je sloupců",
+                     "items": {"type": "object", "required": ["caption", "columns", "rows"], "additionalProperties": false,
+                               "properties": {"caption": {"$ref": "#/$defs/text"}, "columns": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
+                                              "rows": {"type": "array", "minItems": 1, "items": {"type": "array", "items": {"type": "string"}}}}}},
           "fields": {"type": "array", "description": "pole formuláře obrazovky: lidský popisek, nápověda (meze) a pevné volby místo volného textu",
                      "items": {"type": "object", "required": ["name", "label"], "additionalProperties": false,
                                "properties": {"name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$"}, "label": {"$ref": "#/$defs/text"},

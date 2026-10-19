@@ -372,8 +372,11 @@ def app_page(m, scr, approved, fields, results, ends, shell):
     switch = "".join(f'<a href="?stav={k}" data-aid-stav-link="{k}">{t}</a> ' for k, t in STATES)
     res = "".join(f'<p class="vysledek" role="status" data-aid-result="{esc(t)}">{esc(e)}</p>' for t, e in results)
     retry = f'<p><a class="akce" href="{esc(url[sid])}" data-aid-retry>Zkusit znovu</a></p>'
-    sample = ("" if not scr.get("sample") else '<figure class="ukazka"><figcaption>Ukázka (ne skutečná data)</figcaption><ul>'
-              + "".join(f"<li>{esc(x)}</li>" for x in scr["sample"]) + "</ul></figure>")
+    tables = "".join(f'<table><caption>{esc(tb["caption"])}</caption><thead><tr>' + "".join(f'<th scope="col">{esc(c)}</th>' for c in tb["columns"])
+                     + "</tr></thead><tbody>" + "".join("<tr>" + "".join(f"<td>{esc(c)}</td>" for c in row) + "</tr>" for row in tb["rows"]) + "</tbody></table>"
+                     for tb in scr.get("tables") or [])
+    sample = ("" if not (scr.get("sample") or tables) else '<figure class="ukazka"><figcaption>Ukázka (ne skutečná data)</figcaption>'
+              + ("" if not scr.get("sample") else "<ul>" + "".join(f"<li>{esc(x)}</li>" for x in scr["sample"]) + "</ul>") + tables + "</figure>")
     states = "".join(f'<section class="stav" data-aid-state="{k}"><h2>{t}</h2><p>{esc(scr["states"][k])}</p>{sample if k == "filled" else ""}'
                      f'{retry if k == "error" and not scr["states"][k].lower().startswith("nenastává") else ""}</section>' for k, t in STATES)
     mine = [t for t in m["tasks"] if any(st["screen"] == sid for st in t["steps"])]

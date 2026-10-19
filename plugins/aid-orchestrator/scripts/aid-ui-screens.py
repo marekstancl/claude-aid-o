@@ -106,8 +106,12 @@ def violations(m, proj):
     if not any(isinstance(s, dict) and s.get("nav") is True and not s.get("shell") for s in m["screens"]):
         out.append("/screens: žádná obrazovka není v navigaci (nav: true)")
     for i, s in good_s:
-        for k, txt in [("purpose", s["purpose"])] + [("states/" + x, y) for x, y in s["states"].items()] + [(f"sample/{j}", x) for j, x in enumerate(s.get("sample") or [])]:
+        for k, txt in [("purpose", s["purpose"])] + [("states/" + x, y) for x, y in s["states"].items()] + [(f"sample/{j}", x) for j, x in enumerate(s.get("sample") or [])] \
+                + [(f"tables/{j}/rows/{r}", c) for j, tb in enumerate(s.get("tables") or []) for r, row in enumerate(tb["rows"]) for c in row]:
             refs(txt, f"/screens/{i}/{k}")
+        for j, tb in enumerate(s.get("tables") or []):
+            if any(len(row) != len(tb["columns"]) for row in tb["rows"]):
+                out.append(f"/screens/{i}/tables/{j}: řádek tabulky {tb['caption']} nemá tolik buněk, kolik je sloupců")
         for j, a in enumerate(s["actions"]):
             for k in ("label", "confirm", "confirm_yes", "confirm_no", "disabled_reason"):
                 refs(a.get(k), f"/screens/{i}/actions/{j}/{k}")
