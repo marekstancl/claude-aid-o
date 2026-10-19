@@ -70,7 +70,9 @@ const WAITING_PAGE = `<!DOCTYPE html>
 
 const app = express();
 const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+// Only the companion's own pages may talk to it: the server binds 0.0.0.0 for the VPN, so any page open in
+// the PM's browser could otherwise connect and plant "answers" for the agent (Origin and Host must both be ours).
+const wss = new WebSocket.Server({ server, verifyClient: ({ req }) => ownRequest(req) });
 
 const clients = new Set();
 
@@ -90,8 +92,8 @@ wss.on('connection', (ws, req) => {
     // Every page event, appended and never cleared: what `aid-companion.sh answers` reads.
     // An agent can write this file too, so it is the agent's input, never proof of a PM choice.
     if (['choice', 'note', 'confirm'].includes(event.type)) {
-      const row = { v: 1, plan: META.plan || null, kolo: event.kolo ?? null, page: event.page || event.screen || null,
-        event_id: crypto.randomUUID(), at: new Date().toISOString(), ...event };
+      const row = { ...event, v: 1, plan: META.plan || null, kolo: event.kolo ?? null, page: event.page || event.screen || null,
+        event_id: crypto.randomUUID(), at: new Date().toISOString() };   // server fields last: a page cannot set them
       fs.appendFileSync(path.join(SCREEN_DIR, 'answers.jsonl'), JSON.stringify(row) + '\n');
     }
   });
