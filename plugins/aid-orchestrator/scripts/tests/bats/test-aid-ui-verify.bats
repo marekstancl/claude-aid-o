@@ -553,8 +553,9 @@ YML
     echo "import fs from 'node:fs'; fs.writeFileSync('$T/imported', '$f'); export default async () => {};" > "$f"
   done
   ln -s "$T/evil.mjs" "$PROJ/.aid-ui/scenarios/evil.mjs"
+  # a pwa keeps structure.flows (a webapp runs its model, P116): the allowlist guards that path
   echo "export default async ({ page, base }) => { await page.goto(base); };" > "$PROJ/.aid-ui/scenarios/ok.mjs"
-  jq -n '{variant:{type:"webapp"},build:{id:"x",fingerprints:{"index.html":"a"}},
+  jq -n '{variant:{type:"pwa"},build:{id:"x",fingerprints:{"index.html":"a"}},
     structure:{roles:["../../../../esc"],flows:[{id:"../../x",states:["s"]},{id:"a/../../x",states:["s"]},{id:"X",states:["s"]},
       {id:"evil",states:["s"]},{id:"ok",states:["../../../../esc2"]}]}}' > "$T/state.json"
   url="$(AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" preview "$SITE" | sed -n 's/^URL: //p')"

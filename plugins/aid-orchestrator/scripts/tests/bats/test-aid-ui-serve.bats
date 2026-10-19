@@ -472,3 +472,36 @@ J
   [ "$(node "$BATS_TEST_TMPDIR/modes.mjs")" = "true true false /formular/ true true" ]
   "$SERVE" stop skeleton
 }
+
+@test "app-skeleton: a link outside its mode cannot be followed; a submit with a deep link keeps both its parameters and the input" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '.modes = [{id: "bezi", label: "Běží"}, {id: "pauza", label: "Pauza"}] | .screens[0].actions[0].modes = ["bezi"] | .screens[0].actions[0].disabled_reason = "V pauze ne."
+      | .screens[1].actions[0].query = "id=n1"' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/q.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); const r = [];
+await pg.goto('http://127.0.0.1:39918/seznam/?rezim=pauza'); await pg.locator('[data-aid-action="seznam.novy"]').click({ force: true }).catch(() => {});
+await pg.waitForTimeout(300); r.push(new URL(pg.url()).pathname);
+await pg.goto('http://127.0.0.1:39918/formular/'); await pg.fill('[name="nazev"]', 'Nákup'); await pg.click('[data-aid-action="formular.ulozit"]'); await pg.waitForURL(/detail/);
+const u = new URL(pg.url()); r.push(u.searchParams.get('id') + ' ' + u.searchParams.get('nazev'));
+console.log(r.join(' | ')); await b.close();
+J
+  [ "$(node "$BATS_TEST_TMPDIR/q.mjs")" = "/seznam/ | n1 Nákup" ]
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: Zkusit znovu in the error state keeps the screen's deep link and drops only the error" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  "$SERVE" skeleton "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/r.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage();
+await pg.goto('http://127.0.0.1:39918/detail/?id=n7&stav=error');
+console.log(await pg.locator('[data-aid-retry]').first().getAttribute('href')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/r.mjs")"; [ "$out" = "/detail/?id=n7" ] || { echo "href: $out"; return 1; }
+  "$SERVE" stop skeleton
+}

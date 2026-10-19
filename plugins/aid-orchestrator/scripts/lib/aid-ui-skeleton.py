@@ -251,10 +251,12 @@ document.querySelectorAll('[data-aid-stav-link]').forEach(function(a){if(a.datas
 document.querySelectorAll('[data-aid-back]').forEach(function(a){a.addEventListener('click',function(ev){if(document.referrer&&new URL(document.referrer).origin===location.origin){ev.preventDefault();history.back();}});});
 var main=document.querySelector('main');if(st==='loading')main.setAttribute('aria-busy','true');
 var ts=q.get('stav')||'';document.querySelectorAll('[data-aid-task-state]').forEach(function(e){e.hidden=e.dataset.aidTaskState!==ts;});
+document.querySelectorAll('[data-aid-retry]').forEach(function(a){var x=new URL(location.href);x.searchParams.delete('stav');a.setAttribute('href',x.pathname+x.search);});   // the same screen and its id, without the error
 var rz=q.get('rezim');try{if(rz)sessionStorage.setItem('aid-rezim',rz);rz=sessionStorage.getItem('aid-rezim');}catch(e){}
 var modes=document.querySelector('[data-aid-modes-list]');if(modes){var all=modes.dataset.aidModesList.split(' ');if(all.indexOf(rz)<0)rz=all[0];
 document.querySelectorAll('[data-aid-rezim-link]').forEach(function(a){if(a.dataset.aidRezimLink===rz)a.setAttribute('aria-current','true');});
 document.querySelectorAll('[data-aid-modes]').forEach(function(b){var off=b.dataset.aidModes.split(' ').indexOf(rz)<0;b.toggleAttribute('disabled',off);b.setAttribute('aria-disabled',off?'true':'false');
+if(b.tagName==='A'){if(off&&b.hasAttribute('href')){b.dataset.href=b.getAttribute('href');b.removeAttribute('href');}else if(!off&&b.dataset.href)b.setAttribute('href',b.dataset.href);}
 var r=document.getElementById(b.dataset.aidReason);if(r)r.hidden=!off;});}
 var an=document.querySelector('[data-aid-stav-oznameni]');if(an&&q.get('stav'))an.textContent='Zobrazen stav: '+(document.querySelector('[data-aid-stav-link="'+st+'"]')||{}).textContent;
 document.querySelectorAll('[data-aid-result]').forEach(function(e){e.hidden=done.indexOf(e.dataset.aidResult)<0;});
@@ -267,7 +269,7 @@ document.querySelectorAll('form[data-aid-form]').forEach(function(f){var err=f.q
 f.addEventListener('submit',function(ev){ev.preventDefault();var bad=null;f.querySelectorAll('input,select').forEach(function(i){var e=document.getElementById(i.id+'-chyba');
 if(e)e.hidden=i.checkValidity();if(!i.checkValidity()){i.setAttribute('aria-invalid','true');bad=bad||i;}else i.removeAttribute('aria-invalid');});
 if(bad){bad.focus();return;}var b=ev.submitter,to=(b&&b.getAttribute('formaction'))||f.getAttribute('action'),d=new URLSearchParams(new FormData(f));
-if(b&&b.name)d.set(b.name,b.value);var u=to+'?'+d.toString();f.setAttribute('aria-busy','true');if(b)b.disabled=true;
+if(b&&b.name)d.set(b.name,b.value);var x=new URL(to,location.href);d.forEach(function(v,k){x.searchParams.set(k,v);});var u=x.pathname+x.search;f.setAttribute('aria-busy','true');if(b)b.disabled=true;
 fetch(u).then(function(r){if(!r.ok)throw new Error(r.status);location.href=u;}).catch(function(){f.removeAttribute('aria-busy');if(b)b.disabled=false;
 err.hidden=false;err.focus();});});});})();"""
 
@@ -364,12 +366,12 @@ def app_page(m, scr, approved, fields, results, ends, shell):
     mo = m.get("modes") or []
     msw = ("" if not mo else f'<p class="rezimy" data-aid-modes-list="{esc(" ".join(x["id"] for x in mo))}">Režim (ukázka): '
            + " ".join(f'<a href="?rezim={esc(x["id"])}" data-aid-rezim-link="{esc(x["id"])}" title="{esc(x.get("text") or "")}">{esc(x["label"])}</a>' for x in mo) + "</p>")
-    bar = msw + "".join(f'<div class="lista" data-aid-screen="{esc(x["id"])}" aria-label="{esc(x["title"])}">'
+    bar = msw + "".join(f'<div class="lista" role="group" data-aid-screen="{esc(x["id"])}" aria-label="{esc(x["title"])}">'
                   f'<p class="lista-stav" role="status">{esc(x["states"]["filled"])}</p>'   # what the bar shows, not only its buttons
                   f'{actions_html(m, x, url, shell[x["id"]][0], shell[x["id"]][1])}</div>' for x in m["screens"] if x.get("shell"))
     switch = "".join(f'<a href="?stav={k}" data-aid-stav-link="{k}">{t}</a> ' for k, t in STATES)
     res = "".join(f'<p class="vysledek" role="status" data-aid-result="{esc(t)}">{esc(e)}</p>' for t, e in results)
-    retry = f'<p><a class="akce" href="{esc(url[sid])}">Zkusit znovu</a></p>'
+    retry = f'<p><a class="akce" href="{esc(url[sid])}" data-aid-retry>Zkusit znovu</a></p>'
     sample = ("" if not scr.get("sample") else '<figure class="ukazka"><figcaption>Ukázka (ne skutečná data)</figcaption><ul>'
               + "".join(f"<li>{esc(x)}</li>" for x in scr["sample"]) + "</ul></figure>")
     states = "".join(f'<section class="stav" data-aid-state="{k}"><h2>{t}</h2><p>{esc(scr["states"][k])}</p>{sample if k == "filled" else ""}'
@@ -386,6 +388,7 @@ def app_page(m, scr, approved, fields, results, ends, shell):
     li = lambda xs: "<ul>" + "".join(f"<li>{x}</li>" for x in xs) + "</ul>"
     foot = "".join(f'<details><summary>{t}</summary>{li(xs)}</details>' for t, xs in (
         ("Slovník pojmů", [f"<b>{esc(g['term'])}</b>: {esc(g['meaning'])}" for g in m.get("glossary") or []]),
+        ("Odkud jsou čísla v ukázkách", [f"<b>{esc(v['value'])}</b>: {esc(v['source'])}" for v in (m.get("values") or {}).values()]),
         ("Co aplikace záměrně nedělá", [f"{esc(o['what'])}: {esc(o['why'])}" for o in m.get("out_of_scope") or []]),
         ("Stopa požadavků", [f"{esc(r['id'])} ({esc(r['source'])}): {esc(r['text'])} → " + esc(", ".join(r.get("covered_by") or []) or "mimo rozsah: " + str(r.get("out_of_scope")))
                              for r in m.get("requirements") or []])) if xs)
@@ -431,7 +434,7 @@ def build_app(p):
         approved = (json.load(open(os.path.join(p, "docs", "design", "brand-state.json"), encoding="utf-8")).get("app") or {}).get("approved_model_sha") == sha
     except (OSError, ValueError):
         approved = False
-    fields = {}
+    fields = {x["id"]: [f["name"] for f in x.get("fields") or []] for x in m["screens"]}   # every field the screen declares
     for t in m["tasks"]:
         for st in t["steps"]:
             for n in st.get("input") or {}:

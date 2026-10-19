@@ -564,7 +564,7 @@ app_handover() {
   run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   python3 "$SK" build "$APP" >/dev/null
   s="$APP/site/seznam/index.html"; f="$APP/site/formular/index.html"; d="$APP/site/detail/index.html"
-  grep -q 'Poznámek: 3' "$s"; grep -q 'Smazat 1 z 3 poznámek?' "$d"                        # the named value in every text
+  grep -q 'Poznámek: 3' "$s"; grep -q 'Smazat 1 z 3 poznámek?' "$d"; grep -q '<b>3</b>: ukázka: tři poznámky' "$s"   # the named value in every text, with its source
   grep -q '>Smazat poznámku</a> <button type="button" data-aid-confirm-no>Nechat poznámku</button>' "$d"   # buttons name the action
   grep -q 'href="/detail/?id=nakup-1" data-aid-action="seznam.otevrit"' "$s"                # a deep link
   grep -q 'data-aid-modes="bezi" data-aid-reason="proc-seznam-novy"' "$s"; grep -q 'V pauze nové poznámky nejdou.' "$s"; grep -q 'data-aid-modes-list="bezi pauza"' "$s"
