@@ -80,6 +80,7 @@ export default async function ({ page, base, state }) {
     };
     await page.route('**/*', fail);
     await press(page, st.screen, st.action, false);
+    for (let w = 0; !hit && w < 20; w++) await page.waitForTimeout(100);   // under load the request is routed a moment after the click
     await page.unroute('**/*', fail);
     if (!hit) return { response, done: false, why: `krok ${n}: akce ${st.action} neposlala požadavek, selhání nešlo vnutit` };
     if (!(await page.locator(S(st.screen)).first().isVisible().catch(() => false)))
