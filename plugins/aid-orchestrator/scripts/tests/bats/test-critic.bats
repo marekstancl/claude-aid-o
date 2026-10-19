@@ -314,3 +314,37 @@ STUB
   [ "$status" -eq 2 ]; [[ "$output" == *"names the brief"*"does not exist"* ]]
   [ ! -f "$D/plan/prompt.md" ]
 }
+
+@test "check: level 2 is empty only when nothing follows its opening sentence but a 'nothing to suggest' sentence; a prose suggestion is not empty (share P001, 14. 10. 2026)" {
+  aid_critic_prepare P9 --moment plan >/dev/null
+  _response plan '| 1 | a | odmítnuto | proč |'
+  _answer plan '**1. a**' 'Toto je návrh pro rozhodnutí PM. První verzi by šlo omezit na nové formuláře a přehledy. Marek by získal sdílení, ale odložil by převzetí.'
+  run aid_critic_check P9 --moment plan
+  [ "$status" -eq 0 ]; [ "$(jq -r .level2_empty "$D/plan/check.json")" = "false" ]
+  _answer plan '**1. a**' 'Toto je návrh pro rozhodnutí PM. Další změnu rozsahu nenavrhuji.'
+  run aid_critic_check P9 --moment plan
+  [ "$status" -eq 0 ]; [ "$(jq -r .level2_empty "$D/plan/check.json")" = "true" ]
+  _answer plan '**1. a**' 'Toto je námět pro rozhodnutí PM.'
+  run aid_critic_check P9 --moment plan
+  [ "$status" -eq 0 ]; [ "$(jq -r .level2_empty "$D/plan/check.json")" = "true" ]
+}
+
+@test "check: an escaped pipe in a response cell does not split it — the accepted row's checked file is still read (AID 11. 10. 2026)" {
+  aid_critic_prepare P9 --moment plan >/dev/null
+  _answer plan '**1. a**\n**2. b**'
+  _response plan '| 1 | grep a \| b | PŘIJATO | `grep b` |' '| 2 | b | odmítnuto | \| `x` |'
+  run aid_critic_check P9 --moment plan
+  [ "$status" -eq 0 ]
+  _response plan '| 1 | a \| `x.sh` | PŘIJATO | někde |' '| 2 | b | odmítnuto | proč |'
+  run aid_critic_check P9 --moment plan
+  [ "$status" -eq 5 ]; [[ "$output" == *"names no checked file or command"* ]]
+}
+
+@test "prepare: a stakes paragraph with only cost lines is named as such, not as a missing paragraph (agents 12. 10. 2026)" {
+  sed 's/^\*\*Co je v sázce:\*\*.*/**Co je v sázce:** 27,94 USD za kolo./' "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-zadani.md" > "$P/.aid-o/plans/P9-zadani.md"
+  printf -- '---\nid: P9\nzadani: .aid-o/plans/P9-zadani.md\n---\n# Plan: x\n' > "$P/.aid-o/plans/P9-x.md"
+  run aid_critic_prepare P9 --moment plan --plan "$P/.aid-o/plans/P9-x.md"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"holds only cost lines"* ]]
+  [[ "$output" != *"has no **Co je v sázce:** paragraph"* ]]
+}
