@@ -111,7 +111,9 @@ cmd_answers() {
   local f="$DIR/answers.jsonl"
   [[ -s "$f" ]] || { echo "no answers yet (${f})"; return 0; }
   local k="${KOLO:-$(jq -s 'map(.kolo // 0) | max' "$f")}"
-  if (( HISTORY )); then jq -c --argjson k "$k" 'select((.kolo // 0) == $k)' "$f"; return 0; fi
+  if (( HISTORY )); then   # every event of every round; --kolo narrows it to one
+    if [[ -n "$KOLO" ]]; then jq -c --argjson k "$k" 'select((.kolo // 0) == $k)' "$f"; else cat "$f"; fi; return 0
+  fi
   jq -s --argjson k "$k" '
     map(select((.kolo // 0) == $k)) as $e
     | { kolo: $k,

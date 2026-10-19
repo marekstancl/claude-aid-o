@@ -53,10 +53,15 @@ _ws() {
   [ "$(jq -r '.volby["1"]' <<< "$output")" = A ]; [ "$(jq -r '.poznamky["2"]' <<< "$output")" = "je to hnus" ]
   [ "$(jq -r '.odeslano.type' <<< "$output")" = confirm ]; [ "$(jq -r '.odeslano.event_id' <<< "$output")" != forged ]
   run _k answers --history; [ "$(wc -l <<< "$output")" -eq 4 ]
+  # a second round: its own latest state, the first round still readable, the history holds both
+  _ws "$port" '{"type":"choice","kolo":2,"bod":"1","volba":"B"}'
+  run _k answers; [ "$(jq -r .kolo <<< "$output")" = 2 ]; [ "$(jq -r '.volby["1"]' <<< "$output")" = B ]
+  run _k answers --kolo 1; [ "$(jq -r '.volby["1"]' <<< "$output")" = A ]
+  run _k answers --history; [ "$(wc -l <<< "$output")" -eq 5 ]
   run _k up; [ "$(jq -r .reused <<< "$output")" = true ]; [ "$(jq -r .pid <<< "$output")" = "$pid" ]
   _k down
   run _k up; [ "$(jq -r .reused <<< "$output")" = false ]; [ "$(jq -r .pid <<< "$output")" != "$pid" ]
-  [ "$(wc -l < "$D/answers.jsonl")" -eq 4 ]
+  [ "$(wc -l < "$D/answers.jsonl")" -eq 5 ]
 }
 
 @test "AC1 security: a page of another origin cannot open the websocket (no planted answers)" {
@@ -166,6 +171,9 @@ EOF
   ! grep -q 'data:image/png;base64' "$D/navrh-1.html"
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-ui-proposal.sh' && aid_ui_proposal_check '$P/.aid-o/work/brainstorm/P900/proposal.json' '$P'"
   echo "$output"; [ "$status" -eq 0 ]
+  # and the check the design gate itself runs on it (aid-brainstorm-state.sh gate --phase design)
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-ui-proposal.sh' && aid_ui_proposal_basis_check '$P/.aid-o/work/brainstorm/P900/proposal.json' '$P'"
+  echo "$output"; [ "$status" -eq 0 ]
   local url; url="$(jq -r .url "$D/server.json")"
   [[ "$(curl -s "$url/")" == *"P900 · kolo 1"* ]]
   [ "$(curl -s -o /dev/null -w '%{http_code}' "$url/shots/desktop/a.png")" = 200 ]
@@ -189,6 +197,9 @@ EOF
     await p.keyboard.press('ArrowDown'); r.title = await p.textContent('#title');
     r.textOnly = await p.evaluate(() => document.getElementById('ap').classList.contains('text'));
     await p.click('.opt[data-k=B]'); r.counter2 = await p.textContent('#count');
+    await p.keyboard.press('ArrowUp'); await p.click('[data-view=desktop]'); await p.click('#img');
+    r.real = await p.evaluate(() => document.getElementById('pv').classList.contains('real') && getComputedStyle(document.getElementById('img')).maxWidth === 'none');
+    r.pinned = await p.evaluate(() => { const f = document.querySelector('.rf').getBoundingClientRect(); return Math.abs(f.bottom - innerHeight) <= 1; });
     console.log(JSON.stringify(r)); await b.close();"
   echo "$output"
   [ "$(jq -r .pageScroll <<< "$output")" = false ]; [ "$(jq -r .columnScroll <<< "$output")" = true ]
@@ -196,6 +207,7 @@ EOF
   [ "$(jq -r .count <<< "$output")" = "Zvoleno 2 z 2" ]; [ "$(jq -r .past <<< "$output")" = 1 ]
   [[ "$(jq -r .phone <<< "$output")" == *"pv m"* ]]
   [ "$(jq -r .title <<< "$output")" = "2. Textová otázka" ]; [ "$(jq -r .textOnly <<< "$output")" = true ]
+  [ "$(jq -r .real <<< "$output")" = true ]; [ "$(jq -r .pinned <<< "$output")" = true ]
 }
 
 @test "AC3 show refuses, each named: a missing field, a recommendation that is no option, keys not from A, a missing shot, a path out of the plan's dir, a component not imported from ui.components, an unresolved import, a new component file without nove, an unlisted change, a file of two options" {
@@ -236,6 +248,15 @@ EOF
   [[ "$(curl -s "http://127.0.0.1:$port/screen")" == *'data-choice="a"'* ]]
   printf '<!doctype html><html><body><p id="mine">full</p></body></html>' > "$d/full.html"; sleep 0.5
   [[ "$(curl -s "http://127.0.0.1:$port/")" == *'<p id="mine">full</p>'* ]]
+  # the helper's data-confirm still answers: the old .events and the new answers.jsonl
+  printf '<div class="options"><div class="option selected" data-choice="b">B</div></div><button data-confirm>OK</button>' > "$d/confirm.html"; sleep 0.5
+  run node --input-type=module -e "
+    import { createRequire } from 'node:module';
+    const { chromium } = createRequire('$AID_PLUGIN_PATH/lib/ui-fidelity/package.json')('@playwright/test');
+    const b = await chromium.launch({ executablePath: process.env.CHROME || undefined }); const p = await b.newPage();
+    await p.goto('http://127.0.0.1:$port/'); await p.click('[data-choice=b]'); await p.click('button[data-confirm]'); await p.waitForTimeout(500); await b.close();"
+  grep -q '"choice":"b"' "$d/.events"
+  grep -q '"type":"confirm"' "$d/answers.jsonl"
   bash "$AID_PLUGIN_PATH/lib/brainstorm-server/stop-server.sh" "$d" >/dev/null 2>&1 || true
 }
 

@@ -362,7 +362,8 @@ The companion kit (`scripts/aid-companion.sh`, the UI proposals of a brainstorm)
 lives and how it starts: show the PM the block `source "$AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh" &&
 aid_ui_config_detect <project root>` prints (`ui.dir`, `ui.components`, `ui.dev_cmd`, `ui.ready_path`,
 `ui.api_prefix` — detected from `vite.config.*` / `next.config.*` and the sources; what it cannot find is a
-comment, never a guess) and merge it into `project.yaml` only on the PM's yes. A project without UI is
+comment, never a guess; `ui.rules[]` (the files with the project's UI rules) and `ui.api_origins[]` (an API
+on another origin) are asked for, never detected) and merge it into `project.yaml` only on the PM's yes. A project without UI is
 not asked.
 
 ### What the project has to document with
