@@ -304,15 +304,25 @@ def gate_attrs(sid, a):
             f'<span id="{rid}" class="proc" hidden>{esc(a["disabled_reason"])}</span>')
 
 
-def actions_html(m, scr, url, fields, ends):
+def actions_html(m, scr, url, fields, ends, item=None):
     """The actions of one screen (data-aid-action) and the form of its submit actions. ends: action id -> the tasks it
-    ends - a link, a submit button or a confirm carries ?vysledek=<tasks>, and the result shows only then."""
+    ends - a link, a submit button or a confirm carries ?vysledek=<tasks>, and the result shows only then. item None:
+    the screen's actions without an item; item k: the actions of sample row k, with their own form holding the inputs
+    the tasks give those actions."""
     sid = scr["id"]
+    mine = [a for a in scr["actions"] if a.get("item") == item]
+    own = {n for t in m["tasks"] for st in t["steps"] if st["screen"] == sid and any(a["id"] == st["action"] and "item" in a for a in scr["actions"])
+           for n in st.get("input") or {}}   # inputs that go with an item's action live in that item's form
+    if item is None:
+        fields = [n for n in fields if n not in own]
+    else:
+        fields = [n for t in m["tasks"] for st in t["steps"] if st["screen"] == sid and any(a["id"] == st["action"] for a in mine) for n in st.get("input") or {}]
+        fields = list(dict.fromkeys(fields))
     def tail(a):   # the target's parameters: a deep link (query) and the tasks the action ends (vysledek)
         ps = ([a["query"]] if a.get("query") else []) + ([f"vysledek={','.join(ends[a['id']])}"] if ends.get(a["id"]) else [])
         return esc("?" + "&".join(ps)) if ps else ""
     acts, btns = [], []
-    for a in scr["actions"]:
+    for a in mine:
         da = f'data-aid-action="{esc(sid)}.{esc(a["id"])}"'
         if a["kind"] == "navigate":
             back = " data-aid-back" if a.get("back") else ""
@@ -347,7 +357,7 @@ def actions_html(m, scr, url, fields, ends):
                 return f'<p><label for="f-{esc(sid)}-{esc(n)}">{esc(f["label"])}</label> <select id="f-{esc(sid)}-{esc(n)}" name="{esc(n)}"{hint}>{opts}</select> {note}</p>'
             return f'<p><label for="{fid}">{esc(f["label"])}</label> <input id="{fid}" name="{esc(n)}"{hint}{lim}> {note}</p>'
         inputs = "".join(field(n) for n in fields)
-        first = next(a for a in scr["actions"] if a["kind"] == "submit")
+        first = next(a for a in mine if a["kind"] == "submit")
         form = (f'<form method="get" action="{esc(url[first["to"]])}" data-aid-form novalidate>{inputs}'
                 f'<p class="chyba" role="alert" tabindex="-1" data-aid-error hidden>{esc(scr["states"]["error"])}</p>{"".join(btns)}</form>')
     return form + (f'<div class="akce">{"".join(acts)}</div>' if acts else "")
@@ -376,7 +386,8 @@ def app_page(m, scr, approved, fields, results, ends, shell):
                      + "</tr></thead><tbody>" + "".join("<tr>" + "".join(f"<td>{esc(c)}</td>" for c in row) + "</tr>" for row in tb["rows"]) + "</tbody></table>"
                      for tb in scr.get("tables") or [])
     sample = ("" if not (scr.get("sample") or tables) else '<figure class="ukazka"><figcaption>Ukázka (ne skutečná data)</figcaption>'
-              + ("" if not scr.get("sample") else "<ul>" + "".join(f"<li>{esc(x)}</li>" for x in scr["sample"]) + "</ul>") + tables + "</figure>")
+              + ("" if not scr.get("sample") else "<ul>" + "".join(f"<li>{esc(x)}" + (f'<div class="polozka-akce">{actions_html(m, scr, url, fields, ends, k)}</div>' if any(a.get("item") == k for a in scr["actions"]) else "")
+                                                               + "</li>" for k, x in enumerate(scr["sample"])) + "</ul>") + tables + "</figure>")
     states = "".join(f'<section class="stav" data-aid-state="{k}"><h2>{t}</h2><p>{esc(scr["states"][k])}</p>{sample if k == "filled" else ""}'
                      f'{retry if k == "error" and not scr["states"][k].lower().startswith("nenastává") else ""}</section>' for k, t in STATES)
     mine = [t for t in m["tasks"] if any(st["screen"] == sid for st in t["steps"])]

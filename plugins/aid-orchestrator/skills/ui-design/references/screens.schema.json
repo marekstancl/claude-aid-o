@@ -58,7 +58,8 @@
                 "modes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/id"}, "description": "režimy, ve kterých akce jde"},
                 "disabled_reason": {"$ref": "#/$defs/text", "description": "proč akce v jiném režimu nejde (věta u neaktivního tlačítka)"},
                 "query": {"type": "string", "pattern": "^[A-Za-z0-9_-]+=[A-Za-z0-9_.:-]+(&[A-Za-z0-9_-]+=[A-Za-z0-9_.:-]+)*$", "description": "parametry adresy cíle (id=btc-1402): hluboký odkaz"},
-                "back": {"type": "boolean", "description": "true = vede zpět tam, odkud uživatel přišel (Zpět prohlížeče); to je cíl, když historie není"}
+                "back": {"type": "boolean", "description": "true = vede zpět tam, odkud uživatel přišel (Zpět prohlížeče); to je cíl, když historie není"},
+                "item": {"type": "integer", "minimum": 0, "description": "řádek ukázky (sample, od 0), ke kterému akce patří: Provést u nejistého signálu, Vyřídit u své položky; kostra ji kreslí u něj, ne pod seznamem"}
               }
             }
           },

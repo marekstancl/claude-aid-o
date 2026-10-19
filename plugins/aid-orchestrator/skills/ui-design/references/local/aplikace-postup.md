@@ -95,7 +95,8 @@ Postavená aplikace drží dvě věci, na kterých stojí testy úloh a předán
 zdrojem): jedno číslo je na jednom místě a čísla téhož obchodu si nemůžou odporovat. Nevratná akce nese texty svých
 tlačítek (`confirm_yes`, `confirm_no`), pole své meze (`required`, `min`, `max`, `maxlength`, hláška `error`), odkaz
 na záznam svůj parametr (`query`). Graf má v kostře datovou tabulku (`tables`: popisek, sloupce, řádky se stejným
-počtem buněk), ne jen větu shrnutí.
+počtem buněk), ne jen větu shrnutí. Akce jedné položky seznamu (Provést u nejistého signálu, Vyřídit u své položky) nese
+`item` = řádek ukázky; kostra ji kreslí u něj i s jejími poli, ne pod celým seznamem.
 
 ## 5. Brána
 1. `aid-ui-flows.py generate <projekt>` napíše z modelu do `.aid-ui/scenarios/` jeden test na úlohu (kroky, pak

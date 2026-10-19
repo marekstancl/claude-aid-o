@@ -505,3 +505,28 @@ J
   out="$(node "$BATS_TEST_TMPDIR/r.mjs")"; [ "$out" = "/detail/?id=n7" ] || { echo "href: $out"; return 1; }
   "$SERVE" stop skeleton
 }
+
+@test "app-skeleton: an action of one sample row is drawn at that row with its own inputs; the generated task walks it by mouse, keyboard and failure" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '.screens[1].sample = ["Nákup na sobotu", "Práce"] | (.screens[1].actions[] | select(.id == "ulozit" or .id == "znovu")) += {item: 1}
+      | .screens[0].sample = ["Nákup"] | (.screens[0].actions[] | select(.id == "otevrit")) += {item: 0}' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  run python3 "$BATS_TEST_DIRNAME/../../aid-ui-screens.py" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  "$SERVE" skeleton "$P" >/dev/null
+  f="$P/site/formular/index.html"
+  grep -qE '<li>Práce<div class="polozka-akce"><form [^>]*>.*name="nazev".*data-aid-action="formular.ulozit"' "$f"   # the row holds its action and its input
+  ! grep -qE '<li>Nákup na sobotu<div' "$f"; [ "$(grep -o 'name="nazev"' "$f" | wc -l)" -eq 1 ]                        # nowhere else
+  grep -qE '<li>Nákup<div class="polozka-akce"><div class="akce"><a [^>]*data-aid-action="seznam.otevrit"' "$P/site/seznam/index.html"
+  python3 "$BATS_TEST_DIRNAME/../../aid-ui-flows.py" generate "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/w.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const r = [];
+for (const st of ['normal', 'keyboard', 'fail-1']) {
+  const pg = await b.newPage(); const s = (await import('$P/.aid-ui/scenarios/zalozit.mjs?' + st)).default;
+  const o = await s({ page: pg, base: 'http://127.0.0.1:39918/', state: st }); r.push(st + ':' + o.done + (o.why ? ' ' + o.why : '')); await pg.close();
+}
+console.log(r.join(' | ')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/w.mjs")"; [ "$out" = "normal:true | keyboard:true | fail-1:true" ] || { echo "$out"; return 1; }
+  "$SERVE" stop skeleton
+}

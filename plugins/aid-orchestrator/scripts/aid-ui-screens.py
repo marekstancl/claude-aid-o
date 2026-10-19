@@ -99,6 +99,8 @@ def violations(m, proj):
             for md in a.get("modes") or []:
                 if md not in modes:
                     out.append(f"{at}/modes: režim {md} model nezná (modes)")
+            if "item" in a and a["item"] >= len(s.get("sample") or []):
+                out.append(f"{at}: akce {s['id']}.{a['id']} patří k řádku ukázky {a['item']}, obrazovka má {len(s.get('sample') or [])} řádků (sample)")
             if a.get("modes") and not a.get("disabled_reason"):
                 out.append(f"{at}: akce {s['id']}.{a['id']} jde jen v některých režimech, ale neříká proč jinak ne (disabled_reason)")
     if sum(1 for s in m["screens"] if isinstance(s, dict) and s.get("shell") is True) > 1:
