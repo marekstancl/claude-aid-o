@@ -5,7 +5,7 @@ did with them, its scores and path to 10 per round, since the place's last reope
 the studio (.aid-ui/studio/history.jsonl, by: client) beside the PM's decisions (by: pm, shown as the PM's). The
 expert remembers one place; the client every place. The blind audit reads none of it.
 """
-import json, os
+import json, os, re
 
 PLACES = ("sdeleni", "logo", "pohyb", "struktura", "vzhled", "web")
 LAUNCH_DIR = os.path.join(".aid-ui", "critic", "launch")
@@ -38,6 +38,52 @@ def rounds(p, place):
     ns = sorted(int(x) for x in os.listdir(d) if x.isdigit()) if os.path.isdir(d) else []
     return [json.load(open(os.path.join(d, str(n), "round.json"), encoding="utf-8")) for n in ns
             if os.path.isfile(os.path.join(d, str(n), "round.json"))]
+
+
+# ---------------------------------------------------------------- what the client supplies (P116, PM 19. 10. 2026)
+# A role's finding with owner "client" and its readiness items ("the client must supply") go to the client role, which
+# answers from the project's files (aid-ui-client.py supply): a fact with its source and the quoted text, an owner's
+# choice of an allowed kind with its reason, or "missing" (left for the PM). Records per place in
+# .aid-ui/client/supplied/<place>.json (in the place's bundle, so the roles see them and the bundle sha moves).
+SUPPLY_KINDS = ("naming", "default", "priority", "choice")   # what the owner may decide without a fact in the files
+
+
+def supply_file(p, place):
+    return os.path.join(p, ".aid-ui", "client", "supplied", place + ".json")
+
+
+def supply_items(p, place):
+    """The client's items of the last round of the build loop at the place (an audit round too; never the launch
+    loop): its findings with owner client and the round's readiness. Each item's key hashes the place, the round,
+    the kind, the finding id and the text, so a new round or a changed text asks again."""
+    import hashlib
+    d = os.path.join(p, ".aid-ui", "critic", "rounds", *([] if place == "web" else [place]))
+    ns = sorted(int(x) for x in os.listdir(d) if x.isdigit() and os.path.isfile(os.path.join(d, x, "round.json"))) if os.path.isdir(d) else []
+    if not ns:
+        return []
+    r = json.load(open(os.path.join(d, str(ns[-1]), "round.json"), encoding="utf-8"))
+    items = [{"kind": "finding", "id": f["id"], "role": f.get("role"), "text": f["text"]} for f in r.get("findings") or [] if f.get("owner") == "client"]
+    items += [{"kind": "readiness", "id": None, "role": None, "text": t} for t in r.get("readiness") or []]
+    for it in items:
+        it["round"] = r["n"]
+        it["key"] = hashlib.sha256(json.dumps([place, r["n"], it["kind"], it["id"], it["text"]], ensure_ascii=False).encode()).hexdigest()
+    return items
+
+
+def supply_records(p, place):
+    """{key: record} of the place; an unreadable file is no record (the loop asks again, never trusts a broken one)."""
+    try:
+        d = json.load(open(supply_file(p, place), encoding="utf-8"))
+        return {k: v for k, v in (d.get("items") or {}).items() if isinstance(v, dict) and v.get("status") in ("supplied", "decided", "missing")
+                and re.fullmatch(r"\.aid-ui/client/turns/supply-[a-z]+-r[0-9]+-[0-9]+", str(v.get("turn") or ""))   # from a client run, not typed in
+                and os.path.isfile(os.path.join(p, v["turn"], "turn.json"))}
+    except (OSError, ValueError, AttributeError):
+        return {}
+
+
+def unsupplied(p, place):
+    rec = supply_records(p, place)
+    return [i for i in supply_items(p, place) if i["key"] not in rec]
 
 
 def place_memory(p, role, place):

@@ -52,7 +52,7 @@ handover: the deployment writes its own docs/ui/nasazeni.json.
       the brief file exists; the written brief fails aid-plan-lint.sh --zadani (it is removed, the lint's lines shown).
 
 P116 - a web application (variant.type webapp) gets package version 2: kind webapp, screens {path, sha256,
-approved_sha256} (the model the PM approved; build refuses a model changed since or never approved) and task_results
+approved_sha256} (the model the owner approved; build refuses a model changed since or never approved) and task_results
 (each task's app_flows rows in the recorded gate, of that model; verified_on skeleton - the studio's gate is a design
 check; build refuses results of another model and a gate where no task passed); an existing app's compare
 (aid-ui-baseline.py) must pass, the tasks the PM dropped go to removed_tasks. check --project also wants the model
@@ -188,7 +188,7 @@ def handover_of(state):
 
 
 def app_part(proj, state, g):
-    """P116: kind webapp - the model the PM approved and each task's result in the recorded gate (verified_on skeleton:
+    """P116: kind webapp - the model the owner approved and each task's result in the recorded gate (verified_on skeleton:
     the studio's gate is a design check; only the run gate in the project's code yields code)."""
     mp = os.path.join(proj, "docs", "design", "screens.json")
     if not os.path.isfile(mp):

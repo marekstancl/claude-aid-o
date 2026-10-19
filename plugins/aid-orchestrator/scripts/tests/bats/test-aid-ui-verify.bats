@@ -879,7 +879,7 @@ detail() { jq -r --arg c "$1" --arg p "$2" --arg s "$3" '[.rows[] | select(.chec
   app_gate
   jq '.app.approved_model_sha = "0000"' "$PROJ/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
   gate_app
-  [ "$status" -eq 1 ]; [[ "$output" == *"changed since the PM approved it"* ]]; [[ "$output" == *"only on the model the PM approved"* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"changed since the owner approved it"* ]]; [[ "$output" == *"only on the model the owner approved"* ]]
   [ ! -f "$RES" ]
 }
 

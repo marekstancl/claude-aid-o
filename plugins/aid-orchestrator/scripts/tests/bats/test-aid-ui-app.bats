@@ -165,26 +165,26 @@ ans_by() {
   [ "$status" -eq 0 ]
 }
 
-@test "app-path: the client role's or an agent's answer to a webapp's task question is refused; the PM's is recorded with the model sha" {
+@test "app-path: an agent's answer to a webapp's task question is refused; the PM's or the client role's is recorded with the model sha" {
   app_proj
-  run ans_by client c1 structure "docs/design/screens.json@$MSHA"
-  [ "$status" -eq 1 ]; [[ "$output" == *"app_tasks_need_owner"*"by client"* ]]
-  [ "$(jq '.answers.c1' "$STATE")" = null ]
   run ans_by agent a1 task_map "docs/design/screens.json@$MSHA"
   [ "$status" -eq 1 ]; [[ "$output" == *"app_tasks_need_owner"*"by agent"* ]]
   # the PM's answer to a target that is not the model now
   run ans p0 structure "sha256:abc"
   [ "$status" -ne 0 ]; [ "$(jq '.answers.p0' "$STATE")" = null ]
   run "$SCRIPT" model-approved "$PROJ"
-  [ "$status" -eq 1 ]; [[ "$output" == *"is not approved by the PM"* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"is not approved by the owner"* ]]
   ans p1 structure "docs/design/screens.json@$MSHA"
   [ "$(jq -r .app.approved_model_sha "$STATE")" = "$MSHA" ]
   [ "$(jq -r .answers.p1.by "$STATE")" = pm ]
   run "$SCRIPT" model-approved "$PROJ"
   [ "$status" -eq 0 ]; [[ "$output" == *"model approved: $MSHA"* ]]
+  # the client role plays the owner (PM 19. 10. 2026): its approval counts too, the baseline stays the PM's
+  ans_by client c1 structure "docs/design/screens.json@$MSHA" >/dev/null
+  [ "$(jq -r .answers.c1.by "$STATE")" = client ]; [ "$(jq -r .app.approved_model_sha "$STATE")" = "$MSHA" ]
   # no recorded variant: the guard fails closed - a model in the project is an app's, whatever the agent's file says
   jqw 'del(.variant)'; rm -f "$PROJ/.aid-ui/variant.json"
-  run ans_by client c2 structure "docs/design/screens.json@$MSHA"
+  run ans_by agent a2 structure "docs/design/screens.json@$MSHA"
   [ "$status" -eq 1 ]; [[ "$output" == *"app_tasks_need_owner"* ]]
 }
 
@@ -193,7 +193,7 @@ ans_by() {
   ans p1 structure "docs/design/screens.json@$MSHA"
   jq '.tasks[0].title = "Založit novou poznámku"' "$PROJ/docs/design/screens.json" > "$T/m.json" && mv "$T/m.json" "$PROJ/docs/design/screens.json"
   run "$SCRIPT" model-approved "$PROJ"
-  [ "$status" -eq 1 ]; [[ "$output" == *"changed since the PM approved it"* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"changed since the owner approved it"* ]]
   n="$(sha256sum "$PROJ/docs/design/screens.json" | cut -d' ' -f1)"
   ans p2 structure "docs/design/screens.json@$n"
   run "$SCRIPT" model-approved "$PROJ"

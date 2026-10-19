@@ -10,7 +10,7 @@ user_invocable: false
 
 **Webová aplikace (P116):** u `type: webapp` platí místo bodů 2-6 níže `references/local/aplikace-postup.md` (oddíly 1 a 2):
 model obrazovek a úloh `docs/design/screens.json`, kostra z něj a otázka `structure` s cílem
-`docs/design/screens.json@<sha>`, kterou zodpoví jen PM.
+`docs/design/screens.json@<sha>`, kterou zodpoví vlastník: klient-agent (hraje PM, jako nezávislý agent v AID runu), PM ho může přebít.
 
 **Last Updated:** 2026-09-28
 

@@ -106,6 +106,11 @@ app_places_project() {
   [[ "$(python3 "$C" prompt "$P" --role owner --place struktura)" == *"Model obrazovek a úloh"* ]]
   # the struktura bundle of an app is its model
   [ "$(python3 "$C" bundle-files "$P" --place struktura | tr '\n' ' ')" = "docs/design/screens.json zadani.md " ]
+  # what the client supplied for the place is in its bundle (P116): the roles read it and the bundle sha moves
+  b0="$(python3 "$C" bundle-sha "$P" --place struktura)"
+  mkdir -p "$P/.aid-ui/client/supplied"; echo '{"items": {}}' > "$P/.aid-ui/client/supplied/struktura.json"
+  [ "$(python3 "$C" bundle-files "$P" --place struktura | tr '\n' ' ')" = ".aid-ui/client/supplied/struktura.json docs/design/screens.json zadani.md " ]
+  [ "$(python3 "$C" bundle-sha "$P" --place struktura)" != "$b0" ]; rm -r "$P/.aid-ui/client"
   mkdir -p "$P/.aid-ui/verify"; echo '{}' > "$P/.aid-ui/verify/result.json"
   [ "$(python3 "$C" bundle-files "$P" --place web | tr '\n' ' ')" = ".aid-ui/verify/result.json site/index.html " ]
 }

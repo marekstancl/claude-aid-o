@@ -116,6 +116,17 @@ detaily. Před každým kolem místa (`aid-ui-quality.py round`, všechna místa
 Zápis `aid-ui-quality.py self <projekt> --place <místo> --file <kontrola.json>` to ověří a váže na otisk podkladů místa;
 `round` bez platné vlastní kontroly nad touto verzí nespustí. Po každé opravě se kontrola dělá znovu.
 
+## Co role nechají na klientovi, dodá klient-agent (P116, PM 19. 10. 2026, všechna místa)
+
+Nález s `owner: client` a položky readiness („musí dodat klient“) nečekají na PM. Hned po kole (po triage) je
+smyčka pošle klient-roli - nezávislému agentovi, který hraje vlastníka jako v AID runu:
+`aid-ui-client.py supply <projekt> --place <místo>` (decision `supply`; další kolo bez toho nespustí). Klient odpoví
+z podkladů projektu: fakt se zdrojem `soubor:řádek` a doslovnou citací (kód ji v souboru najde), volbu vlastníka jen
+druhu jméno / výchozí hodnota / pořadí / výběr z možností s důvodem, a co v podkladech není (peníze, termíny, právo,
+osobní údaje, dnešní postup) jako `missing`. Nález s odpovědí převezmi (triage) a oprav podle ní; role odpovědi vidí
+v podkladech místa. V závěrečném hlášení PM je výpis `aid-ui-client.py decided <projekt>`: co klient-agent rozhodl
+bez PM a co zbývá na PM.
+
 ## Dvě cesty: web a webová aplikace (P116, 18. 10. 2026)
 
 Druh `webapp` vede vlastní cestou podle `references/local/aplikace-postup.md` (vrstva s předností jako ostatní

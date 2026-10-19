@@ -9,7 +9,7 @@
 # every round, the agent's own work included (13. 10. 2026).
 
 setup() {
-  SC="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  SC="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; export SC
   Q="$SC/aid-ui-quality.py"; K="$SC/../skills/ui-design/critic"
   T="$BATS_TEST_TMPDIR"; P="$T/p"; mkdir -p "$P/docs/content" "$P/site" "$T/bin"
   printf '# Pekárna U Mlýna\nKváskový chleba v Brně.\n' > "$P/docs/content/product-context.md"
@@ -37,6 +37,7 @@ SH
 #!/usr/bin/env bash
 [[ "\$1" == --version ]] && exit 0
 p="\$(cat)"; role=owner; grep -q "$(yq -r '.criteria[0].id' "$K/web-local.tech.yaml")" <<<"\$p" && role=tech
+grep -q "# Co po tobě studio chce" <<<"\$p" && role=supply
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":100000,"cached_input_tokens":0,"output_tokens":1000}}))' "$T/ans-\$role.json"
 SH
   chmod +x "$T/bin/"*
@@ -63,7 +64,25 @@ PY2
 qround() {
   local pl=web a; for a in "$@"; do [[ "${prev:-}" == --place ]] && pl="$a"; prev="$a"; done; prev=""
   [[ -f "$P/.aid-ui/critic/$([[ $pl == web ]] && echo frozen.json || echo frozen/$pl.json)" ]] && selfdoc 9 "$pl" && python3 "$Q" self "$P" --place "$pl" --file "$T/self.json" >/dev/null
-  python3 "$Q" round "$@"
+  python3 "$Q" round "$@" || return
+  supply_missing "$pl"
+}
+# supply_missing [place] - the client role answered every item of the last round as missing (what the loop did
+# before P116: client findings stay blocked); the real supply has its own cases below
+supply_missing() {
+  python3 - "$P" "${1:-web}" <<'PY2'
+import json, os, sys
+sys.path.insert(0, os.environ["SC"] + "/lib"); import aid_ui_memory as m
+p, pl = sys.argv[1], sys.argv[2]
+items = m.unsupplied(p, pl)
+if items:
+    t = ".aid-ui/client/turns/supply-%s-r%d-1" % (pl.replace("-", ""), items[0]["round"]); os.makedirs(os.path.join(p, t), exist_ok=True)
+    json.dump({}, open(os.path.join(p, t, "turn.json"), "w"))
+    f = m.supply_file(p, pl); os.makedirs(os.path.dirname(f), exist_ok=True)
+    cur = m.supply_records(p, pl)
+    cur.update({i["key"]: dict(i, status="missing", missing="klient dodá později", turn=t) for i in items})
+    json.dump({"place": pl, "items": cur}, open(f, "w"))
+PY2
 }
 
 # ans <owner score> [<tech score>] [<severity of f1>]: every criterion of a role at its score, f1 by the agent, f2 by the client
@@ -166,7 +185,7 @@ work() {   # the agent works: one assistant turn in its transcript, now
   [ ! -e "$A/a1/owner/bundle/podklady/historie.json" ]   # an audit is blind
   [ "$(dec)" = done ]
   # an audit that does not confirm the web: the auditors' findings become an audit round to triage, no repair round
-  rm "$P/.aid-ui/critic/verdict.json"; ans 9 7; run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 3 ] || { echo "$output"; return 1; }
+  rm "$P/.aid-ui/critic/verdict.json"; ans 9 7; run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 3 ] || { echo "$output"; return 1; }; supply_missing
   [ "$(dec)" = triage ]
   jq -e '.audit == true and .n == 3 and (.findings | length) == 12 and (.findings | map(.id) | index("r3-a1-tech-f1")) != null and .score.tech == 7' "$P/.aid-ui/critic/rounds/3/round.json" >/dev/null
   python3 "$Q" status "$P" | jq -e '.repair_rounds == 1' >/dev/null
@@ -183,7 +202,7 @@ work() {   # the agent works: one assistant turn in its transcript, now
   python3 "$Q" fixed "$P" r1-owner-f1 --evidence x --method "steps/6-build.md" >/dev/null; [ "$(dec)" = audit ]   # a fix is allowed, the audit still rates round 1's web
   run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"not the best accepted web (round 1"* ]]
   cp "$T/best.html" "$P/site/index.html"
-  ans 9 7; run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 3 ]
+  ans 9 7; run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 3 ]; supply_missing
   for k in 1 2 3; do for r in owner tech; do python3 "$Q" triage "$P" "r2-a$k-$r-f1" accepted --expected "+1" >/dev/null; python3 "$Q" fixed "$P" "r2-a$k-$r-f1" --evidence y --method "steps/6-build.md" >/dev/null; done; done
   [ "$(dec)" = round ]; echo '<html lang="cs"><body>chleba, lepší</body></html>' > "$P/site/index.html"
   ans 9 9 minor; qround "$P" --web "$W" >/dev/null
@@ -413,4 +432,62 @@ snap() { (cd "$P/.aid-ui/critic" && find . -path ./launch -prune -o -type f -pri
   python3 "$Q" triage "$P" "$id" accepted --expected x >/dev/null
   run python3 "$Q" fixed "$P" "$id" --evidence "$(printf 'oprava \xc3')" --method "steps/6-build.md 3a"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+# supply_ans <how> - the client's answer to the last round's items: the owner's f2 a fact (good | badquote | studio
+# source), the tech's f2 an owner's choice, the readiness missing
+supply_ans() {
+  python3 - "$P" "$1" > "$T/ans-supply.json" <<'PY2'
+import json, os, sys
+sys.path.insert(0, os.environ["SC"] + "/lib"); import aid_ui_memory as m
+p, how = sys.argv[1], sys.argv[2]
+out = []
+for i in m.supply_items(p, "web"):
+    if i["kind"] == "readiness":
+        out.append({"key": i["key"], "status": "missing", "missing": "fotky dodá majitel"})
+    elif i["role"] == "tech":
+        out.append({"key": i["key"], "status": "decided", "decided_kind": "naming", "answer": "Galerie", "reason": "tak tomu říkají zákazníci"})
+    else:
+        src = {"good": ("docs/content/product-context.md:2", "Kváskový chleba v Brně"), "badquote": ("docs/content/product-context.md:2", "Rohlíky z Prahy a okolí"),
+               "studio": ("site/index.html:1", "chleba</body>")}[how]
+        out.append({"key": i["key"], "status": "supplied", "answer": "pečeme kváskový chleba", "source": src[0], "quote": src[1]})
+print(json.dumps({"items": out}))
+PY2
+}
+
+@test "supply: what the roles left to the client is answered by the client role before the next round - a fact with its quoted source, an owner's choice, or missing" {
+  ans 6 7; selfdoc 9 web; python3 "$Q" self "$P" --place web --file "$T/self.json" >/dev/null
+  python3 "$Q" round "$P" --web "$W" >/dev/null
+  for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f1" accepted --expected "+1" >/dev/null; done
+  [ "$(dec)" = supply ]; python3 "$Q" status "$P" | jq -r .why | grep -q "aid-ui-client.py supply"
+  run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"supply"* ]]
+  # a quote that is not on the cited line, or the studio's own output as the source: refused, nothing recorded
+  for how in badquote studio; do
+    supply_ans "$how"; run python3 "$SC/aid-ui-client.py" supply "$P" --place web
+    [ "$status" -eq 1 ]; [ ! -e "$P/.aid-ui/client/supplied/web.json" ]
+  done
+  grep -q "the quote is not on docs/content/product-context.md:2" "$P"/.aid-ui/client/turns/supply-web-r1-1/turn.json
+  grep -q "what the studio wrote" "$P"/.aid-ui/client/turns/supply-web-r1-2/turn.json
+  # a record typed in by hand (no client run behind it) is no record
+  mkdir -p "$P/.aid-ui/client/supplied"; python3 -c 'import json,sys,os; sys.path.insert(0, os.environ["SC"]+"/lib"); import aid_ui_memory as m
+json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka") for i in m.supply_items(sys.argv[1], "web")}}, open(sys.argv[1]+"/.aid-ui/client/supplied/web.json", "w"))' "$P"
+  [ "$(dec)" = supply ]; rm "$P/.aid-ui/client/supplied/web.json"
+  supply_ans good; run python3 "$SC/aid-ui-client.py" supply "$P" --place web; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '[.items[] | .status] | sort == ["decided","missing","supplied"]' "$P/.aid-ui/client/supplied/web.json" >/dev/null
+  jq -e '[.items[] | select(.status == "supplied")][0] | .source == "docs/content/product-context.md:2" and .provider == "codex" and (.turn | startswith(".aid-ui/client/turns/supply-web-r1-"))' "$P/.aid-ui/client/supplied/web.json" >/dev/null
+  # answered client findings go back to the agent; the missing readiness stays the PM's and stops nothing
+  [ "$(dec)" = triage ]; python3 "$Q" status "$P" | jq -r .why | grep -q "r1-owner-f2"
+  run python3 "$SC/aid-ui-client.py" supply "$P" --place web; [[ "$output" == *"nothing left"* ]]
+  for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f2" accepted --expected "+1" >/dev/null; python3 "$Q" fixed "$P" "r1-$r-f2" --evidence "o nás: kváskový chleba" --method "steps/6-build.md" >/dev/null; done
+  for r in owner tech; do python3 "$Q" fixed "$P" "r1-$r-f1" --evidence "úvod přepsán" --method "steps/6-build.md" >/dev/null; done
+  [ "$(dec)" = round ]
+  # the roles see what the client supplied
+  ans 7; qround "$P" --web "$W" >/dev/null
+  jq -e '.items | length == 3' "$P/.aid-ui/critic/rounds/2/owner/bundle/podklady/klient-dodal.json" >/dev/null
+  grep -q "klient-dodal.json" "$P/.aid-ui/critic/rounds/2/tech/prompt.md"
+  # what the client decided without the PM, and what is left to the PM
+  run python3 "$SC/aid-ui-client.py" decided "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"Dodal z podkladů"*"zdroj docs/content/product-context.md:2: „Kváskový chleba v Brně“"* ]]
+  [[ "$output" == *"Rozhodl jako vlastník"*"Galerie (naming; tak tomu říkají zákazníci)"* ]]
+  [[ "$output" == *"Zbývá na PM"*"vlastní fotky → fotky dodá majitel"* ]]
 }

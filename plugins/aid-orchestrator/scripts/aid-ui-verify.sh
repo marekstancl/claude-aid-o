@@ -87,9 +87,9 @@ if [[ -z "$live" ]]; then   # binds the LOCAL gate to the recorded build; the ru
   [[ "$now_id" == "$id" ]] || die "the site in $dir changed since build-record (build id $now_id, recorded $id); rebuild and run build-record again"
 fi
 
-# P116: a webapp is gated only on the model the PM approved, with its task scenarios generated from that model now
+# P116: a webapp is gated only on the model the owner approved, with its task scenarios generated from that model now
 if [[ "$(jq -r '.variant.type // ""' "$STATE")" == webapp ]]; then   # every mode: the copy subject and the live rows too
-  bash "$HERE/aid-ui-state.sh" model-approved "$PROJECT" >/dev/null || die "the gate of an app runs only on the model the PM approved (see above)"
+  bash "$HERE/aid-ui-state.sh" model-approved "$PROJECT" >/dev/null || die "the gate of an app runs only on the model the owner approved (see above)"
   python3 "$HERE/aid-ui-flows.py" generate "$PROJECT" >/dev/null || die "the task scenarios could not be generated from docs/design/screens.json (see above)"
 fi
 

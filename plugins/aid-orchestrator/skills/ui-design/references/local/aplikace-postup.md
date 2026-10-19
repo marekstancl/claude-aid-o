@@ -56,20 +56,27 @@ aplikaci nekopíruje: tytéž nástroje, větev podle druhu.
    `aid-ui-screens.py check <projekt>` (exit 0).
 5. Kostra: `aid-ui-serve.sh skeleton <projekt>` postaví z modelu proklikávací aplikaci na stálé adrese: navigace,
    každá obrazovka s přepínačem stavů (`?stav=empty|loading|error|filled`), akce vedou na své obrazovky, mazání přes
-   potvrzení. Dokud PM model neschválí, nese každá stránka pruh „model čeká na schválení vlastníkem".
+   potvrzení. Dokud vlastník model neschválí, nese každá stránka pruh „model čeká na schválení vlastníkem".
 5a. **Lišta aplikace** (STOP, Panika, režim - co je na každé obrazovce) je obrazovka s `shell: true`: její akce kostra
    vykreslí na každé stránce, krok úlohy na ní smí stát odkudkoli.
 5b. **Před kolem rolí:** `aid-ui-verify.sh <projekt> --precheck` zelené nad modelem teď, vlastní projití obou měřítek
    (každé kritérium ≥ 9 s důkazem) a `aid-ui-quality.py self <projekt> --place struktura --file <kontrola.json>`.
 6. Kolo místa `struktura` (`aid-ui-quality.py round <projekt> --place struktura --web <adresa kostry>`): role
    proklikávají kostru a čtou model. Klient-role je vlastník produktu a klíčový uživatel, postavená z kódu a zadání
-   projektu. Její nálezy jdou PM na kartu jako podklad.
-7. **Úlohy schvaluje vlastník produktu (PM), nikdo jiný.** Otázka druhu `structure`, `part: obrazovky`,
-   `target: docs/design/screens.json@<sha256 modelu teď>`. Odpověď klient-role ani agenta se nezapíše
+   projektu.
+6a. **Co hodnotitelé nechali na klientovi** (nález s `owner: client`, položky readiness) dodá klient-role hned po
+   kole: `aid-ui-client.py supply <projekt> --place struktura` (smyčka bez toho další kolo nepustí, decision `supply`).
+   Fakt ze souborů projektu se zdrojem `soubor:řádek` a doslovnou citací, kterou kód v souboru najde; volba vlastníka
+   jen druhu jméno, výchozí hodnota, pořadí, výběr z možností, s důvodem; co v podkladech není (peníze, termíny,
+   právo, osobní údaje, dnešní postup) = `missing` pro PM. Nález, na který klient odpověděl, převezmi (triage) a oprav
+   podle odpovědi; hodnotitelé odpovědi vidí v podkladech místa. Co rozhodl klient-agent bez PM:
+   `aid-ui-client.py decided <projekt>` - patří do závěrečného hlášení.
+7. **Úlohy schvaluje vlastník** (PM 19. 10. 2026): klient-role, která hraje PM jako nezávislý agent v AID runu, nebo
+   PM sám (jeho odpověď ji přebije). Otázka druhu `structure`, `part: obrazovky`,
+   `target: docs/design/screens.json@<sha256 modelu teď>`. Odpověď agenta studia se nezapíše
    (`app_tasks_need_owner`). Schválení si stav pamatuje s otiskem modelu (`app.approved_model_sha`);
    `aid-ui-state.sh model-approved <projekt>` ověří, že model je ten schválený. Změněný model = kostra znovu jako
-   návrh a nová otázka PM. Deleguje-li PM schvalování na jmenovaného vlastníka, dá mu odkaz na svou stránku studia
-   a zapíše to jako rozhodnutí (`decide`); jiná cesta, jak by odpověď někoho jiného platila za PM, není.
+   návrh a nová otázka. Výchozí stav existující aplikace a zrušení její dnešní úlohy schvaluje dál jen PM (bod 2 a 4).
 
 ## 3. Texty, stavy a vzhled
 Kroky 3-5 jako u webu, nad kostrou aplikace: texty obrazovek a všech stavů (hlášky chyb říkají, co se stalo a co dál),

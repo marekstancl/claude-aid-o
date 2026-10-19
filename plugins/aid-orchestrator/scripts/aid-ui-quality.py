@@ -34,7 +34,10 @@ rounds/<n>/{owner,tech}/ (the ratings), rounds/<n>/history-<role>.json (the memo
       method which procedure made it (a step, an adopted skill) or "z hlavy: <why none>" - the round report to the PM.
   status <project>
       {decision, why, rounds, repair_rounds, scores, best} with decision one of
-      triage | fix | round | close | audit | stop:conflict | stop:stagnation | stop:round_cap | done.
+      triage | supply | fix | round | close | audit | stop:conflict | stop:stagnation | stop:round_cap | done.
+      supply (P116, not in the launch loop): after the triage, an item the last round left to the client has no
+      answer of the client role yet (aid-ui-client.py supply); a client finding the client answered (supplied or
+      decided) goes back to triage - the agent takes it up; a missing one stays blocked for the PM.
       Round 1 is the first rating, rounds 2-4 the repair rounds (ROUND_CAP 3); an audit is no round. The best round:
       the higher lower-role score, then the lowest criterion, then the mean (best_key). Accepted, or the rounds
       spent with an accepted web -> `close` first asks to set accepted findings not fixed yet to superseded, then
@@ -339,6 +342,16 @@ def status(p):
     open_ = [f["id"] for f in last["findings"] if not f.get("state")]
     if open_:
         return dict(out, decision="triage", why="findings without a state: " + ", ".join(open_))
+    if not LAUNCH:   # P116: what a role left to the client goes to the client role first (aid-ui-client.py supply)
+        todo_c = memory.unsupplied(p, PLACE)
+        if todo_c:
+            return dict(out, decision="supply", why="the client has not answered %d item(s) of round %d: aid-ui-client.py supply %s --place %s"
+                        % (len(todo_c), last["n"], p, PLACE))
+        rec, keys = memory.supply_records(p, PLACE), {i["id"]: i["key"] for i in memory.supply_items(p, PLACE) if i["kind"] == "finding"}
+        answered = [f["id"] for f in last["findings"] if f.get("state") == "blocked" and (f.get("blocked_by") == "client_supply"
+                    or f.get("reason") == "client supplies it (readiness)") and (rec.get(keys.get(f["id"])) or {}).get("status") in ("supplied", "decided")]
+        if answered:
+            return dict(out, decision="triage", why="the client answered, take it up (accepted + fix, or a reason): " + ", ".join(answered))
     todo = [f["id"] for f in last["findings"] if f.get("state") == "accepted" and not f.get("evidence")]
     accepted_any = any(f.get("state") == "accepted" for f in last["findings"])
     cap = out["repair_rounds"] >= ROUND_CAP
@@ -446,7 +459,7 @@ def usd_since(p, at):
 
 def mark_client(f):
     if f["owner"] == "client":
-        f.update(state="blocked", reason="client supplies it (readiness)")
+        f.update(state="blocked", reason="client supplies it (readiness)", blocked_by="client_supply")
     return f
 
 
@@ -589,7 +602,7 @@ def triage(p, fid, state, opts):
             die("--%s %s: no other finding of round %d with that id" % (k, opts[k], last["n"]))
     if opts.get("conflict-with") and state != "blocked":
         die("--conflict-with goes with blocked only (the finding cannot be fixed without making the other worse)", 2)
-    for k in ("reason", "expected", "of", "conflict_with", "evidence"):
+    for k in ("reason", "expected", "of", "conflict_with", "evidence", "blocked_by"):   # a triaged client finding is the agent's now
         f.pop(k, None)
     f["state"] = state
     for k in ("reason", "expected", "of"):

@@ -561,6 +561,9 @@ def bundle_files(proj, place, need=True):
         if req and not hits and need:
             die(f"{place}: missing input {pat} (the place's roles rate it; it is not replaced by site/)")
         out += hits
+    sup = os.path.join(".aid-ui", "client", "supplied", place + ".json")   # P116: what the client supplied for this place
+    if os.path.isfile(os.path.join(proj, sup)) and os.path.realpath(os.path.join(proj, sup)) == os.path.join(os.path.realpath(proj), sup):
+        out.append(sup)
     return sorted(set(out))
 
 

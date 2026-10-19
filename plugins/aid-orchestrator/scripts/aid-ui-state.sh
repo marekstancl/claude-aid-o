@@ -124,11 +124,11 @@
 #                                        skip record (decide --title přeskočeno --outcome "<part> přeskočena" --why …)
 #                                        for every part its options skip: vize, hledani, logo
 #   build-json <dir>                     (P116) prints the build record of <dir> (id, fingerprints) without writing
-#   model-approved <project>             (P116) exit 0 when docs/design/screens.json is the model the PM approved
+#   model-approved <project>             (P116) exit 0 when docs/design/screens.json is the model the owner (PM or client role) approved
 #                                        (app.approved_model_sha); 1 naming why (never approved, changed since)
 #
 #   P116 app rules in record-answer: for a webapp (variant.type, else .aid-ui/variant.json) an answer of kind
-#   structure or task_map is recorded only when by pm (the PM's studio page) and with target
+#   structure or task_map is recorded only when by pm (the PM's studio page) or by client (the client role) and with target
 #   docs/design/screens.json@<sha256 of the model now> (app_tasks_need_owner); an approve stores
 #   app {approved_model_sha, answer, at}. An exception answer whose target (or an item's) is baseline@<sha> or
 #   task@<id> is recorded only when by pm (app_owner_only), baseline@ only for the list now and task@ only for a task of
@@ -918,8 +918,9 @@ app_type() {
 }
 model_sha() { [[ -f "$PROJECT/docs/design/screens.json" ]] && sha256sum "$PROJECT/docs/design/screens.json" | cut -d' ' -f1; }
 
-# P116: the product owner decides an app's tasks. For a webapp the answer to its structure (and task_map) question
-# must be the PM's (by pm - the PM's page, aid-ui-studio server) and target docs/design/screens.json@<sha now>
+# P116: the owner decides an app's tasks. For a webapp the answer to its structure (and task_map) question must be the
+# PM's (by pm - the PM's page) or the client role's (by client - its agent token; PM 19. 10. 2026: the client role
+# plays the PM, as in an AID run; the PM may override) and target docs/design/screens.json@<sha now>
 # (app_tasks_need_owner); an exception for the baseline list or a baseline task's removal (baseline@<sha>,
 # task@<id>) is the PM's in any project (app_owner_only). Prints the approved model sha for an approve.
 app_owner_guard() {   # <answer json>
@@ -938,7 +939,7 @@ app_owner_guard() {   # <answer json>
     done < <(jq -r '[.target, (.items[]?.target)] | .[] | strings | select(test("^(baseline|task)@"))' <<<"$1")
   fi
   [[ "$kind" == structure || "$kind" == task_map ]] && [[ "$(app_type)" == webapp ]] || return 0
-  [[ "$by" == pm ]] || die "app_tasks_need_owner: the tasks and flows of an app are approved by the product owner (PM) on the PM's studio page; the answer to $(jq -r .question <<<"$1") is by ${by:-nobody} (the client role's rating is its input, not the decision); nothing recorded"
+  [[ "$by" == pm || "$by" == client ]] || die "app_tasks_need_owner: the tasks and flows of an app are approved by the owner - the PM on the PM's studio page or the client role (its agent token, by client); the answer to $(jq -r .question <<<"$1") is by ${by:-nobody}; nothing recorded"
   sha="$(model_sha)" || die "app_tasks_need_owner: no docs/design/screens.json to approve (step Obrazovky a úlohy writes it); nothing recorded"
   [[ "$tgt" == "docs/design/screens.json@$sha" ]] || die "app_tasks_need_owner: the question of an app's tasks targets docs/design/screens.json@<sha of the model now> ($sha), not $tgt; nothing recorded"
 }
@@ -1385,9 +1386,9 @@ case "$VERB" in
   model-approved)
     need_state
     a="$(jq -r '.app.approved_model_sha // ""' "$STATE")"
-    [[ -n "$a" ]] || die "model-approved: the app's model docs/design/screens.json is not approved by the PM (question structure, target docs/design/screens.json@<sha>)"
+    [[ -n "$a" ]] || die "model-approved: the app's model docs/design/screens.json is not approved by the owner, PM or client role (question structure, target docs/design/screens.json@<sha>)"
     sha="$(model_sha)" || die "model-approved: no docs/design/screens.json"
-    [[ "$sha" == "$a" ]] || die "model-approved: docs/design/screens.json changed since the PM approved it (now ${sha:0:12}, approved ${a:0:12}); ask the PM again"
+    [[ "$sha" == "$a" ]] || die "model-approved: docs/design/screens.json changed since the owner approved it (now ${sha:0:12}, approved ${a:0:12}); ask again"
     echo "model approved: $sha"
     ;;
 
