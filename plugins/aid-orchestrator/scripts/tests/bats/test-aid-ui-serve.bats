@@ -391,7 +391,7 @@ import { createRequire } from 'module';
 const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
 const b = await chromium.launch(); const pg = await b.newPage(); await pg.goto('http://127.0.0.1:39918/detail/');
 const before = await pg.locator('[data-aid-confirm-yes="detail.smazat"]').isVisible();
-await pg.click('[data-aid-action="detail.smazat"]'); await pg.click('[data-aid-confirm-yes="detail.smazat"]'); await pg.waitForLoadState();
+await pg.click('[data-aid-action="detail.smazat"]'); await pg.click('[data-aid-confirm-yes="detail.smazat"]'); await pg.waitForURL(/seznam/);
 console.log(before + ' ' + await pg.getAttribute('main', 'data-aid-screen')); await b.close();
 J
   [ "$(node "$BATS_TEST_TMPDIR/del.mjs")" = "false seznam" ]
@@ -528,5 +528,20 @@ for (const st of ['normal', 'keyboard', 'fail-1']) {
 console.log(r.join(' | ')); await b.close();
 J
   out="$(node "$BATS_TEST_TMPDIR/w.mjs")"; [ "$out" = "normal:true | keyboard:true | fail-1:true" ] || { echo "$out"; return 1; }
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: the bar says the mode now and what it means, in every mode" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '.modes = [{id: "bezi", label: "Běží", text: "zapisuje"}, {id: "pauza", label: "Pauza", text: "nic nového"}] | .screens += [{id: "lista", title: "Lišta", purpose: "stav", nav: false, shell: true, actions: [], states: {empty: "x", loading: "x", error: "x", filled: "Spojení OK"}}]' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/md.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); const r = [];
+for (const q of ['', '?rezim=pauza']) { await pg.goto('http://127.0.0.1:39918/seznam/' + q); r.push(await pg.locator('.lista-rezim').innerText()); }
+console.log(r.join(' | ')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/md.mjs")"; [ "$out" = "Běží: zapisuje | Pauza: nic nového" ] || { echo "$out"; return 1; }
   "$SERVE" stop skeleton
 }

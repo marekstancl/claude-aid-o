@@ -10,6 +10,8 @@ rounds/<n>/{owner,tech}/ (the ratings), rounds/<n>/history-<role>.json (the memo
 {owner,tech}/, loop.json (the summary the studio shows, with every round's cost and time), verdict.json.
 
   self <project> [--place <p>] --file <kontrola.json>
+      (kontrola.json also fix_check {by, results: {<finding>: {verdict: overeno|nepravda|castecne, seen}}} when the last
+      round has fixed findings: an independent verifier saw every fix in the built version - P116, PM 19. 10. 2026)
       The producer's own check (PM 18. 10. 2026: the version that goes to the roles has everything of the brief and is
       checked; the roles fine-tune it). kontrola.json {requirements: [{id, source "<file>:<line>" in the project, text,
       covered_by: [where] | out_of_scope: <why>}], scores: {owner|tech: {<criterion>: {score, evidence}}}}: every
@@ -248,7 +250,30 @@ def self_problems(p, doc):
                 bad.append("předběžná brána kostry je neúplná, chybí řádky: " + "; ".join(miss[:5]))
             if red:
                 bad.append("předběžná brána kostry není zelená: " + "; ".join(red[:5]))
+    bad += fix_check_problems(p, doc)
     return bad
+
+
+def fix_check_problems(p, doc):
+    """P116 (PM 19. 10. 2026, round 3: two fixes were recorded and were not there): every fix of the last round was
+    checked in the built version by an independent verifier with a clean context (Codex or a Claude agent - never the
+    producer), and it saw each one done. doc.fix_check {by, results: {<finding id>: {verdict: overeno|nepravda|castecne,
+    seen: <what it saw where>}}}."""
+    rs = rounds(p)
+    fixed = [f["id"] for f in (rs[-1]["findings"] if rs else []) if f.get("state") == "accepted" and f.get("evidence")]
+    if not fixed:
+        return []
+    fc = doc.get("fix_check") if isinstance(doc.get("fix_check"), dict) else {}
+    by, res = str(fc.get("by") or "").strip(), fc.get("results") if isinstance(fc.get("results"), dict) else {}
+    if not by or by.lower() in ("self", "agent", "studio", "producer", "vyrobce", "výrobce"):
+        return ["fix_check: opravy kola %d neověřil nezávislý ověřovatel v postavené verzi (fix_check.by = kdo, s čistým kontextem)" % rs[-1]["n"]]
+    out = []
+    for fid in fixed:
+        x = res.get(fid) if isinstance(res.get(fid), dict) else {}
+        v, seen = str(x.get("verdict") or ""), str(x.get("seen") or "").strip()
+        if v != "overeno" or not seen:
+            out.append(f"fix_check {fid}: ověřovatel {by} opravu neviděl ({v or 'bez výroku'}: {seen[:100]}) - oprav ji a nech ověřit znovu")
+    return out
 
 
 def self_record(p, f):
@@ -261,7 +286,7 @@ def self_record(p, f):
     if bad:
         die("self refused (verze ještě nejde ke kritikovi):\n  " + "\n  ".join(bad))
     rec = {"place": PLACE, "bundle_sha": site_sha(p), "frozen_sha": frozen_sha(p), "requirements": doc.get("requirements") or (model_of(p) or {}).get("requirements"),
-           "scores": doc["scores"], "at": now()}
+           "scores": doc["scores"], "fix_check": doc.get("fix_check"), "at": now()}
     os.makedirs(os.path.dirname(self_path(p)), exist_ok=True)
     wj(self_path(p), rec)
     print(f"SELF {PLACE}: {len(rec['requirements'])} požadavků, všechna kritéria ≥ {SELF_MIN}; kolo smí běžet nad {rec['bundle_sha'][:12]}")

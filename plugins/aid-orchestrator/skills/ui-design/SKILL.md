@@ -113,6 +113,10 @@ detaily. Před každým kolem místa (`aid-ui-quality.py round`, všechna místa
 3. **Vlastní strojové kontroly zelené:** u aplikace `aid-ui-verify.sh <projekt> --precheck` nad kostrou (úlohy, stavy,
    klávesnice, obnova, axe), u hotového webu brána a `gate-check`.
 4. **Vlastní projití všech kritérií** obou rolí: každé aspoň 9 s důkazem, pod 9 agent opraví sám.
+5. **Opravy z minulého kola ověří nezávislý ověřovatel v postavené verzi** (Codex, nebo Claude agent s čistým
+   kontextem; nikdy výrobce): dostane nálezy, doklady oprav a adresu verze, u každé napíše overeno / nepravda /
+   castecne a co kde viděl. Do kontroly jde jako `fix_check`; bez výroku `overeno` u každé opravy `self` neprojde
+   (P116, 19. 10. 2026: dvě opravy byly zapsané jako hotové a nebyly - ověřené slovem v modelu, ne v kostře).
 Zápis `aid-ui-quality.py self <projekt> --place <místo> --file <kontrola.json>` to ověří a váže na otisk podkladů místa;
 `round` bez platné vlastní kontroly nad touto verzí nespustí. Po každé opravě se kontrola dělá znovu.
 

@@ -57,13 +57,20 @@ rec = json.load(open(f)); out = {}
 for r in ("owner", "tech"):
     out[r] = {("" if e["key"] == pl else e["key"] + ".") + c["id"]: {"score": sc, "evidence": "úvod: nadpis a cena chleba"}
               for e in rec["roles"][r]["rubrics"] for c in e["rubric"]["criteria"]}
-print(json.dumps({"requirements": [{"id": "r1", "source": "docs/content/product-context.md:2", "text": "Kváskový chleba v Brně", "covered_by": ["index.html"]}], "scores": out}))
+# every fix of the last round seen by an independent verifier (FIXCHECK=nepravda / none to test the refusal)
+d = os.path.join(p, ".aid-ui/critic/rounds", *([] if pl == "web" else [pl])); ns = sorted(int(x) for x in os.listdir(d) if x.isdigit()) if os.path.isdir(d) else []
+last = json.load(open(os.path.join(d, str(ns[-1]), "round.json"))) if ns and os.path.isfile(os.path.join(d, str(ns[-1]), "round.json")) else {"findings": []}
+fx = {f["id"]: {"verdict": os.environ.get("FIXCHECK", "overeno"), "seen": "úvod: nová věta je vidět"} for f in last["findings"] if f.get("state") == "accepted" and f.get("evidence")}
+doc = {"requirements": [{"id": "r1", "source": "docs/content/product-context.md:2", "text": "Kváskový chleba v Brně", "covered_by": ["index.html"]}], "scores": out}
+if os.environ.get("FIXCHECK") != "none":
+    doc["fix_check"] = {"by": "codex", "results": fx}
+print(json.dumps(doc))
 PY2
 }
 # qround <project> [args] - a round after the producer's own check of the current version (PM 18. 10. 2026)
 qround() {
   local pl=web a; for a in "$@"; do [[ "${prev:-}" == --place ]] && pl="$a"; prev="$a"; done; prev=""
-  [[ -f "$P/.aid-ui/critic/$([[ $pl == web ]] && echo frozen.json || echo frozen/$pl.json)" ]] && selfdoc 9 "$pl" && python3 "$Q" self "$P" --place "$pl" --file "$T/self.json" >/dev/null
+  [[ -f "$P/.aid-ui/critic/$([[ $pl == web ]] && echo frozen.json || echo frozen/$pl.json)" ]] && selfdoc 9 "$pl" && { python3 "$Q" self "$P" --place "$pl" --file "$T/self.json" >/dev/null || return; }
   python3 "$Q" round "$@" || return
   supply_missing "$pl"
 }
@@ -502,4 +509,14 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f1" rejected_with_reason --reason "úvod je konkrétní" >/dev/null; done
   run python3 "$Q" status "$P"
   jq -e '.decision == "stop:stagnation" and (.why | contains("waits on what the client has not supplied (r1-owner-f2, r1-tech-f2)"))' <<<"$output" >/dev/null || { echo "$output"; return 1; }
+}
+
+@test "self: the fixes of the last round count only when an independent verifier saw each one in the built version" {
+  ans 6 7; qround "$P" --web "$W" >/dev/null; cycle
+  FIXCHECK=none selfdoc 9 web; run python3 "$Q" self "$P" --place web --file "$T/self.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"fix_check: opravy kola 1 neověřil nezávislý ověřovatel"* ]]
+  FIXCHECK=nepravda selfdoc 9 web; run python3 "$Q" self "$P" --place web --file "$T/self.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"fix_check r1-owner-f1: ověřovatel codex opravu neviděl (nepravda"* ]]
+  jq '.fix_check.by = "self"' <(FIXCHECK=overeno selfdoc 9 web; cat "$T/self.json") > "$T/s2.json"; run python3 "$Q" self "$P" --place web --file "$T/s2.json"; [ "$status" -eq 1 ]
+  selfdoc 9 web; run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }

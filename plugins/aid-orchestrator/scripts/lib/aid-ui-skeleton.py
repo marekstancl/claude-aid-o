@@ -255,6 +255,7 @@ document.querySelectorAll('[data-aid-retry]').forEach(function(a){var x=new URL(
 var rz=q.get('rezim');try{if(rz)sessionStorage.setItem('aid-rezim',rz);rz=sessionStorage.getItem('aid-rezim');}catch(e){}
 var modes=document.querySelector('[data-aid-modes-list]');if(modes){var all=modes.dataset.aidModesList.split(' ');if(all.indexOf(rz)<0)rz=all[0];
 document.querySelectorAll('[data-aid-rezim-link]').forEach(function(a){if(a.dataset.aidRezimLink===rz)a.setAttribute('aria-current','true');});
+document.querySelectorAll('[data-aid-mode-is]').forEach(function(e){e.hidden=e.dataset.aidModeIs!==rz;});
 document.querySelectorAll('[data-aid-modes]').forEach(function(b){var off=b.dataset.aidModes.split(' ').indexOf(rz)<0;b.toggleAttribute('disabled',off);b.setAttribute('aria-disabled',off?'true':'false');
 if(b.tagName==='A'){if(off&&b.hasAttribute('href')){b.dataset.href=b.getAttribute('href');b.removeAttribute('href');}else if(!off&&b.dataset.href)b.setAttribute('href',b.dataset.href);}
 var r=document.getElementById(b.dataset.aidReason);if(r)r.hidden=!off;});}
@@ -377,7 +378,10 @@ def app_page(m, scr, approved, fields, results, ends, shell):
     msw = ("" if not mo else f'<p class="rezimy" data-aid-modes-list="{esc(" ".join(x["id"] for x in mo))}">Režim (ukázka): '
            + " ".join(f'<a href="?rezim={esc(x["id"])}" data-aid-rezim-link="{esc(x["id"])}" title="{esc(x.get("text") or "")}">{esc(x["label"])}</a>' for x in mo) + "</p>")
     bar = msw + "".join(f'<div class="lista" role="group" data-aid-screen="{esc(x["id"])}" aria-label="{esc(x["title"])}">'
-                  f'<p class="lista-stav" role="status">{esc(x["states"]["filled"])}</p>'   # what the bar shows, not only its buttons
+                  + ("" if not mo else '<p class="lista-rezim" role="status">' + "".join(   # the mode now, with what it means (P116 pilot: the bar said Demo běží in every mode)
+                      f'<span data-aid-mode-is="{esc(md["id"])}"{"" if i == 0 else " hidden"}>{esc(md["label"])}' + (f': {esc(md["text"])}' if md.get("text") else "") + '</span>'
+                      for i, md in enumerate(mo)) + "</p>")
+                  + f'<p class="lista-stav" role="status">{esc(x["states"]["filled"])}</p>'   # what the bar shows, not only its buttons
                   f'{actions_html(m, x, url, shell[x["id"]][0], shell[x["id"]][1])}</div>' for x in m["screens"] if x.get("shell"))
     switch = "".join(f'<a href="?stav={k}" data-aid-stav-link="{k}">{t}</a> ' for k, t in STATES)
     res = "".join(f'<p class="vysledek" role="status" data-aid-result="{esc(t)}">{esc(e)}</p>' for t, e in results)
