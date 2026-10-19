@@ -107,7 +107,9 @@ def violations(m, proj):
         out.append("/screens: žádná obrazovka není v navigaci (nav: true)")
     for i, s in good_s:
         for k, txt in [("purpose", s["purpose"])] + [("states/" + x, y) for x, y in s["states"].items()] + [(f"sample/{j}", x) for j, x in enumerate(s.get("sample") or [])] \
-                + [(f"tables/{j}/rows/{r}", c) for j, tb in enumerate(s.get("tables") or []) for r, row in enumerate(tb["rows"]) for c in row]:
+                + [(f"tables/{j}/caption", tb["caption"]) for j, tb in enumerate(s.get("tables") or [])] \
+                + [(f"tables/{j}/columns/{c}", x) for j, tb in enumerate(s.get("tables") or []) for c, x in enumerate(tb["columns"])] \
+                + [(f"tables/{j}/rows/{r}/{c}", x) for j, tb in enumerate(s.get("tables") or []) for r, row in enumerate(tb["rows"]) for c, x in enumerate(row)]:
             refs(txt, f"/screens/{i}/{k}")
         for j, tb in enumerate(s.get("tables") or []):
             if any(len(row) != len(tb["columns"]) for row in tb["rows"]):
