@@ -372,8 +372,14 @@ execution_yaml_has_gate_profiles() {
 #   fragment declares on its `# project_tests: [...]` line, merged in stack
 #   order. Nothing for no stack. Used by compose_execution_yaml (fresh init)
 #   and offered by /aid-init to a file without the key (never written silently).
+# With --root <dir>, the proposal is what the repository HOLDS (agents 12. 10. 2026: the bash stack proposed
+# test-*.sh while the tests were tests-*.sh, and python/TS tests were never seen): the usual test-file
+# patterns found among the tracked files, plus the stack's own globs — each kept only when a file matches.
+# Nothing matches → a comment saying so, never a key that covers no test.
+_AID_TEST_PATTERNS=('test_*.py' '*_test.py' 'test-*.sh' 'tests-*.sh' '*.bats' '*.test.ts' '*.test.tsx' '*.test.js' '*.spec.ts' '*.spec.js' '*_test.go' '*_test.rs')
 render_project_tests_block() {
-  local plugin_dir s frag globs='[]'
+  local plugin_dir s frag globs='[]' root=""
+  if [[ "${1:-}" == --root ]]; then root="${2:?render_project_tests_block: --root needs a dir}"; shift 2; fi
   plugin_dir=$(_resolve_plugin_dir) || return 1
   for s in "$@"; do
     [[ -n "$s" ]] || continue
@@ -381,6 +387,23 @@ render_project_tests_block() {
     [[ -f "$frag" ]] || continue
     globs="$(jq -c --argjson g "$(sed -n 's/^# project_tests: //p' "$frag" | head -1 | jq -c '. // []' 2>/dev/null || echo '[]')" '. + $g | unique' <<< "$globs")"
   done
+  if [[ -n "$root" ]]; then
+    local pat g kept='[]' stack_globs="$globs"
+    for pat in "${_AID_TEST_PATTERNS[@]}"; do globs="$(jq -c --arg g "**/${pat}" '. + [$g] | unique' <<< "$globs")"; done
+    while IFS= read -r g; do
+      # git's own glob pathspec, the one the test gates use (`**` = any depth, the root included)
+      [[ -n "$(git -C "$root" ls-files -- ":(glob)${g}" 2>/dev/null | head -1)" ]] && kept="$(jq -c --arg g "$g" '. + [$g]' <<< "$kept")"
+    done < <(jq -r '.[]' <<< "$globs")
+    if [[ "$kept" != "[]" ]]; then globs="$kept"
+    elif [[ "$stack_globs" != "[]" ]]; then
+      # a new project has no tests yet: the stack's defaults keep the gate owing proof once they exist
+      echo "# No tracked file matches a test pattern yet: these are the stack's defaults — check them when the first tests exist."
+      globs="$stack_globs"
+    else
+      echo "# project_tests: no tracked file matches the usual test patterns (${_AID_TEST_PATTERNS[*]}) — declare the test globs by hand"
+      return 0
+    fi
+  fi
   [[ "$globs" == "[]" ]] && return 0
   echo "# The project's test files (P110): a change under them needs a gate flagged"
   echo "# runs_project_tests that proves it ran them (aid-run-gates.sh --lint-profiles)."
@@ -446,7 +469,7 @@ compose_execution_yaml() {
 # Review and customize commands; remove sections for stacks you don't use.
 
 EOF
-    render_project_tests_block "${clean_stacks[@]:-}"
+    render_project_tests_block --root "$project_root" "${clean_stacks[@]:-}"
     echo ""
     echo "gates:"
 

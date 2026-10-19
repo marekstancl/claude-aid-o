@@ -224,7 +224,7 @@ aid_plan_json_steps_from_plan() {
     done <<< "$top"
     if [[ -n "$dropped" ]]; then
       error_exit "Files block in ${plan} has bullets this generator cannot parse:
-${dropped}Every top-level Files bullet must read \`- <Create|Modify|Test|Rewrite>: <path> — <why>\`, and a \`Test:\` bullet naming a suite that does not exist yet must state its tier: \`- Test: \\\`path\\\` (tier: t1) — <what it proves>\`. See skills/plan-writing.md (Files block grammar). Fix the plan and re-run generation." 1
+${dropped}Every top-level Files bullet must read \`- <Create|Modify|Test|Rewrite|Delete>: <path> — <why>\`, and a \`Test:\` bullet naming a suite that does not exist yet must state its tier: \`- Test: \\\`path\\\` (tier: t1) — <what it proves>\`. See skills/plan-writing.md (Files block grammar). Fix the plan and re-run generation." 1
     fi
 
     # UI change fields.

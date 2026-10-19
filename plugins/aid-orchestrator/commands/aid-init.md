@@ -258,7 +258,7 @@ makes the hash stale: the command refuses (exit 2), writes nothing, and prints t
 
 **1a. The project_tests offer (P110).** When the file has no `project_tests:` key
 (`execution_yaml_lacks_project_tests` in `scripts/lib/aid-init-execution-yaml.sh`), `/aid-init`
-shows the PM the block `render_project_tests_block <detected stacks>` prints — the test-file globs
+shows the PM the block `render_project_tests_block --root <project root> <detected stacks>` prints (the globs of the test files the repository actually tracks; none found is said, never proposed) — the test-file globs
 of each stack — and appends it only on the PM's yes. Without the key the gate runner refuses
 nothing (`declared: false`) and only advises (`project_tests_undeclared`). With it, a change under
 those globs needs a gate flagged `runs_project_tests: true` whose command writes

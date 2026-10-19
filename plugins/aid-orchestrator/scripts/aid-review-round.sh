@@ -968,7 +968,7 @@ _semantic_final_write() {
   range="$(jq -r '.range // ""' "$STEPCHECK")"; base="${range%%..*}"
   tmp="${out}.tmp"
   local rounds=() r
-  for r in "${BASE}"/round-*/merged.json; do [[ -f "$r" ]] && rounds+=("$r"); done
+  for r in "${BASE}"/round-*/merged.json; do [[ -f "$r" && "$r" =~ /round-[0-9]+/merged\.json$ ]] && rounds+=("$r"); done   # a set-aside round-N.x dir is no round
   (( ${#rounds[@]} )) || { echo "close: no merged.json under ${BASE}" >&2; return 1; }
   jq -s --arg base "$base" --arg head "${CLOSE_HEAD:-$(_head)}" --arg closed_head "$(_head)" --arg range "$range" --arg v "$verdict" --arg at "$(_now)" --arg cp "$CHECKPOINT" \
         --arg project "$(basename "$ROOT")" --arg plan "$(basename "$(dirname "$EVID")")" --arg run "$(basename "$EVID")" \
@@ -1482,6 +1482,13 @@ _standing_delegate() {
   jq -n --arg at "$(_now)" --arg why "$REASON" '{delegate: true, by: "PM", words: $why, at: $at, recorded_by: "controller"}' > "$f"
   echo "recorded the PM's delegation for ${pid}: escalations are settled by an independent agent (${f})"
 }
+# _dlg_tree_state — the plan worktree as a stand-in must leave it: untracked and ignored paths (an ignored
+# directory collapsed to one line, e.g. "!! pkg/__pycache__/"), and one digest line for the content of the
+# tracked files (a stand-in edits none). .aid-o/ is the round's own (prompt, verdict, this record).
+_dlg_tree_state() {
+  { git -C "$ROOT" status --porcelain --untracked-files=all --ignored=traditional 2>/dev/null | grep -v '^.. \.aid-o/' || true
+    printf '## tracked-content %s\n' "$(git -C "$ROOT" diff HEAD --binary 2>/dev/null | sha256sum | cut -d' ' -f1)"; } | sort
+}
 # _dlg_resync <round dir> <answer label> — the round's verdict in its four
 # places after a finding changed (the same rewrite a dispute does).
 _dlg_resync() {
@@ -1558,7 +1565,7 @@ cmd_delegate() {
     fi
     if (( rc != 0 )); then
       # what the worktree looked like before the stand-in: its record refuses files it adds (F14)
-      git -C "$ROOT" status --porcelain --untracked-files=all 2>/dev/null | sort > "${dir}/adjudicator-delegated-${fp16}.status-before" || true
+      _dlg_tree_state > "${dir}/adjudicator-delegated-${fp16}.status-before" || true
       echo "STAND-IN: no codex verdict (${why}); dispatch ${prompt} to an independent general-purpose agent at model ${RC_STAND_IN_MODEL} inside the bracket adjudicator-delegated-${fp16} (aid-emit-dispatch.sh start --focus adjudicator-delegated-${fp16} --agent-id claude:adjudicator-delegated --evidence-dir ${dir}; complete … --output-file ${vfile}), have it write ${vfile} with \"provider\": \"claude\", then: aid-review-round.sh delegate --checkpoint ${CHECKPOINT} --evidence-dir ${EVID}${STEP:+ --step ${STEP}} --round ${ROUND} --fingerprint ${FINGERPRINT} --verdict ${vfile}"
       exit 4
     fi
@@ -1595,8 +1602,10 @@ cmd_delegate() {
            "dispatch the stand-in inside the bracket (aid-emit-dispatch.sh start/complete --focus adjudicator-delegated-${fp16}), then record again"
   fi
   local before="${dir}/adjudicator-delegated-${fp16}.status-before" left
-  if [[ "$provider" != codex && -f "$before" ]]; then
-    left="$(comm -13 "$before" <(git -C "$ROOT" status --porcelain --untracked-files=all 2>/dev/null | sort) | sed 's/^...//' | grep -vxF "$(realpath --relative-to="$ROOT" "$VERDICT" 2>/dev/null)" | head -20 || true)"
+  if [[ "$provider" != codex ]]; then
+    [[ -f "$before" ]] || _dlg_refuse delegation_left_files "no record of the worktree before the stand-in ran (${before}) — nothing proves it left the tree as it found it" \
+      "dispatch the stand-in again through delegate --fingerprint ${FINGERPRINT} (it records the tree first), then record its verdict"
+    left="$(comm -13 "$before" <(_dlg_tree_state) | sed 's/^...//' | head -20 || true)"
     [[ -z "$left" ]] || _dlg_refuse delegation_left_files "the stand-in left files in ${ROOT} that were not there before it ran: $(tr '\n' ' ' <<< "$left")" \
       "remove them (they are the stand-in's, not the step's), then record the verdict again"
   fi

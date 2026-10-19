@@ -1755,7 +1755,14 @@ _DLG() { "$ROUND_SH" delegate --checkpoint cp2 --evidence-dir "$E" --step 0 --pr
 _verdict() { jq -n --arg f "${5:-$FP}" --arg a "$2" --arg c "${3:-technical}" --arg p "${4:-claude}" \
   '{fingerprint: $f, kind: (if $a | IN("accepted", "rejected") then "dispute" else "open_after_rounds" end), answer: $a, class: $c,
     reason: "the reviewer read the live checkout; the worktree has it", rerun: {cmd: "grep -n new src/app.py", exit: 0, output_tail: "3:new"}, provider: $p}' > "$1"; }
+# _snap <round dir> <fp16> [root] — the before-record the STAND-IN dispatch writes (aid-review-round.sh
+# _dlg_tree_state), for a test that hands a stand-in's verdict in without going through that dispatch
+_snap() {
+  ( cd "${3:-$R}" && { git status --porcelain --untracked-files=all --ignored=traditional | grep -v '^.. \.aid-o/' || true
+      printf '## tracked-content %s\n' "$(git diff HEAD --binary | sha256sum | cut -d' ' -f1)"; } | sort ) > "$1/adjudicator-delegated-$2.status-before"
+}
 _adj_bracket() {   # <fp16> <verdict file>
+  [[ -f "$(D 1)/adjudicator-delegated-$1.status-before" ]] || _snap "$(D 1)" "$1"
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "adjudicator-delegated-$1" --agent-id claude:adjudicator-delegated --evidence-dir "$(D 1)" >/dev/null
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "adjudicator-delegated-$1" --output-file "$2" --evidence-dir "$(D 1)" >/dev/null
 }
@@ -1894,7 +1901,7 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   _F collect --round 1 >/dev/null
   run _F close --round 1 --tokens final_criteria=5 final_generalist=5; [ "$status" -eq 1 ]; [[ "$output" == *"await an independent verdict"* ]]
   local fp f16 v; fp="$(_F delegate --round 1 --pending)"; f16="$(sed 's/^sha256://' <<< "$fp" | cut -c1-16)"; v="$(FD 1)/adjudicator-delegated-${f16}.json"
-  _verdict "$v" dismiss technical claude "$fp"
+  _verdict "$v" dismiss technical claude "$fp"; _snap "$(FD 1)" "$f16"
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "adjudicator-delegated-${f16}" --agent-id claude:adjudicator-delegated --evidence-dir "$(FD 1)" >/dev/null
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "adjudicator-delegated-${f16}" --output-file "$v" --evidence-dir "$(FD 1)" >/dev/null
   run _F delegate --round 1 --fingerprint "$fp" --verdict "$v"; echo "$output"; [ "$status" -eq 0 ]
@@ -1975,6 +1982,41 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "adjudicator-delegated-${f16}" --agent-id claude:adjudicator-delegated --evidence-dir "$(FD 1)" >/dev/null
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "adjudicator-delegated-${f16}" --output-file "$v" --evidence-dir "$(FD 1)" >/dev/null
   run _F delegate --round 1 --fingerprint "$fp" --verdict "$v"; echo "$output"; [ "$status" -eq 0 ]
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh' && aid_stage_writes_verify '$E'"
+  echo "$output"; [ "$status" -eq 0 ]
+}
+
+@test "delegate: the stand-in check also sees an ignored __pycache__ it left and an edit to a tracked file; without the before-record it refuses (Codex review 19. 10. 2026)" {
+  _dlg auto; _dispute; _probe false rate_limited
+  printf '__pycache__/\n' >> "$R/.gitignore"; git -C "$R" add .gitignore; git -C "$R" commit -qm ignore
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 4 ]
+  _verdict "$VF" accepted; _adj_bracket "$F16" "$VF"
+  mkdir -p "$R/src/__pycache__"; touch "$R/src/__pycache__/app.cpython-312.pyc"
+  run _DLG --fingerprint "$FP" --verdict "$VF"
+  [ "$status" -eq 1 ]; [[ "$output" == *"delegation_left_files"*"__pycache__"* ]]
+  rm -r "$R/src/__pycache__"; echo "# touched" >> "$R/src/app.py"
+  run _DLG --fingerprint "$FP" --verdict "$VF"
+  [ "$status" -eq 1 ]; [[ "$output" == *"delegation_left_files"*"tracked-content"* ]]
+  git -C "$R" checkout -q -- src/app.py
+  rm "$(D 1)/adjudicator-delegated-${F16}.status-before"
+  run _DLG --fingerprint "$FP" --verdict "$VF"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no record of the worktree before the stand-in ran"* ]]
+}
+
+@test "delegate: a CP7 dispute settled by Codex after the round closed leaves every cp7 file recorded, the runner's own files included (Codex review 19. 10. 2026)" {
+  _frepo; _fsc
+  bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh' && aid_stage_writes_record '$E' fixture \$(aid_stage_writes_inputs '$E')"
+  yq -i '.review_checkpoints.final_review.reviewers[1].provider = "codex" | .review_checkpoints.final_review.reviewers[1].model = "gpt-5"' "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "${_BLOCKER/blocker/major}"
+  _F collect --round 1 >/dev/null
+  run _F close --round 1 --tokens final_criteria=5 final_generalist=5; echo "$output"; [ "$status" -eq 0 ]
+  local fp; fp="$(jq -r '.findings[0].fingerprint' "$(FD 1)/merged.json")"
+  "$ROUND_SH" standing --plan "$R/.aid-o/plans/P901-x.md" --project-root "$R" --delegate --reason "PM: nezávislý agent rozhodne spory za mě" >/dev/null
+  _F dispute --round 1 --fingerprint "$fp" --reason "the import is in src/app.py on the plan branch" >/dev/null
+  _fake_codex
+  export CODEX_VERDICT="$(jq -nc --arg f "$fp" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "the import is there", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}, provider: "codex"}')"
+  run _F delegate --round 1 --fingerprint "$fp" </dev/null; echo "$output"; [ "$status" -eq 0 ]
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh' && aid_stage_writes_verify '$E'"
   echo "$output"; [ "$status" -eq 0 ]
 }

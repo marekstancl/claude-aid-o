@@ -75,3 +75,5 @@
 0	p112_new	delegation_missing
 0	p112_new	delegation_out_of_scope
 0	p114_new	plan_page_missing
+0	companion_new	delegation_left_files
+0	companion_new	plan_close_worktree_dirty

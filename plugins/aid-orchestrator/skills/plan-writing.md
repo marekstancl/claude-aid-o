@@ -246,8 +246,12 @@ hard pre-flight of `plan-run` (readiness); a violation stops the run's start wit
 exact line).** Each Files bullet MUST be exactly:
 
 ```
-- <Create|Modify|Test|Rewrite>: `path` [ + `path`]* [(lines ~N-M)] [(tier: t0|t1|t2)] [— prose]
+- <Create|Modify|Test|Rewrite|Delete>: `path` [ + `path`]* [(lines ~N-M)] [(tier: t0|t1|t2)] [— prose]
 ```
+
+- `Delete:` declares a file the step removes: the step's return must name it in
+  `deleted_files`, and it must be gone from the tree (how it was removed is the step's
+  business). Earlier plans wrote a deletion as `Modify: … — deleted`, which still reads.
 
 - The path(s) come FIRST, each in backticks, immediately after the `Verb:` label.
 - Multiple files in one bullet ONLY via an explicit `` + `` between backtick paths.

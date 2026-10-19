@@ -1200,7 +1200,7 @@ _fsm_refusal_next() {
     binding_wrong_commit|binding_plan_step_hash_mismatch|incomplete_step_binding)
       next="rewrite the binding of $(_fsm_cmd "$vf") after the step commit (reviewed_commit = HEAD, plan_step_hash from the live plan.json — pipeline.md §Output verification), then: $inc" ;;
     amend_scope_no_brief_point)
-      next="the widening serves no point this step closes: bring it to the PM as a scope change (skills/pipeline.md escalations, rule 11) — or, at GATES, name the point of any step" ;;
+      next="the widening serves no point this step closes: bring it to the PM as a scope change (skills/pipeline.md escalations, rule 11) — a Decision card quoting each path; after the PM's answer: $(_fsm_cmd bash "$fsm" amend-scope "$sf" --add "<path>" --reason "<the PM's decision>" --pm-card "<card>") — or, at GATES, name the point of any step" ;;
     amend_scope_reason_names_no_point)
       next="$(_fsm_cmd bash "$fsm" amend-scope "$sf" --add "<path>" --reason "<AC<n> of ${_ZP_SET:-the step points}> needs <path> because …")" ;;
     step_criteria_failed)
@@ -5471,11 +5471,12 @@ _FSM_ALWAYS_ALLOWED=(".aid-o/work/backlog.md" ".aid-o/work/aid-plugin-issues.md"
 # refuses a path outside the tree unless it is an absolute path some step of
 # this plan already declared (P100 Step 4).
 cmd_amend_scope() {
-  local state_file="" reason=""; local -a add=()
+  local state_file="" reason="" pm_card=""; local -a add=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --add)    [[ -n "${2:-}" ]] || die "amend-scope: --add needs a path"; add+=("$2"); shift 2 ;;
       --reason) reason="${2:-}"; shift 2 ;;
+      --pm-card) pm_card="${2:-}"; shift 2 ;;   # the PM's decision card quoting every added path (aidlab-apps 15. 10. 2026)
       *)        [[ -z "$state_file" ]] || die "amend-scope: unexpected argument '$1'"; state_file="$1"; shift ;;
     esac
   done
@@ -5510,12 +5511,20 @@ cmd_amend_scope() {
     else
       _zp_set="$(jq -r --argjson i "$_zp_cs" '.steps[$i].zavira[]? // empty' "$_zp_plan")"
     fi
-    if [[ -z "$_zp_set" ]]; then
+    if [[ -z "$_zp_set" && -n "$pm_card" ]]; then
+      # the PM decided this scope change: the card the PM answered quotes every path it adds
+      declare -F aid_pm_card_check >/dev/null || source "${SCRIPT_DIR}/lib/aid-decision-card.sh"
+      local _pc_p _pc_why
+      for _pc_p in "${add[@]}"; do
+        _pc_why="$(aid_pm_card_check "$pm_card" "$_pc_p")" || die "amend-scope: --pm-card ${pm_card} does not carry the PM's decision on ${_pc_p}: ${_pc_why}"
+      done
+      _zp_point="pm:$(sha256sum "$pm_card" | cut -c1-16)"
+    elif [[ -z "$_zp_set" ]]; then
       echo "amend-scope: step $(( _zp_cs + 1 )) closes no point of the brief — a widening here is a scope change for the PM (rule 11)" >&2
       _fsm_refusal_next amend_scope_no_brief_point || true
       exit 1
     fi
-    _zp_point="$(grep -Eow 'AC[0-9]+' <<< "$reason" | grep -xF -f <(printf '%s\n' "$_zp_set") | head -1 || true)"
+    [[ -n "$_zp_point" ]] || _zp_point="$(grep -Eow 'AC[0-9]+' <<< "$reason" | grep -xF -f <(printf '%s\n' "$_zp_set") | head -1 || true)"
     if [[ -z "$_zp_point" ]]; then
       echo "amend-scope: --reason must name the brief point this widening serves (one of: $(paste -sd, <<< "$_zp_set" | sed 's/,/, /g'))" >&2
       _ZP_SET="$(paste -sd, <<< "$_zp_set")" _fsm_refusal_next amend_scope_reason_names_no_point || true

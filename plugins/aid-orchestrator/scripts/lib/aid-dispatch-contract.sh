@@ -107,6 +107,16 @@ aid_dispatch_contract_build() {
       artifact_paths+=("$p")
     done < <(_aid_split_path_entry "$body" 2>/dev/null || true)
   done < <(jq -r '.outputs[]? // empty' <<< "$step")
+  # Deletions: the paths behind Delete bullets (AID 13. 10. 2026) — gone after the step, and named in
+  # its deleted_files; how the step removed them (git rm, a generator) is its own business.
+  local -a deletion_paths=()
+  while IFS= read -r bullet; do
+    [[ "$bullet" =~ ^Delete:[[:space:]]* ]] || continue
+    body="${bullet#*:}"; body="${body#"${body%%[![:space:]]*}"}"
+    while IFS= read -r p; do [[ -n "$p" ]] && deletion_paths+=("$p"); done < <(_aid_split_path_entry "$body" 2>/dev/null || true)
+  done < <(jq -r '.outputs[]? // empty' <<< "$step")
+  local deletions='[]'
+  (( ${#deletion_paths[@]} > 0 )) && deletions="$(printf '%s\n' "${deletion_paths[@]}" | awk '!seen[$0]++' | jq -Rsc 'split("\n") | map(select(length > 0))')"
   local artifacts='[]'
   if (( ${#artifact_paths[@]} > 0 )); then
     artifacts="$(printf '%s\n' "${artifact_paths[@]}" | awk '!seen[$0]++' | jq -Rsc 'split("\n") | map(select(length > 0))')"
@@ -133,6 +143,7 @@ aid_dispatch_contract_build() {
   body_json="$(jq -c \
     --argjson i "$idx" \
     --argjson artifacts "$artifacts" \
+    --argjson deletions "$deletions" \
     --arg evidence "${evroot:+${evroot%/}/}steps/${step_id}" \
     --slurpfile plan "$plan" \
     --arg id "$step_id" \
@@ -145,6 +156,7 @@ aid_dispatch_contract_build() {
       forbidden_paths: (.forbidden_paths // []),
       depends_on: [ ($plan[0].dependencies // [])[] | select(.after == $id) | .before ],
       expected_artifacts: $artifacts,
+      expected_deletions: $deletions,
       acceptance_criteria: (.acceptance_criteria // []),
       ui_change_contract: (.ui_change_contract // null),
       evidence_dir: $evidence
@@ -358,6 +370,14 @@ aid_dispatch_contract_validate() {
     [[ -e "$_a_path" ]] || _add missing "$a"
   done <<< "$expected"
   [[ "$missing" != "[]" ]] && _add reasons "expected artifacts are missing on disk: $(jq -r 'join(", ")' <<< "$missing")"
+  local gone=() d _d_path
+  while IFS= read -r d; do
+    [[ -n "$d" ]] || continue
+    [[ "$d" == /* ]] && _d_path="$d" || _d_path="${root}/${d}"
+    if [[ -e "$_d_path" ]]; then gone+=("${d} (still on disk)")
+    elif [[ $'\n'"$deleted"$'\n' != *$'\n'"$d"$'\n'* ]]; then gone+=("${d} (not in deleted_files)"); fi
+  done < <(jq -r '.expected_deletions[]? // empty' "$c")
+  (( ${#gone[@]} )) && _add reasons "declared deletions not done: ${gone[*]}"
 
   # Commits the step made in another repository (repo_commits, read by the step
   # check) must exist there: a range that does not resolve is refused, named.
@@ -476,6 +496,16 @@ aid_dispatch_contract_commit() {
   fi
   local -a files=() forced=()
   local f
+  # The repositories the return already committed in (repo_commits, validated above): a file there is
+  # reported as committed there, not as something still to do (aidlab-apps 15. 10. 2026).
+  local done_repos=$'\n' rc_repo rc_wt rc_pj="" cand
+  for cand in "$(dirname "$c")/../../plan.json" "$(dirname "$c")/plan.json"; do [[ -f "$cand" ]] && { rc_pj="$cand"; break; }; done
+  while IFS= read -r rc_repo; do
+    [[ -n "$rc_repo" ]] || continue
+    if [[ "$rc_repo" == /* ]]; then rc_wt="$rc_repo"
+    else rc_wt=""; [[ -n "$rc_pj" ]] && IFS=$'\t' read -r rc_wt _ < <(aid_rr_resolve "$rc_pj" "$rc_repo"); fi
+    [[ -n "$rc_wt" ]] && done_repos+="$(git -C "$rc_wt" rev-parse --show-toplevel 2>/dev/null)"$'\n'
+  done < <(jq -r '.repo_commits[]?.repo // empty' "$r" 2>/dev/null)
   # Present on disk, or tracked and deleted — a declared deletion is a
   # change like any other and is staged as one. An accepted absolute path is
   # another repository's (validation holds this tree's to relative paths): it
@@ -488,7 +518,11 @@ aid_dispatch_contract_commit() {
       local d="${f%/*}" owner=""
       while [[ -n "$d" && ! -d "$d" ]]; do d="${d%/*}"; done
       owner="$(git -C "${d:-/}" rev-parse --show-toplevel 2>/dev/null)" || owner="unknown — not inside a git repository"
-      echo "contract: not committed here: ${f} (another repository: ${owner} — commit it there and name it in the return's repo_commits)" >&2
+      if [[ "$done_repos" == *$'\n'"$owner"$'\n'* ]]; then
+        echo "contract: ${f} is in ${owner}, committed there (the return's repo_commits, checked with the step)" >&2
+      else
+        echo "contract: not committed here: ${f} (another repository: ${owner} — commit it there and name it in the return's repo_commits)" >&2
+      fi
       continue
     fi
     [[ "$f" == .aid-o/* ]] && continue   # AID's own state is never the step's delivery

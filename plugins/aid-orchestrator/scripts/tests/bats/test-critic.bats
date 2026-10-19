@@ -328,11 +328,11 @@ STUB
   run aid_critic_check P9 --moment plan
   [ "$status" -eq 0 ]; [ "$(jq -r .level2_empty "$D/plan/check.json")" = "true" ]
   local t
-  for t in 'Toto je návrh pro PM.\nNenavrhuji rušit API, ale odložil bych UI.' 'This is for the PM to decide! No change to the API; defer the UI.' 'Námět pro PM?\n- odložit export\n- přidat náhled' 'Toto je návrh pro PM.\nPrvní řádek návrhu.\nDruhý řádek návrhu.'; do
+  for t in 'Toto je návrh pro PM.\nNic dalšího k rozsahu, jen bych odložil export.' 'Toto je návrh pro PM.\nNenavrhuji rušit API, ale odložil bych UI.' 'This is for the PM to decide! No change to the API; defer the UI.' 'Námět pro PM?\n- odložit export\n- přidat náhled' 'Toto je návrh pro PM.\nPrvní řádek návrhu.\nDruhý řádek návrhu.'; do
     _answer plan '**1. a**' "$t"; run aid_critic_check P9 --moment plan
     [ "$status" -eq 0 ]; [ "$(jq -r .level2_empty "$D/plan/check.json")" = "false" ] || { echo "not empty expected: $t"; false; }
   done
-  for t in 'This is a suggestion for the PM.\nNo change to the scope.' 'Námět pro PM!\nZměnu rozsahu nenavrhuji.' 'Toto je návrh pro PM.'; do
+  for t in 'This is a suggestion for the PM.\nNo change to the scope.' 'Námět pro PM!\nZměnu rozsahu nenavrhuji.' 'Toto je návrh pro PM.' 'Návrh pro PM. Nothing to suggest.' 'Návrh pro PM. Další změnu rozsahu nenavrhuji.'; do
     _answer plan '**1. a**' "$t"; run aid_critic_check P9 --moment plan
     [ "$status" -eq 0 ]; [ "$(jq -r .level2_empty "$D/plan/check.json")" = "true" ] || { echo "empty expected: $t"; false; }
   done

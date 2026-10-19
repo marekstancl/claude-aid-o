@@ -164,7 +164,7 @@ aid_plan_close_cost() {
   local dir="$1" plan_id="$2" first
   local -a runs=() files=()
   mapfile -t runs < <(ls -d "$dir"/R-"${plan_id}"-final-* 2>/dev/null | sort -t- -k4 -n)
-  mapfile -t files < <(ls "$dir"/R-"${plan_id}"-final-*/cp7/round-*/measurement.json 2>/dev/null)
+  mapfile -t files < <(ls "$dir"/R-"${plan_id}"-final-*/cp7/round-*/measurement.json 2>/dev/null | grep -E '/round-[0-9]+/measurement\.json$')
   first="$(find "${runs[0]:-/nonexistent}" -maxdepth 1 -type f -printf '%T@\n' 2>/dev/null | sort -n | head -n1)"
   first="${first%.*}"; first="${first:-null}"
   jq -n --argjson attempts "${#runs[@]}" --argjson first "$first" --argjson now "$(date +%s)" \
@@ -213,9 +213,9 @@ aid_plan_run_cost() {
   local -a files=()
   for e in "$@"; do
     [[ -d "$e" ]] || { partial=true; continue; }
-    while IFS= read -r f; do files+=("$f"); done < <(find "$e" -path '*/cp2/step-*/round-*/measurement.json' 2>/dev/null | sort)
+    while IFS= read -r f; do files+=("$f"); done < <(find "$e" -path '*/cp2/step-*/round-*/measurement.json' 2>/dev/null | grep -E '/round-[0-9]+/measurement\.json$' | sort)
   done
-  while IFS= read -r f; do files+=("$f"); done < <(ls "$dir"/R-"${plan_id}"-final-*/cp7/round-*/measurement.json 2>/dev/null)
+  while IFS= read -r f; do files+=("$f"); done < <(ls "$dir"/R-"${plan_id}"-final-*/cp7/round-*/measurement.json 2>/dev/null | grep -E '/round-[0-9]+/measurement\.json$')
   out="$(_aid_rs_cost_json ${files[@]+"${files[@]}"})" || return 3
   jq -c --argjson a "$(ls -d "$dir"/R-"${plan_id}"-final-* 2>/dev/null | wc -l)" --argjson p "$partial" \
     '. + {attempts: $a} + (if $p then {attempts_partial: true} else {} end)' <<< "$out"
@@ -230,7 +230,7 @@ aid_plan_run_cost() {
 aid_plan_plan_cost() {
   local dir="$1" plan_id="$2" out ev model t cusd ctok='0' cfound=0 cunknown=0 crejected=0
   local -a files=()
-  while IFS= read -r f; do files+=("$f"); done < <(ls "$dir"/cp1/round-*/measurement.json "$dir"/cp1/attempt-*/round-*/measurement.json 2>/dev/null)
+  while IFS= read -r f; do files+=("$f"); done < <(ls "$dir"/cp1/round-*/measurement.json "$dir"/cp1/attempt-*/round-*/measurement.json 2>/dev/null | grep -E '/round-[0-9]+/measurement\.json$')
   if (( ${#files[@]} == 0 )); then
     jq -nc '{usd: null, reason: "no_cp1_evidence", critic: null, critic_reason: "no_cp1_evidence"}'; return 0
   fi
@@ -286,8 +286,8 @@ aid_plan_close_time() {
   local root="$1" plan="$2"; shift 2
   local ev="${root}/.aid-o/work/evidence/${plan}" d audit sids
   local -a m=() tl=()
-  mapfile -t m < <(ls "$ev"/cp1/round-*/measurement.json "$ev"/R-"${plan}"-final-*/cp7/round-*/measurement.json 2>/dev/null
-                   for d; do find "${root}/${d}" -path '*/cp2/*' -name measurement.json 2>/dev/null; done)
+  mapfile -t m < <({ ls "$ev"/cp1/round-*/measurement.json "$ev"/R-"${plan}"-final-*/cp7/round-*/measurement.json 2>/dev/null
+                   for d; do find "${root}/${d}" -path '*/cp2/*' -name measurement.json 2>/dev/null; done; } | grep -E '/round-[0-9]+/measurement\.json$')
   for d; do [[ -f "${root}/${d}/timeline.jsonl" ]] && tl+=("${root}/${d}/timeline.jsonl"); done
   for d in "$ev"/R-"${plan}"-final-*/timeline.jsonl; do [[ -f "$d" ]] && tl+=("$d"); done
   audit="${AID_HOOK_AUDIT:-$(aid_session_store_dir hooks)/audit.jsonl}"

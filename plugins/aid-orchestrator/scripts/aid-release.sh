@@ -1117,7 +1117,7 @@ cmd_prepare_plan() {
   done
 
   if [[ -z "$plan_id" || -z "$bump" || -z "$plan_branch" ]]; then
-    echo "Usage: aid-release.sh prepare-plan <plan_id> --bump <auto|patch|minor|major> --plan-branch <branch> [--project-root <path>] [--dry-run]" >&2
+    echo "Usage: aid-release.sh prepare-plan <plan_id> --bump <auto|patch|minor|major|none> --plan-branch <branch> [--project-root <path>] [--dry-run]" >&2
     exit 2
   fi
   if ! [[ "$plan_id" =~ ^P[0-9]{3}$ ]]; then
@@ -1125,8 +1125,8 @@ cmd_prepare_plan() {
     exit 2
   fi
   case "$bump" in
-    auto|patch|minor|major) ;;
-    *) echo "ERROR: prepare-plan: --bump must be auto|patch|minor|major (got '${bump}')" >&2; exit 2 ;;
+    auto|patch|minor|major|none) ;;
+    *) echo "ERROR: prepare-plan: --bump must be auto|patch|minor|major|none (got '${bump}')" >&2; exit 2 ;;
   esac
 
   # Re-resolve REPO_ROOT against --project-root when given (the top-level
@@ -1157,6 +1157,24 @@ cmd_prepare_plan() {
     # version WAS prepared, and it would silently skip the one tag.
     $dry || _release_write_prep_record "$plan_id" "$plan_branch" "$bump" "${BASH_REMATCH[1]}" || return 1
     echo "${BASH_REMATCH[1]}"
+    return 0
+  fi
+
+  # ── --bump none: a step of the plan already raised the version and wrote its CHANGELOG section (a
+  #    project whose CLAUDE.md says so — WAN P109 18. 10. 2026 had to fake a prepare commit). Nothing is
+  #    edited or committed; the version is the newest CHANGELOG header, which must be above the last tag.
+  if [[ "$bump" == none ]]; then
+    local cv="" lt=""
+    [[ -f "$REPO_ROOT/CHANGELOG.md" ]] && cv="$(grep -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/CHANGELOG.md" | head -1 || true)"
+    [[ -n "$cv" ]] || { echo "PRECONDITION FAIL: prepare-plan --bump none: CHANGELOG.md has no '## [X.Y.Z]' section — the plan's step writes it with the version it raised, or use --bump auto|patch|minor|major" >&2; exit 1; }
+    lt="$(git -C "$REPO_ROOT" tag --merged HEAD -l 'v[0-9]*' 2>/dev/null | sed 's/^v//' | sort -V | tail -1 || true)"   # the highest, not the nearest
+    if [[ -n "$lt" ]] && [[ "$(printf '%s\n%s\n' "$lt" "$cv" | sort -V | tail -1)" == "$lt" ]]; then
+      echo "PRECONDITION FAIL: prepare-plan --bump none: the newest CHANGELOG section is ${cv}, not above the last tag v${lt} — the version was not raised; use --bump auto|patch|minor|major" >&2; exit 1
+    fi
+    if $dry; then echo "[DRY RUN] Would record v${cv} for ${plan_id} as already prepared (no commit, no tag)"; return 0; fi
+    _release_write_prep_record "$plan_id" "$plan_branch" "none" "$cv" || return 1
+    echo "Already raised by the plan: v${cv} (CHANGELOG), above v${lt:-<no tag>} — recorded, nothing committed." >&2
+    echo "$cv"
     return 0
   fi
 

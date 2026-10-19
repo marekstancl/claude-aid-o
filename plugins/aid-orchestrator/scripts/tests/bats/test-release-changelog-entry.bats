@@ -441,3 +441,17 @@ PY
   run grep -c 'operatorEdit' plugins/aid-orchestrator/.claude-plugin/plugin.json
   [ "$output" = "1" ]
 }
+
+@test "prepare-plan --bump none: a version the plan already raised (CHANGELOG above the last tag) is recorded with no commit; one not above the tag is refused (WAN P109 18. 10. 2026)" {
+  _seed "2.0.1" "$(_changelog_complete_target)"
+  cd "$TEST_PROJECT_ROOT"; git tag v2.0.0; git checkout -q -b plan/P900
+  local commits_before; commits_before="$(git rev-list --count HEAD)"
+  run bash "$RELEASE" prepare-plan P900 --bump none --plan-branch plan/P900 --project-root "$TEST_PROJECT_ROOT"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"2.0.1"* ]]
+  [ "$(git rev-list --count HEAD)" = "$commits_before" ]
+  [ "$(jq -r .version "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P900/release-prep.json")" = 2.0.1 ]
+  git tag v2.0.1
+  run bash "$RELEASE" prepare-plan P900 --bump none --plan-branch plan/P900 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]; [[ "$output" == *"not above the last tag"* ]]
+}
