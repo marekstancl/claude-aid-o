@@ -5500,7 +5500,7 @@ cmd_amend_scope() {
   # only for a point of the brief, named in --reason: the current step's points
   # in EXECUTE, any step's in GATES (a gate fix serves the whole plan). Checked
   # BEFORE anything is retired or written. A plan without a brief traces null.
-  local _zp_plan _zp_cs _zp_total _zp_point="" _zp_set=""
+  local _zp_plan _zp_cs _zp_total _zp_point="" _zp_set="" _pm_decision=""
   _zp_plan="$(cd "$(dirname "$state_file")" && pwd)/plan.json"
   if [[ -f "$_zp_plan" ]] && [[ -n "$(jq -r '.zadani_sha256 // ""' "$_zp_plan" 2>/dev/null)" ]]; then
     _zp_cs=$(yaml_field "$state_file" current_step); _zp_cs="${_zp_cs:-0}"
@@ -5511,21 +5511,22 @@ cmd_amend_scope() {
     else
       _zp_set="$(jq -r --argjson i "$_zp_cs" '.steps[$i].zavira[]? // empty' "$_zp_plan")"
     fi
-    if [[ -z "$_zp_set" && -n "$pm_card" ]]; then
-      # the PM decided this scope change: the card the PM answered quotes every path it adds
+    if [[ -n "$pm_card" ]]; then
+      # the PM decided this scope change — whatever points the step closes: the card the PM answered
+      # quotes every path it adds (the same card check as dispute --pm; IMP-692 says how weak it is)
       declare -F aid_pm_card_check >/dev/null || source "${SCRIPT_DIR}/lib/aid-decision-card.sh"
       local _pc_p _pc_why
       for _pc_p in "${add[@]}"; do
         _pc_why="$(aid_pm_card_check "$pm_card" "$_pc_p")" || die "amend-scope: --pm-card ${pm_card} does not carry the PM's decision on ${_pc_p}: ${_pc_why}"
       done
-      _zp_point="pm:$(sha256sum "$pm_card" | cut -c1-16)"
+      _pm_decision="$(jq -nc --arg c "$pm_card" --arg s "$(sha256sum "$pm_card" | cut -d' ' -f1)" '{card: $c, card_sha256: $s}')"
     elif [[ -z "$_zp_set" ]]; then
       echo "amend-scope: step $(( _zp_cs + 1 )) closes no point of the brief — a widening here is a scope change for the PM (rule 11)" >&2
       _fsm_refusal_next amend_scope_no_brief_point || true
       exit 1
     fi
-    [[ -n "$_zp_point" ]] || _zp_point="$(grep -Eow 'AC[0-9]+' <<< "$reason" | grep -xF -f <(printf '%s\n' "$_zp_set") | head -1 || true)"
-    if [[ -z "$_zp_point" ]]; then
+    [[ -n "$_pm_decision" ]] || _zp_point="$(grep -Eow 'AC[0-9]+' <<< "$reason" | grep -xF -f <(printf '%s\n' "$_zp_set") | head -1 || true)"
+    if [[ -z "$_zp_point" && -z "$_pm_decision" ]]; then
       echo "amend-scope: --reason must name the brief point this widening serves (one of: $(paste -sd, <<< "$_zp_set" | sed 's/,/, /g'))" >&2
       _ZP_SET="$(paste -sd, <<< "$_zp_set")" _fsm_refusal_next amend_scope_reason_names_no_point || true
       exit 1
@@ -5619,7 +5620,9 @@ cmd_amend_scope() {
   local amend="${step_dir}/scope-amendment.json"
   local now; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   local entry; entry="$(jq -n --arg at "$now" --argjson step "$cs" --arg sid "$step_id" --argjson paths "$add_json" --arg reason "$reason" --arg zp "$_zp_point" \
-    '{at:$at, step:$step, step_id:$sid, paths:$paths, reason:$reason, zadani_point: (if $zp == "" then null else $zp end)}')"
+    --argjson pmd "${_pm_decision:-null}" \
+    '{at:$at, step:$step, step_id:$sid, paths:$paths, reason:$reason, zadani_point: (if $zp == "" then null else $zp end)}
+     + (if $pmd == null then {} else {pm_decision: $pmd} end)')"
   local tmp_amend tmp_plan; tmp_amend="$(mktemp)"; tmp_plan="$(mktemp)"
   if [[ -f "$amend" ]]; then
     jq --argjson e "$entry" '. + [$e]' "$amend" > "$tmp_amend" || { rm -f "$tmp_amend" "$tmp_plan"; die "amend-scope: ${amend} is not a JSON array — repair or remove it first; nothing was changed"; }
@@ -5649,7 +5652,7 @@ cmd_amend_scope() {
   # Known limit: the generation-time D5 gate (gates/aid-contract-validate.sh)
   # compares plan.json against the EPIC's scope blocks; it runs at generation,
   # not mid-EPIC, and a REGENERATION resets the amendment by design.
-  log_event "${evidence_dir}/timeline.jsonl" "scope_amended" step="$cs" step_id="$step_id" paths="$(jq -r 'join(",")' <<<"$add_json")" reason="$reason" zadani_point="${_zp_point:-null}"
+  log_event "${evidence_dir}/timeline.jsonl" "scope_amended" step="$cs" step_id="$step_id" paths="$(jq -r 'join(",")' <<<"$add_json")" reason="$reason" zadani_point="${_zp_point:-null}" pm_card="$(jq -r '.card // "null"' <<< "${_pm_decision:-null}")"
   fsm_emit_audit_log "scope_amended" --evidence-dir "$evidence_dir" --step "$cs" --paths "$(jq -r 'join(",")' <<<"$add_json")" --reason "$reason" 2>/dev/null || true
   echo "amend-scope: step ${cs} (${step_id}) may now also change: $(jq -r 'join(", ")' <<<"$add_json") — recorded in ${amend#${evidence_dir}/} and the timeline; plan_json_hash re-stamped. Continue the step; the agent's return must list these files like any other."
 }

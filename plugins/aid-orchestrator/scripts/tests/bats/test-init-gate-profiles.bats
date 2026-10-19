@@ -404,7 +404,7 @@ YAML
   [[ "$(yq '.gates.plan_diff.command' .aid-o/config/execution.yaml)" == *"aid-plan-diff.sh --plan {plan_path}"*"--isolated --cwd ."* ]]
 }
 
-@test "project_tests is proposed from the test files the repository tracks, a new repository keeps the stack defaults with a note, and without a stack says so (agents 12. 10. 2026)" {
+@test "project_tests is proposed from the test files the repository tracks, an existing project without tests is told so with no key, a fresh workspace keeps the stack defaults with a note (agents 12. 10. 2026)" {
   source "$HELPER"
   git init -q .; mkdir -p tests asistent/tests web/src
   touch tests/tests-a.sh asistent/tests/test_x.py web/src/b.test.ts
@@ -413,6 +413,8 @@ YAML
   [[ "$output" == *'project_tests: ["**/*.test.ts","**/test_*.py","**/tests-*.sh"]'* ]]
   local e; e="$(mktemp -d)"; git -C "$e" init -q
   run render_project_tests_block --root "$e" bash
+  [[ "$output" == *"no tracked file matches the usual test patterns"* && "$output" != *"project_tests: ["* ]]
+  run render_project_tests_block --root "$e" --fresh bash
   [[ "$output" == *"No tracked file matches a test pattern yet"* && "$output" == *'project_tests: ["**/*.bats","**/test-*.sh"]'* ]]
   run render_project_tests_block --root "$e"
   [[ "$output" == *"no tracked file matches the usual test patterns"* && "$output" != *"project_tests: ["* ]]

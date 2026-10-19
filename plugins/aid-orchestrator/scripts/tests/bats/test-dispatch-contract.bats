@@ -447,7 +447,9 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   aid_dispatch_contract_build p2.json 0 c2.json
   [ "$(jq -c .expected_deletions c2.json)" = '["src/old.sh"]' ]
   VERSION="$(jq -r .version c2.json)"
-  : > src/old.sh; _return '{}'
+  git init -q .; git config user.email t@t; git config user.name T
+  : > src/old.sh; git add -A; git commit -qm seed
+  _return '{}'
   run aid_dispatch_contract_validate c2.json .aid-o/return.json "$TEST_DIR"
   [ "$status" -eq 1 ]; [[ "$output" == *"src/old.sh (still on disk)"* ]]
   rm src/old.sh
@@ -456,6 +458,12 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   _return '{deleted_files: ["src/old.sh"]}'
   run aid_dispatch_contract_validate c2.json .aid-o/return.json "$TEST_DIR"
   echo "$output"; [ "$status" -eq 0 ]
+  # a Delete of a path that was never tracked deletes nothing (Codex review 19. 10. 2026)
+  jq '.steps[0].outputs += ["Delete: `src/never.sh` — x"] | .steps[0].allowed_paths += ["src/never.sh"]' plan.json > p3.json
+  aid_dispatch_contract_build p3.json 0 c3.json; VERSION="$(jq -r .version c3.json)"
+  _return '{deleted_files: ["src/never.sh"]}'
+  run aid_dispatch_contract_validate c3.json .aid-o/return.json "$TEST_DIR"
+  [ "$status" -eq 1 ]; [[ "$output" == *"src/never.sh (never a tracked file"* ]]
 }
 
 @test "contract: another repository's file whose commits the return names in repo_commits is reported as committed there, not as still to do (aidlab-apps 15. 10. 2026)" {

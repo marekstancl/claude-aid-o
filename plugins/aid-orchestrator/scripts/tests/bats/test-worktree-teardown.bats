@@ -146,6 +146,14 @@ _seed_aborted_plan() {
   [[ "$output" == *"plan_close_worktree_dirty"* && "$output" == *"navrh-pro-pm.md"* ]]
   [ ! -f "$ROOT/.aid-o/work/plan-state/P901/plan-close-complete" ]
   [ -f "$(_wt P901)/navrh-pro-pm.md" ]
+  rm "$(_wt P901)/navrh-pro-pm.md"
+  local tracked; tracked="$(git -C "$(_wt P901)" ls-files | head -1)"
+  if [[ -n "$tracked" ]]; then
+    echo "# edited" >> "$(_wt P901)/$tracked"
+    run _pf plan-close P901 --project-root "$ROOT" \
+      --force --force-reason "test: exercise the plan-close worktree teardown path"
+    [ "$status" -eq 1 ]; [[ "$output" == *"plan_close_worktree_dirty"* && "$output" == *"$tracked"* ]]
+  fi
   run _pf plan-close P901 --project-root "$ROOT" --discard-worktree-changes \
     --force --force-reason "test: exercise the plan-close worktree teardown path"
   [ "$status" -eq 0 ]

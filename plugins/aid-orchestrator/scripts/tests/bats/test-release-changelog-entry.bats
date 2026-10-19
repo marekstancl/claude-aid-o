@@ -451,6 +451,11 @@ PY
   [[ "$output" == *"2.0.1"* ]]
   [ "$(git rev-list --count HEAD)" = "$commits_before" ]
   [ "$(jq -r .version "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P900/release-prep.json")" = 2.0.1 ]
+  # a raised header that is not committed is no raised version (Codex review 19. 10. 2026)
+  sed -i '0,/^## \[/s//## [2.0.9] — x\n\n- y\n\n## [/' CHANGELOG.md
+  run bash "$RELEASE" prepare-plan P900 --bump none --plan-branch plan/P900 --project-root "$TEST_PROJECT_ROOT"
+  [ "$status" -ne 0 ]; [[ "$output" == *"uncommitted changes"* ]]
+  git checkout -q -- CHANGELOG.md
   git tag v2.0.1
   run bash "$RELEASE" prepare-plan P900 --bump none --plan-branch plan/P900 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -ne 0 ]; [[ "$output" == *"not above the last tag"* ]]

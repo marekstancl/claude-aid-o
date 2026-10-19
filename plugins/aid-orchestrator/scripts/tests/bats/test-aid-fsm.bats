@@ -2118,5 +2118,13 @@ YML
   [ "$status" -ne 0 ]; [[ "$output" == *"setup.cfg"* ]]
   run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add pyproject.toml --reason "PM: Povolit package-data pro krok 2" --pm-card "$card"
   echo "$output"; [ "$status" -eq 0 ]
-  [[ "$(jq -r '.[-1].zadani_point' "$td/steps/step_1_backend/scope-amendment.json")" == pm:* ]]
+  [ "$(jq -r '.[-1].zadani_point' "$td/steps/step_1_backend/scope-amendment.json")" = null ]
+  [ "$(jq -r '.[-1].pm_decision.card' "$td/steps/step_1_backend/scope-amendment.json")" = "$card" ]
+  # a step that DOES close points: the PM's card still decides, no point needs naming (Codex review 19. 10. 2026)
+  _zp_plan_json "$td"; _zp_state "$td" EXECUTE 0
+  printf -- '- setup.cfg\n' >> "$card"; touch -d '-10 seconds' "$card"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$AID_HOOK_AUDIT"
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add setup.cfg --reason "PM: a config file the step needs" --pm-card "$card"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.[-1].pm_decision.card' "$td/steps/step_1_backend/scope-amendment.json")" = "$card" ]
 }

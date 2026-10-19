@@ -375,7 +375,12 @@ aid_dispatch_contract_validate() {
     [[ -n "$d" ]] || continue
     [[ "$d" == /* ]] && _d_path="$d" || _d_path="${root}/${d}"
     if [[ -e "$_d_path" ]]; then gone+=("${d} (still on disk)")
-    elif [[ $'\n'"$deleted"$'\n' != *$'\n'"$d"$'\n'* ]]; then gone+=("${d} (not in deleted_files)"); fi
+    elif [[ $'\n'"$deleted"$'\n' != *$'\n'"$d"$'\n'* ]]; then gone+=("${d} (not in deleted_files)")
+    # a deletion of a TRACKED file: still in the index (deleted in the tree) or gone in a commit of the step
+    elif [[ "$d" != /* ]] && ! git -C "$root" ls-files --error-unmatch -- "$d" >/dev/null 2>&1 \
+         && [[ -z "$(git -C "$root" log -1 --format=%h --diff-filter=D -- "$d" 2>/dev/null)" ]]; then
+      gone+=("${d} (never a tracked file — nothing was deleted)")   # still in the index, or deleted in a commit
+    fi
   done < <(jq -r '.expected_deletions[]? // empty' "$c")
   (( ${#gone[@]} )) && _add reasons "declared deletions not done: ${gone[*]}"
 

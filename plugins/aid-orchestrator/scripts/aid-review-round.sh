@@ -304,7 +304,7 @@ _index_add() {
 _prev_attempt_rounds() {
   local fc="${EVID}/fix-class.json"
   [[ -f "$fc" ]] || return 0
-  ls -d "$(dirname "$EVID")/$(basename "$(jq -r '.previous_run_dir // "none"' "$fc")")"/cp7/round-* 2>/dev/null | sort -t- -k2 -n -r
+  ls -d "$(dirname "$EVID")/$(basename "$(jq -r '.previous_run_dir // "none"' "$fc")")"/cp7/round-* 2>/dev/null | grep -E '/round-[0-9]+$' | sort -t- -k2 -n -r
 }
 _carried_roles() {
   local dir="$1" fc="${EVID}/fix-class.json" role feeds src out='{}'; shift
@@ -1395,6 +1395,7 @@ cmd_dispute() {
   [[ -f "${dir}/merged.json" ]] || _die "round ${ROUND} not collected"
   local final
   for final in "${BASE}"/round-*/plan-final.md; do
+    [[ "$final" =~ /round-[0-9]+/plan-final\.md$ ]] || continue   # a set-aside round-N.x dir finalizes nothing
     [[ -f "$final" ]] && cmp -s "$PLAN" "$final" \
       && _die "the plan is finalized (plan-final.md matches it); a dispute now would change what the acceptance criteria must quote — edit the plan and finalize again"
   done

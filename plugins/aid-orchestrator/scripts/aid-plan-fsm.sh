@@ -6508,7 +6508,14 @@ cmd_plan_close() {
   # Before anything changes: the worktree the close will remove holds no work of anyone's.
   local _wt_close _wt_dirty; _wt_close="$(aid_plan_recorded_worktree "$root" "$plan_id" 2>/dev/null || true)"
   if [[ -n "$_wt_close" && -d "$_wt_close" && "${_PFSM_DISCARD_WT:-0}" -ne 1 ]]; then
-    _wt_dirty="$(git -C "$_wt_close" status --porcelain --untracked-files=all 2>/dev/null | head -20 || true)"
+    local _wt_rc=0; _wt_dirty="$(git -C "$_wt_close" status --porcelain --untracked-files=all 2>&1)" || _wt_rc=$?
+    if (( _wt_rc != 0 )); then
+      echo "PRECONDITION FAIL: plan-close: REFUSED (plan_close_worktree_dirty): cannot read the state of ${_wt_close} (git status exit ${_wt_rc}: $(head -2 <<< "$_wt_dirty" | tr '\n' ' ')) — the close would remove it unseen" >&2
+      echo "next: repair the worktree (aid-plan-fsm.sh plan-state ${plan_id} --recreate-worktree --reason \"<why>\"), or delete it on purpose: plan-close ${plan_id} --discard-worktree-changes" >&2
+      echo "(pipeline.md §When AID refuses: plan_close_worktree_dirty)" >&2
+      exit 1
+    fi
+    _wt_dirty="$(head -20 <<< "$_wt_dirty")"
     if [[ -n "$_wt_dirty" ]]; then
       echo "PRECONDITION FAIL: plan-close: REFUSED (plan_close_worktree_dirty): the execution worktree ${_wt_close} holds changes the close would delete:" >&2
       sed 's/^/  /' <<< "$_wt_dirty" >&2

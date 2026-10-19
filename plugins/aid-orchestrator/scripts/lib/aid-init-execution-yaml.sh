@@ -378,8 +378,11 @@ execution_yaml_has_gate_profiles() {
 # Nothing matches → a comment saying so, never a key that covers no test.
 _AID_TEST_PATTERNS=('test_*.py' '*_test.py' 'test-*.sh' 'tests-*.sh' '*.bats' '*.test.ts' '*.test.tsx' '*.test.js' '*.spec.ts' '*.spec.js' '*_test.go' '*_test.rs')
 render_project_tests_block() {
-  local plugin_dir s frag globs='[]' root=""
+  local plugin_dir s frag globs='[]' root="" fresh=0
   if [[ "${1:-}" == --root ]]; then root="${2:?render_project_tests_block: --root needs a dir}"; shift 2; fi
+  # --fresh: a new workspace (compose) keeps the stack's defaults when no test exists yet; the offer to an
+  # existing project (/aid-init upgrade) never proposes globs that match nothing
+  if [[ "${1:-}" == --fresh ]]; then fresh=1; shift; fi
   plugin_dir=$(_resolve_plugin_dir) || return 1
   for s in "$@"; do
     [[ -n "$s" ]] || continue
@@ -395,7 +398,7 @@ render_project_tests_block() {
       [[ -n "$(git -C "$root" ls-files -- ":(glob)${g}" 2>/dev/null | head -1)" ]] && kept="$(jq -c --arg g "$g" '. + [$g]' <<< "$kept")"
     done < <(jq -r '.[]' <<< "$globs")
     if [[ "$kept" != "[]" ]]; then globs="$kept"
-    elif [[ "$stack_globs" != "[]" ]]; then
+    elif (( fresh )) && [[ "$stack_globs" != "[]" ]]; then
       # a new project has no tests yet: the stack's defaults keep the gate owing proof once they exist
       echo "# No tracked file matches a test pattern yet: these are the stack's defaults — check them when the first tests exist."
       globs="$stack_globs"
@@ -469,7 +472,7 @@ compose_execution_yaml() {
 # Review and customize commands; remove sections for stacks you don't use.
 
 EOF
-    render_project_tests_block --root "$project_root" "${clean_stacks[@]:-}"
+    render_project_tests_block --root "$project_root" --fresh "${clean_stacks[@]:-}"
     echo ""
     echo "gates:"
 

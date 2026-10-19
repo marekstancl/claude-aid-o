@@ -1165,7 +1165,11 @@ cmd_prepare_plan() {
   #    edited or committed; the version is the newest CHANGELOG header, which must be above the last tag.
   if [[ "$bump" == none ]]; then
     local cv="" lt=""
-    [[ -f "$REPO_ROOT/CHANGELOG.md" ]] && cv="$(grep -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+' "$REPO_ROOT/CHANGELOG.md" | head -1 || true)"
+    # read from the COMMIT, never the working file: an uncommitted header would be recorded against a
+    # prepare_commit that does not contain it (Codex, 19. 10. 2026)
+    git -C "$REPO_ROOT" diff --quiet HEAD -- CHANGELOG.md 2>/dev/null \
+      || { echo "PRECONDITION FAIL: prepare-plan --bump none: CHANGELOG.md has uncommitted changes — commit the version the plan raised first" >&2; exit 1; }
+    cv="$(git -C "$REPO_ROOT" show HEAD:CHANGELOG.md 2>/dev/null | grep -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
     [[ -n "$cv" ]] || { echo "PRECONDITION FAIL: prepare-plan --bump none: CHANGELOG.md has no '## [X.Y.Z]' section — the plan's step writes it with the version it raised, or use --bump auto|patch|minor|major" >&2; exit 1; }
     lt="$(git -C "$REPO_ROOT" tag --merged HEAD -l 'v[0-9]*' 2>/dev/null | sed 's/^v//' | sort -V | tail -1 || true)"   # the highest, not the nearest
     if [[ -n "$lt" ]] && [[ "$(printf '%s\n%s\n' "$lt" "$cv" | sort -V | tail -1)" == "$lt" ]]; then
