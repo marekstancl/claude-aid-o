@@ -308,3 +308,11 @@ MAJOR='[{"fingerprint":"f2","step":1,"severity":"major","claim":"Step one names 
   run "$GATE" --plan "$PLAN"
   [ "$status" -eq 3 ]; [[ "$output" == *"the brief changed after round 1 (the plan names no zadani: now"* ]]
 }
+
+@test "gate: a set-aside round directory (round-2.unprepared-<time>) is not a round (AID 9. 10. 2026)" {
+  _round 1 '[]'
+  mkdir -p "$CP1/round-2.unprepared-1791560907"
+  run bash "$GATE" --plan "$PLAN"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"1791560907"* ]]
+}

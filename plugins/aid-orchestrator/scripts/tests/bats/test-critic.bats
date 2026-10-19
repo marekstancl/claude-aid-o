@@ -327,6 +327,15 @@ STUB
   _answer plan '**1. a**' 'Toto je námět pro rozhodnutí PM.'
   run aid_critic_check P9 --moment plan
   [ "$status" -eq 0 ]; [ "$(jq -r .level2_empty "$D/plan/check.json")" = "true" ]
+  local t
+  for t in 'Toto je návrh pro PM.\nNenavrhuji rušit API, ale odložil bych UI.' 'This is for the PM to decide! No change to the API; defer the UI.' 'Námět pro PM?\n- odložit export\n- přidat náhled' 'Toto je návrh pro PM.\nPrvní řádek návrhu.\nDruhý řádek návrhu.'; do
+    _answer plan '**1. a**' "$t"; run aid_critic_check P9 --moment plan
+    [ "$status" -eq 0 ]; [ "$(jq -r .level2_empty "$D/plan/check.json")" = "false" ] || { echo "not empty expected: $t"; false; }
+  done
+  for t in 'This is a suggestion for the PM.\nNo change to the scope.' 'Námět pro PM!\nZměnu rozsahu nenavrhuji.' 'Toto je návrh pro PM.'; do
+    _answer plan '**1. a**' "$t"; run aid_critic_check P9 --moment plan
+    [ "$status" -eq 0 ]; [ "$(jq -r .level2_empty "$D/plan/check.json")" = "true" ] || { echo "empty expected: $t"; false; }
+  done
 }
 
 @test "check: an escaped pipe in a response cell does not split it — the accepted row's checked file is still read (AID 11. 10. 2026)" {
@@ -338,6 +347,10 @@ STUB
   _response plan '| 1 | a \| `x.sh` | PŘIJATO | někde |' '| 2 | b | odmítnuto | proč |'
   run aid_critic_check P9 --moment plan
   [ "$status" -eq 5 ]; [[ "$output" == *"names no checked file or command"* ]]
+  _response plan '| 1 | a | PŘIJATO | `grep x` \|' '| 2 | b | odmítnuto | proč \|' 
+  sed -i 's/\\|$/\\| |/' "$D/plan/critic-response.md"
+  run aid_critic_check P9 --moment plan
+  [ "$status" -eq 0 ]
 }
 
 @test "prepare: a stakes paragraph with only cost lines is named as such, not as a missing paragraph (agents 12. 10. 2026)" {

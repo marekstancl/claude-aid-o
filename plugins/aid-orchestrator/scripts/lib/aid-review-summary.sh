@@ -70,7 +70,7 @@ _aid_rs_rounds() {
   local d n
   for d in "$1"/round-*/; do
     [[ -d "$d" ]] || continue
-    n="${d%/}"; n="${n##*-}"; [[ "$n" =~ ^[0-9]+$ ]] && printf '%s\n' "$n"
+    n="${d%/}"; n="${n##*/round-}"; [[ "$n" =~ ^[0-9]+$ ]] && printf '%s\n' "$n"
   done | sort -n
 }
 

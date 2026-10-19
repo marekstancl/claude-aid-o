@@ -1937,3 +1937,44 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   f="$(tail -1 <<< "$fps")"
   run _DLG --fingerprint "$f"; [ "$status" -eq 1 ]; [[ "$output" == *"not the last one"* ]]
 }
+
+@test "delegate: the adjudicator's prompt asks for the verdict as the final message, never to write a file in a read-only sandbox (aidlab-apps 16. 10. 2026)" {
+  _dlg auto; _dispute; _probe false rate_limited
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 4 ]
+  local p; p="$(ls "$(D 1)"/adjudicator-delegated-*.prompt.md)"
+  grep -q 'Your final message is ONE JSON object' "$p"
+  grep -q 'In a read-only sandbox do not try to write a file' "$p"
+  ! grep -q '^Write your verdict as ONE JSON object to:' "$p"
+}
+
+@test "delegate: a Claude stand-in that left a file in the worktree is refused delegation_left_files; once removed, the verdict records (aidlab-apps 15. 10. 2026)" {
+  _dlg auto; _dispute; _probe false rate_limited
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 4 ]
+  touch "$R/uv.lock"
+  _verdict "$VF" accepted; _adj_bracket "$F16" "$VF"
+  run _DLG --fingerprint "$FP" --verdict "$VF"
+  [ "$status" -eq 1 ]; [[ "$output" == *"delegation_left_files"* ]]; [[ "$output" == *"uv.lock"* ]]
+  rm "$R/uv.lock"
+  run _DLG --fingerprint "$FP" --verdict "$VF"; echo "$output"; [ "$status" -eq 0 ]
+}
+
+@test "delegate: a CP7 dispute settled after the round closed leaves every cp7 file recorded — the decision's stage-writes check passes (WAN 18. 10. 2026)" {
+  _frepo; _fsc
+  # what the earlier stages (produce, gates) record in a real close
+  bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh' && aid_stage_writes_record '$E' fixture \$(aid_stage_writes_inputs '$E')"
+  _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "${_BLOCKER/blocker/major}"
+  _F collect --round 1 >/dev/null
+  run _F close --round 1 --tokens final_criteria=5 final_generalist=5; echo "$output"; [ "$status" -eq 0 ]
+  local fp f16 v; fp="$(jq -r '.findings[0].fingerprint' "$(FD 1)/merged.json")"; f16="$(sed 's/^sha256://' <<< "$fp" | cut -c1-16)"; v="$(FD 1)/adjudicator-delegated-${f16}.json"
+  "$ROUND_SH" standing --plan "$R/.aid-o/plans/P901-x.md" --project-root "$R" --delegate --reason "PM: nezávislý agent rozhodne spory za mě" >/dev/null
+  _F dispute --round 1 --fingerprint "$fp" --reason "the import is in src/app.py on the plan branch" >/dev/null
+  _probe false rate_limited
+  run _F delegate --round 1 --fingerprint "$fp"; [ "$status" -eq 4 ]
+  _verdict "$v" accepted technical claude "$fp"
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "adjudicator-delegated-${f16}" --agent-id claude:adjudicator-delegated --evidence-dir "$(FD 1)" >/dev/null
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "adjudicator-delegated-${f16}" --output-file "$v" --evidence-dir "$(FD 1)" >/dev/null
+  run _F delegate --round 1 --fingerprint "$fp" --verdict "$v"; echo "$output"; [ "$status" -eq 0 ]
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh' && aid_stage_writes_verify '$E'"
+  echo "$output"; [ "$status" -eq 0 ]
+}

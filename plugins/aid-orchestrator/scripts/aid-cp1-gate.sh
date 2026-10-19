@@ -182,7 +182,7 @@ fi
 rounds=()
 for d in "${CP1}"/round-*/; do
   [[ -d "$d" ]] || continue
-  n="${d%/}"; n="${n##*-}"; [[ "$n" =~ ^[0-9]+$ ]] && rounds+=("$n")
+  n="${d%/}"; n="${n##*/round-}"; [[ "$n" =~ ^[0-9]+$ ]] && rounds+=("$n")
 done
 mapfile -t rounds < <(printf '%s\n' "${rounds[@]}" | grep -v '^$' | sort -n)
 if [[ ! -d "$(_round_dir 1)" ]]; then

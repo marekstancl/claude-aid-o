@@ -363,7 +363,7 @@ _restart_attempt() {
   fi
   local last="" d n fd
   for d in "${BASE}"/round-*/; do
-    n="${d%/}"; n="${n##*-}"; [[ "$n" =~ ^[0-9]+$ && -f "${d}fix-diff.json" ]] && { [[ -z "$last" ]] || (( n > last )); } && last="$n"
+    n="${d%/}"; n="${n##*/round-}"; [[ "$n" =~ ^[0-9]+$ && -f "${d}fix-diff.json" ]] && { [[ -z "$last" ]] || (( n > last )); } && last="$n"
   done
   fd="${BASE}/round-${last:-0}/fix-diff.json"
   if [[ "$(jq -r '.brief_changed // false' "$fd" 2>/dev/null)" != true ]]; then
@@ -1347,7 +1347,7 @@ _last_round() {
   local d n best=""
   for d in "${BASE}"/round-*/; do
     [[ -f "${d}measurement.json" ]] || continue
-    n="${d%/}"; n="${n##*-}"
+    n="${d%/}"; n="${n##*/round-}"
     [[ "$n" =~ ^[0-9]+$ ]] && { [[ -z "$best" ]] || (( n > best )); } && best="$n"
   done
   printf '%s' "$best"
@@ -1414,7 +1414,8 @@ cmd_dispute() {
     # its own stage — the audit shows who changed the verdict and when.
     if [[ "$CHECKPOINT" == cp7 ]]; then
       aid_stage_writes_record "$EVID" "cp7-dispute-${PM_ANSWER:-disputed}" \
-        "cp7/round-${ROUND}/merged.json" "cp7/round-${ROUND}/measurement.json" "cp7/round-${ROUND}/round.json" "cp7/rounds.json" semantic-review-final.json
+        "cp7/round-${ROUND}/merged.json" "cp7/round-${ROUND}/measurement.json" "cp7/round-${ROUND}/round.json" "cp7/rounds.json" semantic-review-final.json \
+      $(cd "$EVID" && compgen -G "cp7/round-${ROUND}/adjudicator-delegated-*" ; cd "$EVID" && compgen -G "cp7/round-${ROUND}/codex-adjudicator-*")   # the verdict and what made it (WAN 18. 10. 2026: decide refused the unrecorded verdict)
     fi
     _log review_dispute checkpoint="$CHECKPOINT" step="${STEP:-null}" round="$ROUND" fingerprint="$FINGERPRINT" answer="${PM_ANSWER:-disputed}" verdict="$v"
   fi
@@ -1497,7 +1498,8 @@ _dlg_resync() {
   [[ "$CHECKPOINT" == cp7 ]] && { _semantic_final_write "$v" || _die "${EVID}/semantic-review-final.json was not rewritten; record the verdict again"; }
   if [[ "$CHECKPOINT" == cp7 ]]; then
     aid_stage_writes_record "$EVID" "cp7-delegated-$2" \
-      "cp7/round-${ROUND}/merged.json" "cp7/round-${ROUND}/measurement.json" "cp7/round-${ROUND}/round.json" "cp7/rounds.json" semantic-review-final.json
+      "cp7/round-${ROUND}/timeline.jsonl" "cp7/round-${ROUND}/merged.json" "cp7/round-${ROUND}/measurement.json" "cp7/round-${ROUND}/round.json" "cp7/rounds.json" semantic-review-final.json \
+      $(cd "$EVID" && compgen -G "cp7/round-${ROUND}/adjudicator-delegated-*" ; cd "$EVID" && compgen -G "cp7/round-${ROUND}/codex-adjudicator-*")
   fi
   return 0
 }
@@ -1555,6 +1557,8 @@ cmd_delegate() {
       why="no codex role configured for ${CHECKPOINT}"; rc=4
     fi
     if (( rc != 0 )); then
+      # what the worktree looked like before the stand-in: its record refuses files it adds (F14)
+      git -C "$ROOT" status --porcelain --untracked-files=all 2>/dev/null | sort > "${dir}/adjudicator-delegated-${fp16}.status-before" || true
       echo "STAND-IN: no codex verdict (${why}); dispatch ${prompt} to an independent general-purpose agent at model ${RC_STAND_IN_MODEL} inside the bracket adjudicator-delegated-${fp16} (aid-emit-dispatch.sh start --focus adjudicator-delegated-${fp16} --agent-id claude:adjudicator-delegated --evidence-dir ${dir}; complete … --output-file ${vfile}), have it write ${vfile} with \"provider\": \"claude\", then: aid-review-round.sh delegate --checkpoint ${CHECKPOINT} --evidence-dir ${EVID}${STEP:+ --step ${STEP}} --round ${ROUND} --fingerprint ${FINGERPRINT} --verdict ${vfile}"
       exit 4
     fi
@@ -1589,6 +1593,12 @@ cmd_delegate() {
       && [[ "$(jq -r --arg f "adjudicator-delegated-${fp16}" 'select(.event == "verifier_dispatch_start" and .focus == $f) | .agent_id // ""' "${dir}/timeline.jsonl" 2>/dev/null | tail -1)" == claude:adjudicator-delegated ]]; } \
       || _dlg_refuse delegation_missing "a Claude verdict without its closed bracket adjudicator-delegated-${fp16} (agent claude:adjudicator-delegated) naming ${VERDICT}" \
            "dispatch the stand-in inside the bracket (aid-emit-dispatch.sh start/complete --focus adjudicator-delegated-${fp16}), then record again"
+  fi
+  local before="${dir}/adjudicator-delegated-${fp16}.status-before" left
+  if [[ "$provider" != codex && -f "$before" ]]; then
+    left="$(comm -13 "$before" <(git -C "$ROOT" status --porcelain --untracked-files=all 2>/dev/null | sort) | sed 's/^...//' | grep -vxF "$(realpath --relative-to="$ROOT" "$VERDICT" 2>/dev/null)" | head -20 || true)"
+    [[ -z "$left" ]] || _dlg_refuse delegation_left_files "the stand-in left files in ${ROOT} that were not there before it ran: $(tr '\n' ' ' <<< "$left")" \
+      "remove them (they are the stand-in's, not the step's), then record the verdict again"
   fi
   local answer class reason entry at
   answer="$(jq -r .answer "$VERDICT")"; class="$(jq -r .class "$VERDICT")"; reason="$(jq -r .reason "$VERDICT")"; at="$(_now)"

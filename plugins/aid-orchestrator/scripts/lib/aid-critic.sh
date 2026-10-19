@@ -289,8 +289,10 @@ aid_critic_check() {
       local l2rest l2n
       l2rest="$(printf '%s\n' "$l2" | grep -v '^#' | tr '\n' ' ' | sed -E 's/^[[:space:]]*[^.!?]*[.!?]+//; s/^[[:space:]]+|[[:space:]]+$//g')"
       l2n="$(grep -oE '[.!?]+([[:space:]]|$)' <<< "$l2rest" | wc -l)"
-      if [[ ! "$l2rest" =~ [[:alpha:]] ]] \
-         || { (( l2n <= 1 )) && grep -Eiq "(nenavrhuj|nemám|nic dalšího|žádn[ýáé]|nothing|no (further )?(change|suggestion))" <<< "$l2rest"; }; then
+      # the whole rest must BE one of the fixed "nothing" sentences (skills/critic.md), never merely contain
+      # a negative word: "Nenavrhuji rušit API, ale odložil bych UI." is a suggestion (Codex, 19. 10. 2026)
+      local l2norm; l2norm="$(sed -E 's/[[:space:]]+/ /g; s/[.!? ]+$//' <<< "${l2rest,,}")"
+      if [[ ! "$l2rest" =~ [[:alpha:]] ]] || { (( l2n <= 1 )) && [[ "$l2norm" =~ ^(další\ )?změnu\ rozsahu\ nenavrhuji$|^nic\ k\ rozsahu\ nemám$|^no\ change\ to\ the\ scope$|^nothing\ to\ suggest$ ]]; }; then
         level2_empty=true
       fi
     fi
