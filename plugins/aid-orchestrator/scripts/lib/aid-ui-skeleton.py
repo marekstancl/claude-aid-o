@@ -266,6 +266,8 @@ if(b)b.addEventListener('click',function(){d.showModal();d.querySelector('[data-
 d.querySelector('[data-aid-confirm-no]').addEventListener('click',function(){d.close();if(b)b.focus();});
 var y=d.querySelector('[data-aid-confirm-yes]'),ge=document.querySelector('[data-aid-error-global]');y.addEventListener('click',function(ev){ev.preventDefault();
 fetch(y.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=y.href;}).catch(function(){d.close();ge.hidden=false;ge.focus();});});});
+document.querySelectorAll('a[data-aid-checked]').forEach(function(a){a.addEventListener('click',function(ev){if(!a.href)return;ev.preventDefault();var ge=document.querySelector('[data-aid-error-global]');
+fetch(a.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=a.href;}).catch(function(){if(ge){ge.hidden=false;ge.focus();}});});});
 document.querySelectorAll('form[data-aid-form]').forEach(function(f){var err=f.querySelector('[data-aid-error]');
 f.addEventListener('submit',function(ev){ev.preventDefault();var bad=null;f.querySelectorAll('input,select').forEach(function(i){var e=document.getElementById(i.id+'-chyba');
 if(e)e.hidden=i.checkValidity();if(!i.checkValidity()){i.setAttribute('aria-invalid','true');bad=bad||i;}else i.removeAttribute('aria-invalid');});
@@ -322,13 +324,18 @@ def actions_html(m, scr, url, fields, ends, item=None):
     def tail(a):   # the target's parameters: a deep link (query) and the tasks the action ends (vysledek)
         ps = ([a["query"]] if a.get("query") else []) + ([f"vysledek={','.join(ends[a['id']])}"] if ends.get(a["id"]) else [])
         return esc("?" + "&".join(ps)) if ps else ""
+    # a link whose failure the model names (failure_paths at its step) checks the way first and stays on error (P116 pilot:
+    # a plain link that fails lands on the browser's error page, the screen and the way back are gone)
+    risky = {t["steps"][fp["at_step"] - 1]["action"] for t in m["tasks"] for fp in t["failure_paths"]
+             if fp["at_step"] <= len(t["steps"]) and t["steps"][fp["at_step"] - 1]["screen"] == sid}
     acts, btns = [], []
     for a in mine:
         da = f'data-aid-action="{esc(sid)}.{esc(a["id"])}"'
         if a["kind"] == "navigate":
             back = " data-aid-back" if a.get("back") else ""
             ga, why = gate_attrs(sid, a)
-            acts.append(f'<a class="akce" href="{esc(url[a["to"]])}{tail(a)}" {da}{back}{ga}>{esc(a["label"])}</a>{why}')
+            chk = " data-aid-checked" if a["id"] in risky and not a.get("back") else ""
+            acts.append(f'<a class="akce" href="{esc(url[a["to"]])}{tail(a)}" {da}{back}{chk}{ga}>{esc(a["label"])}</a>{why}')
         elif a["kind"] == "submit":
             v = f' name="vysledek" value="{esc(",".join(ends[a["id"]]))}"' if ends.get(a["id"]) else ""
             ga, why = gate_attrs(sid, a)

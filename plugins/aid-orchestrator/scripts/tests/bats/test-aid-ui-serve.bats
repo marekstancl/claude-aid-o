@@ -545,3 +545,19 @@ J
   out="$(node "$BATS_TEST_TMPDIR/md.mjs")"; [ "$out" = "Běží: zapisuje | Pauza: nic nového" ] || { echo "$out"; return 1; }
   "$SERVE" stop skeleton
 }
+
+@test "app-skeleton: a link whose failure the model names stays on its screen when the way fails, and the recover walks on" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '(.tasks[] | select(.id == "smazat") | .failure_paths) = [{at_step: 1, kind: "network", keeps_input: true, recover: "otevrit"}]' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  grep -q 'data-aid-action="seznam.otevrit" data-aid-checked' "$P/site/seznam/index.html"; ! grep -q 'data-aid-action="seznam.novy" data-aid-checked' "$P/site/seznam/index.html"
+  python3 "$BATS_TEST_DIRNAME/../../aid-ui-flows.py" generate "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/nf.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); const s = (await import('$P/.aid-ui/scenarios/smazat.mjs')).default;
+const o = await s({ page: pg, base: 'http://127.0.0.1:39918/', state: 'fail-1' }); console.log(o.done + (o.why ? ' ' + o.why : '')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/nf.mjs")"; [ "$out" = "true" ] || { echo "$out"; return 1; }
+  "$SERVE" stop skeleton
+}
