@@ -3,6 +3,39 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.7.0] — 2026-10-19
+
+Companion jako hotová stavebnice a opravy z projektů: agent dodá varianty ze sdílených komponent a tři datové soubory, server, kopii aplikace, focení, stránku i odpovědi PM dělá jeden příkaz. Server companionu se od 2.118.0 vůbec nespustil a poznámky PM se agentovi nezapisovaly – obojí opraveno a hlídáno testem nad skutečným serverem. K tomu 20 oprav z deníků WAN, aidlab-apps, agents, share a AID, každá s testem, který na 3.6.0 padá.
+
+### Added
+- **`scripts/aid-companion.sh up|proto|shots|show|answers|down --plan <P>`** – jedna složka na plán (`.aid-o/work/companion/<P>/`): `up` spustí nebo znovu použije server téže verze pluginu, `proto` zkopíruje UI aplikace mimo repo a spustí vývojový server ve vlastní ověřené skupině procesů, `shots` nafotí počítač i telefon nad smyšlenými daty (kroky, selektory, přihlášení, mocky jen na API, volání bez mocku je chyba), `show` postaví pevnou stránku z `navrh.json` a sama ji zkontroluje, `answers` vypíše volby a poznámky PM.
+- **Pevná stránka návrhu** podle PM (WAN 19. 10. 2026): jedna obrazovka, tři sloupce, náhled nikdy větší než skutečnost, přepínač počítač/telefon, minulé kolo, přilepená poznámka, „Zvoleno n z m“, textový bod bez náhledu.
+- **„Podle existujících vzorů“ hlídá kód:** komponenty v `postaveno_z` musí soubory varianty skutečně importovat z `ui.components` (relativní cesty, aliasy z `tsconfig`, index), nový soubor komponenty jen v `nove[]` s důvodem (PM ho vidí označený), změněný soubor kopie musí patřit právě jedné možnosti.
+- **`/aid-init` navrhne klíče `ui`** (`dir`, `components`, `dev_cmd`, `ready_path`, `api_prefix`) z `vite.config.*` / `next.config.*` (`lib/aid-ui-config.sh`).
+- **Štítek `Delete:`** v popisu souborů kroku; kontrakt kroku ověří, že sledovaný soubor zmizel a krok ho uvedl v `deleted_files`.
+- **`prepare-plan --bump none`** pro verzi, kterou už zvedl krok plánu (čte commitnutý CHANGELOG, nic necommituje).
+- **`amend-scope --pm-card <karta>`**: rozšíření rozsahu na výslovné rozhodnutí PM, zapsané jako `pm_decision`.
+
+### Fixed
+- **Server companionu se spustí** (od 2.118.0 padal na chybějícím `confirm-store`); volby, poznámky i odeslání PM se zapisují do `answers.jsonl` a nemažou se; websocket přijme jen vlastní stránku.
+- **`plan-close` nesmaže pracovní kopii se změnami** (WAN 19. 10. 2026) – odmítne před jakoukoli změnou stavu (`plan_close_worktree_dirty`), smazat jde jen výslovně (`--discard-worktree-changes`).
+- **Delegace sporů:** Codex vrací verdikt poslední zprávou (sandbox jen pro čtení ho nezapsal), delegovaný verdikt CP7 nezablokuje uzávěr plánu, náhradník nesmí nechat soubory v pracovní kopii (`delegation_left_files`).
+- **Kontrola plánu (CP1):** kolo se nepřipraví nad plánem, který neprošel připraveností (`plan_not_ready`); odložený adresář `round-N.x` není kolo; citace nálezu projde bránou i kontrolou fragmentů (zpětné uvozovky, uvozovka po `>>`).
+- **Kritik:** návrh rozsahu v próze se už nehlásí jako prázdná úroveň 2; `\|` v buňce odpovědi nerozbije sloupce; odstavec „Co je v sázce“ jen s cenou se pojmenuje přesně.
+- **Kontrola kroku** nespadne na souboru mimo git (`outside_git`, krok jde k revizi); u souborů cizího repa s platným `repo_commits` hlásí „committed there“.
+- **`/aid-init`:** testové brány dostanou limit 900 s, `plan_diff` je definovaná; návrh `project_tests` vychází ze sledovaných testovacích souborů.
+- Kontrola rozdílů mezi kódem a dokumentací vidí i kódy odmítnutí předané pomocnou funkcí; podklady testů ve složce `docs/` nejsou ignorované; kořen pluginu nikdy není kořen projektu; zastaralý podklad testu gramatiky výsledků (noční červená).
+
+### Changed
+- Návod `visual-companion` je jeden postup (134 řádků místo 504); starý režim stránek (fragmenty, `/screen`, `data-confirm`) server dál umí.
+
+### Known limits
+- Karta PM u `--pm-card` má stejnou slabinu jako ostatní karty (IMP-692): kdo umí zapsat soubor karty a událost hooku, umí ji padělat.
+- `proto` neumí workspace/monorepo ani pnpm bez `node_modules` v `ui.dir`; `shots` neumí nové okno, iframe a nahrání souboru – obojí odmítne s výzvou zapsat případ.
+- Vývojový server je v testech jednoduchý statický server; skutečný Vite ověřil nezávislý agent (AC9).
+- Návrh klíčů `ui` při `/aid-init` je pokyn průvodce (`/aid-init` provádí agent); kód je `aid_ui_config_detect` s testem, samotné zapojení do průvodce test nemá.
+- Převzetí portu cizím procesem mezi výběrem a startem vývojového serveru se odhalí (port musí patřit skupině procesů prototypu), ale deterministický test toho závodu není.
+
 ## [3.6.0] — 2026-10-18
 
 Studio `/aid-ui` předává plánu a běhu (P115): převzetí webu zapíše jeden předávací balík, z balíku vznikne jedním příkazem zadání plánu nasazení, brána běhu pustí na doménu jen předaný web bez otevřeného kritického bodu, ostrý web má vlastní hodnocení a studio používá Codex a ceník AIDu místo vlastních kopií. Ověřeno na testovacím projektu a v testbedu (dráha `ui_package_to_gate`); skutečný web se tímto vydáním nenasazoval (PM 3A).

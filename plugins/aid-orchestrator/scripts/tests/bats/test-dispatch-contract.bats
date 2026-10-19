@@ -441,3 +441,50 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   [ "$status" -ne 0 ]
   aid_dispatch_repo_range_ok "$WT" "${base}..${head}" plan/P111-proj
 }
+
+@test "contract: a Delete bullet is a declared deletion — the return is refused while the file is on disk or unnamed in deleted_files, accepted once both hold (AID 13. 10. 2026)" {
+  jq '.steps[0].outputs += ["Delete: `src/old.sh` — replaced by the thing"] | .steps[0].allowed_paths += ["src/old.sh"]' plan.json > p2.json
+  aid_dispatch_contract_build p2.json 0 c2.json
+  [ "$(jq -c .expected_deletions c2.json)" = '["src/old.sh"]' ]
+  VERSION="$(jq -r .version c2.json)"
+  git init -q .; git config user.email t@t; git config user.name T
+  : > src/old.sh; git add -A; git commit -qm seed
+  _return '{}'
+  run aid_dispatch_contract_validate c2.json .aid-o/return.json "$TEST_DIR"
+  [ "$status" -eq 1 ]; [[ "$output" == *"src/old.sh (still on disk)"* ]]
+  rm src/old.sh
+  run aid_dispatch_contract_validate c2.json .aid-o/return.json "$TEST_DIR"
+  [ "$status" -eq 1 ]; [[ "$output" == *"src/old.sh (not in deleted_files)"* ]]
+  _return '{deleted_files: ["src/old.sh"]}'
+  run aid_dispatch_contract_validate c2.json .aid-o/return.json "$TEST_DIR"
+  echo "$output"; [ "$status" -eq 0 ]
+  # a Delete of a path that was never tracked deletes nothing (Codex review 19. 10. 2026)
+  jq '.steps[0].outputs += ["Delete: `src/never.sh` — x"] | .steps[0].allowed_paths += ["src/never.sh"]' plan.json > p3.json
+  aid_dispatch_contract_build p3.json 0 c3.json; VERSION="$(jq -r .version c3.json)"
+  _return '{deleted_files: ["src/never.sh"]}'
+  run aid_dispatch_contract_validate c3.json .aid-o/return.json "$TEST_DIR"
+  [ "$status" -eq 1 ]; [[ "$output" == *"src/never.sh (not a tracked file"* ]]
+  # a path deleted long ago in history is no deletion of this step
+  : > src/never.sh; git add src/never.sh; git commit -qm add; git rm -q src/never.sh; git commit -qm gone
+  run aid_dispatch_contract_validate c3.json .aid-o/return.json "$TEST_DIR"
+  [ "$status" -eq 1 ]; [[ "$output" == *"src/never.sh (not a tracked file"* ]]
+}
+
+@test "contract: another repository's file whose commits the return names in repo_commits is reported as committed there, not as still to do (aidlab-apps 15. 10. 2026)" {
+  git init -q -b main . 2>/dev/null || git init -q .
+  git config user.email t@t; git config user.name T
+  git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
+  local other="$BATS_TEST_TMPDIR/other"; mkdir -p "$other"; git -C "$other" init -q
+  git -C "$other" config user.email t@t; git -C "$other" config user.name T
+  echo a > "$other/doc.md"; git -C "$other" add -A; git -C "$other" commit -qm base; local b; b="$(git -C "$other" rev-parse HEAD)"
+  echo b >> "$other/doc.md"; git -C "$other" commit -qam step
+  jq --arg p "$other/doc.md" '.steps[0].allowed_paths += [$p] | .steps[0].outputs += ["Modify: `" + $p + "` — doc"]' plan.json > .aid-o/p2.json
+  aid_dispatch_contract_build .aid-o/p2.json 0 .aid-o/c2.json
+  VERSION="$(jq -r .version .aid-o/c2.json)"
+  echo xx >> src/thing.sh
+  _return "{changed_files: [\"src/thing.sh\", \"$other/doc.md\"], repo_commits: [{repo: \"$other\", range: \"$b..$(git -C "$other" rev-parse HEAD)\"}]}"
+  run aid_dispatch_contract_commit "$TEST_DIR" .aid-o/c2.json .aid-o/return.json "step 1c"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"$other/doc.md is in $(cd "$other" && pwd -P), committed there"* ]]
+  [[ "$output" != *"not committed here"* ]]
+}

@@ -4,6 +4,7 @@ py_test:
   # DEPENDENCY: pytest must be installed (pip install pytest)
   command: "bash {plugin_path}/scripts/aid-run-gates.sh record-tests --glob '**/tests/**/*.py' --glob '**/test_*.py' --evidence-file {evidence_dir}/gates/py_test.evidence.json -- pytest -q"
   runs_project_tests: true   # P110: it runs the project's tests and proves it (evidence file)
+  timeout_seconds: 900   # the whole suite; the default 60 s cut it silently (aidlab-apps 16. 10. 2026)
   required: true
 py_lint:
   # DEPENDENCY: ruff must be installed (pip install ruff)

@@ -251,3 +251,13 @@ _rr_step() {   # a declared foreign repository "docs" with a worktree on plan/P1
   [ "$status" -eq 0 ]
   [[ "$(_json .reason cp2/step-2)" == *"repo_commits): docs"* ]]
 }
+
+@test "outside git: a declared absolute path in no repository does not end the check with 128 — it is named as outside_git and the step is reviewed (aidlab-apps 16. 10. 2026)" {
+  mkdir -p "$T/eco-root"; echo x > "$T/eco-root/CLAUDE.md"
+  jq --arg f "$T/eco-root/CLAUDE.md" '.steps[0].allowed_paths += [$f]' "$E/plan.json" > "$E/p" && mv "$E/p" "$E/plan.json"
+  echo "# small" >> "$R/src/app.py"; _commit s0 >/dev/null
+  run _run --checkpoint cp2 --step 0; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_json .verdict cp2/step-0)" = review ]
+  [ "$(_json '.outside_git[0]' cp2/step-0)" = "$T/eco-root/CLAUDE.md" ]
+  [[ "$(_json .reason cp2/step-0)" == *"outside any git repository"* ]]
+}

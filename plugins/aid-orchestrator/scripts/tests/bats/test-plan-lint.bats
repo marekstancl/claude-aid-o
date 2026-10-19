@@ -502,3 +502,11 @@ _ac_cmd() { printf '\n## Acceptance Criteria\n\n- [ ] AC1: it is there\n  ```yam
   [[ "$output" == *"[ADVISORY]"*"cannot be read"*"not judged for repo_roots"* ]]
   [[ "$output" != *"foreign_repo_undeclared"* ]]
 }
+
+@test "files grammar: a Delete: bullet is a labelled bullet whose path reaches the step; an unknown label is still refused (AID 13. 10. 2026)" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-scoping.sh"
+  run _aid_classify_files_bullet '- Delete: `src/old.sh` — replaced by the new module'
+  [[ "$output" != error:* ]]
+  run _aid_classify_files_bullet '- Remove: `src/old.sh` — replaced'
+  [ "$output" = "error:no-verb-label" ]
+}

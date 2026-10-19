@@ -66,7 +66,9 @@ aid_rr_phys_repo() {
   local d="$1"
   while [[ -n "$d" && ! -d "$d" ]]; do d="${d%/*}"; done
   [[ -n "$d" ]] || d=/
-  ( cd "$d" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null ) | xargs -r realpath 2>/dev/null
+  # "or nothing" includes a path outside any repository: under pipefail the failed rev-parse must not
+  # fail the caller (aid-step-check.sh exited 128 with no word, aidlab-apps 16. 10. 2026)
+  ( cd "$d" 2>/dev/null && git rev-parse --show-toplevel 2>/dev/null ) | xargs -r realpath 2>/dev/null || true
 }
 
 # aid_rr_entries <src> [<plan_id> <project>] — see the header. A declared path

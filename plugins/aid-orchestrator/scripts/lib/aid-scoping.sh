@@ -186,7 +186,7 @@ _aid_extract_files_bullets_numbered() { awk -v emit_lineno=1 "$_AID_FILES_BULLET
 # the entries the generation-time gate would reject.
 # THE Files-bullet verb vocabulary. Every reader and the generator match
 # against this one pattern, so adding a verb is one edit, not four.
-_AID_FILES_VERB_RE='^(Create|Modify|Test|Rewrite):[[:space:]]*(.*)$'
+_AID_FILES_VERB_RE='^(Create|Modify|Test|Rewrite|Delete):[[:space:]]*(.*)$'
 
 # _aid_files_bullet_body <bullet> — the bullet with its leading "- " and verb
 # label stripped. Returns 1 (and echoes the bullet unchanged) when there is NO
@@ -498,7 +498,7 @@ _aid_allowed_paths_from_files_json() {
   n="$(echo "$files_json" | jq 'length')"
   for (( idx=0; idx<n; idx++ )); do
     entry="$(echo "$files_json" | jq -r --argjson i "$idx" '.[$i]')"
-    stripped="$(printf '%s' "$entry" | sed -E 's/^(Create|Modify|Test|Rewrite):[[:space:]]*//')"
+    stripped="$(printf '%s' "$entry" | sed -E 's/^(Create|Modify|Test|Rewrite|Delete):[[:space:]]*//')"
     if ! parsed="$(_aid_split_path_entry "$stripped")"; then
       echo "aid-scoping: invalid Files entry at array index ${idx}: ${entry}" >&2
       return 1

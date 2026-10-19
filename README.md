@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v3.6.0** (current) — studio /aid-ui předává plánu a běhu: předávací balík, zadání plánu nasazení z balíku, brána běhu `check_ui_handover` (jen předaný web bez otevřeného kritického bodu), hodnocení po nasazení ve vlastní smyčce, Codex a ceník AIDu ve studiu
+- **v3.7.0** (current) — companion jako hotová stavebnice (`aid-companion.sh`: kopie aplikace, focení nad smyšlenými daty, pevná stránka s panelem vlevo, odpovědi PM; agent dodá jen varianty ze sdílených komponent) a 20 oprav z projektů (uzávěr plánu nesmaže neuložené soubory, delegace sporů, citace nálezů, `--bump none`, `Delete:`)
+- **v3.6.0** — studio /aid-ui předává plánu a běhu: předávací balík, zadání plánu nasazení z balíku, brána běhu `check_ui_handover` (jen předaný web bez otevřeného kritického bodu), hodnocení po nasazení ve vlastní smyčce, Codex a ceník AIDu ve studiu
 - **v3.5.0** — studio /aid-ui podle dílny: šest míst rozhodnutí, klient a odborník na Opusu s pamětí, brány v kódu, živá kostra, brána přes všechny stránky a šířky jedním průchodem, `cycle`, nástroje značky a pohybu loga
 - **v3.4.0** — testy před sloučením zpět pod 10 min (919 → 544 s): T0 jen statické kontroly, přetečení do nočního běhu se záznamem, kontrola pater i při vydání, rychlejší skrývání tajných údajů
 - **v3.3.0** — noční běh hlásí, když testy před sloučením přetáhnou rozpočet (`rozpocet-testu`, jedna zpráva za noc, `ok` po návratu)

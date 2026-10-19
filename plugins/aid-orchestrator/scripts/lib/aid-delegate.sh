@@ -66,7 +66,13 @@ aid_delegate_prompt() {
         && echo "A delegate already granted one more fix round and the finding is still open: answer dismiss, or class brief if the plan would deliver less than the brief."
     fi
     echo
-    echo "Write your verdict as ONE JSON object to: ${dir}/adjudicator-delegated-$(aid_delegate_fp16 "$(jq -r .fingerprint <<< "$finding")").json"
+    local vf; vf="${dir}/adjudicator-delegated-$(aid_delegate_fp16 "$(jq -r .fingerprint <<< "$finding")").json"
+    # Codex runs in a read-only sandbox and its LAST MESSAGE is what the runner saves (codex exec -o):
+    # an instruction to write the file made it answer with a complaint instead (aidlab-apps 16. 10. 2026).
+    echo "Your final message is ONE JSON object and nothing else. In a read-only sandbox do not try to write a file —"
+    echo "your final message is saved to ${vf}. If you are a stand-in that can write files, write that JSON object to ${vf}."
+    echo "Leave nothing behind in the repository: run checks in a temporary copy or remove what they create (uv.lock,"
+    echo "__pycache__, build output) — a new file in the plan's worktree makes the step's return fail."
   } > "$out"
 }
 

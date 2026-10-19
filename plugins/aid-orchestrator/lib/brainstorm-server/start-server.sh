@@ -31,6 +31,12 @@
 #                         companion slot (AID_COMPANION_PORTS, default 3930-3949 —
 #                         twenty, the PM runs ten at once); a loopback bind keeps
 #                         a random high port.
+#   --kit                 The companion kit (scripts/aid-companion.sh): the page is the
+#                         kit's own (navrh-<kolo>.html), so no basis is composed on "/"
+#                         and none is required before the first page — `show` writes
+#                         proposal.json, which the brainstorm's design gate checks.
+#   --screen-dir <dir>    Use this directory instead of a new session directory
+#                         (the kit keeps one per plan: .aid-o/work/companion/<plan>).
 #   --foreground          Run server in the current terminal (no backgrounding).
 #   --background          Force background mode (overrides Codex auto-foreground).
 
@@ -45,6 +51,8 @@ FORCE_BACKGROUND="false"
 BIND_HOST="127.0.0.1"
 URL_HOST=""
 PORT=""
+KIT="false"
+FIXED_SCREEN_DIR=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --project-dir) PROJECT_DIR="$2"; shift 2 ;;
@@ -52,6 +60,8 @@ while [[ $# -gt 0 ]]; do
     --host)        BIND_HOST="$2"; shift 2 ;;
     --url-host)    URL_HOST="$2"; shift 2 ;;
     --port)        PORT="$2"; shift 2 ;;
+    --kit)         KIT="true"; shift ;;
+    --screen-dir)  FIXED_SCREEN_DIR="$2"; shift 2 ;;
     --foreground|--no-daemon) FOREGROUND="true"; shift ;;
     --background|--daemon)    FORCE_BACKGROUND="true"; shift ;;
     *) echo "{\"error\": \"Unknown argument: $1\"}"; exit 1 ;;
@@ -90,7 +100,7 @@ if [[ -n "$PROJECT_DIR" ]]; then
     "") fail "$PLAN_ID does not say whether this is a screen of an existing application. Say it first: aid-brainstorm-state.sh topic-kind $PLAN_ID ui   (or: topic-kind $PLAN_ID other --reason \"<why no screen of the application is involved>\")" ;;
     *) fail "$PLAN_ID has topic_kind '$TOPIC_KIND', which is neither ui nor other — fix it: aid-brainstorm-state.sh topic-kind $PLAN_ID ui|other [--reason …]" ;;
   esac
-  if [[ "$TOPIC_KIND" == "ui" ]]; then
+  if [[ "$TOPIC_KIND" == "ui" && "$KIT" != "true" ]]; then
     PROPOSAL="$STATE_DIR/proposal.json"
     # shellcheck source=../../scripts/lib/aid-ui-proposal.sh
     source "$PLUGIN_ROOT/scripts/lib/aid-ui-proposal.sh" || fail "cannot load $PLUGIN_ROOT/scripts/lib/aid-ui-proposal.sh"
@@ -149,7 +159,9 @@ fi
 # Generate unique session directory
 SESSION_ID="$$-$(date +%s)"
 
-if [[ -n "$PROJECT_DIR" ]]; then
+if [[ -n "$FIXED_SCREEN_DIR" ]]; then
+  SCREEN_DIR="$FIXED_SCREEN_DIR"
+elif [[ -n "$PROJECT_DIR" ]]; then
   SCREEN_DIR="${PROJECT_DIR}/.aid-o/work/companion/${SESSION_ID}"
 else
   SCREEN_DIR="/tmp/brainstorm-${SESSION_ID}"
@@ -160,6 +172,9 @@ LOG_FILE="${SCREEN_DIR}/.server.log"
 
 # Create fresh session directory
 mkdir -p "$SCREEN_DIR"
+# A kept directory (--screen-dir) holds the previous run's log: its "server-started" line would be read as
+# this start's (old port). The old log moves aside first.
+[[ -n "$FIXED_SCREEN_DIR" && -f "$SCREEN_DIR/.server.log" ]] && mv -f "$SCREEN_DIR/.server.log" "$SCREEN_DIR/.server.log.prev"
 
 cd "$SCRIPT_DIR" || fail "cannot enter $SCRIPT_DIR"
 

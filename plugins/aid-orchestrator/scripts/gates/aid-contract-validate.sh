@@ -311,7 +311,9 @@ _ac_fragment_smell() {
   # A BALANCED single-quoted phrase ("'current build id' and") is a quotation,
   # not a truncated string — the CP1 gate makes an AC quote a finding, so the two
   # checks disagreed (P103). Mask it like a backtick span before counting.
-  masked="$(sed -E "s/(^|[[:space:](])'[^']+'([[:space:][:punct:]]|$)/\1Q\2/g" <<< "$masked")"
+  # The opening quote may follow punctuation too: `diff_state->>'consumption' = 'open'` inside a quoted
+  # finding is two balanced strings, not a truncated one (WAN P109, 18. 10. 2026).
+  masked="$(sed -E "s/(^|[[:space:](=>:,])'[^']+'([[:space:][:punct:]]|$)/\1Q\2/g" <<< "$masked")"
   total_quotes="$(tr -cd "'" <<< "$masked" | wc -c)"
   word_internal_quotes="$(grep -oE "[[:alnum:]]'[[:alnum:]]|[[:alpha:]]'([[:space:][:punct:]]|$)" <<< "$masked" | wc -l)"
   bare_quotes=$(( total_quotes - word_internal_quotes ))

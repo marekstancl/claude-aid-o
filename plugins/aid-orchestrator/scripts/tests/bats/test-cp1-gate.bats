@@ -308,3 +308,20 @@ MAJOR='[{"fingerprint":"f2","step":1,"severity":"major","claim":"Step one names 
   run "$GATE" --plan "$PLAN"
   [ "$status" -eq 3 ]; [[ "$output" == *"the brief changed after round 1 (the plan names no zadani: now"* ]]
 }
+
+@test "gate: a set-aside round directory (round-2.unprepared-<time>) is not a round (AID 9. 10. 2026)" {
+  _round 1 '[]'
+  mkdir -p "$CP1/round-2.unprepared-1791560907"
+  run bash "$GATE" --plan "$PLAN"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"1791560907"* ]]
+}
+
+@test "round-2: a blocker whose claim starts with a backticked path is quoted without the backticks — the plan check refuses them, the gate does not need them (AID 17. 10. 2026)" {
+  local b; b="$(jq -c '.[0].claim = "`.aid-ui/studio/history.jsonl` is written by the studio and read by no step"' <<< "$BLOCKER")"
+  _round 1 "$(jq -c '.[0].status = "fixed"' <<< "$b")"; _fixcheck 1
+  sed -i 's/^- \[ \] it also works$/- [ ] it also works\n- [ ] Resolved: „.aid-ui\/studio\/history.jsonl is written by the studio and read by no step“ — a test reads it/' "$PLAN"
+  _round 2 "$b"
+  run "$GATE" --plan "$PLAN"
+  echo "$output"; [ "$status" -eq 0 ]
+}

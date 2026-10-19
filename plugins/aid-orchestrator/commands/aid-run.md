@@ -890,7 +890,7 @@ worktree (`.aid-worktrees/plan-<id>`) on `plan/<id>` for the whole close.
 
 | # | Command | What it does | It refuses when |
 |---|---------|--------------|-----------------|
-| 0 | `bash "$AID_PLUGIN_PATH/scripts/aid-release.sh" prepare-plan <plan> --bump minor\|patch --plan-branch plan/<plan>` (`auto` asks when the plan's commits carry no type) | the version commit, BEFORE the freeze, so the candidate already contains the release metadata | the tree is dirty; HEAD is not the plan branch |
+| 0 | `bash "$AID_PLUGIN_PATH/scripts/aid-release.sh" prepare-plan <plan> --bump minor\|patch --plan-branch plan/<plan>` (`auto` asks when the plan's commits carry no type; `none` when a step of the plan already raised the version and wrote its CHANGELOG section — recorded, nothing committed) | the version commit, BEFORE the freeze, so the candidate already contains the release metadata | the tree is dirty; HEAD is not the plan branch |
 | 1 | `<fsm> plan-finalize <plan> --stage freeze` | merges the target branch into `plan/<plan>`, freezes the candidate, mints `R-<plan>-final-<N>` | an EPIC is not terminal; the merge conflicts (exit 4, state CONFLICT); the tree is dirty |
 | 2 | `<fsm> plan-finalize <plan> --stage gates` | the plan-final gate run; a gate that passed in the previous attempt and whose `inputs:` did not change is copied (`reused_from`), not executed | a gate fails (the report names it); the branch moved off the candidate |
 | 3 | `<fsm> plan-finalize <plan> --stage produce` | review profile, plan-diff, acceptance evidence, and what the round reads (`cp7/`) | gates have not passed; the candidate moved |

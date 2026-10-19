@@ -182,7 +182,7 @@ fi
 rounds=()
 for d in "${CP1}"/round-*/; do
   [[ -d "$d" ]] || continue
-  n="${d%/}"; n="${n##*-}"; [[ "$n" =~ ^[0-9]+$ ]] && rounds+=("$n")
+  n="${d%/}"; n="${n##*/round-}"; [[ "$n" =~ ^[0-9]+$ ]] && rounds+=("$n")
 done
 mapfile -t rounds < <(printf '%s\n' "${rounds[@]}" | grep -v '^$' | sort -n)
 if [[ ! -d "$(_round_dir 1)" ]]; then
@@ -237,7 +237,9 @@ fi
   && echo "CP1-gate: override.json says one round, but round ${last} ran; the later round decides" >&2
 
 # --- every blocker still open is quoted in an acceptance criterion ----------
-_norm() { tr '[:upper:]' '[:lower:]' | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//'; }
+# Quote marks and backticks are dropped on both sides: the plan check (A5) refuses a backticked path no
+# step declares, so an AC quoting such a claim writes it without backticks (AID 17. 10. 2026).
+_norm() { tr '[:upper:]' '[:lower:]' | sed "s/[\`\"'„“”‚‘’]//g" | tr -s '[:space:]' ' ' | sed 's/^ //; s/ $//'; }
 # _criteria <step|null> — the criteria of one step, or the Success Criteria bullets.
 _criteria() {
   if [[ "$1" == null ]]; then

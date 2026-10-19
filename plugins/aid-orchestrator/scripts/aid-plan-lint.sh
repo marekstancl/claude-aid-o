@@ -193,7 +193,7 @@ _reason_msg() {
     no-backtick-path)   echo "path is not \`backtick\`-wrapped";;
     non-line-paren)     echo "a parenthetical before '—' is not a (lines ~N-M) range — move the note after '—'";;
     ambiguous-entry)    echo "unparsed text after a path — use \`a\` + \`b\` for multiple paths and put prose after '—'";;
-    no-verb-label)      echo "no Create:/Modify:/Test:/Rewrite: label — generation cannot tell what this bullet declares, and the path never reaches allowed_paths";;
+    no-verb-label)      echo "no Create:/Modify:/Test:/Rewrite:/Delete: label — generation cannot tell what this bullet declares, and the path never reaches allowed_paths";;
     verb-no-path)       echo "a verb label with no path after it";;
     no-command)           echo "the **Reuse check:** field names no search command — a sentence is not evidence; put the command you ran in \`backticks\`";;
     command-not-allowed)  echo "the **Reuse check:** command is not one of grep/rg/ls/find/git grep — the lint replays it, so it runs read-only searches and nothing else";;
@@ -721,7 +721,7 @@ done < <(awk '
   /^## / { if (head != "") flush(); head = ""; next }
   head == "" { next }
   {
-    line = $0; files = (line ~ /^- (Create|Modify|Test|Rewrite): /)
+    line = $0; files = (line ~ /^- (Create|Modify|Test|Rewrite|Delete): /)
     while (match(line, /`\/[^` ]+`/)) {
       path = substr(line, RSTART + 1, RLENGTH - 2); line = substr(line, RSTART + RLENGTH)
       sub(/\/+$/, "", path)
@@ -975,7 +975,7 @@ _foreign_repo_pass() {
   done < <(
     # a step's Files bullets, and the file:/cmd of every criterion the measurer
     # runs (brief points and each step's own), read by the measurer's parser
-    { awk '/^### Step / { step = 1 } /^## / { step = 0 } step && /^- (Create|Modify|Test|Rewrite): / { print }' "$PLAN"
+    { awk '/^### Step / { step = 1 } /^## / { step = 0 } step && /^- (Create|Modify|Test|Rewrite|Delete): / { print }' "$PLAN"
       { _aid_vp_parse_ac "$PLAN" "Acceptance Criteria|Success Criteria"; _aid_vp_parse_ac "$PLAN" "Step [0-9]+:"; } 2>/dev/null \
         | awk -F $'\x1f' '{ print $4; print $5 }'
     } | grep -oE '(^|[^A-Za-z0-9._/$-])/[A-Za-z0-9._/-]+' | sed -E 's|^[^/]||; s|/+$||')
@@ -991,7 +991,7 @@ blocking=$errors
 
 if [[ "$QUIET" -eq 0 ]]; then
   if [[ "$blocking" -gt 0 ]]; then
-    echo "aid-plan-lint: FAIL (${errors} error(s)$( [[ "$mode" == "strict" ]] && echo ", ${strict_hits} strict violation(s)" )) — fix the findings above. Canonical Files form: '- <Create|Modify|Test|Rewrite>: \`path\` [ + \`path\`]* [(lines ~N-M)] [— prose]'; mandatory step fields: skills/plan-writing.md §\"Mandatory Fields Per Step\"." >&2
+    echo "aid-plan-lint: FAIL (${errors} error(s)$( [[ "$mode" == "strict" ]] && echo ", ${strict_hits} strict violation(s)" )) — fix the findings above. Canonical Files form: '- <Create|Modify|Test|Rewrite|Delete>: \`path\` [ + \`path\`]* [(lines ~N-M)] [— prose]'; mandatory step fields: skills/plan-writing.md §\"Mandatory Fields Per Step\"." >&2
   elif [[ "$strict_hits" -gt 0 ]]; then
     echo "aid-plan-lint: PASS with ${strict_hits} legacy advisory warning(s) (non-blocking for this legacy plan; would block a lifecycle_strict plan)." >&2
   else

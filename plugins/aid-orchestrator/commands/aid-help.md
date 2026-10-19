@@ -219,8 +219,10 @@ made no step starts again with plan-run --restart --reason.
 
 `/aid-plan` brainstorms a topic or writes a plan from a spec — the mode is
 auto-detected from what you pass; a reviewed plan runs with `/aid-run P<NNN>`. When a brainstorm is
-about something visual, `/visual-companion` opens the browser-based mockup
-companion; you can also invoke `/visual-companion` on its own as a smoke test.
+about something visual, `/visual-companion` shows the PM proposals built from the application's
+own components on one fixed page — the agent builds the variants, `scripts/aid-companion.sh`
+does the server, the captures, the page and the PM's answers; you can also invoke
+`/visual-companion` on its own as a smoke test.
 
 ```
 /aid-plan — Brainstorm, Write

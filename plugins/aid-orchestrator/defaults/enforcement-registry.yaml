@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 678 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 684 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
   # ── Plan amendments recorded here because this file is the TRACKED authority ──
   # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
   # `git check-ignore`; `docs/extending-aid.md` is the tracked exception), so an
@@ -4745,3 +4745,69 @@ enforcements:
     recovery: "Rate the deployed address: aid-ui-quality.py launch <project> --url <url> (--reopen <reason> after an accepted verdict)."
     test_covers: "the build loop byte-identical, the web gates, a stale deployment, an address that does not answer (test-aid-ui-quality.bats launch: cases; the t1 refusal is test-aid-ui-package.bats merge-path: stale launch verdict)."
     test: "scripts/tests/bats/test-aid-ui-quality.bats"
+  - id: companion_kit_show_checks
+    type: 1
+    source: "lib/brainstorm-server/kit.mjs (validate, codeChecks, pageCheck, proposal) + scripts/aid-companion.sh"
+    instruction: "skills/visual-companion/SKILL.md (The procedure, The three files)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    description: "Companion kit (19. 10. 2026): show refuses a navrh.json with a missing field, a recommendation that is no option, keys not from A, a missing shot, a path out of the plan's directory, a component in postaveno_z that the option's files do not import from ui.components (relative, tsconfig/jsconfig paths, index files), an unresolved import, a new component file without nove[], a changed file of the copy that no option lists or that two list; and a page that scrolls, hides a control or misses an image. It writes proposal.json for the design gate."
+    test: "scripts/tests/bats/test-companion-kit.bats"
+  - id: companion_kit_answers_and_origin
+    type: 1
+    source: "lib/brainstorm-server/index.js (verifyClient ownRequest, answers.jsonl) + scripts/aid-companion.sh (answers, up, down)"
+    instruction: "skills/visual-companion/SKILL.md (Read the answers)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    description: "Every choice, note and send of the page is appended to answers.jsonl and never cleared (before: only choice, wiped per page — the PM's notes never reached the agent); the websocket accepts only the companion's own origin; server fields (event_id, at, plan) are set last. answers.jsonl is the agent's input, never proof of a PM decision. down stops only a recorded process whose start time and command still match."
+    test: "scripts/tests/bats/test-companion-kit.bats"
+  - id: plan_close_worktree_dirty
+    type: 1
+    source: "scripts/aid-plan-fsm.sh (cmd_plan_close: git status of the recorded worktree before any state change)"
+    instruction: "skills/pipeline.md (plan_close_worktree_dirty)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    description: "WAN 19. 10. 2026: plan-close removed the execution worktree with a PM document in it. The close refuses a worktree with changed or untracked files, or one whose state git cannot read, before anything changes; --discard-worktree-changes is the explicit opposite."
+    test: "scripts/tests/bats/test-worktree-teardown.bats"
+  - id: plan_review_prepare_ready
+    type: 1
+    source: "scripts/aid-review-round.sh (cmd_prepare, plan mode: plan-check pass + aid-generation-readiness.sh)"
+    instruction: "skills/pipeline.md (plan_not_ready)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "AID 10. and 11. 10. 2026: a CP1 round was prepared (and reviewers paid) over a plan that did not pass readiness. prepare refuses a plan whose check did not pass or that fails readiness."
+    test: "scripts/tests/bats/test-review-round.bats"
+  - id: files_delete_label
+    type: 1
+    source: "scripts/lib/aid-scoping.sh (_AID_FILES_VERB_RE) + scripts/lib/aid-dispatch-contract.sh (expected_deletions)"
+    instruction: "skills/plan-writing.md (Files block grammar, Delete:)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "AID 13. 10. 2026: a deletion had to be written as Modify: … — deleted. Delete: is a Files label; the step's return is refused while a declared deletion is still on disk, missing from deleted_files, or was never a tracked file."
+    test: "scripts/tests/bats/test-dispatch-contract.bats"
+  - id: delegated_stand_in_left_files
+    type: 1
+    source: "scripts/aid-review-round.sh (_dlg_tree_state, cmd_delegate --verdict)"
+    instruction: "skills/pipeline.md (delegation_left_files) + defaults/templates/adjudicator-delegated.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "aidlab-apps 15. 10. 2026: a Claude stand-in left uv.lock and __pycache__ in the plan worktree and the step's return failed. Its verdict is refused while the worktree differs from the record taken before it ran (untracked and ignored paths, tracked content, HEAD; .aid-o/ is AID's own)."
+    test: "scripts/tests/bats/test-review-round.bats"

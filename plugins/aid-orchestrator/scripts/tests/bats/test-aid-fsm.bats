@@ -2105,3 +2105,26 @@ YML
   [ "$status" -eq 0 ]
   [ "$(yq -r '.plan_state' "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P910/plan-state.yaml")" = "PLAN_SYNC" ]
 }
+
+@test "amend-scope-zadani: a step closing no point widens with the PM's card quoting every added path; a card missing one is refused (aidlab-apps 15. 10. 2026)" {
+  local td="$TEST_EVIDENCE_DIR"; _zp_plan_json "$td"
+  jq '.steps[0].zavira = [] | .steps[1].zavira = []' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"
+  _zp_state "$td" EXECUTE 0
+  export AID_HOOK_AUDIT="$td/audit.jsonl"
+  local card="$td/card.md"
+  printf 'Rozhodnutí 1: povolit package-data\n- pyproject.toml\n' > "$card"; touch -d '-10 seconds' "$card"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add pyproject.toml --add setup.cfg --reason "PM: Povolit package-data pro krok 2" --pm-card "$card"
+  [ "$status" -ne 0 ]; [[ "$output" == *"setup.cfg"* ]]
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add pyproject.toml --reason "PM: Povolit package-data pro krok 2" --pm-card "$card"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.[-1].zadani_point' "$td/steps/step_1_backend/scope-amendment.json")" = null ]
+  [ "$(jq -r '.[-1].pm_decision.card' "$td/steps/step_1_backend/scope-amendment.json")" = "$card" ]
+  # a step that DOES close points: the PM's card still decides, no point needs naming (Codex review 19. 10. 2026)
+  _zp_plan_json "$td"; _zp_state "$td" EXECUTE 0
+  printf -- '- setup.cfg\n' >> "$card"; touch -d '-10 seconds' "$card"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$AID_HOOK_AUDIT"
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add setup.cfg --reason "PM: a config file the step needs" --pm-card "$card"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.[-1].pm_decision.card' "$td/steps/step_1_backend/scope-amendment.json")" = "$card" ]
+}

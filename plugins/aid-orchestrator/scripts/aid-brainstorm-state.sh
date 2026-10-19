@@ -296,7 +296,7 @@ cmd_gate() {
       source "${PLUGIN_ROOT}/scripts/lib/aid-ui-proposal.sh"
       if ! why="$(aid_ui_proposal_basis_check "$prop" "$(aid_state_root)" 2>&1)"; then
         echo "REFUSED: ${why}" >&2
-        echo "REFUSED: ${plan_id} is a UI topic and has no proposal basis built from the application — build it: source \$AID_PLUGIN_PATH/scripts/lib/aid-ui-proposal.sh && aid_ui_proposal_build <project root> $(state_dir "$plan_id") (skills/visual-companion/SKILL.md)" >&2
+        echo "REFUSED: ${plan_id} is a UI topic and has no proposal basis built from the application — the companion kit writes it: bash \$AID_PLUGIN_PATH/scripts/aid-companion.sh show --plan ${plan_id} (skills/visual-companion/SKILL.md); without the kit: source \$AID_PLUGIN_PATH/scripts/lib/aid-ui-proposal.sh && aid_ui_proposal_build <project root> $(state_dir "$plan_id")" >&2
         return 1
       fi
     fi
