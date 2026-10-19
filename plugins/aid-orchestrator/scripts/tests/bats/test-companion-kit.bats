@@ -128,6 +128,11 @@ EOF
   [ "$(node -e 'const b=require("fs").readFileSync(process.argv[1]);console.log(b.readUInt32BE(16)+"x"+b.readUInt32BE(20))' "$D/shots/desktop/okno.png" 2>/dev/null)" != "" ]
   jq '.base = "https://acta.example.cz"' "$D/shots.json" > "$D/s" && mv "$D/s" "$D/shots.json"
   run _k shots; [ "$status" -ne 0 ]; [[ "$output" == *"never a live application"* ]]
+  # a path that would leave the prototype ("@host/", "//host") is refused (security review 19. 10. 2026)
+  jq '.base = "proto" | .shots[0].path = "@example.com/"' "$D/shots.json" > "$D/s" && mv "$D/s" "$D/shots.json"
+  run _k shots; [ "$status" -ne 0 ]; [[ "$output" == *'a path starts with one "/"'* ]]
+  jq '.shots[0].path = "//example.com/"' "$D/shots.json" > "$D/s" && mv "$D/s" "$D/shots.json"
+  run _k shots; [ "$status" -ne 0 ]; [[ "$output" == *'a path starts with one "/"'* ]]
 }
 
 # a proposal over the sample app: option A edits Page.tsx through the alias, B adds a component through the barrel

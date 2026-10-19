@@ -23,10 +23,20 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
   });
   if (!UI.api_prefix && !(UI.api_origins || []).length) die('shots: project.yaml has no ui.api_prefix (e.g. "/api/") — the step must know which requests are the API');
   let base = spec.base || 'proto';
-  if (base !== 'proto' && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(base)) die(`shots: base "${base}" is not the prototype or a loopback address — the kit photographs invented data only, never a live application`);
   if (base === 'proto') {
     try { base = JSON.parse(fs.readFileSync(path.join(DIR, 'proto.json'), 'utf8')).url; } catch { die(`shots: base "proto" but no prototype runs — aid-companion.sh proto --plan ${PLAN}`); }
   }
+  // the FINAL base, parsed: http on loopback, no credentials — the kit photographs invented data only
+  let origin;
+  try { const u = new URL(base); if (u.protocol !== 'http:' || !['127.0.0.1', 'localhost'].includes(u.hostname) || u.username || u.password) throw 0; origin = u.origin; }
+  catch { die(`shots: base "${base}" is not the prototype or a loopback address — the kit photographs invented data only, never a live application`); }
+  base = origin;
+  // every page address is built on that origin and must stay on it ("@host/" or "//host" would leave it)
+  const at = (p, where) => {
+    if (typeof p !== 'string' || !p.startsWith('/') || p.startsWith('//')) die(`shots: ${where}: a path starts with one "/" (got ${JSON.stringify(p)})`);
+    const u = new URL(p, origin); if (u.origin !== origin) die(`shots: ${where}: ${p} leaves the prototype`);
+    return u.href;
+  };
   const shots = Array.isArray(spec.shots) ? spec.shots : die('shots: shots.json needs "shots": [...]');
   const names = new Set();
   shots.forEach((s, i) => {
@@ -62,6 +72,7 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
       if (Array.isArray(st.cookies) && st.cookies.length) await ctx.addCookies(st.cookies.map(c => ({ url: base, ...c })));
       await ctx.route('**/*', route => {
         const req = route.request(), u = new URL(req.url());
+        if (req.isNavigationRequest() && u.origin !== origin) { unknown.add(`navigation to ${u.origin} (another origin)`); return route.abort(); }
         if (!isApi(u)) {
           // a data request to another origin would reach a live service: refused and listed like an unmocked call
           if (u.origin !== new URL(base).origin && ['xhr', 'fetch'].includes(req.resourceType())) { unknown.add(`${req.method()} ${u.origin}${u.pathname} (another origin)`); return route.abort(); }
@@ -78,10 +89,10 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
       for (const s of shots) {
         if (s.only && !s.only.includes(vp.name)) continue;
         const where = `shot '${s.name}' (${vp.name})`;
-        await page.goto(base + (s.path || '/'), { waitUntil: 'networkidle' });
+        await page.goto(at(s.path || '/', where), { waitUntil: 'networkidle' });
         for (const [k, stp] of (s.steps || []).entries()) {
           const w = `${where} step ${k + 1}`;
-          if ('goto' in stp) await page.goto(base + stp.goto, { waitUntil: 'networkidle' });
+          if ('goto' in stp) await page.goto(at(stp.goto, w), { waitUntil: 'networkidle' });
           else if ('click' in stp) await (await one(page, stp.click, w)).click();
           else if ('fill' in stp) await (await one(page, stp.fill, w)).fill(String(stp.value ?? ''));
           else if ('select' in stp) await (await one(page, stp.select, w)).selectOption(String(stp.value ?? ''));
