@@ -208,3 +208,24 @@ EOF
   [[ "$(curl -s "http://127.0.0.1:$port/")" == *'<p id="mine">full</p>'* ]]
   bash "$AID_PLUGIN_PATH/lib/brainstorm-server/stop-server.sh" "$d" >/dev/null 2>&1 || true
 }
+
+@test "AC7 the guide: one procedure, short, and every kit step it names is a step the script has (and back)" {
+  local g="$AID_PLUGIN_PATH/skills/visual-companion/SKILL.md"
+  [ "$(wc -l < "$g")" -le 200 ]
+  local named have
+  named="$(grep -oE 'aid-companion\.sh [a-z]+|\$K [a-z]+' "$g" | awk '{print $2}' | sort -u | tr '\n' ' ')"
+  have="$(sed -n '/^case "\$step" in/,/^esac/p' "$KIT" | grep -oE '^\s+[a-z|]+\)' | tr -d ' )' | tr '|' '\n' | sort -u | tr '\n' ' ')"
+  [ "$named" = "$have" ] || { echo "guide names: $named / script has: $have"; false; }
+  ! grep -q 'baseline.html' "$g"   # the copied-page path of 2.114.0 is gone
+}
+
+@test "AC8 /aid-init proposes the kit's ui keys for a Vite project, and says what it cannot find" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh"
+  touch "$P/ui/vite.config.ts"; printf "fetch('/api/data')\n" > "$P/ui/src/api.ts"
+  run aid_ui_config_detect "$P"; echo "$output"
+  [ "$(yq '.ui.dir' <<< "$output")" = ui ]; [ "$(yq '.ui.components' <<< "$output")" = ui/src/components/shared ]
+  [ "$(yq -o=json -I=0 '.ui.dev_cmd' <<< "$output")" = '["npx","vite","--port","{port}","--host","127.0.0.1","--strictPort"]' ]
+  [ "$(yq '.ui.ready_path' <<< "$output")" = / ]; [ "$(yq '.ui.api_prefix' <<< "$output")" = /api/ ]
+  rm "$P/ui/vite.config.ts"
+  run aid_ui_config_detect "$P"; [[ "$output" == "# ui: no vite.config"* ]]
+}

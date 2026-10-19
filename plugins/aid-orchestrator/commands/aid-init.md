@@ -358,6 +358,13 @@ project with no UI at all is not asked: no UI steps, no obligation, and the key 
 (absent reads as the default). Detection and the omit rule are in
 `skills/setup/project-scan.md` §"Project Scan", next to the `documentation.*` facts.
 
+The companion kit (`scripts/aid-companion.sh`, the UI proposals of a brainstorm) needs where the UI
+lives and how it starts: show the PM the block `source "$AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh" &&
+aid_ui_config_detect <project root>` prints (`ui.dir`, `ui.components`, `ui.dev_cmd`, `ui.ready_path`,
+`ui.api_prefix` — detected from `vite.config.*` / `next.config.*` and the sources; what it cannot find is a
+comment, never a guess) and merge it into `project.yaml` only on the PM's yes. A project without UI is
+not asked.
+
 ### What the project has to document with
 
 Detection writes three `documentation.*` facts into `project.yaml` so a plan
