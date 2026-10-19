@@ -14,6 +14,8 @@ setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
   ROUND_SH="$AID_PLUGIN_PATH/scripts/aid-review-round.sh"
+  # the packet fixtures are minimal plans; the readiness refusal has its own case (real readiness there)
+  export AID_TEST_MODE=1 AID_REVIEW_READINESS_STUB=pass
   ROOT="$(mktemp -d)"; cd "$ROOT"
   git init -q .
   mkdir -p .aid-o/plans .aid-o/work/evidence/P900 scripts
@@ -2030,7 +2032,7 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   jq '.pass = false' "$EV/plan-check.json" > "$EV/p" && mv "$EV/p" "$EV/plan-check.json"
   run "$ROUND_SH" prepare "$PLAN" --round 1
   [ "$status" -eq 1 ]; [[ "$output" == *"plan_not_ready"*"does not pass"* ]]; [ ! -d "$CP1/round-1/packet" ]
-  _check
+  _check; unset AID_REVIEW_READINESS_STUB
   printf '\n**Files:**\n- Remove: `x.sh` — no such label\n' >> "$PLAN"; _check
   run "$ROUND_SH" prepare "$PLAN" --round 1
   [ "$status" -eq 1 ]; [[ "$output" == *"plan_not_ready"*"readiness fails"* ]]; [ ! -d "$CP1/round-1/packet" ]

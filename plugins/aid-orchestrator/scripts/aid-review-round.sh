@@ -434,7 +434,9 @@ cmd_prepare() {
     if (( ! MANUAL )) && [[ "$(jq -r '.plan_sha256 // ""' "$check")" == "$(sha256sum "$PLAN" | cut -d' ' -f1)" ]]; then
       local _pr_why="" _pr_out=""
       [[ "$(jq -r '.pass // false' "$check")" == true ]] || _pr_why="plan-check.json says the plan does not pass"
-      if [[ -z "$_pr_why" ]] && ! _pr_out="$(bash "${SCRIPT_DIR}/aid-generation-readiness.sh" "$PLAN" --total 1 --project-root "$ROOT" 2>&1)"; then
+      # double-gated test stub (the aid-release-policy.sh pattern): fixtures of the packet tests are minimal plans
+      if [[ "${AID_TEST_MODE:-}" == 1 && "${AID_REVIEW_READINESS_STUB:-}" == pass ]]; then :
+      elif [[ -z "$_pr_why" ]] && ! _pr_out="$(bash "${SCRIPT_DIR}/aid-generation-readiness.sh" "$PLAN" --total 1 --project-root "$ROOT" 2>&1)"; then
         _pr_why="readiness fails: $(tail -3 <<< "$_pr_out" | tr '\n' ' ')"
       fi
       if [[ -n "$_pr_why" ]]; then
