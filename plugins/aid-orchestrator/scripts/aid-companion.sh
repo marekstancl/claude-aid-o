@@ -80,8 +80,9 @@ cmd_up() {
     fi
   fi
   local out host; host="$(url_host)"
+  # AID_COMPANION_BIND=127.0.0.1 (tests): a loopback server on a random port, never a VPN slot a PM uses
   out="$(bash "$SERVER_DIR/start-server.sh" --project-dir "$ROOT" --plan "$PLAN" --kit --screen-dir "$DIR" \
-           --host 0.0.0.0 --url-host "$host")" || true
+           --host "${AID_COMPANION_BIND:-0.0.0.0}" --url-host "$host")" || true
   jq -e '.type == "server-started"' >/dev/null 2>&1 <<< "$out" || die "the server did not start: ${out}"
   pid="$(cat "$DIR/.server.pid")"
   jq -c --arg v "$VERSION" --argjson pid "$pid" --arg st "$(_starttime "$pid")" \
@@ -97,8 +98,9 @@ cmd_down() {
     rm -f "$rec"
   fi
   if [[ -s "$p" ]]; then
+    local cmd; cmd="$(jq -r '.cmd // ""' "$p")"
     read -r pid st pg < <(jq -r '[.pid, .starttime, .pgid] | map(tostring) | join(" ")' "$p")
-    if _alive_as "$pid" "$st" "" && [[ "$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')" == "$pg" ]]; then
+    if _alive_as "$pid" "$st" "$cmd" && [[ "$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')" == "$pg" ]]; then
       kill -- "-$pg" && echo "prototype group ${pg} stopped"
     else echo "prototype: the recorded process (pid ${pid}, group ${pg}) is not the one we started — nothing stopped"; fi
     rm -f "$p"

@@ -172,6 +172,9 @@ LOG_FILE="${SCREEN_DIR}/.server.log"
 
 # Create fresh session directory
 mkdir -p "$SCREEN_DIR"
+# A kept directory (--screen-dir) holds the previous run's log: its "server-started" line would be read as
+# this start's (old port). The old log moves aside first.
+[[ -n "$FIXED_SCREEN_DIR" && -f "$SCREEN_DIR/.server.log" ]] && mv -f "$SCREEN_DIR/.server.log" "$SCREEN_DIR/.server.log.prev"
 
 cd "$SCRIPT_DIR" || fail "cannot enter $SCRIPT_DIR"
 

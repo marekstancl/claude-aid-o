@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vzorová aplikace</title>
+<style>
+body{font:16px system-ui;margin:0;padding:24px}
+.wide{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:600px){.wide{grid-template-columns:1fr}.desk{display:none}}
+#dialog{display:none;border:2px solid #333;padding:12px;margin-top:12px}
+#dialog.open{display:block}
+</style></head>
+<body>
+<h1 id="who">Nepřihlášen</h1>
+<div class="wide"><div id="data">načítám…</div><div class="desk">jen na počítači</div></div>
+<label>Hledat <input id="q" aria-label="Hledat"></label>
+<select aria-label="Pohled"><option value="a">A</option><option value="b">B</option></select>
+<button>Otevřít</button>
+<div id="dialog" data-testid="dialog">Okno pro <span id="echo"></span></div>
+<script>
+const t = localStorage.getItem('token');
+if (t) document.getElementById('who').textContent = 'Přihlášen: ' + t;
+fetch('/api/data').then(r => r.json()).then(j => { document.getElementById('data').textContent = j.text; }).catch(() => {});
+fetch('/api/missing').catch(() => {});
+document.querySelector('button').addEventListener('click', () => {
+  document.getElementById('dialog').classList.add('open');
+  document.getElementById('echo').textContent = document.getElementById('q').value;
+});
+</script>
+</body></html>
