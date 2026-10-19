@@ -600,7 +600,11 @@ Dispatch prompt contains (in order):
    b. If source files exist (TSX/CSS): read relevant source file + lines
       from visual-spec.yaml component entries → paste VERBATIM in prompt
    c. If only PNG: include file paths for agent to Read as confirmation
-   d. If companion HTML: read HTML files from `mockups/` → include verbatim in prompt + generate design-tokens.yaml (same as github source, HTML instead of TSX)
+   d. Companion (`source_type: companion`, skills/visual-companion/SKILL.md step 8): `mockups/` holds the chosen
+      option's source files from the prototype copy and its PNG shots — read the source files and paste them VERBATIM
+      (they are built from the app's shared components, the closest thing to the implementation), the PNGs as paths
+      to Read; the implementation rewrites them against real data, never copies them blind. Older companion HTML
+      (before the kit) is read the same way as source.
    e. Priority: source code > visual-spec.yaml > PNG
 9. **UI CHANGE CONTRACT** — loaded when step has `ui_change_mode: existing_ui` in plan.json:
     a. Extract `step.ui_change_contract` from plan.json (path + sha256 + schema_version)

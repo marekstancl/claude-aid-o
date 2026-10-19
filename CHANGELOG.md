@@ -33,6 +33,8 @@ Companion jako hotová stavebnice a opravy z projektů: agent dodá varianty ze 
 - Karta PM u `--pm-card` má stejnou slabinu jako ostatní karty (IMP-692): kdo umí zapsat soubor karty a událost hooku, umí ji padělat.
 - `proto` neumí workspace/monorepo ani pnpm bez `node_modules` v `ui.dir`; `shots` neumí nové okno, iframe a nahrání souboru – obojí odmítne s výzvou zapsat případ.
 - Vývojový server je v testech jednoduchý statický server; skutečný Vite ověřil nezávislý agent (AC9).
+- Návrh klíčů `ui` při `/aid-init` je pokyn průvodce (`/aid-init` provádí agent); kód je `aid_ui_config_detect` s testem, samotné zapojení do průvodce test nemá.
+- Převzetí portu cizím procesem mezi výběrem a startem vývojového serveru se odhalí (port musí patřit skupině procesů prototypu), ale deterministický test toho závodu není.
 
 ## [3.6.0] — 2026-10-18
 

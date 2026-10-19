@@ -48,20 +48,21 @@ _ws() {
   run _k up; echo "$output"; [ "$status" -eq 0 ]
   local port pid; port="$(jq -r .port <<< "$output")"; pid="$(jq -r .pid <<< "$output")"
   _ws "$port" '{"type":"choice","kolo":1,"bod":"1","volba":"B"}' '{"type":"choice","kolo":1,"bod":"1","volba":"A"}' \
-    '{"type":"note","kolo":1,"bod":"2","text":"je to hnus"}' '{"type":"confirm","kolo":1,"selected":[{"bod":"1","volba":"A"}],"event_id":"forged"}'
+    '{"type":"note","kolo":1,"bod":"2","text":"je to hnus"}' '{"type":"confirm","kolo":1,"selected":[{"bod":"1","volba":"B"}]}' '{"type":"confirm","kolo":1,"selected":[{"bod":"1","volba":"A"}],"event_id":"forged"}'
   run _k answers; echo "$output"
   [ "$(jq -r '.volby["1"]' <<< "$output")" = A ]; [ "$(jq -r '.poznamky["2"]' <<< "$output")" = "je to hnus" ]
   [ "$(jq -r '.odeslano.type' <<< "$output")" = confirm ]; [ "$(jq -r '.odeslano.event_id' <<< "$output")" != forged ]
-  run _k answers --history; [ "$(wc -l <<< "$output")" -eq 4 ]
+  [ "$(jq -r '.odeslano.selected[0].volba' <<< "$output")" = A ]   # the later of two sends
+  run _k answers --history; [ "$(wc -l <<< "$output")" -eq 5 ]
   # a second round: its own latest state, the first round still readable, the history holds both
   _ws "$port" '{"type":"choice","kolo":2,"bod":"1","volba":"B"}'
   run _k answers; [ "$(jq -r .kolo <<< "$output")" = 2 ]; [ "$(jq -r '.volby["1"]' <<< "$output")" = B ]
   run _k answers --kolo 1; [ "$(jq -r '.volby["1"]' <<< "$output")" = A ]
-  run _k answers --history; [ "$(wc -l <<< "$output")" -eq 5 ]
+  run _k answers --history; [ "$(wc -l <<< "$output")" -eq 6 ]
   run _k up; [ "$(jq -r .reused <<< "$output")" = true ]; [ "$(jq -r .pid <<< "$output")" = "$pid" ]
   _k down
   run _k up; [ "$(jq -r .reused <<< "$output")" = false ]; [ "$(jq -r .pid <<< "$output")" != "$pid" ]
-  [ "$(wc -l < "$D/answers.jsonl")" -eq 5 ]
+  [ "$(wc -l < "$D/answers.jsonl")" -eq 6 ]
 }
 
 @test "AC1 security: a page of another origin cannot open the websocket (no planted answers)" {
@@ -117,7 +118,7 @@ EOF
   {"name": "okno", "path": "/index.html", "steps": [
      {"fill": {"role": "textbox", "name": "Hledat"}, "value": "Nováková"}, {"select": {"css": "select"}, "value": "b"},
      {"hover": {"role": "button", "name": "Otevřít"}}, {"click": {"role": "button", "name": "Otevřít"}},
-     {"press": "Tab"}, {"wait": "network"}, {"wait": 50}], "capture": {"element": {"testid": "dialog"}}},
+     {"press": "Tab"}, {"wait": "network"}, {"wait": 50}, {"wait": {"for": {"text": "Nováková"}}}], "capture": {"element": {"css": "#dialog.open"}}},
   {"name": "cela", "path": "/index.html", "capture": "full"}]}
 EOF
   run _k shots; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"GET /api/missing"* ]]; [[ "$output" != *"/index.html"*"no mock"* ]]
@@ -193,7 +194,9 @@ EOF
     r.imgMax = await p.evaluate(() => getComputedStyle(document.getElementById('img')).maxWidth);
     r.count = await p.textContent('#count');
     r.past = await p.locator('.tab.past').count();
+    r.badge = await p.evaluate(() => { const b = [...document.querySelectorAll('.opt[data-k=B] .badge.new')]; return b.length; });
     await p.click('[data-view=mobile]'); r.phone = await p.evaluate(() => document.getElementById('pv').className);
+    r.phoneMax = await p.evaluate(() => getComputedStyle(document.getElementById('img')).maxWidth);
     await p.keyboard.press('ArrowDown'); r.title = await p.textContent('#title');
     r.textOnly = await p.evaluate(() => document.getElementById('ap').classList.contains('text'));
     await p.click('.opt[data-k=B]'); r.counter2 = await p.textContent('#count');
@@ -205,6 +208,7 @@ EOF
   [ "$(jq -r .pageScroll <<< "$output")" = false ]; [ "$(jq -r .columnScroll <<< "$output")" = true ]
   [ "$(jq -r .imgMax <<< "$output")" = "min(100%, 960px)" ]
   [ "$(jq -r .count <<< "$output")" = "Zvoleno 2 z 2" ]; [ "$(jq -r .past <<< "$output")" = 1 ]
+  [ "$(jq -r .counter2 <<< "$output")" = "Zvoleno 2 z 2" ]; [ "$(jq -r .badge <<< "$output")" -ge 1 ]; [ "$(jq -r .phoneMax <<< "$output")" = "min(100%, 390px)" ]
   [[ "$(jq -r .phone <<< "$output")" == *"pv m"* ]]
   [ "$(jq -r .title <<< "$output")" = "2. Textová otázka" ]; [ "$(jq -r .textOnly <<< "$output")" = true ]
   [ "$(jq -r .real <<< "$output")" = true ]; [ "$(jq -r .pinned <<< "$output")" = true ]
@@ -221,6 +225,10 @@ EOF
   _bad '.body[0].moznosti[0].snimky[0].shot = "chybi"' "shot 'chybi' has no desktop capture"
   _bad '.body[0].moznosti[0].snimky[0].shot = "../x"' 'is not a plain shot name'
   _bad '.body[0].moznosti[0].soubory = ["../etc/passwd"]' 'must be a path inside proto/'
+  _bad '.spolecne = ["/etc/passwd"]' 'spolecne[0]'
+  _bad '.spolecne = [3]' 'spolecne[0]'
+  _bad '.body[0].moznosti[1].nove[0].komponenta = "../x.tsx"' 'nove[0].komponenta'
+  _bad '.body[0].moznosti[1].klic = "A"' 'must be "B"'   # a duplicate key is a key out of the A, B, C order
   _bad '.body[0].moznosti[0].postaveno_z += ["Table"]' 'names Table, but no file of the option or of spolecne imports it'
   _bad '.body[0].moznosti[1].nove = []' 'is a new component file'
   _bad '.body[0].moznosti[1].soubory = []' 'no option lists it in soubory'

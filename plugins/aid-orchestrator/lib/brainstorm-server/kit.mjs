@@ -50,7 +50,9 @@ function validate(n, shotsOnly) {
   if (n.plan !== PLAN) fail(`plan must be "${PLAN}" (got ${JSON.stringify(n.plan)})`);
   if (!Number.isInteger(n.kolo) || n.kolo < 1) fail('kolo must be a whole number from 1');
   const rozhodnuto = arr(n.rozhodnuto, 'rozhodnuto'); rozhodnuto.forEach((t, i) => str(t, `rozhodnuto[${i}]`));
-  const spolecne = arr(n.spolecne, 'spolecne');
+  // one path rule for spolecne, soubory and nove[].komponenta: a string inside proto/ (Codex, 19. 10. 2026)
+  const inProto = (f, where) => { if (typeof f !== 'string' || !f || f.startsWith('/') || f.split('/').includes('..')) { fail(`${where}: '${f}' must be a path inside proto/ (no leading /, no ..)`); return false; } return true; };
+  const spolecne = arr(n.spolecne, 'spolecne').filter((f, i) => inProto(f, `spolecne[${i}]`));
   const body = arr(n.body, 'body', false);
   if (!body.length) fail('body must have at least one point');
   const ids = new Set();
@@ -74,11 +76,11 @@ function validate(n, shotsOnly) {
         const mw = `${w}.moznosti[${j}]`;
         const soubory = arr(m.soubory, `${mw}.soubory`);
         for (const f of soubory) {
-          if (typeof f !== 'string' || f.startsWith('/') || f.split('/').includes('..')) fail(`${mw}.soubory: '${f}' must be a path inside proto/ (no leading /, no ..)`);
-          else if (seen.has(f)) fail(`${mw}.soubory: '${f}' is also listed by ${seen.get(f)} — a file belongs to one option, or to spolecne`);
+          if (!inProto(f, `${mw}.soubory`)) continue;
+          if (seen.has(f)) fail(`${mw}.soubory: '${f}' is also listed by ${seen.get(f)} — a file belongs to one option, or to spolecne`);
           else seen.set(f, `${w} option ${m.klic}`);
         }
-        const nove = arr(m.nove, `${mw}.nove`).map((x, k) => ({ komponenta: str(x.komponenta, `${mw}.nove[${k}].komponenta`), duvod: str(x.duvod, `${mw}.nove[${k}].duvod`) }));
+        const nove = arr(m.nove, `${mw}.nove`).map((x, k) => { const c = str(x.komponenta, `${mw}.nove[${k}].komponenta`); inProto(c, `${mw}.nove[${k}].komponenta`); return { komponenta: c, duvod: str(x.duvod, `${mw}.nove[${k}].duvod`) }; });
         return {
           klic: m.klic, nazev: str(m.nazev, `${mw}.nazev`), popis: str(m.popis, `${mw}.popis`), soubory,
           postaveno_z: arr(m.postaveno_z, `${mw}.postaveno_z`).map((c, k) => str(c, `${mw}.postaveno_z[${k}]`)), nove,

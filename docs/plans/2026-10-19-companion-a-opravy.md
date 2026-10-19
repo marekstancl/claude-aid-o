@@ -68,7 +68,7 @@ Jeden příkaz `scripts/aid-companion.sh <krok> --plan <P> [--project-dir <root>
 | `answers` | vypíše poslední stav voleb a poznámek PM pro dané kolo (`--kolo`, výchozí poslední) a s `--history` všechny události |
 | `down` | zastaví server tohoto plánu a skupinu procesů prototypu, ale jen když sedí zapsaná identita: PGID, PID vedoucího procesu s jeho časem startu (`/proc/<pid>/stat`) a příkaz; při nesouladu nic nezabije a řekne proč |
 
-**Formáty (JSON Schema v `lib/brainstorm-server/schemas/`, příklady v návodu, chyby jmenují pole):**
+**Formáty (validace v kódu `lib/brainstorm-server/kit.mjs` / `kit-shots.mjs` místo samostatného JSON Schema – jedno místo pravdy, chyby jmenují pole; příklady v návodu):**
 - `mocks.json` – pole `{method?, path (glob na pathname), query? (podmnožina parametrů, přesná shoda hodnot),
   status?, body, headers?}`; první shoda vyhrává. Zachytávají se jen požadavky na `ui.api_prefix` (povinný klíč,
   např. `/api/`) a na `ui.api_origins[]`; moduly, assety a HMR prototypu jdou dál bez zásahu. API volání bez
