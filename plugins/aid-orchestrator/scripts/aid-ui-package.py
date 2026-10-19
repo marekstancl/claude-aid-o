@@ -572,7 +572,7 @@ def app_points(pkg, proj):
     import importlib.util
     spec = importlib.util.spec_from_file_location("aid_ui_screens", os.path.join(HERE, "aid-ui-screens.py"))
     mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
-    model = json.load(open(os.path.join(proj, pkg["screens"]["path"]), encoding="utf-8"))
+    model = mod.resolved(json.load(open(os.path.join(proj, pkg["screens"]["path"]), encoding="utf-8")))
     row = lambda check, *det: f"python3 {plugin}/scripts/aid-ui-package.py live-row docs/ui/predani.json {check}" + "".join(f" --detail '{d}'" for d in det)
     pts = [{"text": "Aplikace běží na adrese z docs/ui/nasazeni.json a brána běhu nad ní pustila scénáře úloh z modelu (aid-ui-verify.sh --package-gate --launch)",
             "owner": "run", "blocks": True, "kind": "launch", "timeout": 1800, "cmd": f"bash {plugin}/scripts/aid-ui-verify.sh --package-gate @BRIEF --launch"},

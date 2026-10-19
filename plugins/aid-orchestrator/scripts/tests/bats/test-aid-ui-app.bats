@@ -66,7 +66,7 @@ mutate() { jq "$1" "$M" > "$T/m.json" && mv "$T/m.json" "$M"; }
   mutate 'del(.screens[2].actions[0].confirm)'
   run python3 "$SCR" check "$APP"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"destruktivní akce detail.smazat bez potvrzení (confirm)"* ]]
+  [[ "$output" == *"destruktivní akce detail.smazat bez potvrzení"* ]]
 }
 
 @test "screens: a submitting task with neither a failure path nor nenastává, protože … is refused" {
@@ -541,7 +541,7 @@ app_handover() {
   run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   run python3 "$SK" build "$APP"; [ "$status" -eq 0 ]
   f="$APP/site/formular/index.html"; s="$APP/site/seznam/index.html"; d="$APP/site/detail/index.html"
-  grep -q '<label for="f-formular-nazev">Název poznámky</label> <input id="f-formular-nazev" name="nazev" aria-describedby="h-formular-nazev">' "$f"
+  grep -q '<label for="f-formular-nazev">Název poznámky</label> <input id="f-formular-nazev" name="nazev" aria-describedby="h-formular-nazev f-formular-nazev-chyba">' "$f"
   grep -q 'Ukázka (ne skutečná data)' "$s"; grep -q 'seznam: databáze; při načtení' "$s"
   grep -q 'z1 (zadani.md:2): Založit poznámku → task:zalozit' "$s"; grep -q 'mimo rozsah: později' "$s"; grep -q '<b>Poznámka</b>: jeden zápis' "$s"
   grep -q 'class="lista-stav" role="status">3 poznámky' "$d"
@@ -551,4 +551,32 @@ app_handover() {
   run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"zadani.md:9 není soubor:řádek v projektu"* ]]
   mutate '.requirements[0].source = "zadani.md:2" | .requirements[0].covered_by = ["task:nikdy"]'
   run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"task:nikdy není úloha modelu"* ]]
+}
+
+@test "merge-path: one number in one place, named confirm buttons, actions by mode, task states on call, field limits, deep links" {
+  SK="$BATS_TEST_DIRNAME/../../lib/aid-ui-skeleton.py"
+  mkdir -p "$APP/.aid-ui"; echo '{"type": "webapp", "brand": "none", "local": false}' > "$APP/.aid-ui/variant.json"
+  mutate '.values = {pocet: {value: "3", source: "ukázka: tři poznámky"}} | .modes = [{id: "bezi", label: "Běží"}, {id: "pauza", label: "Pauza"}]
+    | .screens[0].sample = ["Poznámek: {pocet}"] | .screens[2].actions[0].confirm = "Smazat 1 z {pocet} poznámek?"
+    | .screens[0].actions[1].query = "id=nakup-1" | .screens[0].actions[0].modes = ["bezi"] | .screens[0].actions[0].disabled_reason = "V pauze nové poznámky nejdou."
+    | .screens[1].fields = [{name: "nazev", label: "Název", required: true, maxlength: 80, error: "Název je povinný, nejvýš 80 znaků."}]
+    | .tasks[1].mode = "bezi"'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  python3 "$SK" build "$APP" >/dev/null
+  s="$APP/site/seznam/index.html"; f="$APP/site/formular/index.html"; d="$APP/site/detail/index.html"
+  grep -q 'Poznámek: 3' "$s"; grep -q 'Smazat 1 z 3 poznámek?' "$d"                        # the named value in every text
+  grep -q '>Smazat poznámku</a> <button type="button" data-aid-confirm-no>Nechat poznámku</button>' "$d"   # buttons name the action
+  grep -q 'href="/detail/?id=nakup-1" data-aid-action="seznam.otevrit"' "$s"                # a deep link
+  grep -q 'data-aid-modes="bezi" data-aid-reason="proc-seznam-novy"' "$s"; grep -q 'V pauze nové poznámky nejdou.' "$s"; grep -q 'data-aid-modes-list="bezi pauza"' "$s"
+  grep -q 'data-aid-task-state="zalozit.validation" hidden' "$s"                              # a task's states on its first screen
+  grep -q 'name="nazev" aria-describedby="f-formular-nazev-chyba" required maxlength="80"' "$f"; grep -q 'Název je povinný, nejvýš 80 znaků.' "$f"
+  # the task-state rows are in the matrix; the generated scenario starts in the task's mode
+  [ "$(python3 "$SCR" matrix "$APP" | jq '[.rows[] | select(.page == "task:zalozit")] | length')" -eq 6 ]
+  python3 "$BATS_TEST_DIRNAME/../../aid-ui-flows.py" generate "$APP" >/dev/null
+  grep -q '"url": "/seznam/?rezim=bezi"' "$APP/.aid-ui/scenarios/smazat.mjs"
+  # an unknown value, an unknown mode, a mode-bound action without its reason, a confirm without its buttons are refused
+  mutate '.screens[0].sample = ["{nikde}"] | .tasks[1].mode = "spi" | del(.screens[0].actions[0].disabled_reason) | del(.screens[2].actions[0].confirm_yes)'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]
+  [[ "$output" == *"{nikde} není pojmenovaná hodnota"* ]]; [[ "$output" == *"režim spi model nezná"* ]]
+  [[ "$output" == *"neříká proč jinak ne"* ]]; [[ "$output" == *"tlačítka, která jmenují akci"* ]]
 }

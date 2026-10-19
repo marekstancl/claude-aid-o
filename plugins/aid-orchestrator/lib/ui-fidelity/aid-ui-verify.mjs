@@ -1391,13 +1391,15 @@ for (const b of BRS) {
       const flow = app || flows.find(f => String(f.id) === m.page && m.state);
       let run = null, rowUrl = null;
       const sha = APPV ? { model_sha256: APPV.model_sha256 } : undefined;
-      if (app && app.check === 'app_states') {   // the screen in test mode with ?stav=: its state block shows text
-        const scr = m.page.slice('screen:'.length);
-        rowUrl = new URL(`${app.url.replace(/^\/+/, '')}?aid-test=1&stav=${m.state}`, base).href;
+      if (app && app.check === 'app_states') {   // the screen (or a task's state) in test mode with ?stav=: its block shows text
+        const task = m.page.startsWith('task:') ? m.page.slice('task:'.length) : null;
+        const scr = task ? app.screen : m.page.slice('screen:'.length);
+        rowUrl = new URL(`${app.url.replace(/^\/+/, '')}?aid-test=1&stav=${task ? task + '.' : ''}${m.state}`, base).href;
         run = async page => {
-          const loc = page.locator(`[data-aid-screen="${scr}"] [data-aid-state="${m.state}"]`).first();
+          const loc = page.locator(task ? `[data-aid-task-state="${task}.${m.state}"]` : `[data-aid-screen="${scr}"] [data-aid-state="${m.state}"]`).first();
           const ok = (await loc.isVisible().catch(() => false)) && (await loc.innerText().catch(() => '')).trim().length > 0;
-          return { response: null, done: ok, why: ok ? '' : `obrazovka ${scr} v testovacím režimu (?aid-test=1&stav=${m.state}) neukazuje stav ${m.state} (viditelný data-aid-state s textem)` };
+          return { response: null, done: ok, why: ok ? '' : task ? `úloha ${task}: stav ${m.state} nejde v testovacím režimu vyvolat (?stav=${task}.${m.state}, viditelný data-aid-task-state s textem)`
+            : `obrazovka ${scr} v testovacím režimu (?aid-test=1&stav=${m.state}) neukazuje stav ${m.state} (viditelný data-aid-state s textem)` };
         };
       } else if (flow) {
         // flow ids come from the project's state: allowlisted, and the module must resolve inside .aid-ui/scenarios

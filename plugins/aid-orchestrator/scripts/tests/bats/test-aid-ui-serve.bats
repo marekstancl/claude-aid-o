@@ -359,7 +359,7 @@ J
   grep -q 'href="/formular/" data-aid-action="seznam.novy"' "$BATS_TEST_TMPDIR/seznam.html"
   grep -q 'href="/detail/" data-aid-action="seznam.otevrit"' "$BATS_TEST_TMPDIR/seznam.html"
   grep -q 'formaction="/detail/" name="vysledek" value="zalozit" data-aid-action="formular.ulozit"' "$BATS_TEST_TMPDIR/formular.html"
-  grep -q '<input name="nazev">' "$BATS_TEST_TMPDIR/formular.html"
+  grep -q 'name="nazev" aria-describedby="f-formular-nazev-chyba">' "$BATS_TEST_TMPDIR/formular.html"
   grep -q 'data-aid-result="zalozit">Nákup na sobotu' "$BATS_TEST_TMPDIR/detail.html"   # where the task ends, its result
   [ "$(curl -sf --max-time 3 http://127.0.0.1:39918/ | grep -c 'data-aid-screen="seznam"')" -eq 1 ]   # home = first nav screen
   "$SERVE" stop skeleton
@@ -383,7 +383,7 @@ J
   P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
   "$SERVE" skeleton "$P" >/dev/null
   grep -q '<button type="button" data-aid-action="detail.smazat" aria-haspopup="dialog">Smazat</button><dialog open class="potvrzeni" data-aid-confirm="detail.smazat"' "$P/site/detail/index.html"
-  grep -q '<a href="/seznam/?vysledek=smazat" data-aid-confirm-yes="detail.smazat">Potvrdit</a>' "$P/site/detail/index.html"
+  grep -q '<a href="/seznam/?vysledek=smazat" data-aid-confirm-yes="detail.smazat">Smazat poznámku</a>' "$P/site/detail/index.html"
   ! grep -q 'data-aid-action="detail.smazat" href' "$P/site/detail/index.html"   # never a plain link
   # in a browser: the action opens the dialog (closed before), Potvrdit leads to the target screen
   cat > "$BATS_TEST_TMPDIR/del.mjs" <<J
@@ -447,5 +447,28 @@ await pg.click('[data-aid-action="detail.smazat"]'); r.push(await pg.evaluate(()
 console.log(r.join(' ')); await b.close();
 J
   [ "$(node "$BATS_TEST_TMPDIR/res.mjs")" = "false true true" ]
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: in a browser - an action outside its mode is disabled with its reason, an invalid field stops the send with its message, a task's state shows on call" {
+  P="$BATS_TEST_DIRNAME/../../../.."; P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '.modes = [{id: "bezi", label: "Běží"}, {id: "pauza", label: "Pauza"}] | .screens[0].actions[0].modes = ["bezi"]
+      | .screens[0].actions[0].disabled_reason = "V pauze nové poznámky nejdou." | .screens[0].actions[0].kind = "navigate"
+      | .screens[1].fields = [{name: "nazev", label: "Název", required: true, error: "Název je povinný."}]' \
+    "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/modes.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); const r = [];
+await pg.goto('http://127.0.0.1:39918/seznam/?rezim=pauza'); const a = pg.locator('[data-aid-action="seznam.novy"]');
+r.push(await a.getAttribute('aria-disabled')); r.push(await pg.locator('#proc-seznam-novy').isVisible());
+await pg.goto('http://127.0.0.1:39918/seznam/?rezim=bezi'); r.push(await pg.locator('[data-aid-action="seznam.novy"]').getAttribute('aria-disabled'));
+await pg.goto('http://127.0.0.1:39918/formular/'); await pg.click('[data-aid-action="formular.ulozit"]');
+r.push(new URL(pg.url()).pathname); r.push(await pg.locator('#f-formular-nazev-chyba').isVisible());
+await pg.goto('http://127.0.0.1:39918/seznam/?stav=zalozit.validation'); r.push(await pg.locator('[data-aid-task-state="zalozit.validation"]').isVisible());
+console.log(r.join(' ')); await b.close();
+J
+  [ "$(node "$BATS_TEST_TMPDIR/modes.mjs")" = "true true false /formular/ true true" ]
   "$SERVE" stop skeleton
 }

@@ -78,7 +78,16 @@ vzory podle oboru aplikace, tři směry vzhledu jako skutečné stránky kostry.
 ## 4. Stavba - smlouva s bránou
 Postavená aplikace drží dvě věci, na kterých stojí testy úloh a předání:
 - každá akce modelu nese `data-aid-action="<obrazovka>.<akce>"` a kořen obrazovky `data-aid-screen="<obrazovka>"`;
-- v testovacím režimu (`?aid-test=1`) obrazovka poslechne `?stav=` a ukáže ten stav.
+- v testovacím režimu (`?aid-test=1`) obrazovka poslechne `?stav=` a ukáže ten stav;
+- stav úlohy (`?stav=<úloha>.<stav>`: chyba validace, prázdno, načítání, selhání, oprávnění, obnova) se ukáže na obrazovce
+  prvního kroku úlohy v bloku `data-aid-task-state="<úloha>.<stav>"`;
+- akce, která jde jen v některých režimech (`modes` v modelu), je v ostatních neaktivní s větou proč; režim pro test
+  nastaví `?rezim=<režim>`.
+
+Čísla v ukázkách, potvrzeních a výsledcích se píšou jako pojmenované hodnoty `{klíč}` (model `values`, každá se
+zdrojem): jedno číslo je na jednom místě a čísla téhož obchodu si nemůžou odporovat. Nevratná akce nese texty svých
+tlačítek (`confirm_yes`, `confirm_no`), pole své meze (`required`, `min`, `max`, `maxlength`, hláška `error`), odkaz
+na záznam svůj parametr (`query`).
 
 ## 5. Brána
 1. `aid-ui-flows.py generate <projekt>` napíše z modelu do `.aid-ui/scenarios/` jeden test na úlohu (kroky, pak

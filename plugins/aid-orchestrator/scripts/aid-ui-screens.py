@@ -25,7 +25,7 @@ each a text or "nenastává, protože …").
 Other scripts import load(), violations(), failure_variants() and matrix() from here (importlib), so there is one
 reading of the model.
 """
-import json, os, sys
+import json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCHEMA = os.path.join(HERE, "..", "skills", "ui-design", "references", "screens.schema.json")
@@ -75,6 +75,12 @@ def violations(m, proj):
     good_s = [(i, s) for i, s in enumerate(m["screens"]) if ("screens", i) not in broken]
     good_t = [(i, t) for i, t in enumerate(m["tasks"]) if ("tasks", i) not in broken]
     unsure = {sid(x) for i, x in enumerate(m["screens"]) if ("screens", i) in broken} - {None}
+    modes = {x.get("id") for x in m.get("modes") or [] if isinstance(x, dict)}
+    vals = m.get("values") or {}
+    def refs(text, where):   # every {key} of a text is a named value of the model: one number, one place
+        for k in re.findall(r"\{([a-z][a-z0-9_]*)\}", str(text or "")):
+            if k not in vals:
+                out.append(f"{where}: {{{k}}} není pojmenovaná hodnota modelu (values)")
     screens = {}
     for i, s in good_s:
         if s["id"] in screens:
@@ -88,12 +94,23 @@ def violations(m, proj):
             seen.add(a["id"])
             if a["to"] not in ids:
                 out.append(f"{at}/to: akce {s['id']}.{a['id']} vede na neexistující obrazovku {a['to']}")
-            if a["kind"] == "destructive" and not a.get("confirm"):
-                out.append(f"{at}: destruktivní akce {s['id']}.{a['id']} bez potvrzení (confirm)")
+            if a["kind"] == "destructive" and not (a.get("confirm") and a.get("confirm_yes") and a.get("confirm_no")):
+                out.append(f"{at}: destruktivní akce {s['id']}.{a['id']} bez potvrzení (confirm, confirm_yes, confirm_no: otázka a tlačítka, která jmenují akci)")
+            for md in a.get("modes") or []:
+                if md not in modes:
+                    out.append(f"{at}/modes: režim {md} model nezná (modes)")
+            if a.get("modes") and not a.get("disabled_reason"):
+                out.append(f"{at}: akce {s['id']}.{a['id']} jde jen v některých režimech, ale neříká proč jinak ne (disabled_reason)")
     if sum(1 for s in m["screens"] if isinstance(s, dict) and s.get("shell") is True) > 1:
         out.append("/screens: lišta (shell: true) je jen jedna")
     if not any(isinstance(s, dict) and s.get("nav") is True and not s.get("shell") for s in m["screens"]):
         out.append("/screens: žádná obrazovka není v navigaci (nav: true)")
+    for i, s in good_s:
+        for k, txt in [("purpose", s["purpose"])] + [("states/" + x, y) for x, y in s["states"].items()] + [(f"sample/{j}", x) for j, x in enumerate(s.get("sample") or [])]:
+            refs(txt, f"/screens/{i}/{k}")
+        for j, a in enumerate(s["actions"]):
+            for k in ("label", "confirm", "confirm_yes", "confirm_no", "disabled_reason"):
+                refs(a.get(k), f"/screens/{i}/actions/{j}/{k}")
     acts = {(s["id"], a["id"]): a for _, s in good_s for a in s["actions"]}
     base, bwhy = baseline_ids(proj)
     if bwhy:
@@ -128,6 +145,11 @@ def violations(m, proj):
                 out.append(f"{sa}/screen: úloha {t['id']} krok {k + 1} stojí na {st['screen']}, předchozí akce vede na {lead}")
             submits = submits or a["kind"] == "submit"
             lead = a["to"]
+        if t.get("mode") and t["mode"] not in modes:
+            out.append(f"{at}/mode: režim {t['mode']} model nezná (modes)")
+        refs(t["done_when"]["expect"], f"{at}/done_when/expect")
+        for k, txt in t["states"].items():
+            refs(txt, f"{at}/states/{k}")
         dw = t["done_when"]
         if dw["screen"] in unsure:
             pass
@@ -168,6 +190,30 @@ def violations(m, proj):
     return out
 
 
+def resolved(m):
+    """The model with every {key} of its texts replaced by the named value (values): the one reading of the numbers the
+    skeleton, the scenarios and the package all use."""
+    vals = {k: v["value"] for k, v in (m.get("values") or {}).items()}
+    def walk(x):
+        if isinstance(x, str):
+            return re.sub(r"\{([a-z][a-z0-9_]*)\}", lambda g: vals.get(g.group(1), g.group(0)), x)
+        if isinstance(x, list):
+            return [walk(y) for y in x]
+        if isinstance(x, dict):
+            return {a: walk(b) for a, b in x.items()}
+        return x
+    return walk(m)
+
+
+def task_state_url(m, t):
+    """Where a task's states show: the screen of its first step (the home screen when that is the bar)."""
+    scr = {s["id"]: s for s in m["screens"]}
+    first = scr[t["steps"][0]["screen"]]
+    if first.get("shell"):
+        first = next(s for s in m["screens"] if s["nav"] and not s.get("shell"))
+    return screen_url(first), first["id"]
+
+
 def screen_url(s):
     return s.get("url") or f"/{s['id']}/"
 
@@ -192,6 +238,10 @@ def matrix(m):
     for t in m["tasks"]:
         rows += [{"page": t["id"], "state": "normal", "check": "app_flows"}, {"page": t["id"], "state": "keyboard", "check": "keyboard_flows"}]
         rows += [{"page": t["id"], "state": v["state"], "check": "task_recovery"} for v in failure_variants(m, t)]
+    for t in m["tasks"]:   # every task's six non-path states can be shown (?stav=<task>.<state>) and are checked
+        u, sid = task_state_url(m, t)
+        rows += [{"page": "task:" + t["id"], "state": k, "check": "app_states", "url": u, "screen": sid}
+                 for k in ("validation", "empty", "loading", "failure", "permission", "recovery")]
     for s in m["screens"]:
         if s.get("shell"):   # the bar has no page of its own: it is checked on every screen's page
             continue

@@ -249,6 +249,13 @@ document.querySelectorAll('main [data-aid-state]').forEach(function(e){if(e.data
 if(!ok)st='filled';document.querySelectorAll('main [data-aid-state]').forEach(function(e){e.hidden=e.dataset.aidState!==st;});
 document.querySelectorAll('[data-aid-stav-link]').forEach(function(a){if(a.dataset.aidStavLink===st)a.setAttribute('aria-current','true');});
 document.querySelectorAll('[data-aid-back]').forEach(function(a){a.addEventListener('click',function(ev){if(document.referrer&&new URL(document.referrer).origin===location.origin){ev.preventDefault();history.back();}});});
+var main=document.querySelector('main');if(st==='loading')main.setAttribute('aria-busy','true');
+var ts=q.get('stav')||'';document.querySelectorAll('[data-aid-task-state]').forEach(function(e){e.hidden=e.dataset.aidTaskState!==ts;});
+var rz=q.get('rezim');try{if(rz)sessionStorage.setItem('aid-rezim',rz);rz=sessionStorage.getItem('aid-rezim');}catch(e){}
+var modes=document.querySelector('[data-aid-modes-list]');if(modes){var all=modes.dataset.aidModesList.split(' ');if(all.indexOf(rz)<0)rz=all[0];
+document.querySelectorAll('[data-aid-rezim-link]').forEach(function(a){if(a.dataset.aidRezimLink===rz)a.setAttribute('aria-current','true');});
+document.querySelectorAll('[data-aid-modes]').forEach(function(b){var off=b.dataset.aidModes.split(' ').indexOf(rz)<0;b.toggleAttribute('disabled',off);b.setAttribute('aria-disabled',off?'true':'false');
+var r=document.getElementById(b.dataset.aidReason);if(r)r.hidden=!off;});}
 var an=document.querySelector('[data-aid-stav-oznameni]');if(an&&q.get('stav'))an.textContent='Zobrazen stav: '+(document.querySelector('[data-aid-stav-link="'+st+'"]')||{}).textContent;
 document.querySelectorAll('[data-aid-result]').forEach(function(e){e.hidden=done.indexOf(e.dataset.aidResult)<0;});
 document.querySelectorAll('dialog[data-aid-confirm]').forEach(function(d){d.close();var b=document.querySelector('[data-aid-action="'+d.dataset.aidConfirm+'"]');
@@ -257,7 +264,9 @@ d.querySelector('[data-aid-confirm-no]').addEventListener('click',function(){d.c
 var y=d.querySelector('[data-aid-confirm-yes]'),ge=document.querySelector('[data-aid-error-global]');y.addEventListener('click',function(ev){ev.preventDefault();
 fetch(y.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=y.href;}).catch(function(){d.close();ge.hidden=false;ge.focus();});});});
 document.querySelectorAll('form[data-aid-form]').forEach(function(f){var err=f.querySelector('[data-aid-error]');
-f.addEventListener('submit',function(ev){ev.preventDefault();var b=ev.submitter,to=(b&&b.getAttribute('formaction'))||f.getAttribute('action'),d=new URLSearchParams(new FormData(f));
+f.addEventListener('submit',function(ev){ev.preventDefault();var bad=null;f.querySelectorAll('input,select').forEach(function(i){var e=document.getElementById(i.id+'-chyba');
+if(e)e.hidden=i.checkValidity();if(!i.checkValidity()){i.setAttribute('aria-invalid','true');bad=bad||i;}else i.removeAttribute('aria-invalid');});
+if(bad){bad.focus();return;}var b=ev.submitter,to=(b&&b.getAttribute('formaction'))||f.getAttribute('action'),d=new URLSearchParams(new FormData(f));
 if(b&&b.name)d.set(b.name,b.value);var u=to+'?'+d.toString();f.setAttribute('aria-busy','true');if(b)b.disabled=true;
 fetch(u).then(function(r){if(!r.ok)throw new Error(r.status);location.href=u;}).catch(function(){f.removeAttribute('aria-busy');if(b)b.disabled=false;
 err.hidden=false;err.focus();});});});})();"""
@@ -284,40 +293,60 @@ def screens_module():
     return m
 
 
+def gate_attrs(sid, a):
+    """An action that goes only in some modes: its modes and the id of the sentence why not."""
+    if not a.get("modes"):
+        return "", ""
+    rid = f"proc-{esc(sid)}-{esc(a['id'])}"
+    return (f' data-aid-modes="{esc(" ".join(a["modes"]))}" data-aid-reason="{rid}" aria-describedby="{rid}"',
+            f'<span id="{rid}" class="proc" hidden>{esc(a["disabled_reason"])}</span>')
+
+
 def actions_html(m, scr, url, fields, ends):
     """The actions of one screen (data-aid-action) and the form of its submit actions. ends: action id -> the tasks it
     ends - a link, a submit button or a confirm carries ?vysledek=<tasks>, and the result shows only then."""
     sid = scr["id"]
-    tail = lambda a: (f"?vysledek={esc(','.join(ends[a['id']]))}" if ends.get(a["id"]) else "")
+    def tail(a):   # the target's parameters: a deep link (query) and the tasks the action ends (vysledek)
+        ps = ([a["query"]] if a.get("query") else []) + ([f"vysledek={','.join(ends[a['id']])}"] if ends.get(a["id"]) else [])
+        return esc("?" + "&".join(ps)) if ps else ""
     acts, btns = [], []
     for a in scr["actions"]:
         da = f'data-aid-action="{esc(sid)}.{esc(a["id"])}"'
         if a["kind"] == "navigate":
             back = " data-aid-back" if a.get("back") else ""
-            acts.append(f'<a class="akce" href="{esc(url[a["to"]])}{tail(a)}" {da}{back}>{esc(a["label"])}</a>')
+            ga, why = gate_attrs(sid, a)
+            acts.append(f'<a class="akce" href="{esc(url[a["to"]])}{tail(a)}" {da}{back}{ga}>{esc(a["label"])}</a>{why}')
         elif a["kind"] == "submit":
             v = f' name="vysledek" value="{esc(",".join(ends[a["id"]]))}"' if ends.get(a["id"]) else ""
-            btns.append(f'<button type="submit" formaction="{esc(url[a["to"]])}"{v} {da}>{esc(a["label"])}</button>')
+            ga, why = gate_attrs(sid, a)
+            q = f'?{esc(a["query"])}' if a.get("query") else ""
+            btns.append(f'<button type="submit" formaction="{esc(url[a["to"]])}{q}"{v} {da}{ga}>{esc(a["label"])}</button>{why}')
         else:   # destructive: the button opens its confirm dialog (the focus on Zrušit); without JS it stands open under it
             k = f'{esc(sid)}.{esc(a["id"])}'
-            acts.append(f'<button type="button" {da} aria-haspopup="dialog">{esc(a["label"])}</button>'
+            ga, why = gate_attrs(sid, a)
+            acts.append(f'<button type="button" {da} aria-haspopup="dialog"{ga}>{esc(a["label"])}</button>{why}'
                         f'<dialog open class="potvrzeni" data-aid-confirm="{k}" aria-label="{esc(a["confirm"])}"><p>{esc(a["confirm"])}</p>'
-                        f'<a href="{esc(url[a["to"]])}{tail(a)}" data-aid-confirm-yes="{k}">Potvrdit</a> <button type="button" data-aid-confirm-no>Zrušit</button></dialog>')
+                        f'<a href="{esc(url[a["to"]])}{tail(a)}" data-aid-confirm-yes="{k}">{esc(a.get("confirm_yes") or "Potvrdit")}</a> '
+                        f'<button type="button" data-aid-confirm-no>{esc(a.get("confirm_no") or "Zrušit")}</button></dialog>')
     form = ""
     if btns:
         spec = {f["name"]: f for f in scr.get("fields") or []}
         def field(n):
             f = spec.get(n) or {"name": n, "label": n}
-            hid = f"h-{esc(sid)}-{esc(n)}"
-            hint = f' aria-describedby="{hid}"' if f.get("hint") else ""
+            hid, fid = f"h-{esc(sid)}-{esc(n)}", f"f-{esc(sid)}-{esc(n)}"
+            hint = f' aria-describedby="{hid} {fid}-chyba"' if f.get("hint") else f' aria-describedby="{fid}-chyba"'
             note = f'<span id="{hid}" class="napoveda">{esc(f["hint"])}</span>' if f.get("hint") else ""
+            note += f'<span id="{fid}-chyba" class="chyba-pole" role="alert" hidden>{esc(f.get("error") or "Zkontrolujte hodnotu.")}</span>'
+            lim = (" required" if f.get("required") else "") + (f' maxlength="{f["maxlength"]}"' if f.get("maxlength") else "")
+            if "min" in f or "max" in f:
+                lim += ' type="number" step="any"' + (f' min="{f["min"]}"' if "min" in f else "") + (f' max="{f["max"]}"' if "max" in f else "")
             if f.get("choices"):
                 opts = "".join(f'<option value="{esc(c["value"])}">{esc(c["label"])}</option>' for c in f["choices"])
                 return f'<p><label for="f-{esc(sid)}-{esc(n)}">{esc(f["label"])}</label> <select id="f-{esc(sid)}-{esc(n)}" name="{esc(n)}"{hint}>{opts}</select> {note}</p>'
-            return f'<p><label for="f-{esc(sid)}-{esc(n)}">{esc(f["label"])}</label> <input id="f-{esc(sid)}-{esc(n)}" name="{esc(n)}"{hint}> {note}</p>'
+            return f'<p><label for="{fid}">{esc(f["label"])}</label> <input id="{fid}" name="{esc(n)}"{hint}{lim}> {note}</p>'
         inputs = "".join(field(n) for n in fields)
         first = next(a for a in scr["actions"] if a["kind"] == "submit")
-        form = (f'<form method="get" action="{esc(url[first["to"]])}" data-aid-form>{inputs}'
+        form = (f'<form method="get" action="{esc(url[first["to"]])}" data-aid-form novalidate>{inputs}'
                 f'<p class="chyba" role="alert" tabindex="-1" data-aid-error hidden>{esc(scr["states"]["error"])}</p>{"".join(btns)}</form>')
     return form + (f'<div class="akce">{"".join(acts)}</div>' if acts else "")
 
@@ -332,7 +361,10 @@ def app_page(m, scr, approved, fields, results, ends, shell):
     cur = ' aria-current="page"'
     nav = "".join(f'<li><a href="{esc(url[x["id"]])}"{cur if x["id"] == sid else ""}>{esc(x["title"])}</a></li>'
                   for x in m["screens"] if x["nav"] and not x.get("shell"))
-    bar = "".join(f'<div class="lista" role="region" data-aid-screen="{esc(x["id"])}" aria-label="{esc(x["title"])}">'
+    mo = m.get("modes") or []
+    msw = ("" if not mo else f'<p class="rezimy" data-aid-modes-list="{esc(" ".join(x["id"] for x in mo))}">Režim (ukázka): '
+           + " ".join(f'<a href="?rezim={esc(x["id"])}" data-aid-rezim-link="{esc(x["id"])}" title="{esc(x.get("text") or "")}">{esc(x["label"])}</a>' for x in mo) + "</p>")
+    bar = msw + "".join(f'<div class="lista" data-aid-screen="{esc(x["id"])}" aria-label="{esc(x["title"])}">'
                   f'<p class="lista-stav" role="status">{esc(x["states"]["filled"])}</p>'   # what the bar shows, not only its buttons
                   f'{actions_html(m, x, url, shell[x["id"]][0], shell[x["id"]][1])}</div>' for x in m["screens"] if x.get("shell"))
     switch = "".join(f'<a href="?stav={k}" data-aid-stav-link="{k}">{t}</a> ' for k, t in STATES)
@@ -343,6 +375,9 @@ def app_page(m, scr, approved, fields, results, ends, shell):
     states = "".join(f'<section class="stav" data-aid-state="{k}"><h2>{t}</h2><p>{esc(scr["states"][k])}</p>{sample if k == "filled" else ""}'
                      f'{retry if k == "error" and not scr["states"][k].lower().startswith("nenastává") else ""}</section>' for k, t in STATES)
     mine = [t for t in m["tasks"] if any(st["screen"] == sid for st in t["steps"])]
+    mod = screens_module()
+    tstates = "".join(f'<section class="stav-ulohy" role="status" data-aid-task-state="{esc(t["id"])}.{k}" hidden><h2>{esc(t["title"])}: {n}</h2><p>{esc(t["states"][k])}</p></section>'
+                      for t in m["tasks"] if mod.task_state_url(m, t)[1] == sid for k, n in STATE_NAMES)
     tasks = ("" if not mine else '<details class="ulohy"><summary>Stavy úloh na této obrazovce</summary>' + "".join(
         f'<h3>{esc(t["title"])}</h3><ul>' + "".join(f"<li>{n}: {esc(t['states'][k])}</li>" for k, n in STATE_NAMES) + "</ul>" for t in mine)
         + "</details>")
@@ -364,7 +399,7 @@ def app_page(m, scr, approved, fields, results, ends, shell):
             ':focus-visible{outline:3px solid #06c;outline-offset:2px}</style></head>\n<body>\n'
             f'{banner}<header><p class="znacka">{esc(m.get("app") or "")}</p>{bar}<nav aria-label="Aplikace"><ul>{nav}</ul></nav></header>\n'
             f'<main data-aid-screen="{esc(sid)}"><h1>{esc(scr["title"])}</h1><p class="ucel">{esc(scr["purpose"])}</p>'
-            f'<nav class="stavy" aria-label="Stav obrazovky">{switch}</nav><p class="oznameni" role="status" aria-live="polite" data-aid-stav-oznameni></p>{res}{states}<p class="chyba" role="alert" tabindex="-1" data-aid-error-global hidden>{esc(scr["states"]["error"])}</p>{actions_html(m, scr, url, fields, ends)}{data}{tasks}</main>\n'
+            f'<nav class="stavy" aria-label="Stav obrazovky">{switch}</nav><p class="oznameni" role="status" aria-live="polite" data-aid-stav-oznameni></p>{res}{tstates}{states}<p class="chyba" role="alert" tabindex="-1" data-aid-error-global hidden>{esc(scr["states"]["error"])}</p>{actions_html(m, scr, url, fields, ends)}{data}{tasks}</main>\n'
             + (f'<footer>{foot}</footer>\n' if foot else "") + f'<script>{APP_JS}</script>\n</body>\n</html>\n')
 
 
@@ -387,6 +422,7 @@ def build_app(p):
     bad = mod.violations(m, p)
     if bad:
         die("the model fails aid-ui-screens.py check:\n" + "\n".join("screens: " + b for b in bad), 2)
+    m = mod.resolved(m)   # the named values in every text: one number, one place
     site = os.path.join(p, "site")
     no_symlinks(p, "site", ".aid-ui/skeleton")
     import hashlib

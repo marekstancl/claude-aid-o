@@ -16,6 +16,13 @@
                                "text": {"$ref": "#/$defs/text"}, "covered_by": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^(task|screen):[a-z0-9][a-z0-9-]{0,63}$"}},
                                "out_of_scope": {"$ref": "#/$defs/text"}}}
     },
+    "values": {"type": "object", "description": "pojmenované ukázkové hodnoty se zdrojem; ukázky, potvrzení a výsledky je dosazují jako {klíč}, takže si čísla nemůžou odporovat",
+               "propertyNames": {"pattern": "^[a-z][a-z0-9_]{0,63}$"},
+               "additionalProperties": {"type": "object", "required": ["value", "source"], "additionalProperties": false,
+                                        "properties": {"value": {"type": "string"}, "source": {"$ref": "#/$defs/text"}}}},
+    "modes": {"type": "array", "description": "režimy aplikace; první je výchozí; akce s modes jde jen v nich",
+              "items": {"type": "object", "required": ["id", "label"], "additionalProperties": false,
+                        "properties": {"id": {"$ref": "#/$defs/id"}, "label": {"$ref": "#/$defs/text"}, "text": {"$ref": "#/$defs/text"}}}},
     "glossary": {"type": "array", "description": "slovník pojmů ze zadání: jedna věc má všude jedno jméno",
                  "items": {"type": "object", "required": ["term", "meaning"], "additionalProperties": false, "properties": {"term": {"$ref": "#/$defs/text"}, "meaning": {"$ref": "#/$defs/text"}}}},
     "out_of_scope": {"type": "array", "description": "co aplikace záměrně nedělá a proč",
@@ -46,6 +53,11 @@
                 "to": {"$ref": "#/$defs/id", "description": "cílová obrazovka; akce, která zůstává, míří na svou obrazovku"},
                 "kind": {"enum": ["navigate", "submit", "destructive"]},
                 "confirm": {"$ref": "#/$defs/text", "description": "otázka potvrzení; povinná u destructive"},
+                "confirm_yes": {"$ref": "#/$defs/text", "description": "text tlačítka, které nevratnou akci provede (Zavřít 2 pozice); povinný u destructive"},
+                "confirm_no": {"$ref": "#/$defs/text", "description": "text tlačítka, které ji nechá být (Nechat běžet); povinný u destructive"},
+                "modes": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/id"}, "description": "režimy, ve kterých akce jde"},
+                "disabled_reason": {"$ref": "#/$defs/text", "description": "proč akce v jiném režimu nejde (věta u neaktivního tlačítka)"},
+                "query": {"type": "string", "pattern": "^[A-Za-z0-9_-]+=[A-Za-z0-9_.:-]+(&[A-Za-z0-9_-]+=[A-Za-z0-9_.:-]+)*$", "description": "parametry adresy cíle (id=btc-1402): hluboký odkaz"},
                 "back": {"type": "boolean", "description": "true = vede zpět tam, odkud uživatel přišel (Zpět prohlížeče); to je cíl, když historie není"}
               }
             }
@@ -54,6 +66,8 @@
           "fields": {"type": "array", "description": "pole formuláře obrazovky: lidský popisek, nápověda (meze) a pevné volby místo volného textu",
                      "items": {"type": "object", "required": ["name", "label"], "additionalProperties": false,
                                "properties": {"name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,63}$"}, "label": {"$ref": "#/$defs/text"},
+                                              "required": {"type": "boolean"}, "min": {"type": "number"}, "max": {"type": "number"}, "maxlength": {"type": "integer", "minimum": 1},
+                                              "error": {"$ref": "#/$defs/text", "description": "hláška u pole při chybném zadání"},
                                               "hint": {"$ref": "#/$defs/text"}, "choices": {"type": "array", "minItems": 2, "items": {"type": "object", "required": ["value", "label"], "additionalProperties": false,
                                               "properties": {"value": {"type": "string"}, "label": {"$ref": "#/$defs/text"}}}}}}},
           "data": {"type": "array", "description": "čísla a stavy na obrazovce: odkud jsou, jak čerstvá a co uživatel uvidí, když zastarají",
@@ -84,6 +98,7 @@
           "id": {"$ref": "#/$defs/id"},
           "title": {"$ref": "#/$defs/text"},
           "roles": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
+          "mode": {"$ref": "#/$defs/id", "description": "režim, ve kterém úloha začíná (Pokračovat začíná v pauze)"},
           "frequency": {"$ref": "#/$defs/text", "description": "jak často úloha nastává (denně, při poruše…): nejčastější patří na hlavní obrazovku"},
           "steps": {
             "type": "array",

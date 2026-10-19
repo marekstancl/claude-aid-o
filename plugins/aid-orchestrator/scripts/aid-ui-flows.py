@@ -109,7 +109,8 @@ def scenario(mod, m, t, sha):
     acts = {(s["id"], a["id"]): a for s in m["screens"] for a in s["actions"]}
     plan = {
         "id": t["id"],
-        "steps": [{"screen": st["screen"], "action": st["action"], "input": st.get("input") or {}, "url": urls[st["screen"]]} for st in t["steps"]],
+        "steps": [{"screen": st["screen"], "action": st["action"], "input": st.get("input") or {},
+                   "url": urls[st["screen"]] + (f"?rezim={t['mode']}" if t.get("mode") and k == 0 else "")} for k, st in enumerate(t["steps"])],
         "done": t["done_when"],
         "kinds": {f"{s}.{a}": x["kind"] for (s, a), x in acts.items()},
         "variants": {v["state"]: {"at_step": v["at_step"], "kind": v["kind"], "recover": v["recover"], "generated": v["generated"]}
@@ -133,6 +134,7 @@ def generate(proj, dry):
         print("ERROR: aid-ui-flows.py: the model fails aid-ui-screens.py check:\n" + "\n".join("screens: " + b for b in bad), file=sys.stderr)
         return 1
     sha = hashlib.sha256(open(mp, "rb").read()).hexdigest()
+    m = mod.resolved(m)   # the texts as the skeleton shows them
     out = os.path.join(proj, ".aid-ui", "scenarios")
     want = {f"{t['id']}.mjs": scenario(mod, m, t, sha) for t in m["tasks"]}
     old = []

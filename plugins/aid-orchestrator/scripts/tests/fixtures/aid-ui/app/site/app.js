@@ -9,7 +9,9 @@
   var main = document.querySelector('[data-aid-screen]'), screen = main.dataset.aidScreen;
   var show = function (st) { main.querySelectorAll('[data-aid-state]').forEach(function (e) { e.hidden = e.dataset.aidState !== st; }); };
   var want = test && q.get('stav');
-  show(want || (screen === 'seznam' && !notes.length ? 'empty' : 'filled'));
+  var task = want && want.indexOf('.') > 0 ? want : '';   // a task's state (?stav=<task>.<state>), the screen stays filled
+  show(task ? 'filled' : (want || (screen === 'seznam' && !notes.length ? 'empty' : 'filled')));
+  main.querySelectorAll('[data-aid-task-state]').forEach(function (e) { e.hidden = e.dataset.aidTaskState !== task; });
   if (screen === 'seznam') {
     var ul = main.querySelector('[data-list]');
     notes.forEach(function (n, i) {
