@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<!-- The companion kit page (scripts/aid-companion.sh show). Fixed: the agent fills navrh.json, never this file.
+     Layout from the PM (WAN P110, 19. 10. 2026): one screen, three columns — points left, preview in the
+     middle, the open point right; the page itself never scrolls, a long column scrolls inside itself. -->
+<style>
+:root{--ink:#1c1917;--mute:#57534e;--faint:#6b6560;--line:#e7e5e4;--bg:#fff;--soft:#f5f5f4;--rec:#0f766e;--new:#b45309}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+.ap{display:grid;grid-template-columns:230px minmax(0,1fr) 380px;height:100vh}
+.ap.text{grid-template-columns:230px minmax(0,1fr)}
+.ap.text .c{display:none}
+.ap>*{min-height:0}
+.l{border-right:1px solid var(--line);padding:12px 14px;overflow:auto;display:flex;flex-direction:column;gap:2px}
+h4{margin:12px 0 6px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
+.l h4:first-child{margin-top:0}
+.nav{display:block;width:100%;text-align:left;border:0;background:none;border-radius:10px;padding:8px 10px;cursor:pointer;font:inherit}
+.nav:hover{background:var(--soft)}.nav.on{background:var(--ink);color:#fff}
+.nav small{display:block;font-size:12px;opacity:.7}
+.seg{display:flex;border:1px solid #d6d3d1;border-radius:999px;overflow:hidden}
+.seg button{flex:1;border:0;background:#fff;padding:7px 0;cursor:pointer;font:inherit;font-size:13px}
+.seg button.on{background:var(--ink);color:#fff}
+.small{font-size:12px;color:#6b6560;margin:6px 0 0}
+.send{margin-top:auto;background:var(--ink);color:#fff;border:0;border-radius:999px;padding:10px;font:inherit;cursor:pointer}
+.c{display:flex;flex-direction:column;padding:12px 16px;min-width:0}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;padding:0 0 8px}
+.tab{border:1px solid #d6d3d1;background:#fff;border-radius:999px;padding:5px 12px;font:inherit;font-size:13px;cursor:pointer}
+.tab.on{background:var(--ink);color:#fff;border-color:var(--ink)}.tab.past{border-style:dashed}
+.pv{flex:1;min-height:0;overflow:auto;background:var(--soft);border:1px solid var(--line);border-radius:10px;padding:10px;display:flex;justify-content:center;align-items:flex-start}
+.pv img{display:block;height:auto;border-radius:6px;box-shadow:0 1px 6px rgba(0,0,0,.1);cursor:zoom-in}
+.pv.d img{max-width:min(100%,960px)}.pv.m img{max-width:min(100%,390px)}
+.pv.real img{max-width:none;cursor:zoom-out}
+.hint{font-size:12px;color:var(--faint);margin-top:6px}
+.r{border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.rs{flex:1;min-height:0;overflow:auto;padding:12px 16px 10px}
+.rf{border-top:1px solid var(--line);padding:8px 16px 12px;background:#fff}
+.r h2{margin:0;font-size:18px}.q{color:var(--mute);margin:4px 0 0}
+.opt{display:block;width:100%;text-align:left;border:1px solid #d6d3d1;border-radius:12px;padding:10px 12px;background:#fff;cursor:pointer;font:inherit;margin-top:8px}
+.opt.sel{border:2px solid var(--ink);padding:9px 11px}
+.opt b{font-size:14px}.opt p{margin:4px 0 0;color:var(--mute);font-size:13px}
+.opt .z{color:var(--faint);font-size:12px}
+.badge{display:inline-block;margin-left:6px;color:#fff;border-radius:999px;font-size:11px;padding:1px 7px;vertical-align:middle;background:var(--rec)}
+.badge.new{background:var(--new)}
+.why{font-size:13px;margin:10px 0 0}
+.rules{font-size:12px;color:var(--mute);margin:10px 0 0;padding:8px 10px;background:var(--soft);border-radius:8px}
+.rules ul{margin:4px 0 0;padding-left:16px}
+textarea{width:100%;min-height:64px;border:1px solid #d6d3d1;border-radius:10px;padding:8px;font:inherit;font-size:13px;resize:vertical}
+.pg{display:flex;gap:6px;margin-top:8px}.pg button{flex:1;border:1px solid #d6d3d1;background:#fff;border-radius:999px;padding:7px;cursor:pointer;font:inherit;font-size:13px}
+.pg button:disabled{opacity:.4;cursor:default}
+@media (max-width:900px){
+  html,body{overflow:auto}
+  .ap,.ap.text{display:block;height:auto}
+  .l,.r{border:0}.c{padding:8px}.pv{max-height:70vh}
+}
+</style>
+</head>
+<body>
+<div class="ap" id="ap">
+ <aside class="l">
+  <h4 id="ptitle"></h4><div id="nav"></div>
+  <div id="viewbox"><h4>Zobrazení</h4><div class="seg"><button data-view="desktop">Počítač</button><button data-view="mobile">Telefon</button></div></div>
+  <div id="decided"></div>
+  <p class="small">↑ ↓ přepíná body. Klik na náhled ukáže skutečnou velikost.</p>
+  <button class="send" id="send">Odeslat volby a poznámky</button>
+  <p class="small" id="count"></p><p class="small" id="sent"></p>
+ </aside>
+ <section class="c"><div class="tabs" id="tabs"></div><div class="pv d" id="pv"><img id="img" alt="náhled" hidden></div><p class="hint" id="cap"></p></section>
+ <aside class="r">
+  <div class="rs"><h2 id="title"></h2><p class="q" id="q"></p><div id="opts"></div><p class="why" id="why"></p><div class="rules" id="rules"></div></div>
+  <div class="rf"><h4 style="margin-top:0">Poznámka</h4><textarea id="note" placeholder="Co upravit, co se nelíbí (nepovinné)"></textarea>
+   <div class="pg"><button id="prev">← Předchozí</button><button id="next">Další →</button></div></div>
+ </aside>
+</div>
+<script type="application/json" id="navrh">__DATA__</script>
+<script>
+(function(){
+const D = JSON.parse(document.getElementById('navrh').textContent);
+const B = D.body, VIEWS = D.zobrazeni;
+const st = { i:0, view:VIEWS[0], pick:{}, tab:0, past:false, notes:{}, real:false };
+B.forEach(b => { st.pick[b.id] = b.doporuceni; });
+const $ = s => document.querySelector(s);
+const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const send = o => { const e = Object.assign({ kolo: D.kolo, page: D.page }, o); if (window.brainstorm) window.brainstorm.send(e); };
+function shotsOf(b){ const o = b.moznosti.find(x => x.klic === st.pick[b.id]); return st.past ? b.minule : (o ? o.snimky : []); }
+function render(){
+  const b = B[st.i], o = b.moznosti.find(x => x.klic === st.pick[b.id]);
+  const hasShots = B.some(x => x.moznosti.some(m => m.snimky.length) || x.minule.length);
+  const pointShots = b.moznosti.some(m => m.snimky.length) || b.minule.length;
+  $('#ap').classList.toggle('text', !pointShots);
+  $('#viewbox').style.display = (hasShots && VIEWS.length > 1) ? '' : 'none';
+  $('#ptitle').textContent = D.plan + ' · kolo ' + D.kolo;
+  $('#nav').innerHTML = B.map((x, i) => `<button class="nav ${i===st.i?'on':''}" data-i="${i}">${i+1}. ${esc(x.title)}<small>zvoleno ${esc(st.pick[x.id] || '–')}${st.notes[x.id] ? ' · poznámka' : ''}</small></button>`).join('');
+  $('#decided').innerHTML = D.rozhodnuto.length ? '<h4>Už rozhodnuto</h4>' + D.rozhodnuto.map(t => `<p class="small">${esc(t)}</p>`).join('') : '';
+  document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x.dataset.view === st.view));
+  if (pointShots) {
+    const list = shotsOf(b), sc = list[Math.min(st.tab, Math.max(list.length - 1, 0))];
+    $('#tabs').innerHTML = (b.minule.length ? `<button class="tab past ${st.past?'on':''}" data-past="1">Minulé kolo</button>` : '')
+      + (o ? o.snimky.map((x, k) => `<button class="tab ${!st.past && k===st.tab ? 'on' : ''}" data-tab="${k}">${esc(o.klic)}: ${esc(x.popisek)}</button>`).join('') : '');
+    $('#pv').className = 'pv ' + (st.view === 'desktop' ? 'd' : 'm') + (st.real ? ' real' : '');
+    const src = sc ? sc.soubory[st.view] : '';
+    if (src) $('#img').src = src; $('#img').hidden = !src;
+    $('#cap').textContent = sc ? (st.past ? 'Minulé kolo: ' : '') + sc.popisek + (src ? '' : ' (pro toto zobrazení snímek není)') : '';
+  }
+  $('#title').textContent = (st.i + 1) + '. ' + b.title; $('#q').textContent = b.otazka;
+  $('#opts').innerHTML = b.moznosti.map(x => `<button class="opt ${o && x.klic===o.klic ? 'sel' : ''}" data-k="${esc(x.klic)}"><b>${esc(x.klic)}) ${esc(x.nazev)}</b>${x.klic===b.doporuceni ? '<span class="badge">doporučuju</span>' : ''}${x.nove.map(n => `<span class="badge new" title="${esc(n.duvod)}">nová komponenta</span>`).join('')}<p>${esc(x.popis)}</p>${x.postaveno_z.length ? `<p class="z">Postaveno z: ${esc(x.postaveno_z.join(', '))}</p>` : ''}${x.nove.map(n => `<p class="z">Nová komponenta ${esc(n.komponenta)}: ${esc(n.duvod)}</p>`).join('')}</button>`).join('');
+  $('#why').innerHTML = `<b>Doporučuju ${esc(b.doporuceni)}:</b> ${esc(b.proc)}`;
+  $('#rules').innerHTML = b.soulad_s_pravidly.length ? '<b>Agent uvádí, z jakých pravidel vychází</b><ul>' + b.soulad_s_pravidly.map(r => `<li>${esc(r.pravidlo)}: ${esc(r.jak)}</li>`).join('') + '</ul>' : '';
+  $('#rules').style.display = b.soulad_s_pravidly.length ? '' : 'none';
+  $('#note').value = st.notes[b.id] || '';
+  $('#prev').disabled = st.i === 0; $('#next').disabled = st.i === B.length - 1;
+  const n = B.filter(x => st.pick[x.id]).length;
+  $('#count').textContent = `Zvoleno ${n} z ${B.length}`;
+}
+function go(i){ st.i = i; st.tab = 0; st.past = false; st.real = false; render(); }
+document.addEventListener('click', e => {
+  if (e.target.id === 'img') { st.real = !st.real; render(); return; }
+  const t = e.target.closest('button'); if (!t) return; const b = B[st.i];
+  if (t.dataset.i !== undefined) return go(+t.dataset.i);
+  if (t.dataset.view) { st.view = t.dataset.view; st.real = false; }
+  else if (t.dataset.k) { st.pick[b.id] = t.dataset.k; st.tab = 0; st.past = false; send({ type: 'choice', bod: b.id, volba: t.dataset.k }); }
+  else if (t.dataset.tab !== undefined) { st.tab = +t.dataset.tab; st.past = false; }
+  else if (t.dataset.past) { st.past = true; st.tab = 0; }
+  else if (t.id === 'prev') return go(st.i - 1);
+  else if (t.id === 'next') return go(st.i + 1);
+  else if (t.id === 'send') {
+    const sel = B.map(x => ({ bod: x.id, volba: st.pick[x.id] || null }));
+    send({ type: 'confirm', selected: sel, notes: st.notes });
+    $('#sent').textContent = 'Odesláno. Napiš do terminálu „hotovo“.'; return;
+  } else return;
+  render();
+});
+$('#note').addEventListener('input', e => { st.notes[B[st.i].id] = e.target.value.trim(); });
+$('#note').addEventListener('change', e => { send({ type: 'note', bod: B[st.i].id, text: e.target.value.trim() }); render(); });
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'TEXTAREA') return;
+  if (e.key === 'ArrowDown' && st.i < B.length - 1) go(st.i + 1);
+  else if (e.key === 'ArrowUp' && st.i > 0) go(st.i - 1);
+  else return; e.preventDefault();
+});
+render();
+})();
+</script>
+</body>
+</html>
