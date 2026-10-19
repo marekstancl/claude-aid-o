@@ -428,6 +428,22 @@ cmd_prepare() {
   if [[ "$MODE" == plan ]]; then
     check="$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")/.aid-o/work/evidence/${PLAN_ID}/plan-check.json"
     [[ -f "$check" ]] || _die "no plan-check.json for ${PLAN_ID}; run aid-plan-check.sh ${PLAN} --json ${check}"
+    # The round reviews a plan that is READY: the check passed (its sha is checked below), and readiness (what
+    # plan-run refuses) holds — reviewers paid for twice over a plan that could not start (AID 10. and 11. 10.)
+    # (a check of another text is refused below with its own message, aid-plan-review-packet.sh)
+    if (( ! MANUAL )) && [[ "$(jq -r '.plan_sha256 // ""' "$check")" == "$(sha256sum "$PLAN" | cut -d' ' -f1)" ]]; then
+      local _pr_why="" _pr_out=""
+      [[ "$(jq -r '.pass // false' "$check")" == true ]] || _pr_why="plan-check.json says the plan does not pass"
+      if [[ -z "$_pr_why" ]] && ! _pr_out="$(bash "${SCRIPT_DIR}/aid-generation-readiness.sh" "$PLAN" --total 1 --project-root "$ROOT" 2>&1)"; then
+        _pr_why="readiness fails: $(tail -3 <<< "$_pr_out" | tr '\n' ' ')"
+      fi
+      if [[ -n "$_pr_why" ]]; then
+        echo "${CMD}: REFUSED (plan_not_ready): ${_pr_why}" >&2
+        echo "next: fix the plan, then bash ${SCRIPT_DIR}/aid-plan-check.sh ${PLAN} --json ${check} && bash ${SCRIPT_DIR}/aid-generation-readiness.sh ${PLAN} --total 1; prepare again" >&2
+        echo "(pipeline.md §When AID refuses: plan_not_ready)" >&2
+        exit 1
+      fi
+    fi
   else
     [[ -f "$STEPCHECK" ]] || _die "no step-check.json in ${BASE}; run aid-step-check.sh --checkpoint ${CHECKPOINT}${STEP:+ --step $STEP} --evidence-dir ${EVID}"
     [[ "$(jq -r .head_sha "$STEPCHECK")" == "$(_head)" ]] || _die "step-check.json is stale (head moved); run aid-step-check.sh again"
@@ -1486,7 +1502,11 @@ _standing_delegate() {
 # directory collapsed to one line, e.g. "!! pkg/__pycache__/"), and one digest line for the content of the
 # tracked files (a stand-in edits none). .aid-o/ is the round's own (prompt, verdict, this record).
 _dlg_tree_state() {
+  # .aid-o/ is AID's own state (the delegation writes there; the step contract never counts it as the
+  # step's delivery); HEAD is part of the state — a stand-in that commits would otherwise leave status
+  # and diff clean (security review 19. 10. 2026)
   { git -C "$ROOT" status --porcelain --untracked-files=all --ignored=traditional 2>/dev/null | grep -v '^.. \.aid-o/' || true
+    printf '## head %s\n' "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)"
     printf '## tracked-content %s\n' "$(git -C "$ROOT" diff HEAD --binary 2>/dev/null | sha256sum | cut -d' ' -f1)"; } | sort
 }
 # _dlg_resync <round dir> <answer label> — the round's verdict in its four
@@ -1565,7 +1585,7 @@ cmd_delegate() {
     fi
     if (( rc != 0 )); then
       # what the worktree looked like before the stand-in: its record refuses files it adds (F14)
-      _dlg_tree_state > "${dir}/adjudicator-delegated-${fp16}.status-before" || true
+      _dlg_tree_state "$dir" > "${dir}/adjudicator-delegated-${fp16}.status-before" || true
       echo "STAND-IN: no codex verdict (${why}); dispatch ${prompt} to an independent general-purpose agent at model ${RC_STAND_IN_MODEL} inside the bracket adjudicator-delegated-${fp16} (aid-emit-dispatch.sh start --focus adjudicator-delegated-${fp16} --agent-id claude:adjudicator-delegated --evidence-dir ${dir}; complete … --output-file ${vfile}), have it write ${vfile} with \"provider\": \"claude\", then: aid-review-round.sh delegate --checkpoint ${CHECKPOINT} --evidence-dir ${EVID}${STEP:+ --step ${STEP}} --round ${ROUND} --fingerprint ${FINGERPRINT} --verdict ${vfile}"
       exit 4
     fi
@@ -1605,7 +1625,7 @@ cmd_delegate() {
   if [[ "$provider" != codex ]]; then
     [[ -f "$before" ]] || _dlg_refuse delegation_left_files "no record of the worktree before the stand-in ran (${before}) — nothing proves it left the tree as it found it" \
       "dispatch the stand-in again through delegate --fingerprint ${FINGERPRINT} (it records the tree first), then record its verdict"
-    left="$(comm -13 "$before" <(_dlg_tree_state) | sed 's/^...//' | head -20 || true)"
+    left="$(comm -13 "$before" <(_dlg_tree_state "$dir") | sed 's/^...//' | head -20 || true)"
     [[ -z "$left" ]] || _dlg_refuse delegation_left_files "the stand-in left files in ${ROOT} that were not there before it ran: $(tr '\n' ' ' <<< "$left")" \
       "remove them (they are the stand-in's, not the step's), then record the verdict again"
   fi

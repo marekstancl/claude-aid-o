@@ -34,7 +34,7 @@ _plan() {
 }
 _check() {
   jq -n --arg s "$(sha256sum "$PLAN" | cut -d' ' -f1)" \
-    '{plan_sha256: $s, warnings: [{id: "A9", location: "p.md", message: "size"}]}' > "$EV/plan-check.json"
+    '{pass: true, plan_sha256: $s, warnings: [{id: "A9", location: "p.md", message: "size"}]}' > "$EV/plan-check.json"
 }
 
 @test "prepare: six prompts, the packet, round.json and an index entry" {
@@ -1759,6 +1759,7 @@ _verdict() { jq -n --arg f "${5:-$FP}" --arg a "$2" --arg c "${3:-technical}" --
 # _dlg_tree_state), for a test that hands a stand-in's verdict in without going through that dispatch
 _snap() {
   ( cd "${3:-$R}" && { git status --porcelain --untracked-files=all --ignored=traditional | grep -v '^.. \.aid-o/' || true
+      printf '## head %s\n' "$(git rev-parse HEAD)"
       printf '## tracked-content %s\n' "$(git diff HEAD --binary | sha256sum | cut -d' ' -f1)"; } | sort ) > "$1/adjudicator-delegated-$2.status-before"
 }
 _adj_bracket() {   # <fp16> <verdict file>
@@ -1998,6 +1999,10 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   run _DLG --fingerprint "$FP" --verdict "$VF"
   [ "$status" -eq 1 ]; [[ "$output" == *"delegation_left_files"*"tracked-content"* ]]
   git -C "$R" checkout -q -- src/app.py
+  git -C "$R" commit -q --allow-empty -m "a stand-in's commit"
+  run _DLG --fingerprint "$FP" --verdict "$VF"
+  [ "$status" -eq 1 ]; [[ "$output" == *"delegation_left_files"*"head"* ]]
+  git -C "$R" reset -q --hard HEAD~1
   rm "$(D 1)/adjudicator-delegated-${F16}.status-before"
   run _DLG --fingerprint "$FP" --verdict "$VF"
   [ "$status" -eq 1 ]; [[ "$output" == *"no record of the worktree before the stand-in ran"* ]]
@@ -2019,4 +2024,14 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   run _F delegate --round 1 --fingerprint "$fp" </dev/null; echo "$output"; [ "$status" -eq 0 ]
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh' && aid_stage_writes_verify '$E'"
   echo "$output"; [ "$status" -eq 0 ]
+}
+
+@test "prepare: a plan whose check did not pass, or that fails readiness, gets no round (AID 10. and 11. 10. 2026)" {
+  jq '.pass = false' "$EV/plan-check.json" > "$EV/p" && mv "$EV/p" "$EV/plan-check.json"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"plan_not_ready"*"does not pass"* ]]; [ ! -d "$CP1/round-1/packet" ]
+  _check
+  printf '\n**Files:**\n- Remove: `x.sh` — no such label\n' >> "$PLAN"; _check
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"plan_not_ready"*"readiness fails"* ]]; [ ! -d "$CP1/round-1/packet" ]
 }

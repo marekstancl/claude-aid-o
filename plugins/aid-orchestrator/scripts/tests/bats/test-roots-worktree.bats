@@ -679,3 +679,11 @@ EOF
   run aid_dotaid_twin_check "$T/main" "$T/wt" "/elsewhere/file.md"; [ "$status" -eq 0 ]
   rm -rf "$T"
 }
+
+@test "plan project root: a stray .aid-o inside the plugin's own root is passed over for the repository's (AID 14. 10. 2026)" {
+  local r; r="$(mktemp -d)"
+  mkdir -p "$r/.aid-o" "$r/plugins/p/.claude-plugin" "$r/plugins/p/.aid-o/work" "$r/plugins/p/fixtures"
+  echo '{}' > "$r/plugins/p/.claude-plugin/plugin.json"; touch "$r/plugins/p/fixtures/plan.md"
+  run bash -c "source '$BATS_TEST_DIRNAME/../../lib/aid-roots.sh'; _aid_plan_project_root '$r/plugins/p/fixtures/plan.md'"
+  [ "$status" -eq 0 ]; [ "$output" = "$r" ]
+}

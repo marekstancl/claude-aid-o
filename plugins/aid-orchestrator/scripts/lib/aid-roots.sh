@@ -210,7 +210,9 @@ _aid_plan_project_root() {
   local dir
   dir="$(cd "$(dirname "$1")" 2>/dev/null && pwd)" || return 1
   while [[ -n "$dir" && "$dir" != "/" ]]; do
-    [[ -d "${dir}/.aid-o" ]] && { printf '%s' "$dir"; return 0; }
+    # the plugin's own root is no project, whatever a stray run left there (AID 14. 10. 2026: a
+    # plugins/aid-orchestrator/.aid-o from 8. 7. won over the repository's, and round review failed)
+    [[ -d "${dir}/.aid-o" && ! -f "${dir}/.claude-plugin/plugin.json" ]] && { printf '%s' "$dir"; return 0; }
     dir="${dir%/*}"          # parameter expansion, not a `dirname` fork per level
   done
   return 1

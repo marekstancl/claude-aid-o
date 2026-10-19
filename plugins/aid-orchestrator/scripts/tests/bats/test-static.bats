@@ -79,3 +79,11 @@ _parses() { run _unparsable "$PLUGIN" "$1"; [ "$status" -eq 0 ] && [ -z "$output
   PATH="$BATS_TEST_TMPDIR/nothing" run _unparsable "$d" js
   [ "$status" -eq 1 ]; [[ "$output" == *"no node to parse js"* ]]
 }
+
+@test "no test fixture is ignored by git: a fixture under a docs/ directory is tracked, not left on one machine (AID 14. 10. 2026)" {
+  local root; root="$(cd "$BATS_TEST_DIRNAME/../../.." && git rev-parse --show-toplevel)"
+  run git -C "$root" check-ignore -q "plugins/aid-orchestrator/scripts/tests/fixtures/any/project/docs/content/x.yaml"
+  [ "$status" -eq 1 ]
+  run git -C "$root" ls-files -oi --exclude-standard -- plugins/aid-orchestrator/scripts/tests/fixtures
+  [ -z "$(grep -v '/node_modules/' <<< "$output")" ] || { echo "ignored fixtures: $output"; false; }
+}
