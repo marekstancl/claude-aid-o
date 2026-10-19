@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [3.7.0] — 2026-10-19
 
 Companion jako hotová stavebnice a opravy z projektů: agent dodá varianty ze sdílených komponent a tři datové soubory, server, kopii aplikace, focení, stránku i odpovědi PM dělá jeden příkaz. Server companionu se od 2.118.0 vůbec nespustil a poznámky PM se agentovi nezapisovaly – obojí opraveno a hlídáno testem nad skutečným serverem. K tomu 20 oprav z deníků WAN, aidlab-apps, agents, share a AID, každá s testem, který na 3.6.0 padá.
 
