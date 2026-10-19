@@ -49,11 +49,27 @@ Průběžná zpráva pilotu (P116 krok 8). Studio běží nad větví `ui/f1-stu
 - Cena: role 3,11 USD (Opus), smyčka celkem 181,3 USD (agent i role, od vzniku studia); čas: kolo rolí 7 min,
   smyčka od začátku studia 1144 min (včetně stavby pluginu a čekání).
 
+### Kolo 4 (19. 10. 2026) - po dodávce klienta-agenta a ověření oprav nezávislým ověřovatelem
+
+- Nové v pluginu: klient-agent dodává, co role nechají na klientovi (`aid-ui-client.py supply`, fakt se zdrojem
+  a citací ověřenou kódem, volba vlastníka s důvodem, nebo „chybí“), schválení modelu smí dát i klient-agent, výpis
+  `decided`; opravy minulého kola musí v postavené verzi vidět nezávislý ověřovatel (`fix_check`); akce jedné položky
+  (`item`); lišta ukazuje aktuální režim; odkaz s cestou selhání zůstane na obrazovce.
+- Klient-agent (38 s): 2 fakty ze zdroje (Signály, páka 10× a denní limit 2 % z migrace), 1 volba (ruční zásahy
+  včetně zavření jedné pozice odložit, varianta ze zadani-ui-obsah.md:200), 2 chybí (dnešní postup, schválení).
+- Ověřovatel (Claude Sonnet, čistý kontext, 3 průchody): v 1. průchodu 5 z 9 oprav ověřeno, 4 částečně a 5 nových
+  rozporů (odkaz na stránku bez SOL, časy obchodu, lišta v každém režimu „Demo běží“, Provést aktivní v pauze, součet
+  dne); po opravách 9 z 9.
+- Předběžná brána 1892/1892 zelená napotřetí: poprvé našla odkaz, který po výpadku sítě ztratí obrazovku (oprava
+  v kostře), podruhé jeden závod pod zátěží (oprava ve scénářích).
+- Klient 8,75 (prošel), odborník 7,64 (prošel bránami role, kolo pod 8,5 u obou); 12 nálezů, 2 major.
+- Cena: role 3,10 USD, kolo 5 min; smyčka celkem 220,45 USD.
+
 ## Místa
 
 | místo | kola | známka klienta | známka odborníka | stav | cena | čas |
 |---|---|---|---|---|---|---|
-| struktura | 3 | 8,15 | 7,44 | kolo 3: klient prošel, odborník ne (o 0,06) | 7,84 USD (role), smyčka 181,3 USD | 19 min rolí |
+| struktura | 4 | 8,75 | 7,64 | kolo 4: obě role prošly bránami role, přijetí kola (8,5) zatím ne | 10,94 USD (role), smyčka 220,45 USD | 24 min rolí |
 
 ## Matice nálezů postupu
 
@@ -75,5 +91,9 @@ Průběžná zpráva pilotu (P116 krok 8). Studio běží nad větví `ui/f1-stu
 | 14 | opraveno | stavy úloh v kostře nejdou vyvolat, pole nevynucuje meze | kostra `?stav=<úloha>.<stav>`, meze polí | b1f16f9d | struktura, kolo 3 |
 | 15 | opraveno | detail bez id, filtr bez polí, Zkusit znovu zahodí id | `query`, pole obrazovky, Zkusit znovu | b1f16f9d, c055707a | struktura, kolo 3 |
 | 16 | opraveno | graf bez datové tabulky | `tables` v modelu i kostře | 997962e9, 7545a4b5 | struktura, kolo 3 |
-| 17 | otevřeno | model neumí akci jedné položky seznamu: Provést / Zahodit / Vyřídit jsou pod celým seznamem | screens.schema.json + kostra | - | - |
-| 18 | otevřeno | vlastní kontrola ověřuje opravu slovem v modelu, ne v postavené kostře; doklady dvou oprav nepravdivé | aid-ui-quality.py fixed / self | - | - |
+| 17 | opraveno | model neumí akci jedné položky seznamu: Provést / Zahodit / Vyřídit jsou pod celým seznamem | screens.schema.json + kostra | 1da672eb | struktura, kolo 4 (ověřovatel) |
+| 18 | opraveno | vlastní kontrola ověřuje opravu slovem v modelu, ne v postavené kostře; doklady dvou oprav nepravdivé | aid-ui-quality.py self (fix_check) | fb641e54 | struktura, kolo 4 (ověřovatel 9/9) |
+| 19 | opraveno | co role nechají na klientovi, nikdo nedodá; schválení modelu jen PM brzdí autonomii | aid-ui-client.py supply/decided, smyčka supply, app_tasks_need_owner | 735c9e1b, 3a32aa1a | struktura, kolo 4 |
+| 20 | opraveno | lišta ukazuje „Demo běží“ v každém režimu | kostra (text režimu v liště) | fb641e54 | struktura, kolo 4 |
+| 21 | opraveno | odkaz s cestou selhání po výpadku sítě ztratí obrazovku | kostra (data-aid-checked) | e026b5e3 | předběžná brána |
+| 22 | opraveno | vnucené selhání pod zátěží nestihlo zachytit požadavek | aid-ui-flows.py | 8afa5408 | předběžná brána 1892/1892 |
