@@ -33,11 +33,27 @@ Průběžná zpráva pilotu (P116 krok 8). Studio běží nad větví `ui/f1-stu
 - Cena: role 2,84 USD (3 volání Opus), práce agenta na verzi 1 a pravidle v pluginu 42,84 USD; čas: příprava verze 1
   77 min, kolo rolí 7 min.
 
+### Kolo 3 (19. 10. 2026) - místo struktura po vynucení obsahu kódem (PM 1A)
+
+- Do pluginu přibylo, co kolo 2 našlo jako slib bez pokrytí: pojmenované hodnoty se zdrojem (`values`, `{klíč}`),
+  režimy s dostupností akcí (`modes`, `disabled_reason`; vypnuté tlačítko i odkaz), texty tlačítek potvrzení
+  (`confirm_yes`, `confirm_no`, povinné), stavy úloh na zavolání (`?stav=<úloha>.<stav>`), meze polí s hláškou,
+  hluboké odkazy (`query`), `aria-busy`, datové tabulky (`tables`); kostra kreslí všechna pole obrazovky.
+- Předběžná brána 2079/2079 zelená (51 min); vlastní hodnocení 9 u všech 12 kritérií; 18 nálezů kola 2 zapsaných.
+- Klient 8,15 (prošel), odborník 7,44 (neprošel o 0,06: model úloh 7, obnova 7, připravenost 7); 9 nálezů.
+- Vlastní hodnocení bylo zase nadsazené, rozdíl menší (9 proti 8,2 / 7,4). Dva doklady oprav byly nepravdivé:
+  Provést / Zahodit „u položky“ (kostra kreslí akce obrazovky pod seznamem, model neumí akci položky) a Telegram
+  „odstraněn“ (zůstal ve třech textech). Příčina: oprava ověřená hledáním slova v modelu, ne pohledem do kostry.
+- Nové věcné nálezy: rozvrh čtení Discordu je od 15. 10. po oknech podle kanálu (model má jedno okno), ruční
+  zavření pozice nemá nejistý výsledek ani souběh s panikou, položka „SL odmítnut“ nemá akci, která ji vyřeší.
+- Cena: role 3,11 USD (Opus), smyčka celkem 181,3 USD (agent i role, od vzniku studia); čas: kolo rolí 7 min,
+  smyčka od začátku studia 1144 min (včetně stavby pluginu a čekání).
+
 ## Místa
 
 | místo | kola | známka klienta | známka odborníka | stav | cena | čas |
 |---|---|---|---|---|---|---|
-| struktura | 2 | 7,75 | 6,34 | kolo 2: klient prošel, odborník ne | 4,73 USD (role) + 42,84 USD (agent) | 12 min rolí, 77 min verze 1 |
+| struktura | 3 | 8,15 | 7,44 | kolo 3: klient prošel, odborník ne (o 0,06) | 7,84 USD (role), smyčka 181,3 USD | 19 min rolí |
 
 ## Matice nálezů postupu
 
@@ -53,3 +69,11 @@ Průběžná zpráva pilotu (P116 krok 8). Studio běží nad větví `ui/f1-stu
 | 8 | opraveno | model neuměl stopu požadavků, slovník, mimo rozsah, zdroj a stáří dat, popisky polí, ukázky, Zpět | screens.schema.json, aid-ui-screens.py, kostra | 88f6aee9, 092e799e | - |
 | 9 | opraveno | lišta v kostře bez obsahu (jen tlačítka); chybový stav bez Zkusit znovu; změna stavu bez oznámení | scripts/lib/aid-ui-skeleton.py | 092e799e | - |
 | 10 | opraveno | záznam opravy spadne na argumentu s rozpůleným znakem (UnicodeEncodeError) | scripts/aid-ui-quality.py (argumenty) | a45b30cc | - |
+| 11 | opraveno | čísla ukázek si odporují, hodnoty pojistek bez zdroje | screens.schema.json `values`, aid-ui-screens.py, kostra | b1f16f9d | struktura, kolo 3 (duvera_v_data 9) |
+| 12 | opraveno | potvrzení v kostře s obecnými tlačítky Potvrdit / Zrušit | `confirm_yes`, `confirm_no` povinné u nevratné akce | b1f16f9d | struktura, kolo 3 |
+| 13 | opraveno | dostupnost akcí podle režimu jen větou; vypnutý odkaz šel kliknout | `modes`, `disabled_reason`, kostra | b1f16f9d, c055707a | struktura, kolo 3 |
+| 14 | opraveno | stavy úloh v kostře nejdou vyvolat, pole nevynucuje meze | kostra `?stav=<úloha>.<stav>`, meze polí | b1f16f9d | struktura, kolo 3 |
+| 15 | opraveno | detail bez id, filtr bez polí, Zkusit znovu zahodí id | `query`, pole obrazovky, Zkusit znovu | b1f16f9d, c055707a | struktura, kolo 3 |
+| 16 | opraveno | graf bez datové tabulky | `tables` v modelu i kostře | 997962e9, 7545a4b5 | struktura, kolo 3 |
+| 17 | otevřeno | model neumí akci jedné položky seznamu: Provést / Zahodit / Vyřídit jsou pod celým seznamem | screens.schema.json + kostra | - | - |
+| 18 | otevřeno | vlastní kontrola ověřuje opravu slovem v modelu, ne v postavené kostře; doklady dvou oprav nepravdivé | aid-ui-quality.py fixed / self | - | - |
