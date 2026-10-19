@@ -47,9 +47,13 @@ ui:
 3. **Build the variants in `proto/`** — only from components in `ui.components`, each variant
    behind `?v=<klic>` (A, B, C … from A in every round). A component you must create is a new
    `.tsx/.jsx/.vue/.svelte` file and goes in `nove[]` with the reason no shared one fits; the PM
-   sees it marked. Never touch the repository itself.
+   sees it marked. Never touch the repository itself. Variants of ONE existing page live in that
+   page behind the `?v=` switch: list the page in `spolecne`; the components it imports count for
+   every option. A file only one option needs goes in that option's `soubory`.
 4. **Data and shots:** write `mocks.json` and `shots.json` in `.aid-o/work/companion/P/`, then
-   `bash $K shots --plan P`. It fails on an API call with no mock — add the mock, run again.
+   `bash $K shots --plan P`. Start with the calls you saw in the code; the step lists every API call
+   still without a mock (login, counters, notifications …) — add them, run again. Today's state is
+   a shot of the page without `?v=` (it goes in `minule[]` in the first round).
 5. **The proposal:** write `navrh.json`, then `bash $K show --plan P`. It refuses with the field
    to fix (a missing text, a key not from A, a shot not taken, a component the option does not
    import from `ui.components`, a changed file no option lists, a page that does not fit). It also

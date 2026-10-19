@@ -74,7 +74,8 @@ _ws() {
   run _k proto; echo "$output"; [ "$status" -eq 0 ]
   local url pg; url="$(jq -r .url <<< "$output")"; pg="$(jq -r .pgid <<< "$output")"
   [ "$(curl -s -o /dev/null -w '%{http_code}' "$url/index.html")" = 200 ]
-  [ -L "$D/proto/node_modules" ]; [ -f "$D/proto-manifest.json" ]
+  [ -d "$D/proto/node_modules" ] && [ ! -L "$D/proto/node_modules" ] && [ -w "$D/proto/node_modules" ]   # the dev server writes its caches there
+  [ -f "$D/proto-manifest.json" ]
   [ -z "$(git -C "$P" status --porcelain)" ]
   sleep 300 & local foreign=$!
   _k down
@@ -190,10 +191,16 @@ EOF
   _bad '.body[0].moznosti[0].snimky[0].shot = "chybi"' "shot 'chybi' has no desktop capture"
   _bad '.body[0].moznosti[0].snimky[0].shot = "../x"' 'is not a plain shot name'
   _bad '.body[0].moznosti[0].soubory = ["../etc/passwd"]' 'must be a path inside proto/'
-  _bad '.body[0].moznosti[0].postaveno_z += ["Table"]' 'names Table, but no file of the option imports it'
+  _bad '.body[0].moznosti[0].postaveno_z += ["Table"]' 'names Table, but no file of the option or of spolecne imports it'
   _bad '.body[0].moznosti[1].nove = []' 'is a new component file'
   _bad '.body[0].moznosti[1].soubory = []' 'no option lists it in soubory'
   _bad '.body[0].moznosti[1].soubory += ["src/pages/Page.tsx"]' 'is also listed by'
+  # variants of one existing page: the page in spolecne, its imports count for every option (AC9 19. 10.)
+  jq '.spolecne = ["src/pages/Page.tsx"] | .body[0].moznosti[0].soubory = []' "$D/navrh.json" > "$D/n" && mv "$D/n" "$D/navrh.json"
+  run _k show; echo "$output"; [ "$status" -eq 0 ]
+  # files a dev server generates (dev-dist/) are no change of the variants
+  mkdir -p "$D/proto/dev-dist"; echo x > "$D/proto/dev-dist/sw.js"
+  run _k show; [ "$status" -eq 0 ]
   printf "import { Gone } from '@/components/shared/Gone';\nimport { Button } from '@/components/shared/Button';\nexport function Page() { return Button({ label: Gone }); }\n" > "$D/proto/src/pages/Page.tsx"
   _bad '.body[0].moznosti[0].postaveno_z = ["Button", "Gone"]' "Gone is imported from '@/components/shared/Gone', which does not resolve"
 }

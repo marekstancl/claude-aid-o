@@ -91,7 +91,7 @@ function validate(n, shotsOnly) {
 }
 
 // ── the copy of the app: which files the variants touched, and what they import ──
-const RUNTIME = [/(^|\/)node_modules(\/|$)/, /(^|\/)dist(\/|$)/, /(^|\/)\.vite(\/|$)/, /(^|\/)vite-cache(\/|$)/, /(^|\/)\.next(\/|$)/, /(^|\/)\.turbo(\/|$)/, /\.log$/, /\.tsbuildinfo$/, /(^|\/)\.git(\/|$)/];
+const RUNTIME = [/(^|\/)node_modules(\/|$)/, /(^|\/)dist(\/|$)/, /(^|\/)dev-dist(\/|$)/, /(^|\/)coverage(\/|$)/, /(^|\/)\.vite(\/|$)/, /(^|\/)vite-cache(\/|$)/, /(^|\/)\.next(\/|$)/, /(^|\/)\.turbo(\/|$)/, /\.log$/, /\.tsbuildinfo$/, /(^|\/)\.git(\/|$)/];
 const isRuntime = rel => RUNTIME.some(r => r.test(rel));
 function walk(root, rel = '', out = []) {
   for (const e of fs.readdirSync(path.join(root, rel), { withFileTypes: true })) {
@@ -170,14 +170,16 @@ function codeChecks(v) {
   for (const b of v.body) for (const m of b.moznosti) {
     if (!m.postaveno_z.length) continue;
     const found = new Map();
-    for (const f of m.soubory) {
+    // the option's own files and the shared ones: variants of ONE existing page live in that page behind ?v=
+    // (spolecne), and their components are imported there (AC9 19. 10. 2026: the rules could not both hold)
+    for (const f of [...m.soubory, ...v.spolecne]) {
       const abs = path.join(protoDir, f);
       if (!fs.existsSync(abs) || !/\.(tsx|ts|jsx|js|vue|svelte)$/.test(f)) continue;
       for (const im of imports(abs, protoDir, al)) if (!found.has(im.name) || im.target) found.set(im.name, im);
     }
     for (const c of m.postaveno_z) {
       const im = found.get(c);
-      if (!im) fail(`body ${b.id} option ${m.klic}: postaveno_z names ${c}, but no file of the option imports it (soubory: ${m.soubory.join(', ') || 'none'})`);
+      if (!im) fail(`body ${b.id} option ${m.klic}: postaveno_z names ${c}, but no file of the option or of spolecne imports it (soubory: ${m.soubory.join(', ') || 'none'})`);
       else if (!im.target) fail(`body ${b.id} option ${m.klic}: ${c} is imported from '${im.spec}', which does not resolve to a file (relative paths, tsconfig/jsconfig paths and index files are followed)`);
       else if (!path.resolve(im.target).startsWith(path.resolve(compInProto) + path.sep)) fail(`body ${b.id} option ${m.klic}: ${c} comes from ${path.relative(protoDir, im.target)}, which is not under ui.components (${compRel || '.'})`);
     }

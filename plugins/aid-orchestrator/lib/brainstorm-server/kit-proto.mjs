@@ -6,7 +6,7 @@ import path from 'node:path';
 import net from 'node:net';
 import { spawn, execFileSync } from 'node:child_process';
 
-const RUNTIME = new Set(['node_modules', 'dist', '.git', '.vite', 'vite-cache', '.next', '.turbo']);
+const RUNTIME = new Set(['node_modules', 'dist', 'dev-dist', '.git', '.vite', 'vite-cache', '.next', '.turbo', 'coverage', 'storybook-static']);
 
 const freePort = () => new Promise((ok, no) => {
   const s = net.createServer(); s.once('error', no);
@@ -41,7 +41,13 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
   }
   if (!fs.existsSync(dest)) {
     fs.cpSync(src, dest, { recursive: true, filter: s => !RUNTIME.has(path.basename(s)) || s === src });
-    fs.symlinkSync(path.join(src, 'node_modules'), path.join(dest, 'node_modules'));
+    // node_modules: a directory of our own whose entries link to the app's — the dev server writes its caches
+    // there (Vite: .vite, .vite-temp), and the app's may not be writable (ACTA's is root's: EACCES, AC9 19. 10.)
+    const nm = path.join(dest, 'node_modules'); fs.mkdirSync(nm);
+    for (const e of fs.readdirSync(path.join(src, 'node_modules'))) {
+      if (e === '.vite' || e === '.vite-temp' || e === '.cache') continue;
+      fs.symlinkSync(path.join(src, 'node_modules', e), path.join(nm, e));
+    }
     fs.writeFileSync(manFile, JSON.stringify(manifest(dest), null, 1));
   } else if (!fs.existsSync(manFile)) {
     die(`proto: ${dest} exists without its manifest (${manFile}) — the copy's changes cannot be told from the app; move ${dest} away and run proto again`);
@@ -57,7 +63,10 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
   const until = Date.now() + 90_000;
   let ok = false;
   while (Date.now() < until) {
-    if (!stat(pgid)) stop(`the dev server exited before it answered (${args.join(' ')})`);
+    if (!stat(pgid)) {
+      let tail = ''; try { tail = fs.readFileSync(path.join(DIR, 'proto.log'), 'utf8').trim().split('\n').slice(-4).join(' | '); } catch {}
+      stop(`the dev server exited before it answered (${args.join(' ')}): ${tail}`);
+    }
     try { const r = await fetch(url + ready); if (r.status === 200) { ok = true; break; } } catch {}
     await new Promise(r => setTimeout(r, 500));
   }
