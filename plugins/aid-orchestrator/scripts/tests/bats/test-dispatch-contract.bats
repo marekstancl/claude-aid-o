@@ -463,7 +463,11 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   aid_dispatch_contract_build p3.json 0 c3.json; VERSION="$(jq -r .version c3.json)"
   _return '{deleted_files: ["src/never.sh"]}'
   run aid_dispatch_contract_validate c3.json .aid-o/return.json "$TEST_DIR"
-  [ "$status" -eq 1 ]; [[ "$output" == *"src/never.sh (never a tracked file"* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"src/never.sh (not a tracked file"* ]]
+  # a path deleted long ago in history is no deletion of this step
+  : > src/never.sh; git add src/never.sh; git commit -qm add; git rm -q src/never.sh; git commit -qm gone
+  run aid_dispatch_contract_validate c3.json .aid-o/return.json "$TEST_DIR"
+  [ "$status" -eq 1 ]; [[ "$output" == *"src/never.sh (not a tracked file"* ]]
 }
 
 @test "contract: another repository's file whose commits the return names in repo_commits is reported as committed there, not as still to do (aidlab-apps 15. 10. 2026)" {

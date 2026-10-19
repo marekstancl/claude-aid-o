@@ -36,11 +36,27 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
   // a running prototype of this plan is reused only when it is still ours
   if (fs.existsSync(rec)) {
     const r = JSON.parse(fs.readFileSync(rec, 'utf8'));
-    if (startOf(r.pid) === r.starttime && pgrpOf(r.pid) === r.pgid) { console.log(JSON.stringify({ ...r, reused: true })); return; }
+    let alive = startOf(r.pid) === r.starttime && pgrpOf(r.pid) === r.pgid;
+    if (alive) {   // ours, but still serving? the port must be the group's and answer
+      const owners = portOwners(r.port);
+      let up = false; try { up = (await fetch(r.url + (UI.ready_path || '/'))).status === 200; } catch {}
+      if (up && owners.length && owners.every(p => pgrpOf(p) === r.pgid)) { console.log(JSON.stringify({ ...r, reused: true })); return; }
+      try { process.kill(-r.pgid, 'SIGTERM'); } catch {}
+    }
     fs.rmSync(rec);
   }
   if (!fs.existsSync(dest)) {
-    fs.cpSync(src, dest, { recursive: true, filter: s => !RUNTIME.has(path.basename(s)) || s === src });
+    // a symlink in the app is copied as its content, and only when it points inside ui.dir: a link kept as a
+    // link would let an edit in the copy change the repository (Codex, 19. 10. 2026)
+    const srcReal = fs.realpathSync(src);
+    fs.cpSync(src, dest, { recursive: true, dereference: true, filter: s => {
+      if (s !== src && RUNTIME.has(path.basename(s))) return false;
+      if (fs.lstatSync(s).isSymbolicLink()) {
+        let real = ''; try { real = fs.realpathSync(s); } catch {}
+        if (!real.startsWith(srcReal + path.sep)) die(`proto: ${s} is a link to ${real || 'nothing'}, outside ${src} — the copy cannot hold it; make it a file or point it inside ui.dir`);
+      }
+      return true;
+    } });
     // node_modules: a directory of our own whose entries link to the app's — the dev server writes its caches
     // there (Vite: .vite, .vite-temp), and the app's may not be writable (ACTA's is root's: EACCES, AC9 19. 10.)
     const nm = path.join(dest, 'node_modules'); fs.mkdirSync(nm);

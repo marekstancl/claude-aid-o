@@ -65,6 +65,11 @@ _ws() {
     const W = require(\"ws\"); const w = new W(\"ws://127.0.0.1:$port\", { origin: \"http://evil.example\" });
     w.on(\"open\", () => { console.log(\"open\"); process.exit(0); }); w.on(\"error\", e => { console.log(e.message); process.exit(0); });'"
   [[ "$output" == *401* ]]
+  # the same host on another port is another site too (Codex 19. 10. 2026)
+  run bash -c "cd '$AID_PLUGIN_PATH/lib/brainstorm-server' && node -e '
+    const W = require(\"ws\"); const w = new W(\"ws://127.0.0.1:$port\", { origin: \"http://127.0.0.1:1\" });
+    w.on(\"open\", () => { console.log(\"open\"); process.exit(0); }); w.on(\"error\", e => { console.log(e.message); process.exit(0); });'"
+  [[ "$output" == *401* ]]
 }
 
 @test "AC5 proto: a missing key is refused with the YAML to add; the copy runs outside the repository, and down stops only its own group" {
@@ -79,6 +84,9 @@ _ws() {
   [ -z "$(git -C "$P" status --porcelain)" ]
   sleep 300 & local foreign=$!
   _k down
+  # a link out of ui.dir cannot be copied (an edit in the copy would change it)
+  rm -rf "$D/proto" "$D/proto-manifest.json"; ln -s /etc/hostname "$P/ui/src/outside.txt"
+  run _k proto; [ "$status" -ne 0 ]; [[ "$output" == *"outside.txt is a link to"*"outside"* ]]; rm "$P/ui/src/outside.txt"
   ! kill -0 -- "-$pg" 2>/dev/null
   kill -0 "$foreign"; kill "$foreign"
 }
@@ -115,6 +123,11 @@ EOF
   [ "$(node -e 'const b=require("fs").readFileSync(process.argv[1]);console.log(b.readUInt32BE(16))' "$D/shots/mobile/cela.png")" -eq 390 ]
   jq '.shots[0].capture = {"element": {"css": "div"}}' "$D/shots.json" > "$D/s" && mv "$D/s" "$D/shots.json"
   run _k shots; [ "$status" -ne 0 ]; [[ "$output" == *"finds"*"elements, it must find exactly one"* ]]
+  jq '.shots[0].capture = "viewport" | .shots[0].steps = [{"wait": {"for": {"css": "div"}}}]' "$D/shots.json" > "$D/s" && mv "$D/s" "$D/shots.json"
+  run _k shots; [ "$status" -ne 0 ]; [[ "$output" == *"it must find exactly one"* ]]
+  [ "$(node -e 'const b=require("fs").readFileSync(process.argv[1]);console.log(b.readUInt32BE(16)+"x"+b.readUInt32BE(20))' "$D/shots/desktop/okno.png" 2>/dev/null)" != "" ]
+  jq '.base = "https://acta.example.cz"' "$D/shots.json" > "$D/s" && mv "$D/s" "$D/shots.json"
+  run _k shots; [ "$status" -ne 0 ]; [[ "$output" == *"never a live application"* ]]
 }
 
 # a proposal over the sample app: option A edits Page.tsx through the alias, B adds a component through the barrel
@@ -182,8 +195,8 @@ EOF
 
 @test "AC3 show refuses, each named: a missing field, a recommendation that is no option, keys not from A, a missing shot, a path out of the plan's dir, a component not imported from ui.components, an unresolved import, a new component file without nove, an unlisted change, a file of two options" {
   _proposal
-  _bad() { jq "$1" "$D/navrh.json" > "$D/bad.json"; cp "$D/navrh.json" "$D/ok.json"; cp "$D/bad.json" "$D/navrh.json"
-           run _k show; cp "$D/ok.json" "$D/navrh.json"; [ "$status" -ne 0 ] || { echo "accepted: $1"; return 1; }
+  _bad() { jq "$1" "$D/navrh.json" > "$P/bad.json"; cp "$D/navrh.json" "$P/ok.json"; cp "$P/bad.json" "$D/navrh.json"
+           run _k show; cp "$P/ok.json" "$D/navrh.json"; [ "$status" -ne 0 ] || { echo "accepted: $1"; return 1; }
            [[ "$output" == *"$2"* ]] || { echo "for $1 expected '$2' in: $output"; return 1; }; }
   _bad 'del(.body[0].otazka)' 'body[0].otazka must be'
   _bad '.body[0].doporuceni = "C"' 'is not the key of one of its options'
@@ -195,6 +208,11 @@ EOF
   _bad '.body[0].moznosti[1].nove = []' 'is a new component file'
   _bad '.body[0].moznosti[1].soubory = []' 'no option lists it in soubory'
   _bad '.body[0].moznosti[1].soubory += ["src/pages/Page.tsx"]' 'is also listed by'
+  # a tool of the agent's own in the plan's directory
+  echo 'x' > "$D/gen_page.py"; run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"gen_page.py is not one of the kit's files"* ]]; rm "$D/gen_page.py"
+  # a name the barrel does not export
+  printf "import { Card, Ghost } from '../components/shared';\nimport { Button } from '@/components/shared/Button';\nexport function Page() { return Button({ label: Ghost }) + Card({}); }\n" > "$D/proto/src/pages/Page.tsx"
+  _bad '.body[0].moznosti[0].postaveno_z = ["Button", "Ghost"]' "does not export it"
   # variants of one existing page: the page in spolecne, its imports count for every option (AC9 19. 10.)
   jq '.spolecne = ["src/pages/Page.tsx"] | .body[0].moznosti[0].soubory = []' "$D/navrh.json" > "$D/n" && mv "$D/n" "$D/navrh.json"
   run _k show; echo "$output"; [ "$status" -eq 0 ]

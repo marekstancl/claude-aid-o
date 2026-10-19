@@ -40,7 +40,9 @@ ui:
 1. **Read before you draw.** Read every file in `ui.rules` and list the components in
    `ui.components`. Read the screen you change and its data types. Write the inventory in chat: the
    fields and their values, the conditions, the components the screen uses, what the PM asks for
-   that the data does not have (that is a backend question, not a drawing).
+   that the data does not have (that is a backend question, not a drawing). No `ui.rules` (or the
+   files do not exist): say so in chat and in `soulad_s_pravidly`, and ask the PM whether the app has
+   UI rules written anywhere.
 2. **Start:** `bash $K up --plan P` (prints the address for the PM; a second `up` reuses the
    server) and `bash $K proto --plan P` (a copy of `ui.dir` in `.aid-o/work/companion/P/proto/`,
    outside the repository, its dev server on a loopback port).
@@ -49,11 +51,14 @@ ui:
    `.tsx/.jsx/.vue/.svelte` file and goes in `nove[]` with the reason no shared one fits; the PM
    sees it marked. Never touch the repository itself. Variants of ONE existing page live in that
    page behind the `?v=` switch: list the page in `spolecne`; the components it imports count for
-   every option. A file only one option needs goes in that option's `soubory`.
+   every option. A file only one option needs goes in that option's `soubory`. An existing
+   component of the page outside `ui.components` (a page-local badge) may be reused as it is; name
+   it in `popis`, not in `postaveno_z` (which is only for shared ones) and not in `nove[]`.
 4. **Data and shots:** write `mocks.json` and `shots.json` in `.aid-o/work/companion/P/`, then
    `bash $K shots --plan P`. Start with the calls you saw in the code; the step lists every API call
    still without a mock (login, counters, notifications …) — add them, run again. Today's state is
-   a shot of the page without `?v=` (it goes in `minule[]` in the first round).
+   a shot of the page without `?v=` (it goes in `minule[]` in the first round). The login key in
+   `storage.localStorage` and the session call the app makes (e.g. `/auth/me`) come from its code.
 5. **The proposal:** write `navrh.json`, then `bash $K show --plan P`. It refuses with the field
    to fix (a missing text, a key not from A, a shot not taken, a component the option does not
    import from `ui.components`, a changed file no option lists, a page that does not fit). It also

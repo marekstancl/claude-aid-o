@@ -23,6 +23,7 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
   });
   if (!UI.api_prefix && !(UI.api_origins || []).length) die('shots: project.yaml has no ui.api_prefix (e.g. "/api/") — the step must know which requests are the API');
   let base = spec.base || 'proto';
+  if (base !== 'proto' && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/.test(base)) die(`shots: base "${base}" is not the prototype or a loopback address — the kit photographs invented data only, never a live application`);
   if (base === 'proto') {
     try { base = JSON.parse(fs.readFileSync(path.join(DIR, 'proto.json'), 'utf8')).url; } catch { die(`shots: base "proto" but no prototype runs — aid-companion.sh proto --plan ${PLAN}`); }
   }
@@ -61,7 +62,11 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
       if (Array.isArray(st.cookies) && st.cookies.length) await ctx.addCookies(st.cookies.map(c => ({ url: base, ...c })));
       await ctx.route('**/*', route => {
         const req = route.request(), u = new URL(req.url());
-        if (!isApi(u)) return route.continue();
+        if (!isApi(u)) {
+          // a data request to another origin would reach a live service: refused and listed like an unmocked call
+          if (u.origin !== new URL(base).origin && ['xhr', 'fetch'].includes(req.resourceType())) { unknown.add(`${req.method()} ${u.origin}${u.pathname} (another origin)`); return route.abort(); }
+          return route.continue();
+        }
         const q = Object.fromEntries(u.searchParams);
         const m = compiled.find(x => (!x.method || x.method === req.method()) && x.re.test(u.pathname)
           && (!x.query || Object.entries(x.query).every(([k, v]) => q[k] === String(v))));
@@ -85,7 +90,7 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
           else if ('wait' in stp) {
             if (typeof stp.wait === 'number') await page.waitForTimeout(stp.wait);
             else if (stp.wait === 'network') await page.waitForLoadState('networkidle');
-            else if (stp.wait && stp.wait.for) await (await loc(page, stp.wait.for, w)).first().waitFor({ timeout: 15000 });
+            else if (stp.wait && stp.wait.for) { await loc(page, stp.wait.for, w).first().waitFor({ timeout: 15000 }); await one(page, stp.wait.for, w); }
           }
         }
         await page.waitForTimeout(300);

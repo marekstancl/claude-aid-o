@@ -146,6 +146,21 @@ function imports(file, protoDir, al) {
   return out;
 }
 
+// what may lie in the plan's directory: the agent's three files and the variants (proto/), and what the kit
+// itself writes — anything else is a tool the agent built (Codex, 19. 10. 2026: the promise was not enforced)
+const ALLOWED = [/^proto$/, /^proto-manifest\.json$/, /^proto\.json$/, /^proto\.log$/, /^shots$/, /^mocks\.json$/, /^shots\.json$/,
+  /^navrh\.json$/, /^navrh-\d+\.html$/, /^check-\d+x\d+\.png$/, /^answers\.jsonl$/, /^server\.json$/, /^\.server\.(log|log\.prev|pid)$/,
+  /^\.events$/, /^\.started$/, /^\.keep$/];
+function dirCheck() {
+  for (const e of fs.readdirSync(DIR)) if (!ALLOWED.some(r => r.test(e))) fail(`${path.join(DIR, e)} is not one of the kit's files — the agent writes only mocks.json, shots.json, navrh.json and the variants in proto/; move it out (a missing ability goes to aid-plugin-issues.md)`);
+}
+function exportsName(file, name) {   // a barrel names it: export { X }, export { Y as X }, export function/const/class X, export * from
+  const src = fs.readFileSync(file, 'utf8');
+  if (/export\s*\*\s*from/.test(src)) return true;
+  if (new RegExp(`export\\s+(default\\s+)?(async\\s+)?(function|const|let|class)\\s+${name}\\b`).test(src)) return true;
+  for (const m of src.matchAll(/export\s*(?:type\s*)?\{([^}]*)\}/g)) if (m[1].split(',').some(p => (p.trim().split(/\s+as\s+/)[1] || p.trim()) === name)) return true;
+  return false;
+}
 function codeChecks(v) {
   const protoDir = path.join(DIR, 'proto'), manFile = path.join(DIR, 'proto-manifest.json');
   if (!fs.existsSync(manFile)) {
@@ -181,6 +196,7 @@ function codeChecks(v) {
       const im = found.get(c);
       if (!im) fail(`body ${b.id} option ${m.klic}: postaveno_z names ${c}, but no file of the option or of spolecne imports it (soubory: ${m.soubory.join(', ') || 'none'})`);
       else if (!im.target) fail(`body ${b.id} option ${m.klic}: ${c} is imported from '${im.spec}', which does not resolve to a file (relative paths, tsconfig/jsconfig paths and index files are followed)`);
+      else if (/\/index\.(tsx?|jsx?)$/.test(im.target) && !exportsName(im.target, c)) fail(`body ${b.id} option ${m.klic}: ${c} is imported from '${im.spec}', but ${path.relative(protoDir, im.target)} does not export it`);
       else if (!path.resolve(im.target).startsWith(path.resolve(compInProto) + path.sep)) fail(`body ${b.id} option ${m.klic}: ${c} comes from ${path.relative(protoDir, im.target)}, which is not under ui.components (${compRel || '.'})`);
     }
   }
@@ -258,6 +274,7 @@ async function show() {
   if (!fs.existsSync(f)) die(`no ${f} — write it (the format is in skills/visual-companion/SKILL.md)`);
   const shotsSpec = fs.existsSync(path.join(DIR, 'shots.json')) ? readJson(path.join(DIR, 'shots.json'), 'shots.json') : { shots: [] };
   const only = Object.fromEntries((shotsSpec.shots || []).filter(s => s.only).map(s => [s.name, s.only]));
+  dirCheck();
   const v = validate(readJson(f, 'navrh.json'), only); stop();
   codeChecks(v); stop();
   const page = render(v);

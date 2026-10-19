@@ -86,4 +86,9 @@ _parses() { run _unparsable "$PLUGIN" "$1"; [ "$status" -eq 0 ] && [ -z "$output
   [ "$status" -eq 1 ]
   run git -C "$root" ls-files -oi --exclude-standard -- plugins/aid-orchestrator/scripts/tests/fixtures
   [ -z "$(grep -v '/node_modules/' <<< "$output")" ] || { echo "ignored fixtures: $output"; false; }
+  # the real fixtures under a docs/ directory (verify-site, 3.2.0) are tracked and not ignored
+  local f n=0
+  while IFS= read -r f; do n=$((n + 1)); ! git -C "$root" check-ignore -q --no-index -- "$f" || { echo "ignored: $f"; false; }; done \
+    < <(git -C "$root" ls-files -- 'plugins/aid-orchestrator/scripts/tests/fixtures/**/docs/**')
+  [ "$n" -gt 0 ]
 }

@@ -150,7 +150,9 @@ function originHost(origin) {
 function hostName(v) { return String(v || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, ''); }
 function ownRequest(req) {
   const o = originHost(req.headers.origin);
-  return !!o && CONFIRM_HOSTS.includes(hostName(o)) && CONFIRM_HOSTS.includes(hostName(req.headers.host));
+  // the page that talks to us is served by us: the Origin's host AND port equal the request's Host (a page of
+  // another port on the same host is another site — Codex 19. 10. 2026); behind a port forward both carry it
+  return !!o && o === String(req.headers.host || '') && CONFIRM_HOSTS.includes(hostName(o));
 }
 app.get('/aid/keep', (req, res) => res.json({ kept: LIFE.isKept(), ...LIFE.state() }));
 app.post('/aid/keep', (req, res) => {
