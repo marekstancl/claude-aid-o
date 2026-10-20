@@ -31,7 +31,7 @@ EOF
 }
 
 # The one focus allowlist (the start check and its error text read this).
-AID_DISPATCH_FOCUS_RE='^(copy-review-standin|cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp6-[a-z][a-z0-9-]*|cp7-[a-z][a-z0-9-]*|critic-(brainstorm|plan)|adjudicator-delegated-[0-9a-f]{16})$'
+AID_DISPATCH_FOCUS_RE='^(copy-review-standin|cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp6-[a-z][a-z0-9-]*|cp7-[a-z][a-z0-9-]*|critic-(brainstorm|plan)|adjudicator-delegated-[0-9a-f]{16}|stand-in-[0-9a-f]{16})$'
 
 # Focus default duration table (resolved when --expected-duration-max not given).
 default_duration_for_focus() {

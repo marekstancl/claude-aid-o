@@ -102,7 +102,7 @@ codes:
   review_round_stale: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
   round_not_closed: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
   run_abandoned: {class: pm, how: "běh opuštěn PM"}
-  second_round_needs_open_blocker: {class: stand_in, how: "nejvýš jedno kolo navíc"}
+  second_round_needs_open_blocker: {class: not_in_run, how: "jen v CP1 (revize plánu): kolo navíc za blocker s opravou, jinak override PM"}
   semantic_wiring_blocked: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
   step_criteria_failed: {class: agent_fix_then_stand_in, how: "bod nesplněn: agent opraví krok; spor o měření nebo opakované selhání → zástupce; vypuštění bodu → PM"}
   step_verify_not_pass: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}

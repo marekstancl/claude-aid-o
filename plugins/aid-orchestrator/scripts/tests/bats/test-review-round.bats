@@ -1855,6 +1855,21 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   run _DLG --fingerprint "$FP"; [ "$status" -eq 0 ]; [[ "$output" == *"already settled"*"nothing dispatched"* ]]
   [ "$(grep -c . "$R/.aid-o/work/evidence/P950/delegated-disputes.jsonl")" = 1 ]
 }
+@test "delegate: new evidence (a new commit) allows ONE new verdict; the old one is superseded in merged.json, the ledger and on disk (P117 (12))" {
+  _dlg auto; _dispute; _fake_codex
+  export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "fine on the worktree", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
+  _DLG --fingerprint "$FP" >/dev/null
+  local L="$R/.aid-o/work/evidence/P950/delegated-disputes.jsonl"
+  git -C "$R" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "the author's new evidence"
+  export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "rejected", class: "technical", reason: "the new commit does not fix it", rerun: {cmd: "grep", exit: 1, output_tail: "no"}}')"
+  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"superseded"* ]]
+  [ -f "$(D 1)/adjudicator-delegated-${F16}.superseded-1.json" ]
+  [ "$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | "\(.status) \(.dispute.delegated.answer) \(.delegated_history | length)"' "$(D 1)/merged.json")" = "open rejected 1" ]
+  [ "$(grep -c . "$L")" = 2 ]; [ "$(tail -1 "$L" | jq -r '.supersedes | length')" = 64 ]
+  # without new evidence no new verdict
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 0 ]; [[ "$output" == *"on this evidence; nothing dispatched"* ]]
+  [ "$(grep -c . "$L")" = 2 ]
+}
 @test "delegate: after /aid-stop (the run declared manual) the automatic delegation is not in force" {
   _dlg auto; _dispute
   mkdir -p "$R/.aid-o/work"; echo 'mode: manual' > "$R/.aid-o/work/auto-mode-state.yaml"

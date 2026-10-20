@@ -1508,6 +1508,26 @@ _dlg_refuse() {   # <code> <message> <next>
   echo "(pipeline.md §When AID refuses: $1)" >&2
   exit 1
 }
+# _dlg_evidence_sha <finding-json> — what a verdict was given on: the finding's claim and evidence, the
+# author's dispute (without what answered it) and HEAD. A new value is new evidence (P117 (12)).
+_dlg_evidence_sha() {
+  { jq -cS '{claim, evidence, command, fix, dispute: ((.dispute // {}) | del(.delegated, .pm))}' <<< "$1"
+    git -C "$ROOT" rev-parse HEAD 2>/dev/null; } | sha256sum | cut -d' ' -f1
+}
+# _dlg_supersede <round dir> <fingerprint> <vfile> — the verdict given on old evidence steps aside: its file is
+# kept as .superseded-<n>, the finding forgets the answer (history keeps it), the ledger says so.
+_dlg_supersede() {
+  local dir="$1" fp="$2" vf="$3" n=1 old
+  while [[ -e "${vf%.json}.superseded-${n}.json" ]]; do n=$((n + 1)); done
+  [[ -f "$vf" ]] && { old="$(sha256sum "$vf" | cut -d' ' -f1)"; mv "$vf" "${vf%.json}.superseded-${n}.json"; }
+  jq --arg f "$fp" --arg at "$(_now)" '.findings |= map(if .fingerprint == $f then
+      (.delegated_history = ((.delegated_history // []) + [((.delegated // .dispute.delegated) + {superseded_at: $at})])
+       | del(.delegated) | del(.dispute.delegated)
+       | if .status == "fixed" and (.dispute // null) != null then .status = "disputed" else . end) else . end)' \
+    "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
+  _SUPERSEDED_SHA="${old:-}"
+  _log delegate_superseded fingerprint="$fp" old_verdict_sha256="${old:-null}"
+}
 # _dlg_kind <finding-json> — dispute | open_after_rounds
 _dlg_kind() { [[ "$(jq -r .status <<< "$1")" == disputed ]] && echo dispute || echo open_after_rounds; }
 # _dlg_pending <round dir> <last 0|1> — fingerprints that await a verdict: every
@@ -1579,8 +1599,15 @@ cmd_delegate() {
   local finding kind fp16 vfile
   finding="$(jq -c --arg f "$FINGERPRINT" 'first(.findings[] | select(.fingerprint == $f)) // empty' "${dir}/merged.json")"
   [[ -n "$finding" ]] || _die "no finding ${FINGERPRINT} in round ${ROUND}"
+  local ev_sha; ev_sha="$(_dlg_evidence_sha "$finding")"; _SUPERSEDED_SHA=""
   if [[ -z "$VERDICT" ]] && jq -e '.delegated != null or .dispute.delegated != null' <<< "$finding" >/dev/null; then
-    echo "finding ${FINGERPRINT}: already settled in round ${ROUND}; nothing dispatched"; return 0
+    if [[ "$(jq -r '(.delegated // .dispute.delegated).evidence_sha256 // ""' <<< "$finding")" == "$ev_sha" ]]; then
+      echo "finding ${FINGERPRINT}: already settled in round ${ROUND} on this evidence; nothing dispatched"; return 0
+    fi
+    # P117 (12): new evidence since the verdict — one new verdict, the old one superseded
+    _dlg_supersede "$dir" "$FINGERPRINT" "${dir}/adjudicator-delegated-$(aid_delegate_fp16 "$FINGERPRINT").json"
+    finding="$(jq -c --arg f "$FINGERPRINT" 'first(.findings[] | select(.fingerprint == $f))' "${dir}/merged.json")"
+    echo "finding ${FINGERPRINT}: new evidence since its verdict — the old verdict is superseded, a new one is asked"
   fi
   [[ "$(jq -r .status <<< "$finding")" == fixed && -z "$VERDICT" ]] && _die "finding ${FINGERPRINT} is fixed — nothing to settle"
   kind="$(_dlg_kind "$finding")"
@@ -1591,10 +1618,9 @@ cmd_delegate() {
   local ledger; ledger="$(aid_delegate_ledger "$root" "$pid")"
 
   if [[ -z "$VERDICT" ]]; then
-    if jq -e '.delegated != null or .dispute.delegated != null' <<< "$finding" >/dev/null; then
-      echo "finding ${FINGERPRINT}: already settled in round ${ROUND}; nothing dispatched"; return 0
-    fi
-    if [[ -s "$ledger" ]] && jq -e -s --arg f "$FINGERPRINT" --arg rd "$dir" 'any(.[]; .fingerprint == $f and .round_dir == $rd)' "$ledger" >/dev/null 2>&1; then
+    # a settlement on THIS evidence (or an older entry without its fingerprint, when nothing was superseded now)
+    if [[ -s "$ledger" ]] && jq -e -s --arg f "$FINGERPRINT" --arg rd "$dir" --arg e "$ev_sha" --arg sup "${_SUPERSEDED_SHA:-}" \
+         'any(.[]; .fingerprint == $f and .round_dir == $rd and (.evidence_sha256 == $e or (.evidence_sha256 == null and $sup == "")))' "$ledger" >/dev/null 2>&1; then
       echo "finding ${FINGERPRINT}: the ledger already records a settlement in this round; nothing dispatched"; return 0
     fi
     if [[ -s "$vfile" ]]; then
@@ -1667,7 +1693,8 @@ cmd_delegate() {
     _die "finding ${FINGERPRINT} already had its delegated fix round and is still open: the second verdict is dismiss, or class brief for the PM"
   fi
   entry="$(jq -nc --arg p "$provider" --arg a "$answer" --arg c "$class" --arg r "$reason" --arg v "$VERDICT" --arg at "$at" --argjson rd "$ROUND" \
-    '{provider: $p, answer: $a, class: $c, reason: $r, verdict_file: $v, at: $at, round: $rd}')"
+    --arg e "$(_dlg_evidence_sha "$finding")" --arg vs "$(sha256sum "$VERDICT" | cut -d' ' -f1)" \
+    '{provider: $p, answer: $a, class: $c, reason: $r, verdict_file: $v, verdict_sha256: $vs, evidence_sha256: $e, at: $at, round: $rd}')"
   local filter
   if [[ "$class" != technical ]]; then
     filter='.delegated = ($e + {to_pm: true})'
@@ -1696,7 +1723,9 @@ cmd_delegate() {
   _dlg_resync "$dir" "$answer"
   mkdir -p "$(dirname "$ledger")"
   jq -nc --arg cp "$CHECKPOINT" --arg rd "$dir" --arg f "$FINGERPRINT" --arg k "$kind" --argjson e "$entry" \
-    '{checkpoint: $cp, round_dir: $rd, fingerprint: $f, kind: $k} + ($e | {provider, answer, class, reason, verdict_file, at})' >> "$ledger"
+    --arg sup "${_SUPERSEDED_SHA:-}" \
+    '{checkpoint: $cp, round_dir: $rd, fingerprint: $f, kind: $k} + ($e | {provider, answer, class, reason, verdict_file, verdict_sha256, evidence_sha256, at})
+     + (if $sup == "" then {} else {supersedes: $sup} end)' >> "$ledger"
   _log delegate_recorded fingerprint="$FINGERPRINT" kind="$kind" answer="$answer" class="$class" provider="$provider"
   if [[ "$class" != technical ]]; then
     _dlg_refuse delegation_out_of_scope "the delegate classed ${FINGERPRINT} as ${class} (${reason}) — the brief, money and live data are the PM's" \

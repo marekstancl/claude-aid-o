@@ -1908,6 +1908,27 @@ SC_WHY="the PM moved this point to the close of the plan"
   [[ "$output" != *'AC1 "the ok file exists"'* ]]      # not listed as a missing change
   [ "$(_cur)" = 0 ]
 }
+@test "stand-in: a point whose step measurement ran out of time moves to the close on the stand-in's permission; the step advances (P117 (11))" {
+  _sc_seed
+  sed -i 's|cmd: "test -f ok.txt"|cmd: "sleep 3"|; s|    expected_exit: 0|    expected_exit: 0\n    timeout: 1|' "$SC_PLAN"
+  run "$FSM" increment-step "$SF"; [ "$status" -eq 1 ]; [[ "$output" == *"AC1 (timeout: neměřeno"* ]]
+  local auth; auth="$(_si_permit "$TEST_EVIDENCE_DIR" step_criteria_failed '{"kind": "measurement_failed", "step": 0, "criterion": "AC1", "why": "the suite needs longer than its limit here"}')"
+  [ "$(jq -r .approved "$auth")" = true ]
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "the step measurement ran out of time, the close measures it" --stand-in "$auth"
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"deferred by the stand-in"* ]]
+  [ "$(_cur)" = 1 ]
+  [ "$(jq -r '.AC1 | "\(.by) \(.to_close)"' "$TEST_EVIDENCE_DIR/cp2/step-0/deferred.json")" = "stand_in true" ]
+}
+@test "stand-in: a permission for another point, or a point that was measured, defers nothing" {
+  _sc_seed
+  sed -i 's|cmd: "test -f ok.txt"|cmd: "sleep 3"|; s|    expected_exit: 0|    expected_exit: 0\n    timeout: 1|' "$SC_PLAN"
+  run "$FSM" increment-step "$SF"; [ "$status" -eq 1 ]
+  local auth; auth="$(_si_permit "$TEST_EVIDENCE_DIR" step_criteria_failed '{"kind": "measurement_failed", "step": 0, "criterion": "AC1"}')"
+  # the point now RUNS and fails (no technical failure any more): the permission no longer applies
+  sed -i 's|cmd: "sleep 3"|cmd: "test -f ok.txt"|' "$SC_PLAN"
+  run "$FSM" increment-step "$SF" --defer-criterion AC1 --reason "the step measurement ran out of time, the close measures it" --stand-in "$auth"
+  echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"deferral of AC1 not honoured"*"measured now"* ]]; [ "$(_cur)" = 0 ]
+}
 @test "delegate: --defer-criterion still needs the PM's answered card in an --auto plan" {
   _sc_seed
   mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P960"; echo 'autonomy: auto' > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P960/plan-state.yaml"
@@ -2130,6 +2151,41 @@ YML
   run bash "$PFSM" epic-complete P910 E-910-1_1 --direct --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -eq 0 ]
   [ "$(yq -r '.plan_state' "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P910/plan-state.yaml")" = "PLAN_SYNC" ]
+}
+
+# _si_permit <evidence dir> <code> <proposal json> — a real stand-in permission: ask (Codex out), a Claude
+# stand-in answers approve inside its bracket, record. Prints the auth.json path.
+_si_permit() {
+  local td="$1" out id d pid=P930 pp
+  pp="$(yq -r '.plan_path // ""' "$td/fsm-state.yaml")"
+  if [[ -n "$pp" && -f "$pp" ]]; then pid="$(awk '/^id:/ {print $2; exit}' "$pp")"
+  else mkdir -p "$TEST_PROJECT_ROOT/.aid-o/plans"; printf -- '---\nid: P930\n---\n# Plan\n' > "$TEST_PROJECT_ROOT/.aid-o/plans/P930-x.md"
+       printf 'plan_path: %s\n' "$TEST_PROJECT_ROOT/.aid-o/plans/P930-x.md" >> "$td/fsm-state.yaml"; fi
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/$pid"; printf 'plan_id: %s\nautonomy: auto\n' "$pid" > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/$pid/plan-state.yaml"
+  echo '{"available": false, "reason": "codex_absent"}' > "$td/probe.json"
+  echo "$3" > "$td/proposal-in.json"
+  out="$(AID_CODEX_PROBE_STUB="$td/probe.json" bash "$AID_PLUGIN_PATH/scripts/aid-stand-in.sh" ask --evidence-dir "$td" --code "$2" --proposal "$td/proposal-in.json" --tree-root "$TEST_PROJECT_ROOT" 2>&1)"
+  id="$(grep -oE 'stand-in-[0-9a-f]{16}' <<< "$out" | head -1 | sed 's/^stand-in-//')"; d="$td/stand-in/$id"
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "stand-in-$id" --agent-id claude:stand-in --evidence-dir "$td" >/dev/null
+  jq -n --arg i "$id" '{id: $i, answer: "approve", class: "technical", reason: "inside the step and nothing protected", provider: "claude"}' > "$d/verdict.json"
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "stand-in-$id" --output-file "$d/verdict.json" --evidence-dir "$td" >/dev/null
+  bash "$AID_PLUGIN_PATH/scripts/aid-stand-in.sh" record --evidence-dir "$td" --id "$id" --verdict "$d/verdict.json" --tree-root "$TEST_PROJECT_ROOT" >/dev/null 2>&1
+  echo "$d/auth.json"
+}
+
+@test "amend-scope-zadani: in an --auto run a step closing no point widens on the stand-in's permission; another path or step is refused (P117 (11))" {
+  local td="$TEST_EVIDENCE_DIR"; _zp_plan_json "$td"
+  jq '.steps[0].zavira = [] | .steps[1].zavira = []' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"
+  _zp_state "$td" EXECUTE 0
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add src/helper.py --reason "the step needs a helper module"
+  [ "$status" -ne 0 ]; [[ "$output" == *"aid-stand-in.sh"*"ask"* ]]; [[ "$output" == *"class: stand_in"* ]]
+  local auth; auth="$(_si_permit "$td" amend_scope_no_brief_point '{"kind": "scope_extension", "step": 0, "paths": ["src/helper.py"], "why": "a helper module"}')"
+  [ -f "$auth" ]; [ "$(jq -r .approved "$auth")" = true ]
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add src/helper.py --add src/other.py --reason "the step needs a helper module" --stand-in "$auth"
+  [ "$status" -ne 0 ]; [[ "$output" == *"does not permit this widening"* ]]
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add src/helper.py --reason "the step needs a helper module" --stand-in "$auth"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.[-1].pm_decision.stand_in' "$td/steps/step_1_backend/scope-amendment.json")" = "$auth" ]
 }
 
 @test "amend-scope-zadani: a step closing no point widens with the PM's card quoting every added path; a card missing one is refused (aidlab-apps 15. 10. 2026)" {

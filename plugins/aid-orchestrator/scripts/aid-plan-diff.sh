@@ -558,15 +558,27 @@ fi
 # while its Decision card passes aid_pm_card_check again — a hand-written file
 # defers nothing. A deferred absent point no longer counts as absent here.
 if [[ "$SCOPE" == step && -f "${STEP_DIR}/deferred.json" ]]; then
-  while IFS=$'\t' read -r dlabel dcard; do
+  while IFS=$'\t' read -r dlabel dcard dby dauth; do
     [[ -n "$dlabel" ]] || continue
-    if why="$(aid_pm_card_check "$dcard" "$dlabel")"; then
+    [[ "$dcard" == - ]] && dcard=""   # no empty field: IFS=tab collapses two tabs into one
+    if [[ "$dby" == stand_in ]]; then
+      # P117: honoured while the permission holds AND the fresh measurement still fails for a technical reason
+      declare -F aid_stand_in_record_ok >/dev/null || source "${SCRIPT_DIR}/lib/aid-stand-in.sh"
+      dreason="$(jq -r --arg l "$dlabel" 'first(.[] | select(.ac_label == $l) | .reason // "") // ""' <<< "$results_json")"
+      if ! why="$(aid_stand_in_record_ok "$dauth" measurement_failed "$(jq -nc --argjson s "${STEP_N:-0}" --arg c "$dlabel" '{step: $s, criterion: $c}')")"; then
+        echo "aid-plan-diff: deferral of ${dlabel} not honoured: ${why}" >&2; continue
+      elif [[ ! "$dreason" =~ $AID_PD_UNMEASURED_RE ]]; then
+        echo "aid-plan-diff: deferral of ${dlabel} not honoured: the point was measured now (${dreason:-ran}) — the stand-in deferred only a technical failure" >&2; continue
+      fi
+      results_json="$(jq -c --arg l "$dlabel" --slurpfile d "${STEP_DIR}/deferred.json" \
+        'map(if .ac_label == $l then . + {deferred: $d[0][$l]} else . end)' <<< "$results_json")"
+    elif why="$(aid_pm_card_check "$dcard" "$dlabel")"; then
       results_json="$(jq -c --arg l "$dlabel" --slurpfile d "${STEP_DIR}/deferred.json" \
         'map(if .ac_label == $l then . + {deferred: $d[0][$l]} else . end)' <<< "$results_json")"
     else
       echo "aid-plan-diff: deferral of ${dlabel} not honoured: ${why}" >&2
     fi
-  done < <(jq -r 'to_entries[] | "\(.key)\t\(.value.card // "")"' "${STEP_DIR}/deferred.json" 2>/dev/null)
+  done < <(jq -r 'to_entries[] | "\(.key)\t\(.value.card // "-")\t\(.value.by // "pm")\t\(.value.stand_in // "-")"' "${STEP_DIR}/deferred.json" 2>/dev/null)
   absent_count="$(jq '[.[] | select(.verdict == "absent" and .deferred == null)] | length' <<< "$results_json")"
 fi
 
