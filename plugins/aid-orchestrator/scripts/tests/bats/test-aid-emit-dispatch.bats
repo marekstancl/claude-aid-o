@@ -283,4 +283,12 @@ teardown() {
   run bash "$SCRIPT" repair --evidence-dir "$ev" --focus '?' --reason "a killed emit left half a line"
   [ "$status" -ne 0 ]; [[ "$output" == *"focus cannot be read"* ]]
   grep -q '"event":"start"' "$ev/pending-dispatches.jsonl"
+  # cut before the event's name: it may have been a start, so it is not dropped either
+  printf '%s\n' '{"ts":"2026-10-20T10:01:00Z","event":"sta' > "$ev/pending-dispatches.jsonl"
+  run bash "$SCRIPT" repair --evidence-dir "$ev" --reason "a killed emit left half a line"
+  [ "$status" -ne 0 ]; [[ "$output" == *"focus cannot be read"* ]]
+  # a damaged complete is no start: moved aside without a focus
+  printf '%s\n' '{"ts":"2026-10-20T10:01:00Z","event":"complete","focus":"x"' > "$ev/pending-dispatches.jsonl"
+  run bash "$SCRIPT" repair --evidence-dir "$ev" --reason "a killed emit left half a line"
+  [ "$status" -eq 0 ]
 }
