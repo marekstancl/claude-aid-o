@@ -148,7 +148,7 @@ app_places_project() {
 import json, sys
 p = sys.argv[1]; rec = json.load(open(p + "/.aid-ui/critic/frozen/struktura.json"))
 sc = {r: {c["id"]: {"score": 9, "evidence": "model a kostra"} for e in rec["roles"][r]["rubrics"] for c in e["rubric"]["criteria"]} for r in ("owner", "tech")}
-print(json.dumps({"requirements": [{"id": "z1", "source": "zadani.md:2", "text": "poznámky", "covered_by": ["task:zalozit", "screen:seznam"]}], "scores": sc}))
+print(json.dumps({"requirements": [{"id": "z1", "source": "zadani.md:2", "text": "poznámky", "covered_by": ["task:zalozit", "screen:seznam"]}], "scores": sc, "whole_check": {"by": "claude", "seen": "kostra bez rozporů", "open": []}}))
 PY
   run python3 "$Q" self "$P" --place struktura --file "$P/self.json"
   [ "$status" -eq 1 ]; [[ "$output" == *"předběžná brána kostry neproběhla"* ]]

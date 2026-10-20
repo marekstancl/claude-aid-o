@@ -62,6 +62,8 @@ d = os.path.join(p, ".aid-ui/critic/rounds", *([] if pl == "web" else [pl])); ns
 last = json.load(open(os.path.join(d, str(ns[-1]), "round.json"))) if ns and os.path.isfile(os.path.join(d, str(ns[-1]), "round.json")) else {"findings": []}
 fx = {f["id"]: {"verdict": os.environ.get("FIXCHECK", "overeno"), "seen": "úvod: nová věta je vidět"} for f in last["findings"] if f.get("state") == "accepted" and f.get("evidence")}
 doc = {"requirements": [{"id": "r1", "source": "docs/content/product-context.md:2", "text": "Kváskový chleba v Brně", "covered_by": ["index.html"]}], "scores": out}
+if os.environ.get("WHOLE") != "none":
+    doc["whole_check"] = {"by": "claude", "seen": "11 stránek, žádný rozpor", "open": [x for x in [os.environ.get("WHOLE_OPEN")] if x]}
 if os.environ.get("FIXCHECK") != "none":
     doc["fix_check"] = {"by": "codex", "results": fx}
 print(json.dumps(doc))
@@ -518,5 +520,7 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   FIXCHECK=nepravda selfdoc 9 web; run python3 "$Q" self "$P" --place web --file "$T/self.json"
   [ "$status" -eq 1 ]; [[ "$output" == *"fix_check r1-owner-f1: ověřovatel codex opravu neviděl (nepravda"* ]]
   jq '.fix_check.by = "self"' <(FIXCHECK=overeno selfdoc 9 web; cat "$T/self.json") > "$T/s2.json"; run python3 "$Q" self "$P" --place web --file "$T/s2.json"; [ "$status" -eq 1 ]
+  WHOLE=none selfdoc 9 web; run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"whole_check: celou verzi neprošel"* ]]
+  WHOLE_OPEN="cena 10 na úvodu, 12 v ceníku" selfdoc 9 web; run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"zůstávají rozpory"*"cena 10"* ]]
   selfdoc 9 web; run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }

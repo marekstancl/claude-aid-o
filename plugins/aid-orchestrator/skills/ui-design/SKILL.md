@@ -117,6 +117,10 @@ detaily. Před každým kolem místa (`aid-ui-quality.py round`, všechna místa
    kontextem; nikdy výrobce): dostane nálezy, doklady oprav a adresu verze, u každé napíše overeno / nepravda /
    castecne a co kde viděl. Do kontroly jde jako `fix_check`; bez výroku `overeno` u každé opravy `self` neprojde
    (P116, 19. 10. 2026: dvě opravy byly zapsané jako hotové a nebyly - ověřené slovem v modelu, ne v kostře).
+   Týž ověřovatel projde i **celou verzi** a hledá rozpory: stejná věc s jinými čísly, časy nebo stavy, ukázka, která
+   porušuje pravidlo, které verze sama uvádí, odkaz nebo text, který slibuje, co verze nemá. Do kontroly jde jako
+   `whole_check` {by, seen, open}; s otevřeným rozporem `self` neprojde (P116 kolo 4: role i ověřovatel našli 8 rozporů,
+   které výrobce při opravách neviděl).
 Zápis `aid-ui-quality.py self <projekt> --place <místo> --file <kontrola.json>` to ověří a váže na otisk podkladů místa;
 `round` bez platné vlastní kontroly nad touto verzí nespustí. Po každé opravě se kontrola dělá znovu.
 
