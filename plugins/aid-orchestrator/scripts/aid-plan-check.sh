@@ -517,8 +517,10 @@ import re, shlex, sys
 SKIP = {"cd","test","[","[[","]]","]","{","}","if","fi","for","while","until","done","then","do","else","elif","case","esac",
         "true","false","echo","printf","export","set","source",".","exit","return","read","shift","local","!","in"}
 INTERP = {"bash","sh","python","python3","node","bats"}
+INNER = []
 def flat(cmd):
-    # $(...) and $((...)) become one word (what runs inside them is not checked), redirections go
+    # $(...) becomes one word and what runs inside it is checked on its own (Codex review of P117 B); $((...)) is
+    # arithmetic, nothing runs; redirections go
     out, i, n = [], 0, len(cmd)
     while i < n:
         if cmd.startswith("$(", i):
@@ -529,6 +531,7 @@ def flat(cmd):
                     d -= 1
                     if d == 0: break
                 j += 1
+            if not cmd.startswith("$((", i): INNER.append(cmd[i + 2:j])
             out.append("SUBST"); i = j + 1; continue
         out.append(cmd[i]); i += 1
     t = "".join(out)
@@ -538,7 +541,8 @@ def progs(cmd, cwd):
     cmd = flat(cmd)
     lex = shlex.shlex(cmd, posix=True, punctuation_chars=";&|()"); lex.whitespace_split = True
     try: toks = list(lex)
-    except ValueError: return
+    except ValueError:
+        print("?\t" + cmd[:60]); return   # quotes that do not close: reported, never passed silently
     cmds = [[]]
     for t in toks:
         if t and set(t) <= set(";&|()"): cmds.append([]); continue
@@ -575,6 +579,7 @@ def progs(cmd, cwd):
         if arg and not arg.startswith("/"): arg = at(arg)
         print(prog + "\t" + arg)
 progs(sys.argv[1], "")
+while INNER: progs(INNER.pop(0), "")
 '
   _b12_progs() { python3 -c "$_B12_PY" "$1"; }
   # The project's rule, from the STATE root (a plan checked in a dependency's worktree is still this project's).
@@ -613,6 +618,7 @@ progs(sys.argv[1], "")
     [[ -z "$pt" || "$pt" =~ ^[1-9][0-9]*$ ]] && { [[ -z "$pt" ]] || (( pt <= 1800 )); } \
       || _block "B12" "$vf:$ln" "timeout: ${pt} — a point's limit is whole seconds up to 1800"
     while IFS=$'\t' read -r prog arg; do
+      [[ "$prog" == "?" ]] && { _warn "B12" "$vf:$ln" "cmd point cannot be parsed (quotes that do not close): ${arg}"; continue; }
       case "$prog" in
         */*) _known_path "${prog#./}" || _block "B12" "$vf:$ln" "cmd point runs \`${prog#./}\`, which does not exist and no step creates it" ;;
         *) PATH="${VENV_PATH:-$PATH}" command -v "$prog" >/dev/null 2>&1 || _block "B12" "$vf:$ln" "cmd point runs \`${prog}\`, which is not installed here — the measurement would exit 127" ;;

@@ -2112,13 +2112,19 @@ _dep() {
 
 @test "prepare: a plan standing on one unmerged plan is checked in its worktree, the binding is recorded and held; two unmerged plans are refused (P117 (3), WAN P112)" {
   _dep P899
-  sed -i 's/^type: regular$/type: regular\ndepends_on_plans: [P899]/' "$PLAN"; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  sed -i 's/^type: regular$/type: regular\ndepends_on_plans: [P899]/' "$PLAN"
+  # step 1 extends a file only the dependency's worktree has (WAN P112)
+  sed -i 's/^uses {{x}} literally$/uses {{x}} literally\n\n**Files:**\n- Modify: `dep-P899.txt` — extend what P899 adds/' "$PLAN"; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  # against the main checkout the plan check does not find it …
+  bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" "$PLAN" --project-root "$ROOT" --json "$BATS_TEST_TMPDIR/main-check.json" --quiet || true
+  jq -e '[.blocking[], .legacy_advisory[], .warnings[]] | map(.message) | any(test("dep-P899"))' "$BATS_TEST_TMPDIR/main-check.json"
   local wt="$ROOT/.aid-worktrees/plan-P899" bf="$EV/dependency-root.json"
   run "$ROUND_SH" prepare "$PLAN" --round 1; echo "$output"; [ "$status" -eq 0 ]
   [[ "$output" == *"stands on unmerged P899"*"$wt"* ]]
   [ "$(jq -r '[.plan, .branch, .head == "'"$(git -C "$wt" rev-parse HEAD)"'"] | join(" ")' "$bf")" = "P899 plan/P899 true" ]
   [ "$(jq -r .worktree "$bf")" = "$wt" ]
   [ "$(jq -r .project_root "$EV/plan-check.json")" = "$wt" ]   # the plan check was taken again in the dependency
+  jq -e '[.blocking[], .legacy_advisory[], .warnings[]] | map(.message) | any(test("dep-P899")) | not' "$EV/plan-check.json"   # … in its worktree it does
   # the dependency moves under the review: the next round is refused
   echo more >> "$wt/dep-P899.txt"; git -C "$wt" -c user.email=t@t -c user.name=t commit -qam more
   run "$ROUND_SH" prepare "$PLAN" --round 2; echo "$output"

@@ -155,7 +155,7 @@ _plan() { # <file> <strict|legacy> [dep2] [files1...]
   _ac 'bash scripts/ghost.sh'; run "$CHECK" p.md; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK B12"*"scripts/ghost.sh"* ]]
   _ac 'X=1 ./src/a.py'; run "$CHECK" p.md; [[ "$output" != *"BLOCK B12"* ]]
   # compound commands: every simple command counts, through env, timeout, bash -c and a cd
-  local c; for c in 'cd src && no-such-tool-xyz' 'env X=1 no-such-tool-xyz' "bash -lc 'no-such-tool-xyz --a'" 'timeout -s KILL 5 no-such-tool-xyz' 'true; ! no-such-tool-xyz' 'cd src && ./ghost.py'; do
+  local c; for c in 'test "$(no-such-tool-xyz)"' 'cd src && no-such-tool-xyz' 'env X=1 no-such-tool-xyz' "bash -lc 'no-such-tool-xyz --a'" 'timeout -s KILL 5 no-such-tool-xyz' 'true; ! no-such-tool-xyz' 'cd src && ./ghost.py'; do
     _ac "$c"; run "$CHECK" p.md; echo "$c → $output" | grep B12; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK B12"* ]]
   done
   _ac 'cd src && ./a.py | grep -q x'; run "$CHECK" p.md; [[ "$output" != *"BLOCK B12"* ]]
