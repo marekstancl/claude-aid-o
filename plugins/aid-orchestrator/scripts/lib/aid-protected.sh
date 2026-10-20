@@ -34,8 +34,13 @@ aid_protected_impact() {
     scope_extension|no_change_step|visual_check|measurement_failed|rename|blocked_step) ;;
     *) echo "unevaluable: the proposal kind '${kind}' is not one the stand-in may decide"; return 1 ;;
   esac
-  # what the proposal declares AND what the frozen plan says the step calls (the plan is not the proposer's)
-  ex="$(jq -r '(.external // [])[]' "$prop" 2>/dev/null; jq -r --argjson i "$(jq -r '.step // -1' "$prop" 2>/dev/null)" '(.steps[$i].external // [])[]' "${ev:-/nonexistent}/plan.json" 2>/dev/null)"
+  # what the proposal declares AND what the frozen plan says the step calls (the plan is not the proposer's) —
+  # fail closed: the step must be a step of a readable plan.json (security review of P117)
+  local si; si="$(jq -r '.step // ""' "$prop" 2>/dev/null)"
+  [[ "$si" =~ ^[0-9]+$ ]] || { echo "unevaluable: the proposal names no step (a non-negative integer)"; return 1; }
+  jq -e --argjson i "$si" '.steps[$i] != null' "${ev:-/nonexistent}/plan.json" >/dev/null 2>&1 \
+    || { echo "unevaluable: step ${si} is not a step of the run's plan.json (${ev:-<no run>}/plan.json)"; return 1; }
+  ex="$(jq -r '(.external // [])[]' "$prop" 2>/dev/null; jq -r --argjson i "$si" '(.steps[$i].external // [])[]' "${ev}/plan.json" 2>/dev/null)"
   [[ -z "$ex" ]] || { echo "money: the proposal calls an outside service (${ex//$'\n'/, }) — a paid service or a new foreign API is the PM's"; return 1; }
 
   # the paths it touches: paths[], both sides of a rename
