@@ -337,9 +337,11 @@ cmd_repair() {
   starts="$(while IFS= read -r line || [[ -n "$line" ]]; do
       [[ -n "$line" ]] || continue
       jq -e 'type == "object" and (.event | type == "string") and (.ts | type == "string")' <<< "$line" >/dev/null 2>&1 && continue
-      # not a start when it is no record at all, or its event is readable and is another one; a record cut
-      # before its event's name may be a start
+      # not a start when it is no record at all, or ONE record (one brace) whose event is readable and is another;
+      # a record cut before its event's name, or two records glued on one line, may hold a start
       [[ "$line" =~ ^[[:space:]]*\{ ]] || continue
+      _braces="${line//[^\{]/}"
+      (( ${#_braces} == 1 )) || { echo '?'; continue; }   # glued records: a readable focus may be the other record's
       if ! grep -qE '"event"[[:space:]]*:[[:space:]]*"[a-z_]+"' <<< "$line" || grep -qE '"event"[[:space:]]*:[[:space:]]*"start"' <<< "$line"; then
         f="$(grep -oE '"focus"[[:space:]]*:[[:space:]]*"[^"]+"' <<< "$line" | sed -E 's/.*"([^"]+)"$/\1/' | head -1)"; echo "${f:-?}"
       fi
