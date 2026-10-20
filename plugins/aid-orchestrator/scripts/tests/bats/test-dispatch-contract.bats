@@ -488,3 +488,71 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   [[ "$output" == *"$other/doc.md is in $(cd "$other" && pwd -P), committed there"* ]]
   [[ "$output" != *"not committed here"* ]]
 }
+
+@test "contract: a deletion committed by the step's own commit is still a deletion when increment-step validates again; a later unrelated commit does not borrow it (WAN P112 krok 4, 20. 10. 2026)" {
+  git init -q -b main . 2>/dev/null || git init -q .
+  git config user.email t@t; git config user.name T
+  : > src/old.sh; git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
+  jq '.steps[0].outputs += ["Delete: `src/old.sh` — replaced"] | .steps[0].allowed_paths += ["src/old.sh"]' plan.json > .aid-o/p2.json
+  mkdir -p .aid-o/ev/steps/step_1_backend
+  aid_dispatch_contract_build .aid-o/p2.json 0 .aid-o/ev/steps/step_1_backend/contract.json
+  VERSION="$(jq -r .version .aid-o/ev/steps/step_1_backend/contract.json)"
+  echo x > src/thing.sh; rm src/old.sh
+  _return '{changed_files: ["src/thing.sh"], deleted_files: ["src/old.sh"]}'
+  run aid_dispatch_contract_commit "$TEST_DIR" .aid-o/ev/steps/step_1_backend/contract.json .aid-o/return.json "step 1"
+  echo "$output"; [ "$status" -eq 0 ]
+  local rec; rec="$(_aid_dc_step_record "$TEST_DIR" .aid-o/ev/steps/step_1_backend/contract.json)"
+  [ -f "$rec" ]; [[ "$rec" == "$(git rev-parse --path-format=absolute --git-dir)"/* ]]   # never in the tree
+  [ -z "$(git status --porcelain --untracked-files=all | grep -v '^?? .aid-o/')" ]
+  run aid_dispatch_contract_validate .aid-o/ev/steps/step_1_backend/contract.json .aid-o/return.json "$TEST_DIR"
+  echo "$output"; [ "$status" -eq 0 ]
+  # a recorded commit that did not delete the path proves nothing
+  jq --arg c "$(git rev-parse HEAD~1)" '.commit = $c' "$rec" > .aid-o/s && mv .aid-o/s "$rec"
+  run aid_dispatch_contract_validate .aid-o/ev/steps/step_1_backend/contract.json .aid-o/return.json "$TEST_DIR"
+  [ "$status" -eq 1 ]; [[ "$output" == *"src/old.sh (not a tracked file"* ]]
+}
+
+@test "contract: AID state other than the step's evidence (.aid-o/work/backlog.md) in changed_files is refused aloud, the evidence is left to AID (WAN P111 krok 10)" {
+  git init -q -b main . 2>/dev/null || git init -q .
+  git config user.email t@t; git config user.name T
+  git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
+  mkdir -p .aid-o/work; echo b > .aid-o/work/backlog.md; echo x > src/thing.sh
+  jq '.steps[0].allowed_paths += [".aid-o/work/backlog.md"]' plan.json > .aid-o/p3.json
+  aid_dispatch_contract_build .aid-o/p3.json 0 .aid-o/c3.json; VERSION="$(jq -r .version .aid-o/c3.json)"
+  _return '{changed_files: ["src/thing.sh", ".aid-o/work/backlog.md"]}'
+  run aid_dispatch_contract_commit "$TEST_DIR" .aid-o/c3.json .aid-o/return.json "step 1"
+  echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *".aid-o/work/backlog.md is AID's state"* ]]
+  [ -z "$(git diff --cached --name-only)" ]
+}
+
+@test "contract: transaction — a commit the hook refuses leaves the index exactly as it was before the step's staging (WAN P112)" {
+  git init -q -b main . 2>/dev/null || git init -q .
+  git config user.email t@t; git config user.name T
+  git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
+  local before; before="$(git diff --cached --name-status)"
+  printf '#!/bin/sh\nexit 1\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
+  echo x > src/thing.sh; echo y > tests/test-thing.bats
+  _return '{}'
+  run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"
+  echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"your index is untouched"* ]]
+  [ "$(git diff --cached --name-status)" = "$before" ]
+}
+
+@test "contract: transaction — a file the user staged is refused before anything is staged, the index byte for byte as it was; the step's commit is built in a temporary index (Codex, P117)" {
+  git init -q -b main . 2>/dev/null || git init -q .
+  git config user.email t@t; git config user.name T
+  git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
+  echo mine > notes.txt; git add notes.txt
+  local idx; idx="$(git rev-parse --git-path index)"; local sum; sum="$(sha1sum < "$idx")"
+  echo x > src/thing.sh; echo y > tests/test-thing.bats
+  _return '{}'
+  run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"
+  echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"notes.txt"* ]]
+  [ "$(sha1sum < "$idx")" = "$sum" ]
+  # without the user's file: a hook that watches the index sees the temporary one, the real one is not written
+  git reset -q notes.txt; rm notes.txt; sum="$(sha1sum < "$idx")"
+  printf '#!/bin/sh\necho "$GIT_INDEX_FILE" > hook-index.txt\nexit 1\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
+  run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"
+  [ "$status" -eq 1 ]; [ "$(sha1sum < "$idx")" = "$sum" ]
+  [ -n "$(cat hook-index.txt)" ]; [ "$(cat hook-index.txt)" != "$idx" ]
+}

@@ -327,3 +327,56 @@ _verdicts() { jq -c '[.results[] | .verdict]' "$1"; }
   [ "$(jq -r '.results[0].verdict' "$EV/plan-diff.json")" = present ]
   AID_PLAN_DIFF_AC_TIMEOUT_FLOOR=2000 run bash "$PD" --plan "$PLAN" --evidence-dir "$EV" --base-commit HEAD; [ "$status" -eq 10 ]
 }
+
+@test "verification_env: the step measurement runs with the project's verification_env (names in the result, never values) — the same reader as the close (WAN P110/P112)" {
+  mkdir -p .aid-o/config; printf 'verification_env:\n  WAN_TEST_DOCKER_MODE: run\n' > .aid-o/config/execution.yaml
+  _pj "1:AC1"
+  { printf -- '---\nid: P950\n---\n# Plan\n\n## Implementation Steps\n\n### Step 1: one\n\n**Zavírá:** AC1\n\n## Acceptance Criteria\n\n- [ ] AC1: env\n'; _blk 'test \"$WAN_TEST_DOCKER_MODE\" = run'; } > "$PLAN"
+  _run --step 0; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_out 0 | jq -r '.results[0].verdict')" = present ]
+  [ "$(_out 0 | jq -c .env_keys)" = '["WAN_TEST_DOCKER_MODE"]' ]
+  ! grep -q '"run"' "$EV/cp2/step-0/plan-diff.json"
+}
+
+@test "effective timeout: a point without timeout: gets the plan_diff gate's timeout_seconds, its own timeout: wins, the floor raises, 1800 is the ceiling (WAN P110 AC13)" {
+  mkdir -p .aid-o/config; printf 'gates:\n  plan_diff:\n    timeout_seconds: 600\n' > .aid-o/config/execution.yaml
+  _pj "1:AC1,AC4"
+  { printf -- '---\nid: P950\n---\n# Plan\n\n## Implementation Steps\n\n### Step 1: one\n\n**Zavírá:** AC1, AC4\n\n## Acceptance Criteria\n\n- [ ] AC1: plain\n'; _blk "true"; printf -- '- [ ] AC4: own\n'; _blk "true" 7; } > "$PLAN"
+  _run --step 0; [ "$status" -eq 0 ]
+  [ "$(_out 0 | jq -r .ac_timeout_default_s)" = 600 ]
+  [[ "$(_out 0 | jq -r '.results[] | select(.ac_label == "AC1") | .evidence')" == *"limit 600 s"* ]]
+  [[ "$(_out 0 | jq -r '.results[] | select(.ac_label == "AC4") | .evidence')" == *"limit 7 s"* ]]
+  AID_PLAN_DIFF_AC_TIMEOUT_FLOOR=30 _run --step 0
+  [[ "$(_out 0 | jq -r '.results[] | select(.ac_label == "AC4") | .evidence')" == *"limit 30 s"* ]]
+  printf 'gates:\n  plan_diff:\n    timeout_seconds: 5000\n' > .aid-o/config/execution.yaml
+  _run --step 0; [ "$(_out 0 | jq -r .ac_timeout_default_s)" = 1800 ]
+  printf 'gates:\n  plan_diff:\n    timeout_seconds: 600\n' > .aid-o/config/execution.yaml
+  AID_PLAN_DIFF_AC_TIMEOUT_FLOOR=900 _run --step 0
+  [[ "$(_out 0 | jq -r '.results[] | select(.ac_label == "AC1") | .evidence')" == *"limit 900 s"* ]]
+  AID_PLAN_DIFF_AC_TIMEOUT=50 _run --step 0; [ "$(_out 0 | jq -r .ac_timeout_default_s)" = 600 ]   # the env replaces the 120 base, a larger gate still wins
+  AID_PLAN_DIFF_AC_TIMEOUT=900 _run --step 0; [ "$(_out 0 | jq -r .ac_timeout_default_s)" = 900 ]
+  rm .aid-o/config/execution.yaml
+  _run --step 0; [ "$(_out 0 | jq -r .ac_timeout_default_s)" = 120 ]
+}
+
+@test "redact: a failing point's output is kept (8 KiB per stream, truncation said), the verification_env value and token-shaped strings never reach the disk (WAN P111 AC10)" {
+  mkdir -p .aid-o/config; printf 'verification_env:\n  DB_PASSWORD: hunter2-canary\n' > .aid-o/config/execution.yaml
+  _pj "1:AC1"
+  { printf -- '---\nid: P950\n---\n# Plan\n\n## Implementation Steps\n\n### Step 1: one\n\n**Zavírá:** AC1\n\n## Acceptance Criteria\n\n- [ ] AC1: fails loudly\n'; _blk 'echo pw=$DB_PASSWORD; echo Bearer abc.def.ghi; echo ghp_ABCDEFGHIJKLMNOPQRSTUV >&2; head -c 20000 /dev/zero | tr "\\\\0" a; echo; echo tail=$DB_PASSWORD; printf x=hunter2-; sleep 0.2; printf "canary\\n"; printf "Bearer " >&2; head -c 20000 /dev/zero | tr "\\\\0" Q >&2; echo >&2; echo end >&2; exit 2'; } > "$PLAN"
+  _run --step 0
+  local ev; ev="$(_out 0 | jq -r '.results[0].evidence')"; echo "$ev"
+  [[ "$ev" == *"exit=2"*"output: ac-output/"* ]]
+  local f="$EV/cp2/step-0/${ev##*output: }"; [ -f "$f" ]
+  ! grep -q 'hunter2-canary' "$f"; ! grep -q 'abc.def.ghi' "$f"; ! grep -q 'ghp_ABCDEF' "$f"
+  grep -q 'last 8192 shown' "$f"; grep -q '\[redigováno\]' "$f"
+  grep -q 'tail=\[redigováno\]' "$f"   # the value after 20 KB of output, in the kept tail, is redacted too
+  grep -q 'x=\[redigováno\]' "$f"      # and so is one written in two pieces (two reads of the filter)
+  ! grep -q 'QQQQ' "$f"; grep -q '^end' "$f"   # a token longer than the kept tail: its prefix-less end is dropped
+  # while the point runs, no file anywhere it could land (temp dir, evidence) holds the raw value (Codex, P117 A+C)
+  mkdir -p "$ROOT/tmp"; export TMPDIR="$ROOT/tmp" SCAN="$ROOT"
+  { printf -- '---\nid: P950\n---\n# Plan\n\n## Implementation Steps\n\n### Step 1: one\n\n**Zavírá:** AC1\n\n## Acceptance Criteria\n\n- [ ] AC1: scans\n'; _blk 'echo pw=$DB_PASSWORD; echo e=$DB_PASSWORD >&2; sleep 0.3; c=hunter2-; grep -rla --exclude-dir=.aid-o --exclude=execution.yaml "${c}canary" "$SCAN" "$TMPDIR" >&2 && exit 7; exit 2'; } > "$PLAN"
+  _run --step 0
+  ev="$(_out 0 | jq -r '.results[0].evidence')"; echo "$ev"; cat "$EV/cp2/step-0/${ev##*output: }"
+  [[ "$ev" == *"exit=2"* ]]   # 7 = the command found the raw value in a file while it ran
+  ! grep -rqa --exclude-dir=.aid-o --exclude=execution.yaml hunter2-canary "$ROOT" "$TMPDIR"
+}

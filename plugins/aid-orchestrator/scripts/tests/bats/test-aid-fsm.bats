@@ -507,6 +507,32 @@ _p040_seed_increment_preconditions() {
   grep -q '"reason":"pending_file_malformed"' "$TEST_PROJECT_ROOT/.aid-o/work/audit-log.jsonl"
 }
 
+# P117 (9): the refusal names a targeted repair, and the repair is enough — no --force.
+@test "increment-step: malformed ledger → repair; orphan start → cancel; both advance without --force (P117)" {
+  local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml" emit="${BATS_TEST_DIRNAME}/../../aid-emit-dispatch.sh"
+  _p040_seed_increment_preconditions "$state_file"
+  printf '%s\n' 'this is not json {{{' '{"ts":"2026-05-31T00:00:00Z","event":"start","focus":"cp2-step-1","agent_id":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"x","expected_duration_max":60}' \
+    > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"aid-emit-dispatch.sh repair"* ]]
+  run bash "$emit" repair --evidence-dir "$TEST_EVIDENCE_DIR" --reason "test: a half-written line from a killed emit"
+  [ "$status" -eq 0 ]
+  grep -qF 'this is not json' "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl.bad"
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"aid-emit-dispatch.sh cancel --focus"* ]]
+  [[ "$output" != *"PM-authorized"* ]]
+  run bash "$emit" cancel --focus cp2-step-1 --evidence-dir "$TEST_EVIDENCE_DIR" --reason "test: the agent of this start never ran"
+  [ "$status" -eq 0 ]
+
+  run "$FSM" increment-step "$state_file"
+  [ "$status" -eq 0 ]
+  [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "4" ]
+}
+
 @test "increment-step: TZ=UTC orphan detection (tight 100s margin, past deadline) → blocked" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _p040_seed_increment_preconditions "$state_file"

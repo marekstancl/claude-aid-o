@@ -86,6 +86,10 @@ source "${SCRIPT_DIR}/lib/aid-obligations.sh"
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"
 # shellcheck source=lib/aid-decision-card.sh
 source "${SCRIPT_DIR}/lib/aid-decision-card.sh"   # aid_pm_card_check (dispute --pm accepted; P110)
+# shellcheck source=lib/aid-lifecycle.sh
+source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"       # _aid_lc_frontmatter_depends, aid_target_branch (P117 (3))
+# shellcheck source=lib/aid-plan-dependency.sh
+source "${SCRIPT_DIR}/lib/aid-plan-dependency.sh"
 # shellcheck source=lib/aid-delegate.sh
 source "${SCRIPT_DIR}/lib/aid-delegate.sh"        # escalations settled by an independent agent (P112)
 
@@ -416,6 +420,13 @@ _measure_step() {
   echo "prepare: step ${STEP} measured → ${EVID}/cp2/step-${STEP}/plan-diff.json" >&2
 }
 
+_dep_refuse() {
+  echo "${CMD}: REFUSED (${DEP_CODE}): ${DEP_WHY}" >&2
+  echo "next: ${DEP_NEXT}" >&2
+  echo "(pipeline.md §When AID refuses: ${DEP_CODE})" >&2
+  exit 1
+}
+
 cmd_prepare() {
   _need_round
   # The PM's switch (review_checkpoints.enabled / the checkpoint's own key) is
@@ -431,17 +442,34 @@ cmd_prepare() {
     # The round reviews a plan that is READY: the check passed (its sha is checked below), and readiness (what
     # plan-run refuses) holds — reviewers paid for twice over a plan that could not start (AID 10. and 11. 10.)
     # (a check of another text is refused below with its own message, aid-plan-review-packet.sh)
+    # P117 (3): a plan standing on one unmerged plan is checked against that plan's worktree; round 1 records
+    # the binding in the state root's evidence, every later round (and plan-run) holds the review to it
+    local _sroot _bf; _sroot="$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")"; _bf="$(aid_plan_dep_binding_file "$_sroot" "$PLAN_ID")"
+    DEP_ROOT="$ROOT"
+    if [[ "${ROUND:-1}" == 1 ]]; then
+      aid_plan_dep_resolve "$_sroot" "$PLAN" || _dep_refuse
+      if [[ "$DEP_JSON" == '{}' ]]; then rm -f "$_bf"; DEP_ROOT="$ROOT"
+      else mkdir -p "${_bf%/*}"; jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {recorded_at: $at}' <<< "$DEP_JSON" > "$_bf"
+           echo "prepare: ${PLAN_ID} stands on unmerged $(jq -r .plan "$_bf") — its paths are checked in $(jq -r .worktree "$_bf") at $(jq -r '.head[:12]' "$_bf")" >&2
+           # the plan check the author ran against the main checkout cannot see the dependency's files:
+           # it is taken again in the dependency's worktree, into the state root's record (Codex, P117 B)
+           bash "${SCRIPT_DIR}/aid-plan-check.sh" "$PLAN" --project-root "$DEP_ROOT" --json "$check" --quiet || true
+      fi
+    else
+      aid_plan_dep_verify "$_sroot" "$PLAN_ID" review || _dep_refuse
+      [[ -f "$_bf" ]] && DEP_ROOT="$(jq -r .worktree "$_bf")"
+    fi
     if (( ! MANUAL )) && [[ "$(jq -r '.plan_sha256 // ""' "$check")" == "$(sha256sum "$PLAN" | cut -d' ' -f1)" ]]; then
       local _pr_why="" _pr_out=""
       [[ "$(jq -r '.pass // false' "$check")" == true ]] || _pr_why="plan-check.json says the plan does not pass"
       # double-gated test stub (the aid-release-policy.sh pattern): fixtures of the packet tests are minimal plans
       if [[ "${AID_TEST_MODE:-}" == 1 && "${AID_REVIEW_READINESS_STUB:-}" == pass ]]; then :
-      elif [[ -z "$_pr_why" ]] && ! _pr_out="$(bash "${SCRIPT_DIR}/aid-generation-readiness.sh" "$PLAN" --total 1 --project-root "$ROOT" 2>&1)"; then
+      elif [[ -z "$_pr_why" ]] && ! _pr_out="$(bash "${SCRIPT_DIR}/aid-generation-readiness.sh" "$PLAN" --total 1 --project-root "$DEP_ROOT" 2>&1)"; then
         _pr_why="readiness fails: $(tail -3 <<< "$_pr_out" | tr '\n' ' ')"
       fi
       if [[ -n "$_pr_why" ]]; then
         echo "${CMD}: REFUSED (plan_not_ready): ${_pr_why}" >&2
-        echo "next: fix the plan, then bash ${SCRIPT_DIR}/aid-plan-check.sh ${PLAN} --json ${check} && bash ${SCRIPT_DIR}/aid-generation-readiness.sh ${PLAN} --total 1; prepare again" >&2
+        echo "next: fix the plan, then bash ${SCRIPT_DIR}/aid-plan-check.sh ${PLAN} --json ${check} && bash ${SCRIPT_DIR}/aid-generation-readiness.sh ${PLAN} --total 1$([[ "$DEP_ROOT" != "$ROOT" ]] && echo " --project-root ${DEP_ROOT}"); prepare again" >&2
         echo "(pipeline.md §When AID refuses: plan_not_ready)" >&2
         exit 1
       fi

@@ -253,6 +253,18 @@ tool, recorded as `fsm_force_override` in the timeline and the audit log, and
 never an agent's way past a refusal. A refusal that stopped valid work (AID
 was wrong) is an entry in `.aid-o/work/aid-plugin-issues.md`.
 
+Every refusal also prints `class: <class> — <how>` from the refusal registry
+`defaults/refusal-classes.yaml` (P117): `agent_fix` — the agent fixes it and
+retries; `prevent` — the plan check or the run start catches it, inside a
+run its targeted repair (the `next:` line) replaces `--force`;
+`agent_fix_then_stand_in` — the agent fixes it, after a repeated failure the
+stand-in decides; `stand_in` — in `--auto` the independent
+stand-in decides (`aid-review-round.sh delegate`), never the PM; `pm` — a
+Decision card; `incident` — the environment is broken, fix it and continue,
+nobody decides anything; `not_in_run` — cannot occur inside a run. A code the
+registry does not know is `pm`. In `--auto` no refusal has a global `--force`
+as its only way out: the stand-in never receives `--force`.
+
 The rows are the reasons agents met from 24. 8. to 23. 9. 2026
 (`scripts/tests/fixtures/refusals/measured-2026-09.tsv`); a reason met later
 gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
@@ -268,7 +280,7 @@ gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
 | `plan_gate_profile_excluded` | the plan requires a gate the run's profile left out | state | widen the profile in `execution.yaml`, then `advance-to-gates` | PM, to accept the gap |
 | `steps_incomplete` | not every step advanced | state | finish the next step, `increment-step` | |
 | `step_criteria_failed` | a brief point the step closes, or its own labelled criterion, ran `absent` (`cp2/step-N/plan-diff.json`, P110); `--force` does not waive it | work | fix the step and commit, `increment-step`; or render the Decision card quoting the point and, after the PM's answer, `increment-step <state> --defer-criterion AC<n> --reason "<the PM's words>" --finding-card <card>` | PM, to defer the point |
-| `no_isolation` | the close's measurer has no usable nested `unshare` (util-linux < 2.38 or user namespaces off): every `cmd` point is `absent`, never passed (P110) | state | install util-linux ≥ 2.38 and allow user namespaces (`sysctl kernel.unprivileged_userns_clone=1`), then `plan-finalize --stage produce` again | PM, to accept the gap |
+| `no_isolation` | the close's measurer has no usable nested `unshare` (util-linux < 2.38 or user namespaces off): every `cmd` point is `absent`, never passed (P110); `plan-run` asks the same probe (`lib/aid-measure-env.sh`) and refuses before the first step (P117) | state | install util-linux ≥ 2.38 and allow user namespaces (`sysctl kernel.unprivileged_userns_clone=1`), then `plan-finalize --stage produce` again | PM, to accept the gap |
 | `profile_skips_project_tests` | the change touches the project's tests (`project_tests:` globs, changed paths from git) and the run's profile has no gate flagged `runs_project_tests` (P110) | state | add the gate that runs the project's tests to the profile (flagged, with `--evidence-file`), run the gates again — `aid-run-gates.sh --lint-profiles <execution.yaml>` | PM, to waive (`aid-gate-waiver.sh issue project_tests --reason`) |
 | `project_tests_evidence_missing` | a flagged gate wrote no evidence of what it ran | work | give its command `--evidence-file {evidence_dir}/gates/<gate>.evidence.json` (or wrap it in `aid-run-gates.sh record-tests`), run the gates again | |
 | `project_tests_not_selected` | a flagged gate's evidence does not list the changed test files — the flag proves nothing | work | run them in the flagged gate, run the gates again | PM, to waive |
@@ -328,6 +340,9 @@ gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
 | `delegation_left_files` | `aid-review-round.sh delegate --verdict`: the Claude stand-in left files in the plan's worktree that were not there when it was dispatched (uv.lock, `__pycache__`, build output) — they would fail the step's return as undeclared (aidlab-apps 15. 10. 2026) | work | remove the stand-in's files, then record the verdict again | controller |
 | `plan_close_worktree_dirty` | `aid-plan-fsm.sh plan-close`: the execution worktree the close removes holds changed or untracked files (WAN 19. 10. 2026: a PM document was deleted with the tree) — checked before any state changes | work | commit them on the plan branch or move them out; deleting them is the explicit `--discard-worktree-changes` | controller |
 | `plan_not_ready` | `aid-review-round.sh prepare --plan` (CP1): the plan-check record does not pass, was taken over another text of the plan, or readiness (`aid-generation-readiness.sh`, what `plan-run` refuses) fails — a round over it pays reviewers for a plan that cannot start (AID 10. and 11. 10. 2026) | work | fix the plan, re-run the plan check and readiness, then prepare again | controller |
+| `dependency_roots_many` | CP1 `prepare`: the plan's `depends_on_plans` names more than one plan whose `plan/<id>` branch is not in the target branch — its paths can be checked against one worktree only (P117) | work | close all but one, or split the plan | PM, to change the plan's scope |
+| `dependency_worktree_missing` | CP1 `prepare` or a later round: the one unmerged dependency has no worktree on `plan/<id>` (P117) | state | `aid-plan-fsm.sh plan-state <dep> --recreate-worktree --reason "<why>"`, then prepare again (a later round: `--restart`) | |
+| `dependency_moved` | a later CP1 round: the dependency's branch moved since round 1 recorded it (`evidence/<plan>/dependency-root.json`); `plan-run`: the dependency merged without the commit CP1 checked against (P117) | state | start the review again (`prepare --round 1 --restart`) | |
 | `delegation_out_of_scope` | the independent agent classed its verdict `brief`, `money` or `data` — the brief, money and live data stay the PM's; `--defer-criterion` never takes a delegate (P112) | work | the finding goes to the PM's card as before (close routes it); the PM answers with `dispute --pm … --finding-card <card>` | PM |
 | `foreign_branch_unverified` | at the close a foreign branch is missing, moved after freeze, or does not carry a range a step reported (a commit in the live checkout does not count) (P111) | work | commit the foreign work in its worktree on its branch (drop a stray live-checkout commit by hand), then `plan-finalize --stage freeze` again | |
 | `repo_root_invalid` | a `repo_roots` entry is not a slug + git repository outside the project, its base branch does not resolve, or its branch `plan/<id>-<project>` already exists without the worktree (P111) | work | fix the frontmatter entry, or rename/delete the stray branch as the line says, then `plan-run` again | |
@@ -959,6 +974,11 @@ when git cannot hand out worktrees, when `aid-plan-parallel-check.sh --group <wa
 steps of THIS wave sharing a file or a declared interface, and when that check cannot run at
 all. **The check never refuses a run; it degrades it.** A wave that cannot be proved safe
 runs in order.
+
+**Steps never run at the same time in one working copy.** `serial` means one step at a time:
+dispatch the next step only after the previous one returned and was committed. Two agents in one
+tree see each other's half-written files and one commit sweeps up the other's work (WAN P111,
+20. 10. 2026). Concurrency exists only on the path below, each step in its own tree.
 
 **Concurrent path** (decision `concurrent slots=N`: N is the ceiling the controller keeps —
 the library does not count agents in flight — a wave larger than N runs in batches, the next

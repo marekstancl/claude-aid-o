@@ -40,6 +40,7 @@ _write_event() { jq -n --arg c "$ROOT" --arg p "$1" --arg tool "${2:-Write}" '{s
   [ "$status" -eq 2 ]
   [[ "$output" == *"step 0 (step_1_backend) of E-1/R-1"* ]]
   [[ "$output" == *"increment-step"* && "$output" == *"Decision card or a Blocked card"* ]]
+  [[ "$output" == *"aid_decision_card_render"* ]]   # P117 (10): the refusal names the renderer
 }
 
 @test "turn: a step that was advanced past is not open — the Stop passes" {

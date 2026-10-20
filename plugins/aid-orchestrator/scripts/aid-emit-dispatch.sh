@@ -312,7 +312,41 @@ cmd_cancel() {
   echo "cancelled start ${focus} (started ${start_ts}): ${reason}"
 }
 
+# cmd_repair --evidence-dir <dir> --reason <text> — a pending-dispatches.jsonl that does not parse: the lines
+# that parse stay, the others move to pending-dispatches.jsonl.bad, the timeline records it (P117: the only
+# way past a malformed ledger was a PM-authorised increment-step --force).
+cmd_repair() {
+  local evidence_dir="" reason=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --evidence-dir) evidence_dir="$2"; shift 2 ;;
+      --reason)       reason="$2"; shift 2 ;;
+      *) echo "ERROR: unknown arg $1" >&2; exit 1 ;;
+    esac
+  done
+  [[ -n "$evidence_dir" ]] || usage
+  [[ ${#reason} -ge 20 ]] || { echo "ERROR: repair needs --reason of at least 20 characters (it goes to the timeline)" >&2; exit 1; }
+  local pending="${evidence_dir}/pending-dispatches.jsonl" lockfile tmp bad kept=0 moved=0 line
+  [[ -f "$pending" ]] || { echo "nothing to repair: no ${pending}"; return 0; }
+  lockfile="${pending}.lock"; touch "$lockfile"
+  (
+    flock -x -w 5 200 || { echo "ERROR: flock timeout on $lockfile" >&2; exit 2; }
+    tmp="$(mktemp "${pending}.XXXXXX")"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -n "$line" ]] || continue
+      if jq -e 'type == "object" and (.event | type == "string") and (.ts | type == "string")' <<< "$line" >/dev/null 2>&1; then
+        printf '%s\n' "$line" >> "$tmp"
+      else printf '%s\n' "$line" >> "${pending}.bad"; fi
+    done < "$pending"
+    mv -f "$tmp" "$pending"
+  ) 200>"$lockfile"
+  moved="$( [[ -f "${pending}.bad" ]] && grep -c '' "${pending}.bad" || echo 0)"
+  log_event "${evidence_dir}/timeline.jsonl" "verifier_dispatch_repair" moved="$moved" reason="$reason" || true
+  echo "repaired ${pending}: unreadable lines are in ${pending}.bad (${moved} in total)"
+}
+
 case "${1:-}" in
+  repair)   shift; cmd_repair "$@" ;;
   start)    shift; cmd_start "$@" ;;
   complete) shift; cmd_complete "$@" ;;
   cancel)   shift; cmd_cancel "$@" ;;

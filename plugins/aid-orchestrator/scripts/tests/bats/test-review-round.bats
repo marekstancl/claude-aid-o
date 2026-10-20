@@ -2028,6 +2028,39 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   echo "$output"; [ "$status" -eq 0 ]
 }
 
+# _dep <id> — an unmerged plan <id>: its branch plan/<id> with a worktree and one commit main does not have
+_dep() {
+  git -C "$ROOT" rev-parse -q --verify HEAD >/dev/null || { git -C "$ROOT" checkout -q -b main 2>/dev/null; git -C "$ROOT" add -A; git -C "$ROOT" -c user.email=t@t -c user.name=t commit -qm init; }
+  git -C "$ROOT" worktree add -q -b "plan/$1" "$ROOT/.aid-worktrees/plan-$1"
+  echo "$1" > "$ROOT/.aid-worktrees/plan-$1/dep-$1.txt"
+  git -C "$ROOT/.aid-worktrees/plan-$1" add -A; git -C "$ROOT/.aid-worktrees/plan-$1" -c user.email=t@t -c user.name=t commit -qm "$1"
+}
+
+@test "prepare: a plan standing on one unmerged plan is checked in its worktree, the binding is recorded and held; two unmerged plans are refused (P117 (3), WAN P112)" {
+  _dep P899
+  sed -i 's/^type: regular$/type: regular\ndepends_on_plans: [P899]/' "$PLAN"; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  local wt="$ROOT/.aid-worktrees/plan-P899" bf="$EV/dependency-root.json"
+  run "$ROUND_SH" prepare "$PLAN" --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"stands on unmerged P899"*"$wt"* ]]
+  [ "$(jq -r '[.plan, .branch, .head == "'"$(git -C "$wt" rev-parse HEAD)"'"] | join(" ")' "$bf")" = "P899 plan/P899 true" ]
+  [ "$(jq -r .worktree "$bf")" = "$wt" ]
+  [ "$(jq -r .project_root "$EV/plan-check.json")" = "$wt" ]   # the plan check was taken again in the dependency
+  # the dependency moves under the review: the next round is refused
+  echo more >> "$wt/dep-P899.txt"; git -C "$wt" -c user.email=t@t -c user.name=t commit -qam more
+  run "$ROUND_SH" prepare "$PLAN" --round 2; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"dependency_moved"*"prepare --round 1 --restart"* ]]
+  # a refused readiness names the dependency's worktree in its next: line
+  unset AID_REVIEW_READINESS_STUB
+  printf '\n**Files:**\n- Remove: `x.sh` — no such label\n' >> "$PLAN"; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"plan_not_ready"* && "$output" == *"--project-root ${wt}"* ]]
+  # two unmerged plans: refused with the reason, no round
+  _dep P898; export AID_REVIEW_READINESS_STUB=pass
+  sed -i 's/^depends_on_plans: \[P899\]$/depends_on_plans: [P899, P898]/' "$PLAN"; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"dependency_roots_many"*"P899 P898"* ]]
+}
+
 @test "prepare: a plan whose check did not pass, or that fails readiness, gets no round (AID 10. and 11. 10. 2026)" {
   jq '.pass = false' "$EV/plan-check.json" > "$EV/p" && mv "$EV/p" "$EV/plan-check.json"
   run "$ROUND_SH" prepare "$PLAN" --round 1

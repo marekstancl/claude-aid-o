@@ -149,6 +149,8 @@ source "${SCRIPT_DIR}/lib/aid-plan-state.sh"      # also sources lib/aid-lock.sh
 source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh"   # also sources lib/aid-lock.sh + lib/aid-gate-profile-select.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
+# shellcheck source=lib/aid-plan-dependency.sh
+source "${SCRIPT_DIR}/lib/aid-plan-dependency.sh"   # P117 (3): the CP1 binding to an unmerged dependency
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-gate-row.sh"     # P097 Step 2 — the ONE gate-row reader (gate_row_normalize)
 source "${SCRIPT_DIR}/lib/aid-plugin-issues.sh"   # the project's record of AID's own defects
@@ -9428,6 +9430,18 @@ _pr_refuse() {
 }
 
 _pr_tx() { aid_gen_transaction_path "$PR_PLAN_ID"; }
+# _pr_isolation_preflight <plan> — P117 (2): the close measures every cmd point of the plan and its brief the
+# way lib/aid-measure-env.sh says; a host that cannot is refused before the first step, not at the close
+# (WAN P110: a whole run, then every point unmeasured for no_isolation).
+_pr_isolation_preflight() {
+  local z line; local -a files=("$1"); z="$(_aid_fm_get "$1" zadani 2>/dev/null)"
+  [[ -n "$z" ]] && files+=("${PR_ROOT}/${z}")
+  grep -qsE '^[[:space:]]*type:[[:space:]]*cmd([[:space:]]|$)' "${files[@]}" || return 0
+  line="$(STATE_ROOT="$PR_ROOT" bash -c 'source "$1"; aid_measure_isolation_check' _ "${SCRIPT_DIR}/lib/aid-measure-env.sh" 2>/dev/null)" && return 0
+  local next="${line#*$'\t'}"; next="${next#next: }"
+  _pr_refuse no_isolation "this host cannot measure the plan's cmd points the way the close does (${line%%$'\t'*}) — each would end unmeasured at the close" \
+    "${next:-install util-linux >= 2.38 and allow user namespaces} — then plan-run ${PR_PLAN_ID} again" 1
+}
 _pr_stage_done() { jq -e --arg n "$1" 'any(.stages[]?; .name == $n)' "$(_pr_tx)" >/dev/null 2>&1; }
 _pr_stage_record() {   # <name> [sha]
   aid_gen_tx_update "$PR_PLAN_ID" '.stages = ((.stages // []) | map(select(.name != $n)) + [{name: $n, done_at: $t} + (if $s == "" then {} else {sha: $s} end)])' \
@@ -9527,6 +9541,8 @@ _pr_main() {
     "$(realpath "$PR_ROOT")/.aid-worktrees/"*)
       _pr_refuse plan_in_scratch_tree "the plan ${plan_abs} lives only in a scratch tree" "put it in ${PR_ROOT}/.aid-o/plans/ and run again" 1 ;;
   esac
+  _pr_isolation_preflight "$plan_abs"
+  aid_plan_dep_verify "$PR_ROOT" "$plan_id" run || _pr_refuse "$DEP_CODE" "$DEP_WHY" "$DEP_NEXT" 1
   plan_rel="${plan_abs#"$(realpath "$PR_ROOT")/"}"
   cd "$PR_ROOT" || exit 3   # plan.json's source_plan is relative to the state root
   ev_rel=".aid-o/work/evidence/${PR_EPIC}/${PR_RUN}"; ev_dir="${PR_ROOT}/${ev_rel}"; pj="${ev_dir}/plan.json"

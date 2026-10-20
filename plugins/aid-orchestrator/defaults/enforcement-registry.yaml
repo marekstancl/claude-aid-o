@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 684 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 690 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
   # ── Plan amendments recorded here because this file is the TRACKED authority ──
   # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
   # `git check-ignore`; `docs/extending-aid.md` is the tracked exception), so an
@@ -3761,7 +3761,7 @@ enforcements:
   - id: brainstorm_design_ui_basis
     type: 1
     source: "scripts/aid-brainstorm-state.sh:cmd_gate (grep: 'no proposal basis')"
-    instruction: "skills/visual-companion/SKILL.md (grep: 'shared UI components')"
+    instruction: "skills/visual-companion/SKILL.md (grep: 'design gate checks')"
     severity: blocking
     surface: llm-facing
     status: active
@@ -4798,7 +4798,7 @@ enforcements:
     status: active
     verdict: ALIGNED
     tier: t1
-    description: "AID 13. 10. 2026: a deletion had to be written as Modify: … — deleted. Delete: is a Files label; the step's return is refused while a declared deletion is still on disk, missing from deleted_files, or was never a tracked file."
+    description: "AID 13. 10. 2026: a deletion had to be written as Modify: … — deleted. Delete: is a Files label; the step's return is refused while a declared deletion is still on disk, missing from deleted_files, or was never a tracked file. P117: after the step's own commit (recorded by aid_dispatch_contract_commit in the tree's git directory, an ancestor of HEAD) the deletion is proven by that commit — a deletion older than the step proves nothing."
     test: "scripts/tests/bats/test-dispatch-contract.bats"
   - id: delegated_stand_in_left_files
     type: 1
@@ -4811,3 +4811,69 @@ enforcements:
     tier: t1
     description: "aidlab-apps 15. 10. 2026: a Claude stand-in left uv.lock and __pycache__ in the plan worktree and the step's return failed. Its verdict is refused while the worktree differs from the record taken before it ran (untracked and ignored paths, tracked content, HEAD; .aid-o/ is AID's own)."
     test: "scripts/tests/bats/test-review-round.bats"
+  - id: refusal_class_registry
+    type: 1
+    source: "defaults/refusal-classes.yaml + scripts/aid-fsm.sh (aid_refusal_class, _fsm_refusal_next)"
+    instruction: "skills/pipeline.md (When AID refuses)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P117 (WAN P110-P112, eight PM stops in --auto): every refusal code the plugin prints has a class (agent_fix, prevent, agent_fix_then_stand_in, stand_in, pm, incident, not_in_run) and every refusal prints it; an unknown code is pm. The orphan and malformed dispatch ledger name targeted repairs (aid-emit-dispatch.sh cancel / repair) instead of --force."
+    test: "scripts/tests/bats/test-refusal-classes.bats + scripts/tests/bats/test-aid-fsm.bats (grep: 'P117')"
+  - id: step_commit_transactional
+    type: 1
+    source: "scripts/lib/aid-dispatch-contract.sh (aid_dispatch_contract_commit)"
+    instruction: "skills/pipeline.md (§4 Output verification)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P117 (WAN P111 krok 10, P112 krok 4): .aid-o/ outside the step's evidence in changed_files is refused aloud (it was dropped silently); a failed add or commit (a hook refusing) puts the index back as it was, so a retry does not see a staged rename as no deletion."
+    test: "scripts/tests/bats/test-dispatch-contract.bats"
+  - id: plan_diff_one_env_one_limit
+    type: 1
+    source: "scripts/aid-plan-diff.sh (_pd_env_load, _pd_effective_timeout, _pd_capture)"
+    instruction: "skills/plan-writing.md (verification_pattern timeout:)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P117 (WAN P110 AC13, P111 AC10): the step measurement, the plan_diff gate and produce (all aid-plan-diff.sh) load the same verification_env and the same limit (own timeout:, else AID_PLAN_DIFF_AC_TIMEOUT or the plan_diff gate's timeout_seconds or 120; the floor raises; 1800 is the ceiling); the result names the variables, never their values, and the limit used. A failing point keeps 8 KiB of each stream with the truncation said, verification_env values and token-shaped strings redacted before the disk."
+    test: "scripts/tests/bats/test-plan-diff-step.bats"
+  - id: plan_check_project_and_measurable
+    type: 1
+    source: "scripts/aid-plan-check.sh (B11 plan_checks, B12 measurable cmd points)"
+    instruction: "skills/plan-writing.md (Completeness Gate) + defaults/execution.yaml (plan_checks:)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    description: "P117 (WAN P110/P111: tests named after the plan passed CP1 and failed the project's lint in the run; a point's program missing showed only at the close): the plan check runs the project's plan_checks over the paths the plan creates (exit != 0 or a timeout blocks) and blocks a cmd point of the plan or its brief whose program is not here or does not exist; a variable the isolated measurement lacks is a warning."
+    test: "scripts/tests/bats/test-plan-check.bats (grep: 'plan-check B11') + (grep: 'plan-check B12')"
+  - id: plan_run_isolation_preflight
+    type: 1
+    source: "scripts/aid-plan-fsm.sh (_pr_isolation_preflight) + scripts/lib/aid-measure-env.sh (aid_measure_isolation_check)"
+    instruction: "skills/pipeline.md (no_isolation)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    description: "P117 (WAN P110: a whole run, then every point unmeasured at the close): plan-run of a plan with cmd points asks the close's own isolation probe and refuses no_isolation before anything is created."
+    test: "scripts/tests/bats/test-plan-run.bats (grep: 'no_isolation, P117')"
+  - id: cp1_dependency_root
+    type: 1
+    source: "scripts/lib/aid-plan-dependency.sh + scripts/aid-review-round.sh (cmd_prepare) + scripts/aid-plan-fsm.sh (plan-run)"
+    instruction: "skills/pipeline.md (dependency_roots_many, dependency_worktree_missing, dependency_moved)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P117 (WAN P112: CP1 checked a dependent plan against the main checkout and refused real paths): a plan standing on one unmerged plan (its plan/<id> not in the target branch) is checked in that plan's worktree; round 1 records plan, worktree, branch and HEAD in the state root's evidence, later rounds refuse a moved or missing dependency, plan-run refuses a dependency merged without the reviewed commit; two unmerged dependencies are refused."
+    test: "scripts/tests/bats/test-plan-dependency.bats + scripts/tests/bats/test-review-round.bats (grep: 'standing on one unmerged')"

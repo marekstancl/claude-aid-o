@@ -73,6 +73,17 @@
 #     ASISTENT_TEST_DATABASE_URL: "${ASISTENT_TEST_DATABASE_URL}"
 # The rule is read from the state root's copy of this file, never the candidate's.
 
+# `plan_checks:` (optional, top level; P117) — the project's own checks of a
+# PLAN, run by aid-plan-check.sh (and so by CP1 and generation readiness) before
+# anything is built: each command runs in the project root with the paths the
+# plan creates (Create:/Test:) on stdin and in the file $AID_PLAN_NEW_PATHS, the
+# plan in $AID_PLAN_FILE; exit != 0 blocks the plan (B11), timeout_s 1..300
+# (default 60). A rule the project enforces on files (test names, a catalogue
+# entry for a new API path) is cheapest here, not in the run:
+#   plan_checks:
+#     - name: test_names
+#       command: python3 tests/meta/test_tier_lint.py --paths-from-stdin
+
 # `project_tests:` (optional, top level; P110) — globs of the project's test
 # files (`**/` = any number of directories, none included). When the run's
 # changed paths (git diff <base>..HEAD) touch one, the gate runner requires a

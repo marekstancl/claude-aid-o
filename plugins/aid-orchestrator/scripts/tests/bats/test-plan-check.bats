@@ -136,6 +136,39 @@ _plan() { # <file> <strict|legacy> [dep2] [files1...]
   _plan p.md legacy '- Depends on: Step 1' '- Create: `src/a.py` — again'
   run "$CHECK" p.md; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK B8"* ]]
 }
+@test "plan-check B11: the project's plan check from execution.yaml reads the paths the plan creates; its refusal blocks, a hang is named (P117, WAN P110/P111)" {
+  mkdir -p .aid-o/config
+  # the project's own rule: no test file named after a plan; it gets the new paths on stdin and in a file
+  printf '#!/bin/sh\ntest -s "$AID_PLAN_NEW_PATHS" || exit 3\n! grep -E "(^|/)test_p[0-9]{3}"\n' > names.sh
+  printf 'plan_checks:\n  - name: test_names\n    command: sh names.sh\n' > .aid-o/config/execution.yaml
+  _plan p.md strict; run "$CHECK" p.md; echo "$output"; [ "$status" -eq 0 ]
+  _plan p.md strict '- Depends on: Step 1' '- Create: `tests/test_p117_thing.py` — the test'
+  run "$CHECK" p.md; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK B11"*"test_names"*"refuses the plan"* ]]
+  printf 'plan_checks:\n  - name: slow\n    command: "sleep 5"\n    timeout_s: 1\n' > .aid-o/config/execution.yaml
+  _plan p.md strict; run "$CHECK" p.md; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK B11"*"'slow' did not finish in 1 s"* ]]
+}
+@test "plan-check B12: a cmd point whose program is missing blocks, one reading a variable the isolated measurement lacks warns; verification_env and the brief's points count (P117)" {
+  mkdir -p .aid-o/config; printf 'verification_env:\n  DB_URL: x\n' > .aid-o/config/execution.yaml
+  _ac() { _plan p.md strict; printf '\n## Acceptance Criteria\n\n- [ ] AC1\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "%s"\n  ```\n' "$1" >> p.md; }
+  _ac 'test -n $DB_URL'; run "$CHECK" p.md; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" != *"B12"* ]]
+  _ac 'no-such-tool-xyz --run'; run "$CHECK" p.md; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK B12"*"no-such-tool-xyz"*"not installed"* ]]
+  _ac 'bash scripts/ghost.sh'; run "$CHECK" p.md; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK B12"*"scripts/ghost.sh"* ]]
+  _ac 'X=1 ./src/a.py'; run "$CHECK" p.md; [[ "$output" != *"BLOCK B12"* ]]
+  # compound commands: every simple command counts, through env, timeout, bash -c and a cd
+  local c; for c in 'cd src && no-such-tool-xyz' 'env X=1 no-such-tool-xyz' "bash -lc 'no-such-tool-xyz --a'" 'timeout -s KILL 5 no-such-tool-xyz' 'true; ! no-such-tool-xyz' 'cd src && ./ghost.py'; do
+    _ac "$c"; run "$CHECK" p.md; echo "$c → $output" | grep B12; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK B12"* ]]
+  done
+  _ac 'cd src && ./a.py | grep -q x'; run "$CHECK" p.md; [[ "$output" != *"BLOCK B12"* ]]
+  # shapes real plans use (WAN P112, agents P003/P006, AID P111): a | inside quotes, 2>&1, $(...), $((...))
+  for c in '! grep -rn \"a\\|b\" src --include=*.py' 'X=1 bash src/a.py >/dev/null 2>&1 && true' 'test $(grep -c x src/a.py) -eq 2' 'n=0; for f in a b; do c=$(grep -c x src/a.py); n=$((n+c)); done; [ $n -ge 0 ]'; do
+    _ac "$c"; run "$CHECK" p.md; echo "$c → $output" | grep B12 || true; [[ "$output" != *"BLOCK B12"* ]]
+  done
+  _ac 'test -n $AID_PLUGIN_PATH'; run "$CHECK" p.md; [ "$status" -eq 0 ]; [[ "$output" == *"WARN  B12"*"AID_PLUGIN_PATH"* ]]
+  # the brief's points are measured at the close, so they are checked too
+  _plan p.md strict; local z; z="$(awk '/^zadani:/ {print $2; exit}' p.md)"
+  printf '\n- [ ] AC9: x\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "no-such-tool-xyz"\n  ```\n' >> "$z"
+  run "$CHECK" p.md; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK B12 ${TEST_DIR}/${z}"* || "$output" == *"BLOCK B12"*"${z}"* ]]
+}
 @test "plan-check B9: a new test file sharing a basename with an existing one warns" {
   mkdir -p tests/other; printf 'ok\n' > tests/other/test_a.py; git add -A
   _plan p.md strict '- Depends on: Step 1' '- Test: `tests/new/test_a.py` — cases' '- Create: `src/new.py` — new'

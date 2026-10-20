@@ -509,8 +509,125 @@ if (( HAS_REPO )); then
     refs="$(grep -rIlE --exclude-dir=.git --exclude-dir=.aid-o --exclude-dir=node_modules --exclude-dir=.aid-worktrees --exclude-dir=.pytest_cache -- "$pat" "$ROOT" 2>/dev/null | grep -vF -- "$(_abs "$f")" | grep -vF -- "$PLAN" | sed "s#^${ROOT}/##" | grep -vxF -f <(printf '%s\n' "$ALL_FILES_PATHS") | grep -vE '^(docs/|CHANGELOG|CLAUDE\.md|\.pytest_cache)' | head -5 | tr '\n' ' ')"
     [[ -n "$refs" ]] && _warn "B10" "$PLAN" "\`${f}\` is to be removed but \`${stem}\` is still referenced by: ${refs}"
   done
+  # _b12_progs <cmd> — "<program>\t<script path or empty>" for every simple command of a cmd point, quote-aware
+  # (shlex): split on && || ; | ( ), through VAR=value, env, timeout, nice/command/exec/time, into bash|sh -c
+  # '<inner>', with a cd moving where later relative paths are. Unbalanced quotes: nothing is reported.
+  _B12_PY='
+import re, shlex, sys
+SKIP = {"cd","test","[","[[","]]","]","{","}","if","fi","for","while","until","done","then","do","else","elif","case","esac",
+        "true","false","echo","printf","export","set","source",".","exit","return","read","shift","local","!","in"}
+INTERP = {"bash","sh","python","python3","node","bats"}
+def flat(cmd):
+    # $(...) and $((...)) become one word (what runs inside them is not checked), redirections go
+    out, i, n = [], 0, len(cmd)
+    while i < n:
+        if cmd.startswith("$(", i):
+            d, j = 0, i + 1
+            while j < n:
+                if cmd[j] == "(": d += 1
+                elif cmd[j] == ")":
+                    d -= 1
+                    if d == 0: break
+                j += 1
+            out.append("SUBST"); i = j + 1; continue
+        out.append(cmd[i]); i += 1
+    t = "".join(out)
+    t = re.sub(r"\d*(>>?|<)&\d+-?", " ", t)       # 2>&1, >&2
+    return re.sub(r"&>>?", ">", t)                  # &>file → >file
+def progs(cmd, cwd):
+    cmd = flat(cmd)
+    lex = shlex.shlex(cmd, posix=True, punctuation_chars=";&|()"); lex.whitespace_split = True
+    try: toks = list(lex)
+    except ValueError: return
+    cmds = [[]]
+    for t in toks:
+        if t and set(t) <= set(";&|()"): cmds.append([]); continue
+        cmds[-1].append(t)
+    for w in cmds:
+        k, n = 0, len(w)
+        while k < n:
+            x = w[k]
+            if x in ("!", "{", "then", "do", "else", "time", "nice", "command", "exec"): k += 1
+            elif re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", x): k += 1
+            elif x == "env":
+                k += 1
+                while k < n and (w[k].startswith("-") or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", w[k])): k += 1
+            elif x == "timeout":
+                k += 1
+                while k < n and w[k].startswith("-"):
+                    k += 2 if w[k] in ("-s", "-k") else 1
+                k += 1
+            else: break
+        if k >= n: continue
+        prog = w[k]
+        if prog == "cd":
+            if k + 1 < n and not w[k + 1].startswith(("/", "$", "-")): cwd = (cwd + "/" if cwd else "") + w[k + 1].removeprefix("./")
+            continue
+        if prog in SKIP or prog.startswith("$"): continue
+        if prog in ("bash", "sh") and k + 2 < n and re.match(r"^-[a-z]*c$", w[k + 1]):
+            progs(w[k + 2], cwd); continue
+        arg = ""
+        if prog in INTERP and k + 1 < n and "/" in w[k + 1] and not w[k + 1].startswith(("-", "$")): arg = w[k + 1]
+        def at(p):
+            if p.startswith("/") or not cwd: return p.removeprefix("./")
+            return cwd + "/" + p.removeprefix("./")
+        if "/" in prog: prog = "./" + at(prog) if not prog.startswith("/") else prog
+        if arg and not arg.startswith("/"): arg = at(arg)
+        print(prog + "\t" + arg)
+progs(sys.argv[1], "")
+'
+  _b12_progs() { python3 -c "$_B12_PY" "$1"; }
+  # The project's rule, from the STATE root (a plan checked in a dependency's worktree is still this project's).
+  _common="$(git -C "$ROOT" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  EXEC_YAML="${_common%/.git}/.aid-o/config/execution.yaml"; [[ -f "$EXEC_YAML" ]] || EXEC_YAML="$ROOT/.aid-o/config/execution.yaml"
+  # B11 — the project's own plan checks (execution.yaml plan_checks: [{name, command, timeout_s}]) over the
+  # paths the plan creates, on stdin and in $AID_PLAN_NEW_PATHS (WAN P110/P111: tests named after the plan
+  # passed CP1 and failed the project's test_tier_lint in the run, where only the PM could rename them).
+  if [[ -f "$EXEC_YAML" ]] && [[ "$(yq -r '.plan_checks // [] | length' "$EXEC_YAML" 2>/dev/null)" -gt 0 ]]; then
+    NEW_PATHS="$(for i in "${!FB_LN[@]}"; do [[ "${FB_VERB[$i]}" == Create || "${FB_VERB[$i]}" == Test ]] && printf '%s\n' ${FB_PATHS[$i]}; done | sort -u)"
+    _np="$(mktemp)"; printf '%s\n' "$NEW_PATHS" | grep -v '^$' > "$_np"
+    while IFS=$'\t' read -r pc_name pc_cmd pc_t; do
+      [[ -n "$pc_cmd" ]] || { _block "B11" "$EXEC_YAML" "plan_checks entry '${pc_name}' has no command"; continue; }
+      [[ "$pc_t" =~ ^[1-9][0-9]*$ ]] || pc_t=60; (( pc_t > 300 )) && pc_t=300
+      pc_out="$(cd "$ROOT" && AID_PLAN_FILE="$PLAN" AID_PLAN_NEW_PATHS="$_np" timeout "$pc_t" bash -c "$pc_cmd" < "$_np" 2>&1)"; pc_rc=$?
+      if (( pc_rc == 124 )); then _block "B11" "$EXEC_YAML" "project plan check '${pc_name}' did not finish in ${pc_t} s"
+      elif (( pc_rc != 0 )); then _block "B11" "$PLAN" "project plan check '${pc_name}' refuses the plan (exit ${pc_rc}): $(tail -3 <<< "$pc_out" | tr '\n' ' ')"
+      fi
+    done < <(yq -r '.plan_checks[] | [(.name // "unnamed"), (.command // ""), ((.timeout_s // "") | tostring)] | @tsv' "$EXEC_YAML" 2>/dev/null)
+    rm -f "$_np"
+  fi
+  # B12 — a cmd point the measurement cannot run: its program is not here (and no step creates it), or it reads
+  # a variable the isolated measurement does not have (env -i keeps PATH, HOME, TMPDIR and verification_env).
+  VENV_KEYS="$(yq -r '.verification_env // {} | keys | .[]' "$EXEC_YAML" 2>/dev/null || true)"
+  VENV_PATH="$(yq -r '.verification_env.PATH // ""' "$EXEC_YAML" 2>/dev/null || true)"   # a project's own PATH for the measurement
+  [[ "$VENV_PATH" =~ ^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$ ]] && VENV_PATH="${!BASH_REMATCH[1]:-}"
+  # the points the close measures are the brief's (zadani:) as well as the plan's own
+  _zf="$(awk 'NR==1 && !/^---/ {exit} NR>1 && /^---/ {exit} /^zadani:/ {sub(/^zadani:[[:space:]]*/, ""); gsub(/"/, ""); print; exit}' "$PLAN")"
+  [[ -n "$_zf" && "$_zf" != /* ]] && _zf="${ROOT}/${_zf}"
+  _zf_alt="${_common%/.git}/${_zf#"${ROOT}/"}"; [[ -f "$_zf" ]] || _zf="$_zf_alt"
+  VP_ALL="$(printf '%s\n' "$VP_BLOCKS" | sed "s|^|${PLAN}\t|"; [[ -f "$_zf" ]] && _aid_vp_extract "$_zf" | sed "s|^|${_zf}\t|")"
+  while IFS=$'\t' read -r vf ln rec; do
+    [[ -n "${ln:-}" ]] || continue
+    IFS=$'\x1f' read -r _ _ typ c _ _ _ pt <<< "$rec"
+    [[ "$typ" == cmd && -n "$c" ]] || continue
+    [[ -z "$pt" || "$pt" =~ ^[1-9][0-9]*$ ]] && { [[ -z "$pt" ]] || (( pt <= 1800 )); } \
+      || _block "B12" "$vf:$ln" "timeout: ${pt} — a point's limit is whole seconds up to 1800"
+    while IFS=$'\t' read -r prog arg; do
+      case "$prog" in
+        */*) _known_path "${prog#./}" || _block "B12" "$vf:$ln" "cmd point runs \`${prog#./}\`, which does not exist and no step creates it" ;;
+        *) PATH="${VENV_PATH:-$PATH}" command -v "$prog" >/dev/null 2>&1 || _block "B12" "$vf:$ln" "cmd point runs \`${prog}\`, which is not installed here — the measurement would exit 127" ;;
+      esac
+      [[ -z "$arg" ]] || _known_path "$arg" || _block "B12" "$vf:$ln" "cmd point runs \`${arg}\`, which does not exist and no step creates it"
+    done < <(_b12_progs "$c")
+    for v in $(grep -oE '\$\{?[A-Za-z_][A-Za-z0-9_]*' <<< "$c" | tr -d '${' | sort -u); do
+      [[ "$v" =~ ^(PATH|HOME|TMPDIR|PWD|OLDPWD|RANDOM|LINENO|SECONDS|IFS|BASH_[A-Z_]*)$ ]] && continue
+      grep -qE "(^|[^A-Za-z0-9_])${v}=|for ${v} |read( -[a-z]+)* ${v}" <<< "$c" && continue   # set inside the command
+      _in_list "$v" "$VENV_KEYS" && continue
+      _warn "B12" "$vf:$ln" "cmd point reads \$${v}, which the isolated measurement does not set (declare it in verification_env or set it in the command)"
+    done
+  done <<< "$VP_ALL"
 else
-  _warn "B" "$PLAN" "no repository content under '${ROOT:-<none>}' — the plan-vs-repository checks (A5, A7, B1-B10) did not run"
+  _warn "B" "$PLAN" "no repository content under '${ROOT:-<none>}' — the plan-vs-repository checks (A5, A7, B1-B12) did not run"
 fi
 
 # ---------------------------------------------------------------------------

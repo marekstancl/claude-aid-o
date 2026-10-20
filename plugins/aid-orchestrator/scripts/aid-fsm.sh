@@ -1219,6 +1219,25 @@ _fsm_refusal_next() {
     *) return 1 ;;
   esac
   printf 'next: %s\n(pipeline.md §When AID refuses: %s)\n' "$next" "$reason" >&2
+  aid_refusal_class_line "$reason" >&2 || true
+}
+
+# aid_refusal_class <code> — the class of a refusal code from defaults/refusal-classes.yaml (P117): who acts on
+# it in an --auto run. Unknown or unreadable = pm (fail-closed). aid_refusal_class_line prints "class: …".
+aid_refusal_class() {
+  local f="${SCRIPT_DIR}/../defaults/refusal-classes.yaml" c
+  c="$(C="$1" yq -r '.codes[strenv(C)].class // ""' "$f" 2>/dev/null)" || c=""
+  printf '%s\n' "${c:-pm}"
+}
+aid_refusal_class_line() {
+  local c; c="$(aid_refusal_class "$1")"
+  case "$c" in
+    agent_fix|prevent) echo "class: ${c} — the agent fixes it and goes on; no question" ;;
+    agent_fix_then_stand_in) echo "class: ${c} — the agent fixes it; after a repeated failure the stand-in decides (aid-review-round.sh delegate)" ;;
+    stand_in) echo "class: ${c} — in an --auto run the stand-in decides (aid-review-round.sh delegate), not the PM" ;;
+    incident) echo "class: ${c} — a broken environment: fix it as named, then run again; nothing to decide" ;;
+    *) echo "class: ${c} — a protected impact: the PM decides" ;;
+  esac
 }
 
 # ─── P032 Step 3: Grandfather + Repeated-Fail Helpers ────────────────────
@@ -1509,9 +1528,8 @@ fsm_check_orphan_dispatches() {
     echo "ERROR: pending-dispatches.jsonl is malformed; refusing to advance step." >&2
     echo "  File: $pending_file" >&2
     echo "  jq error: $jq_stderr" >&2
-    echo "  Fix: inspect file, repair JSONL syntax, OR override:" >&2
-    echo "    aid-fsm.sh increment-step <state_file> --force --reason '<≥20 chars>' \\" >&2
-    echo "        --blocked-checks 'dispatch_orphan_complete'" >&2
+    echo "  Fix (no --force needed): bash ${SCRIPT_DIR}/aid-emit-dispatch.sh repair --evidence-dir $evidence_dir --reason '<what broke the ledger>'" >&2
+    echo "  then run the same increment-step again. (pipeline.md §When AID refuses: pending_file_malformed)" >&2
     fsm_emit_audit_log "fsm_orphan_dispatch_fail" \
       --evidence-dir "$evidence_dir" --reason "pending_file_malformed"
     die "pending_file_malformed: $pending_file"
@@ -1538,9 +1556,9 @@ fsm_check_orphan_dispatches() {
   done <<< "$orphan_focuses"
 
   echo "" >&2
-  echo "OR (PM-authorized override, audited):" >&2
-  echo "  aid-fsm.sh increment-step <state_file> --force --reason '<≥20 chars why this is acceptable>' \\" >&2
-  echo "      --blocked-checks 'dispatch_orphan_complete'" >&2
+  echo "OR, when the agent's run is lost (no output will come), withdraw the start — no --force needed:" >&2
+  echo "  bash ${SCRIPT_DIR}/aid-emit-dispatch.sh cancel --focus <focus> --evidence-dir $evidence_dir --reason '<why the run is lost>'" >&2
+  echo "  then dispatch the role again. (pipeline.md §When AID refuses: dispatch_orphan_complete)" >&2
 
   # P076 Step 13 — DISPATCH_ORPHANED is `ladder_entry: instruction`: no code here
   # writes the ladder record, the MESSAGE names the command that does — by RESOLVED

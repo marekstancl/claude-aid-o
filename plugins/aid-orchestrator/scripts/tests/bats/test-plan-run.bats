@@ -101,6 +101,16 @@ _page() { ( source "$PLUGIN_DIR/scripts/lib/aid-plan-summary.sh" && aid_plan_sum
   [ "$(jq -r 'keys[]' "$R/.aid-o/work/active-runs.json")" = "E-900-1_1" ]
 }
 
+@test "direct: a host where the close could measure no cmd point is refused before anything is created (no_isolation, P117)" {
+  mkdir -p "$R/fakebin"; printf '#!/bin/sh\nexit 1\n' > "$R/fakebin/unshare"; chmod +x "$R/fakebin/unshare"
+  PATH="$R/fakebin:$PATH" _run
+  echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"no_isolation"* && "$output" == *"util-linux"* ]]
+  [[ "$output" == *"class: incident"* || "$output" == *"When AID refuses: no_isolation"* ]]
+  ! git -C "$R" rev-parse -q --verify plan/P900 >/dev/null
+  [ ! -d "$EV" ]
+}
+
 @test "direct: init --direct records branch plan/<id> and creates no task/ branch" {
   _run_ok
   [ "$status" -eq 0 ]
