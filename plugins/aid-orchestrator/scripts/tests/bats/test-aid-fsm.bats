@@ -498,7 +498,7 @@ _p040_seed_increment_preconditions() {
 @test "increment-step: malformed pending-dispatches → fail loud + audit reason" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml"
   _p040_seed_increment_preconditions "$state_file"
-  printf '%s\n' 'this is not json {{{' > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
+  printf '%s\n' 'this is not json ]]]' > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
 
   run "$FSM" increment-step "$state_file"
   [ "$status" -ne 0 ]
@@ -511,7 +511,7 @@ _p040_seed_increment_preconditions() {
 @test "increment-step: malformed ledger → repair; orphan start → cancel; both advance without --force" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml" emit="${BATS_TEST_DIRNAME}/../../aid-emit-dispatch.sh"
   _p040_seed_increment_preconditions "$state_file"
-  printf '%s\n' 'this is not json {{{' '{"ts":"2026-05-31T00:00:00Z","event":"start","focus":"cp2-step-1","agent_id":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"x","expected_duration_max":60}' \
+  printf '%s\n' 'this is not json ]]]' '{"ts":"2026-05-31T00:00:00Z","event":"start","focus":"cp2-step-1","agent_id":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"x","expected_duration_max":60}' \
     > "$TEST_EVIDENCE_DIR/pending-dispatches.jsonl"
 
   run "$FSM" increment-step "$state_file"

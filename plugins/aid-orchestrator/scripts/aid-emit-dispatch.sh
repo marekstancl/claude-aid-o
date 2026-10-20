@@ -337,14 +337,15 @@ cmd_repair() {
   starts="$(while IFS= read -r line || [[ -n "$line" ]]; do
       [[ -n "$line" ]] || continue
       jq -e 'type == "object" and (.event | type == "string") and (.ts | type == "string")' <<< "$line" >/dev/null 2>&1 && continue
-      # not a start when it is no record at all, or ONE record (one brace) whose event is readable and is another;
-      # a record cut before its event's name, or two records glued on one line, may hold a start
-      [[ "$line" =~ ^[[:space:]]*\{ ]] || continue
+      # every start record holds a brace: a damaged line without one is no start and is moved aside; a line that
+      # is one whole-looking start with a readable focus is withdrawn by that name; anything else that holds a
+      # brace may hide a cut or glued start and goes to a person — nothing is guessed (Codex review rounds 2-5)
+      [[ "$line" == *"{"* ]] || continue
       _braces="${line//[^\{]/}"
-      (( ${#_braces} == 1 )) || { echo '?'; continue; }   # glued records: a readable focus may be the other record's
-      if ! grep -qE '"event"[[:space:]]*:[[:space:]]*"[a-z_]+"' <<< "$line" || grep -qE '"event"[[:space:]]*:[[:space:]]*"start"' <<< "$line"; then
-        f="$(grep -oE '"focus"[[:space:]]*:[[:space:]]*"[^"]+"' <<< "$line" | sed -E 's/.*"([^"]+)"$/\1/' | head -1)"; echo "${f:-?}"
-      fi
+      if (( ${#_braces} == 1 )) && [[ "$line" =~ ^[[:space:]]*\{ ]] && grep -qE '"event"[[:space:]]*:[[:space:]]*"start"' <<< "$line" \
+         && (( $(grep -oE '"(event|focus)"[[:space:]]*:' <<< "$line" | wc -l) == 2 )); then
+        f="$(grep -oE '"focus"[[:space:]]*:[[:space:]]*"[^"]+"' <<< "$line" | sed -E 's/.*"([^"]+)"$/\1/')"; echo "${f:-?}"
+      else echo '?'; fi
     done < "$pending" | sort -u)"
   # a start whose focus cannot be read cannot be withdrawn by name — a person looks at it (Codex review round 2)
   [[ $'\n'"$starts"$'\n' == *$'\n''?'$'\n'* ]] \

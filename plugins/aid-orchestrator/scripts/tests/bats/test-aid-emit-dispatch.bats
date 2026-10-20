@@ -291,8 +291,12 @@ teardown() {
   printf '%s\n' '{"ts":"2026-10-20T10:00:00Z","event":"complete","focus":"x"}{"ts":"2026-10-20T10:01:00Z","event":"sta' > "$ev/pending-dispatches.jsonl"
   run bash "$SCRIPT" repair --evidence-dir "$ev" --reason "a killed emit left half a line"
   [ "$status" -ne 0 ]; [[ "$output" == *"focus cannot be read"* ]]
-  # a damaged complete is no start: moved aside without a focus
-  printf '%s\n' '{"ts":"2026-10-20T10:01:00Z","event":"complete","focus":"x"' > "$ev/pending-dispatches.jsonl"
+  # one brace, a readable other event and a cut start after it: still a person's call
+  printf '%s\n' '{"event":"complete"}"event":"sta' > "$ev/pending-dispatches.jsonl"
+  run bash "$SCRIPT" repair --evidence-dir "$ev" --reason "a killed emit left half a line"
+  [ "$status" -ne 0 ]; [[ "$output" == *"focus cannot be read"* ]]
+  # damage without a brace holds no start: moved aside without a focus
+  printf '%s\n' 'Z:00","event":"complete","focus":"x"' > "$ev/pending-dispatches.jsonl"
   run bash "$SCRIPT" repair --evidence-dir "$ev" --reason "a killed emit left half a line"
   [ "$status" -eq 0 ]
 }
