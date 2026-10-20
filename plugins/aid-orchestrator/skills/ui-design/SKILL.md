@@ -126,6 +126,12 @@ Zápis `aid-ui-quality.py self <projekt> --place <místo> --file <kontrola.json>
 na otisk podkladů místa; `round` bez platné kontroly nad touto verzí nespustí. **Vlastní známky výrobce se nepíšou**
 (P118: v pilotu vždy „9“, role 4,9-8,8 - nic nerozhodovaly).
 
+## Opravy po přijatém kole: delta kolo, ne znovuotevření (P118, místa kromě hotového webu)
+
+Když místo prošlo a výrobce verzi ještě opraví (nálezy přijatého kola), smyčka hlásí `delta`: jedno další kolo nad
+opravenou verzí, role mají celou paměť nálezů. Teprve pak verdikt místa, aby stál na tom, co se předává. Znovuotevření
+(`reopen`) je jen na přání PM; ani ono rolím paměť nemaže (P116 kolo 5: role bez paměti hodnotily místo jako nové).
+
 ## Co role nechají na klientovi, dodá klient-agent (P116, PM 19. 10. 2026, všechna místa)
 
 Nález s `owner: client` a položky readiness („musí dodat klient“) nečekají na PM. Hned po kole (po triage) je

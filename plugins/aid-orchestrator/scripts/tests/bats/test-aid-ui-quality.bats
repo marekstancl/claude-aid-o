@@ -232,7 +232,7 @@ work() {   # the agent works: one assistant turn in its transcript, now
   python3 "$Q" reopen "$P" --reason "PM: odstup od čar" >/dev/null; [ "$(dec)" = round ]; ls "$P/.aid-ui/critic/verdicts/"*.json >/dev/null
   echo '<html lang="cs"><body>chleba, znovu</body></html>' > "$P/site/index.html"
   ans 9 9 minor; qround "$P" --web "$W" >/dev/null
-  jq -e '(.findings | length) == 0 and (.ratings | length) == 0' "$P/.aid-ui/critic/rounds/4/history-owner.json" >/dev/null   # the memory restarts at the reopen
+  jq -e '(.findings | length) > 0 and (.ratings | length) > 0' "$P/.aid-ui/critic/rounds/4/history-owner.json" >/dev/null   # P118: the memory survives the reopen
   for r in owner tech; do python3 "$Q" triage "$P" "r4-$r-f1" rejected_with_reason --reason x >/dev/null; done
   python3 "$Q" status "$P" | jq -e '.decision == "audit" and .best.round == 4 and .repair_rounds == 0' >/dev/null
 }
@@ -586,4 +586,24 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   # a quote that is not in the file is no valid answer; with no stand-in the run stops
   sed -i 's/close_limit(p)/close_market(p)/' "$P/src/execute.py"; echo '{"facts": [{"id": "x", "kind": "unknown", "statement": "y", "sources": [{"source": "src/execute.py:1", "quote": "nic takového tu není", "source_kind": "code"}]}]}' > "$T/ans-claude.json"
   run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"no valid answer from opus"* ]]
+}
+
+@test "delta (P118): fixes after an accepted place round give one more round over the fixed version, no reopen; the roles keep their memory" {
+  python3 "$SC/aid-ui-critic.py" freeze "$P" --type web-local --place sdeleni >/dev/null
+  cat > "$T/bin/codex" <<SH
+#!/usr/bin/env bash
+[[ "\$1" == --version ]] && exit 0
+p="\$(cat)"; role=owner; grep -q "### $(yq -r '.criteria[0].id' "$K/web-local.tech.sdeleni.yaml") " <<<"\$p" && role=tech
+python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
+SH
+  chmod +x "$T/bin/codex"
+  pans sdeleni 9
+  run qround "$P" --place sdeleni; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  pcycle sdeleni
+  [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = verdict ]   # accepted, the version unchanged
+  f="$(python3 "$SC/aid-ui-critic.py" bundle-files "$P" --place sdeleni | head -1)"; echo "Doplněno podle nálezu." >> "$P/$f"
+  run python3 "$Q" status "$P" --place sdeleni; jq -e '.decision == "delta" and (.why | contains("rate it once"))' <<<"$output" >/dev/null || { echo "$output"; return 1; }
+  run qround "$P" --place sdeleni; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.round == 2' <<<"${lines[-1]}" >/dev/null
+  jq -e '[.findings[].id] | index("r1-owner-f1") != null' "$P/.aid-ui/critic/rounds/sdeleni/2/history-owner.json" >/dev/null
 }

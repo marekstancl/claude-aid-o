@@ -138,9 +138,9 @@ def unsupplied(p, place):
 
 
 def place_memory(p, role, place):
-    """{place, findings, ratings} of one role at one place since its reopen; None when the role has not rated it."""
-    since = reopened_at(p, place)
-    rs = [r for r in rounds(p, place) if r.get("at", "") >= since and not r.get("audit")]
+    """{place, findings, ratings} of one role at one place - every round, a reopen included (P118: a role that forgot
+    what it had found rated the reopened place as new, 7.6 -> 6.1); None when the role has not rated it."""
+    rs = [r for r in rounds(p, place) if not r.get("audit")]
     if not rs:
         return None
     finds = [{"id": f["id"], "round": r["n"], "criterion": f["criterion"], "where": f.get("where"), "text": f["text"],

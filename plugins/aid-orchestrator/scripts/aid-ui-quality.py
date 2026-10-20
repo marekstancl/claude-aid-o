@@ -33,7 +33,9 @@ rounds/<n>/{owner,tech}/ (the ratings), rounds/<n>/history-<role>.json (the memo
       method which procedure made it (a step, an adopted skill) or "z hlavy: <why none>" - the round report to the PM.
   status <project>
       {decision, why, rounds, repair_rounds, scores, best} with decision one of
-      triage | supply | fix | round | close | audit | stop:conflict | stop:stagnation | stop:round_cap | done.
+      triage | supply | fix | round | delta | close | audit | verdict | stop:conflict | stop:stagnation | stop:round_cap | done.
+      delta (P118, a place other than web): the round after acceptance was fixed and the version changed - one more
+      round over it is allowed (the roles keep their memory), then the verdict over what is handed over.
       supply (P116, not in the launch loop): after the triage, an item the last round left to the client has no
       answer of the client role yet (aid-ui-client.py supply); a client finding the client answered (supplied or
       decided) goes back to triage - the agent takes it up; a missing one stays blocked for the PM.
@@ -387,6 +389,11 @@ def status(p):
             return dict(out, decision="close", why="%s (best: round %d, owner %.1f, tech %.1f); set %s superseded with the reason, then audit"
                         % ("both roles reached the goal" if last["score"]["accepted"] else "%d repair rounds done" % ROUND_CAP,
                            target["n"], target["score"]["owner"], target["score"]["tech"], ", ".join(todo)))
+        if PLACE != "web" and site_sha(p) != rs[-1]["site_sha"] and any(f.get("evidence") for f in rs[-1]["findings"]):
+            # P118: the version was fixed after the accepted round - one delta round over it (the roles keep their
+            # memory), never a reopen that forgets; the verdict then stands on what is handed over
+            return dict(out, decision="delta", why="place %s: the version changed after the accepted round %d (its fixes); rate it once (round), then the verdict"
+                        % (PLACE, rs[-1]["n"]))
         if PLACE != "web":
             return dict(out, decision="verdict", why="place %s: decide it from round %d - aid-ui-critic.py place-verdict, then aid-ui-state.sh place-record"
                         % (PLACE, rs[-1]["n"]))
@@ -549,7 +556,7 @@ def merge(runs):
 
 def do_round(p, web):
     st = status(p)
-    if st["decision"] != "round":
+    if st["decision"] not in ("round", "delta"):
         die("no round now: %s (%s)" % (st["decision"], st["why"]))
     if PLACE in ("web", "struktura") and not web:
         die("--web <url>: the %s is rated live (%s)" % (LABEL_URL[PLACE], "the served site" if PLACE == "web" else "the skeleton address"), 2)
