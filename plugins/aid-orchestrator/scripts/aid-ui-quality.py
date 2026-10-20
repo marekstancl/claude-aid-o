@@ -147,6 +147,7 @@ def site_sha(p):
 
 
 # ---------------------------------------------------------------- the producer's own check before every round (PM 18. 10. 2026)
+PLUGIN_AT_START = None   # P118: the plugin's version when the round began
 LAUNCH = False   # set only by this command line (launch | --launch), never by the environment
 REQ_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
@@ -431,21 +432,24 @@ def round_costs(p, rs):
             k = "agent" if x.get("provider") == "agent" else (x.get("purpose") or "?").split(":")[0]
             by[k] = round(by.get(k, 0) + (x.get("usd") or 0), 4)
         # P118: where the time went - the roles' calls, the verifier's runs, the gate's runs; the rest is the producer
+        clip = lambda s0, e0: (max(a, s0), min(end, e0))   # every interval inside this round's window, never negative
         crit = [costs.ts(x.get("at")) for x in rows if (x.get("purpose") or "").startswith("critic") and costs.ts(x.get("at")) - a < 3600]
-        roles = (max(crit) - a) / 60 if crit else 0
-        ver = sum(max(0, costs.ts(v.get("at")) - costs.ts(v.get("started"))) for v in memory.verify_records_all(p, PLACE)
-                  if v.get("started") and a <= costs.ts(v.get("started")) < end) / 60
-        gate = 0
+        iv = [("roles",) + clip(a, max(crit))] if crit else []
+        iv += [("verify",) + clip(costs.ts(v["started"]), costs.ts(v.get("at"))) for v in memory.verify_records_all(p, PLACE) if v.get("started")]
         try:
-            for line in open(os.path.join(p, ".aid-ui", "gate-times.jsonl"), encoding="utf-8"):
-                g = json.loads(line)
-                if a <= costs.ts(g["started"]) < end:
-                    gate += (costs.ts(g["ended"]) - costs.ts(g["started"])) / 60
-        except (OSError, ValueError, KeyError):
+            iv += [("gate",) + clip(costs.ts(g["started"]), costs.ts(g["ended"])) for g in (json.loads(x) for x in open(os.path.join(p, ".aid-ui", "gate-times.jsonl"), encoding="utf-8")) if g.get("started") and g.get("ended")]
+        except (OSError, ValueError):
             pass
+        ph, taken = {"roles": 0.0, "verify": 0.0, "gate": 0.0}, []
+        for k, s0, e0 in sorted(iv, key=lambda x: x[1]):   # overlaps counted once, to the phase that started first
+            for ts0, te0 in taken:
+                if s0 < te0 and e0 > ts0:
+                    s0 = max(s0, te0)
+            if e0 > s0:
+                ph[k] += (e0 - s0) / 60; taken.append((s0, e0))
         total = (end - a) / 60
         out.append({"usd": round(sum(by.values()), 2), "by": by, "minutes": round(total),
-                    "phases": {"roles": round(roles, 1), "verify": round(ver, 1), "gate": round(gate, 1), "producer": round(max(0, total - roles - ver - gate), 1)},
+                    "phases": {k: round(v, 1) for k, v in ph.items()} | {"producer_and_waiting": round(max(0, total - sum(ph.values())), 1)},
                     "agent_measured": any(x.get("provider") == "agent" for x in rows)})
     return out
 
@@ -575,6 +579,11 @@ def merge(runs):
 
 
 def do_round(p, web):
+    global PLUGIN_AT_START
+    try:
+        PLUGIN_AT_START = json.load(open(os.path.join(HERE, "..", ".claude-plugin", "plugin.json"), encoding="utf-8")).get("version")
+    except (OSError, ValueError):
+        PLUGIN_AT_START = None
     st = status(p)
     if st["decision"] not in ("round", "delta"):
         die("no round now: %s (%s)" % (st["decision"], st["why"]))
@@ -614,6 +623,8 @@ def do_round(p, web):
         plug = json.load(open(os.path.join(HERE, "..", ".claude-plugin", "plugin.json"), encoding="utf-8")).get("version")
     except (OSError, ValueError):
         plug = None
+    if PLUGIN_AT_START is not None and plug != PLUGIN_AT_START:
+        die(f"the plugin changed during the round ({PLUGIN_AT_START} -> {plug}); nothing recorded - run the round again on one version")
     rec = {"n": n, "at": at, "place": PLACE, "delta": st["decision"] == "delta", "plugin": plug, "answers": shas, "web": web, "site_sha": runs["owner"]["site_sha"], "frozen_sha": runs["owner"]["frozen_sha"],
            "provider": {r: runs[r].get("provider") for r in ROLES}, "score": score, "findings": finds, "readiness": score["readiness"],
            "task_test": task_row(p), "usd_equiv": usd_since(p, at)}
@@ -865,6 +876,9 @@ def brief(p):
     L += ["", "## Otevřené body ověřovatele nad touto verzí", ""] + ([f"- {o.get('where')}: {o.get('what')} ({o.get('why') or ''})" for o in opn] or ["- žádné (nebo ověřovatel nad touto verzí neběžel)"])
     try:
         q = json.load(open(os.path.join(p, ".aid-ui", "quick", "result.json"), encoding="utf-8"))
+        msha = hashlib.sha256(open(model, "rb").read()).hexdigest() if os.path.isfile(model) else None
+        if q.get("model_sha256") != msha:
+            raise ValueError("the quick check ran on another model")   # never red rows of an older version
         red = [r for r in q.get("rows") or [] if r.get("status") != "pass"]
         L += ["", "## Červené řádky rychlé kontroly", ""] + ([f"- {r['check']} {r['page']} {r.get('state') or ''}: {str(r.get('detail') or '')[:160]}" for r in red[:30]] or ["- žádné"])
     except (OSError, ValueError):

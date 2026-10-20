@@ -71,9 +71,11 @@ const sha = f => createHash('sha256').update(fs.readFileSync(f)).digest('hex');
 // P118: one artifact per run - the site (and an app's model and scenarios) as they were when the run began; a run
 // whose version changed under it writes no result (a gate over half the old and half the new version proves nothing)
 const treeSha = d => { const h = createHash('sha256'); const walk = x => { if (!fs.existsSync(x)) return; for (const e of fs.readdirSync(x, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-  const f = path.join(x, e.name); if (e.isDirectory()) walk(f); else if (e.isFile()) h.update(path.relative(d, f) + '\0' + sha(f) + '\n'); } }; walk(d); return h.digest('hex'); };
+  const f = path.join(x, e.name); const st_ = fs.statSync(f, { throwIfNoEntry: false }); if (!st_) continue;   // a link counts as its target
+  if (st_.isDirectory()) walk(f); else if (st_.isFile()) h.update(path.relative(d, f) + '\0' + sha(f) + '\n'); } }; walk(d); return h.digest('hex'); };
 const artifactNow = () => [treeSha(site), project ? treeSha(path.join(project, '.aid-ui', 'scenarios')) : '', project && fs.existsSync(path.join(project, 'docs/design/screens.json')) ? sha(path.join(project, 'docs/design/screens.json')) : ''].join('|');
 const ARTIFACT = artifactNow();
+fs.rmSync(path.join(out, 'result.json'), { force: true });   // a run that stops leaves no older result behind
 const inside = (root, f) => { const r = path.resolve(root, f); return r === root || r.startsWith(root + path.sep) ? r : null; };
 // site file behind a same-origin URL, or null (outside the site or not a file)
 function siteFile(u) {
@@ -1422,8 +1424,10 @@ for (const b of BRS) {
           const bad = [];
           for (const x of app.expect || []) {
             const el = page.locator(`[data-aid-action="${x.action}"]`).first();
-            const off = await el.evaluate(e => e.disabled === true || e.getAttribute('aria-disabled') === 'true' || (e.tagName === 'A' && !e.hasAttribute('href'))).catch(() => null);
-            const why = await el.evaluate(e => { const r = e.dataset.aidReason && document.getElementById(e.dataset.aidReason); return !!r && !r.hidden && r.textContent.trim().length > 0; }).catch(() => false);
+            // off = it cannot be used: a disabled control or a link without a target (aria-disabled alone is no stop)
+            const off = await el.evaluate(e => e.disabled === true || (e.tagName === 'A' && !e.hasAttribute('href'))).catch(() => null);
+            const rid = await el.getAttribute('data-aid-reason').catch(() => null);
+            const why = !!rid && await page.locator(`[id="${rid}"]`).first().isVisible().catch(() => false) && (await page.locator(`[id="${rid}"]`).first().innerText().catch(() => '')).trim().length > 0;
             if (off === null) bad.push(`${x.action}: na stránce není`);
             else if (off === x.enabled) bad.push(`${x.action}: v režimu ${m.state} ${x.enabled ? 'má jít, ale je vypnutá' : 'nemá jít, ale jde'}`);
             else if (off && !why) bad.push(`${x.action}: vypnutá bez viditelného důvodu`);
@@ -1436,10 +1440,12 @@ for (const b of BRS) {
         rowUrl = new URL(`${app.url.replace(/^\/+/, '')}?aid-test=1&stav=${task ? task + '.' : ''}${m.state}`, base).href;
         run = async page => {
           const loc = page.locator(task ? `[data-aid-task-state="${task}.${m.state}"]` : `[data-aid-screen="${scr}"] [data-aid-state="${m.state}"]`).first();
-          const busy = task || m.state !== 'loading' || await page.locator('main[aria-busy="true"]').count().catch(() => 0) > 0;   // P118: loading says it to a reader
+          // P118: the screen's loading state says it to a reader, and no other state keeps saying it
+          const busyNow = task ? null : await page.locator(`main[data-aid-screen="${scr}"][aria-busy="true"]`).count().catch(() => 0) > 0;
+          const busy = task || (m.state === 'loading' ? busyNow : !busyNow);
           const ok = busy && (await loc.isVisible().catch(() => false)) && (await loc.innerText().catch(() => '')).trim().length > 0;
           return { response: null, done: ok, why: ok ? '' : task ? `úloha ${task}: stav ${m.state} nejde v testovacím režimu vyvolat (?stav=${task}.${m.state}, viditelný data-aid-task-state s textem)`
-            : !busy ? `obrazovka ${scr}: stav načítání nemá na obsahu aria-busy="true"`
+            : !busy ? (m.state === 'loading' ? `obrazovka ${scr}: stav načítání nemá na obsahu aria-busy="true"` : `obrazovka ${scr}: stav ${m.state} nechává aria-busy="true"`)
             : `obrazovka ${scr} v testovacím režimu (?aid-test=1&stav=${m.state}) neukazuje stav ${m.state} (viditelný data-aid-state s textem)` };
         };
       } else if (flow) {
@@ -1540,7 +1546,8 @@ if (want('all_pages')) {
 rows.sort((a, b) => ROWAT.get(a) - ROWAT.get(b));
 if (artifactNow() !== ARTIFACT) { console.error('aid-ui-verify.mjs: the version (site, model or scenarios) changed during the run; no result - run the gate again on one version'); process.exit(1); }
 const result = { run_at: new Date().toISOString(), artifact: createHash('sha256').update(ARTIFACT).digest('hex'), build_id: st.build?.id, matrix, rows, fingerprints: fps, ...(APPV ? { model_sha256: APPV.model_sha256 } : {}) };
-fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 1));
+fs.writeFileSync(path.join(out, 'result.json.part'), JSON.stringify(result, null, 1));
+fs.renameSync(path.join(out, 'result.json.part'), path.join(out, 'result.json'));   // a reader never sees half a result
 const count = rows.reduce((a, r) => (a[r.status] = (a[r.status] || 0) + 1, a), {});
 console.log(`VERIFY: ${JSON.stringify(count)} -> ${path.join(out, 'result.json')}`);
 if (extra.length) console.log(`note: checks not named in this checks.yaml, not run: ${extra.join(', ')}`);

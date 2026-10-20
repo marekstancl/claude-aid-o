@@ -645,5 +645,5 @@ SH
   mkdir -p "$P/.aid-ui"; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   echo "{\"mode\": \"precheck\", \"started\": \"$now\", \"ended\": \"$now\", \"open\": 0}" >> "$P/.aid-ui/gate-times.jsonl"
   run python3 "$Q" status "$P"
-  jq -e '.history[0].cost.phases | (keys | sort) == ["gate", "producer", "roles", "verify"] and all(.[]; type == "number" and . >= 0)' <<<"$output" >/dev/null || { echo "$output" | jq -c '.history[0].cost'; return 1; }
+  jq -e '.history[0].cost.phases | (keys | sort) == ["gate", "producer_and_waiting", "roles", "verify"] and all(.[]; type == "number" and . >= 0)' <<<"$output" >/dev/null || { echo "$output" | jq -c '.history[0].cost'; return 1; }
 }
