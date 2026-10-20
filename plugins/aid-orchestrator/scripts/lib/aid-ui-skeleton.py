@@ -414,7 +414,7 @@ def app_page(m, scr, approved, fields, results, ends, shell):
     switch = "".join(f'<a href="?stav={k}" data-aid-stav-link="{k}">{t}</a> ' for k, t in STATES)
     res = "".join(f'<p class="vysledek" role="status" data-aid-result="{esc(t)}">{esc(e)}</p>' for t, e in results)
     retry = f'<p><a class="akce" href="{esc(url[sid])}" data-aid-retry>Zkusit znovu</a></p>'
-    tables = "".join(f'<table><caption>{esc(tb["caption"])}</caption><thead><tr>' + "".join(f'<th scope="col">{esc(c)}</th>' for c in tb["columns"])
+    tables = "".join(f'<table tabindex="0"><caption>{esc(tb["caption"])}</caption><thead><tr>' + "".join(f'<th scope="col">{esc(c)}</th>' for c in tb["columns"])
                      + "</tr></thead><tbody>" + "".join("<tr>" + "".join(f"<td>{esc(c)}</td>" for c in row) + "</tr>" for row in tb["rows"]) + "</tbody></table>"
                      for tb in scr.get("tables") or [])
     first_mode = (m.get("modes") or [{}])[0].get("id")

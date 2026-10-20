@@ -587,7 +587,7 @@ app_handover() {
   mutate '.values = {cena: {value: "120", source: "ukázka"}} | .screens[2].tables = [{caption: "Úrovně místo grafu", columns: ["Úroveň", "Cena"], rows: [["vstup", "{cena}"]]}]'
   run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   python3 "$SK" build "$APP" >/dev/null
-  grep -q '<table><caption>Úrovně místo grafu</caption><thead><tr><th scope="col">Úroveň</th><th scope="col">Cena</th></tr></thead><tbody><tr><td>vstup</td><td>120</td></tr>' "$APP/site/detail/index.html"
+  grep -q '<table tabindex="0"><caption>Úrovně místo grafu</caption><thead><tr><th scope="col">Úroveň</th><th scope="col">Cena</th></tr></thead><tbody><tr><td>vstup</td><td>120</td></tr>' "$APP/site/detail/index.html"
   mutate '.screens[2].tables[0].rows += [["cíl"]] | .screens[2].tables[0].rows[0][1] = "{neni}"'
   run python3 "$SCR" check "$APP"
   [ "$status" -eq 1 ]; [[ "$output" == *"nemá tolik buněk"* ]]; [[ "$output" == *"tables/0/rows/0/1"* ]]
