@@ -123,10 +123,18 @@ mutate() { jq "$1" "$M" > "$T/m.json" && mv "$T/m.json" "$M"; }
 
 # app_proj [variant json] - a studio project (state_setup) of kind webapp with the fixture model; places off (the
 # place rules have their own suite) and step 1 options all false
+# with_facts <project> - an existing app's agreed facts (P118) and the model's tasks citing them
+with_facts() {
+  mkdir -p "$1/src" "$1/docs/design"
+  printf 'def delete_note(n):\n    db.delete(n)\n' > "$1/src/app.py"
+  echo '{"facts": [{"id": "mazani", "kind": "observed_current", "statement": "Poznámka se smaže z databáze.", "sources": [{"source": "src/app.py:2", "quote": "db.delete(n)", "source_kind": "code"}], "agreed_by": ["codex", "opus"]}], "open": [], "dropped": []}' > "$1/docs/design/app-facts.json"
+  jq '(.tasks[] | .facts) = ["mazani"]' "$1/docs/design/screens.json" > "$1/docs/design/m.json" && mv "$1/docs/design/m.json" "$1/docs/design/screens.json"
+}
 app_proj() {
   state_setup
   jqw --argjson v "${1:-{\"type\":\"webapp\",\"brand\":\"none\",\"local\":false\}}" '.variant = $v | .places = false | .options = {vision: false, seo: false, identity: false}'
   mkdir -p "$PROJ/docs/design"; cp "$FIXA/docs/design/screens.json" "$PROJ/docs/design/screens.json"
+  [[ "${1:-}" != *'"existing":true'* ]] || with_facts "$PROJ"
   MSHA="$(sha256sum "$PROJ/docs/design/screens.json" | cut -d' ' -f1)"
 }
 # ans_by <client|agent> <id> <kind> <target> [decision] - the question answered with the agent token (not the PM's page)
@@ -300,6 +308,7 @@ base_proj() {
   cp "$BATS_TEST_DIRNAME/../fixtures/aid-ui/app-existing/tasks.json" "$APP/.aid-ui/baseline/tasks.json"
   BSHA="$(sha256sum "$APP/.aid-ui/baseline/tasks.json" | cut -d' ' -f1)"
   echo '{"variant": {"type": "webapp", "existing": true}, "answers": {}}' > "$APP/docs/design/brand-state.json"
+  with_facts "$APP"
 }
 st_set() { jq "$1" "$APP/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$APP/docs/design/brand-state.json"; }
 # approve_list [by] - the state as record-answer leaves it after the PM's (or another's) approval of the list

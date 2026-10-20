@@ -40,6 +40,7 @@ SH
 p="\$(cat)"; role=owner; grep -q "$(yq -r '.criteria[0].id' "$K/web-local.tech.yaml")" <<<"\$p" && role=tech
 grep -q "# Co po tobě studio chce" <<<"\$p" && role=supply
 grep -q "nezávislý ověřovatel verze" <<<"\$p" && role=verify
+grep -q "^Jsi soudce" <<<"\$p" && role=judge
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":100000,"cached_input_tokens":0,"output_tokens":1000}}))' "$T/ans-\$role.json"
 SH
   chmod +x "$T/bin/"*
@@ -561,13 +562,17 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   printf 'def on_rejected_sl(p):\n    close_market(p)\n    pause()\n' > "$P/src/execute.py"
   printf '# Roadmapa\nOdmítnutý SL → okamžité zavření marketem + alert.\n' > "$P/docs/content/roadmap.md"
   F1='{"id": "sl-odmitnut", "kind": "observed_current", "statement": "Odmítnutý SL appka zavře trhem a pozastaví se.", "conditions": "SL nejde nastavit", "result": "zavření a pauza", "unwanted": "pozice bez SL", "sources": [{"source": "src/execute.py:1-3", "quote": "close_market(p)", "source_kind": "code"}]}'
-  F2='{"id": "zavreni-sl", "kind": "required_target", "statement": "Při odmítnutém SL zavřít marketem a poslat alert.", "sources": [{"source": "src/execute.py:2", "quote": "close_market(p)", "source_kind": "code"}]}'
+  F2='{"id": "zavreni-sl", "kind": "observed_current", "statement": "Když SL nejde nastavit, appka pozici zavře trhem a pozastaví se.", "sources": [{"source": "src/execute.py:2", "quote": "close_market(p)", "source_kind": "code"}]}'
   F3='{"id": "jen-codex", "kind": "assumption", "statement": "Alert jde i do Telegramu.", "sources": [{"source": "docs/content/roadmap.md:2", "quote": "zavření marketem + alert", "source_kind": "roadmap"}]}'
   echo "{\"facts\": [$F1, $F3]}" > "$T/ans-owner.json"   # the Codex stub answers what the owner file holds for a prompt without the tech rubric
   printf '#!/usr/bin/env bash\ncat >/dev/null; python3 -c '"'"'import json,sys; print(json.dumps({"result": open(sys.argv[1]).read(), "usage": {}}))'"'"' "%s"\n' "$T/ans-claude.json" > "$T/bin/claude"
   echo "{\"facts\": [$F2]}" > "$T/ans-claude.json"
+  echo '{"pairs": [{"n": 0, "same": false, "why": "jeden mluví o alertu"}]}' > "$T/ans-judge.json"   # same lines, different claims: both stay open
   run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  jq -e '(.facts | map(.id)) == ["sl-odmitnut"] and .facts[0].agreed_by == ["codex", "opus"] and (.open | map(.fact.id)) == ["jen-codex"]' "$P/docs/design/app-facts.json" >/dev/null
+  jq -e '(.facts | length) == 0 and ([.open[].fact.id] | sort) == ["jen-codex", "sl-odmitnut", "zavreni-sl"]' "$P/docs/design/app-facts.json" >/dev/null
+  echo '{"pairs": [{"n": 0, "same": true, "why": "totéž"}]}' > "$T/ans-judge.json"
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '(.facts | map(.id)) == ["sl-odmitnut"] and .facts[0].agreed_by == ["codex", "opus"] and (.open | map(.fact.id)) == ["jen-codex"]' "$P/docs/design/app-facts.json" >/dev/null || { jq -c '[.facts[].id, [.open[].fact.id]]' "$P/docs/design/app-facts.json"; return 1; }
   # the model of an existing app: an open question and a writing task without facts are refused
   mkdir -p "$P/docs/design"; cp "$SC/tests/fixtures/aid-ui/app/docs/design/screens.json" "$P/docs/design/screens.json"
   run python3 "$SC/aid-ui-screens.py" check "$P"; [ "$status" -eq 1 ]

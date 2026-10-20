@@ -216,6 +216,15 @@ def violations(m, proj):
     # P118: the facts of an existing app (aid-ui-client.py facts): no open question, no quote that left its source
     facts_ids = None
     ff = os.path.join(proj, "docs", "design", "app-facts.json") if proj else None
+    existing = False
+    for vf, key in ((os.path.join(proj, "docs", "design", "brand-state.json"), "variant"), (os.path.join(proj, ".aid-ui", "variant.json"), None)) if proj else ():
+        try:
+            v = json.load(open(vf, encoding="utf-8")); v = v.get(key) if key else v
+            existing = bool(isinstance(v, dict) and v.get("existing")); break
+        except (OSError, ValueError, AttributeError):
+            continue
+    if existing and not (ff and os.path.isfile(ff)):
+        out.append("/app-facts: existující aplikace bez faktů - aid-ui-client.py facts <projekt> (co appka opravdu dělá, ze dvou čtenářů)")
     if ff and os.path.isfile(ff):
         sys.path.insert(0, os.path.join(HERE, "lib"))
         import aid_ui_memory as mem
@@ -223,12 +232,15 @@ def violations(m, proj):
             fd = json.load(open(ff, encoding="utf-8"))
         except ValueError as e:
             fd = {}; out.append(f"/app-facts: docs/design/app-facts.json není čitelný JSON ({e})")
-        facts_ids = {x.get("id") for x in fd.get("facts") or [] if isinstance(x, dict)}
+        fd = fd if isinstance(fd, dict) else {}
+        fd = {k: [x for x in fd.get(k) or [] if isinstance(x, dict)] for k in ("facts", "open")}
+        facts_ids = {x.get("id") for x in fd["facts"]}
+        firm = {x.get("id") for x in fd["facts"] if x.get("kind") not in ("assumption", "unknown")}
         if fd.get("open"):
             out.append(f"/app-facts: {len(fd['open'])} otevřených otázek (oba vytěžovače se neshodly): " + ", ".join(str(o.get("fact", {}).get("id")) for o in fd["open"][:6])
                        + " - aid-ui-client.py facts --focus, nebo --drop <id> --reason")
         for x in fd.get("facts") or []:
-            for so in x.get("sources") or []:
+            for so in [y for y in x.get("sources") or [] if isinstance(y, dict)]:
                 e = mem.source_ok(proj, so.get("source"), so.get("quote"))
                 if e:
                     out.append(f"/app-facts/{x.get('id')}: zdroj zestárl ({e}) - vytěž fakta znovu")
@@ -289,6 +301,8 @@ def violations(m, proj):
                 out.append(f"/tasks/{i}/facts: úloha {t['id']} zapisuje, ale neodkazuje na fakta appky (app-facts.json), o která se její chování opírá")
             elif miss:
                 out.append(f"/tasks/{i}/facts: {', '.join(miss)} není dohodnutý fakt v app-facts.json")
+            elif not set(t["facts"]) & firm:
+                out.append(f"/tasks/{i}/facts: úloha {t['id']} se opírá jen o domněnku nebo neznámé (assumption / unknown) - potřebuje fakt ze zdroje")
         perm = str(t["states"]["permission"]).strip()
         if perm.lower().startswith(("nenastává", "nenastane")) or len(perm) < 20:
             out.append(f"/tasks/{i}/states/permission: úloha {t['id']} zapisuje - stav oprávnění říká, kdo nesmí a co uvidí (ne „nenastává“ ani prázdná věta)")
