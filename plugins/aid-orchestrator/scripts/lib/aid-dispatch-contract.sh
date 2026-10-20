@@ -377,8 +377,10 @@ aid_dispatch_contract_validate() {
     [[ "$d" == /* ]] && _d_path="$d" || _d_path="${root}/${d}"
     if [[ -e "$_d_path" ]]; then gone+=("${d} (still on disk)")
     elif [[ $'\n'"$deleted"$'\n' != *$'\n'"$d"$'\n'* ]]; then gone+=("${d} (not in deleted_files)")
-    # a deletion of a TRACKED file: still in the index (deleted in the tree) or gone in a commit of the step
+    # a deletion of a TRACKED file: still in the index (deleted in the tree), staged (`git rm`: in HEAD, not in
+    # the index) or gone in a commit of the step
     elif [[ "$d" != /* ]] && ! git -C "$root" ls-files --error-unmatch -- "$d" >/dev/null 2>&1 \
+         && ! git -C "$root" cat-file -e "HEAD:${d}" 2>/dev/null \
          && ! _aid_dc_deleted_by_step "$root" "$c" "$d"; then
       # before the step's commit the path is still in the index; after it, the step's own commit
       # (recorded by aid_dispatch_contract_commit, _aid_dc_step_record) must be the one that deleted it — an old

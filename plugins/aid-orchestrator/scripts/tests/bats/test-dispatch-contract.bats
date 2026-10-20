@@ -458,6 +458,10 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   _return '{deleted_files: ["src/old.sh"]}'
   run aid_dispatch_contract_validate c2.json .aid-o/return.json "$TEST_DIR"
   echo "$output"; [ "$status" -eq 0 ]
+  # deleted with `git rm` (staged: in HEAD, gone from the index) is this step's deletion too (testbed P117)
+  git rm -q --cached src/old.sh
+  run aid_dispatch_contract_validate c2.json .aid-o/return.json "$TEST_DIR"
+  echo "$output"; [ "$status" -eq 0 ]
   # a Delete of a path that was never tracked deletes nothing (Codex review 19. 10. 2026)
   jq '.steps[0].outputs += ["Delete: `src/never.sh` — x"] | .steps[0].allowed_paths += ["src/never.sh"]' plan.json > p3.json
   aid_dispatch_contract_build p3.json 0 c3.json; VERSION="$(jq -r .version c3.json)"

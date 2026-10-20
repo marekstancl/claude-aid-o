@@ -22,7 +22,7 @@ Plán dojede v `--auto` bez PM a uzávěr se netočí (P117, vstup WAN P109–P1
 - **Cílené opravy místo `--force`:** `aid-emit-dispatch.sh repair` (poškozený záznam dispatch), `cancel` (osiřelý start).
 
 ### Fixed
-- **`expected_deletions` po commitu kroku** (regrese 3.7.0, WAN P112 stál na `--force`): smazání prokáže commit kroku.
+- **`expected_deletions` po commitu kroku** (regrese 3.7.0, WAN P112 stál na `--force`): smazání prokáže commit kroku; smazání přes `git rm` (připravené v indexu, soubor je ještě v HEAD) platí také (nalezeno pilotem testbedu).
 - **Commit kroku je transakční** (dočasný index; index uživatele se nikdy nezapíše) a `.aid-o/*` v návratu je hlasité odmítnutí, ne tiché zahození.
 - **Jedno prostředí a jeden limit měření** pro krok, bránu i `produce` (`verification_env`, `_pd_effective_timeout`); výstup bodu, který selhal, se ukládá (8 KiB na proud) a tajemství i hesla v URL se redigují dřív, než cokoli jde na disk.
 - **Delegace:** nový verdikt jen na nový důkaz, starý `superseded`, nejvýš jednou na nález a kolo (pak PM).
