@@ -154,20 +154,21 @@ _apcs_delegated_lines() {
   local root f; root="$(aid_state_root 2>/dev/null || pwd)"
   f="${root}/.aid-o/work/evidence/${1}/delegated-disputes.jsonl"
   [[ -s "$f" ]] || return 0
-  printf 'Delegovaná rozhodnutí (nezávislý agent místo PM): %s\n' "$(grep -c . "$f")"
-  jq -r '"  - \(.checkpoint) \(.kind | if . == "dispute" then "rozpor" else "otevřené po kolech" end): \(.provider) → \(.answer)\(if .class != "technical" then " (\(.class) → karta PM)" else "" end) — \(.reason)"' "$f" 2>/dev/null
+  # P117: the stand-in's decisions count too; the record of a permission's use is no decision
+  printf 'Delegovaná rozhodnutí (nezávislý agent místo PM): %s\n' "$(jq -s '[.[] | select(.checkpoint != "stand_in_used")] | length' "$f")"
+  jq -r 'select(.checkpoint != "stand_in_used") | "  - \(.checkpoint) \(.kind | {dispute: "rozpor", open_after_rounds: "otevřené po kolech", scope_extension: "rozšíření rozsahu", no_change_step: "krok bez změny", visual_check: "vizuální kontrola", measurement_failed: "technicky selhané měření", rename: "přejmenování", blocked_step: "blokovaný krok"}[.] // .): \(.provider) → \(.answer)\(if .class != "technical" then " (\(.class) → karta PM)" else "" end) — \(.reason)"' "$f" 2>/dev/null
 }
 _apcs_delegated_count() {
   local root f; root="$(aid_state_root 2>/dev/null || pwd)"
   f="${root}/.aid-o/work/evidence/${1}/delegated-disputes.jsonl"
-  [[ -s "$f" ]] && grep -c . "$f" || echo 0
+  [[ -s "$f" ]] && jq -s '[.[] | select(.checkpoint != "stand_in_used")] | length' "$f" || echo 0
 }
 # _apcs_delegated_inline <plan_id> — the same settlements on one page row.
 _apcs_delegated_inline() {
   local root f; root="$(aid_state_root 2>/dev/null || pwd)"
   f="${root}/.aid-o/work/evidence/${1}/delegated-disputes.jsonl"
   [[ -s "$f" ]] || return 0
-  jq -rs 'map("\(.checkpoint) \(.kind | if . == "dispute" then "rozpor" else "otevřené po kolech" end): \(.provider) → \(.answer)\(if .class != "technical" then " (\(.class) → PM)" else "" end) — \(.reason)") | join("; ")' "$f" 2>/dev/null
+  jq -rs 'map(select(.checkpoint != "stand_in_used")) | map("\(.checkpoint) \(.kind | {dispute: "rozpor", open_after_rounds: "otevřené po kolech", scope_extension: "rozšíření rozsahu", no_change_step: "krok bez změny", visual_check: "vizuální kontrola", measurement_failed: "technicky selhané měření", rename: "přejmenování", blocked_step: "blokovaný krok"}[.] // .): \(.provider) → \(.answer)\(if .class != "technical" then " (\(.class) → PM)" else "" end) — \(.reason)") | join("; ")' "$f" 2>/dev/null
 }
 
 _apcs_plugin_issues_line() {

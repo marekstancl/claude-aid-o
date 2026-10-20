@@ -34,7 +34,7 @@ ui:
   ready_path: /
   api_prefix: /api/                      # only these requests are answered from mocks.json
   copy_extra: [tsconfig.base.json]       # optional: repository files outside ui.dir the app reads by ../ (never .env, keys)
-  first_shot_timeout_s: 15               # optional, 1..120: the first page waits longer (a dev server compiles on it)
+  first_shot_timeout_s: 15               # optional, 1..120: the first shot's waits (a dev server compiles on it; a page load never under 30 s)
 ```
 
 **Vite whose config imports files outside `ui.dir`** (a `vite.config.ts` that reads `../shared/…`, or a

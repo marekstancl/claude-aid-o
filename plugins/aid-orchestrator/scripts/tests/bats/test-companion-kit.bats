@@ -101,6 +101,14 @@ _ws() {
   mkdir -p "$P/shared"; echo "body{}" > "$P/shared/base.css"; echo "SECRET=1" > "$P/.env.local"
   yq -i '.ui.copy_extra = [".env.local"]' "$P/.aid-o/config/project.yaml"
   run _k proto; [ "$status" -ne 0 ]; [[ "$output" == *"looks like a secret"* ]]; rm -rf "$D/proto" "$D/proto-manifest.json"
+  mkdir -p "$P/.env.d" "$P/credentials/aws"; echo x > "$P/.env.d/production.txt"; echo x > "$P/credentials/aws/config.json"
+  for e in .env.d/production.txt credentials/aws/config.json; do
+    yq -i ".ui.copy_extra = [\"$e\"]" "$P/.aid-o/config/project.yaml"
+    run _k proto; [ "$status" -ne 0 ]; [[ "$output" == *"looks like a secret"* ]]; rm -rf "$D/proto" "$D/proto-manifest.json"
+  done
+  # a link inside the companion directory never steers the copy (onto the kit's own files or out of it)
+  mkdir -p "$D"; ln -s "$D" "$D/shared"; yq -i '.ui.copy_extra = ["shared/base.css"]' "$P/.aid-o/config/project.yaml"
+  run _k proto; [ "$status" -ne 0 ]; [[ "$output" == *"is a link"* ]]; rm -rf "$D/proto" "$D/proto-manifest.json" "$D/shared"
   yq -i '.ui.copy_extra = ["../etc/hostname"]' "$P/.aid-o/config/project.yaml"
   run _k proto; [ "$status" -ne 0 ]; rm -rf "$D/proto" "$D/proto-manifest.json"
   yq -i '.ui.copy_extra = ["shared/base.css"]' "$P/.aid-o/config/project.yaml"
@@ -113,6 +121,10 @@ _ws() {
   echo '{"base": "proto", "shots": [{"name": "seznam", "path": "/index.html", "capture": {"scroll": {"css": "#list"}}}]}' > "$D/shots.json"
   run _k shots; echo "$output"; [ "$status" -eq 0 ]
   [ "$(node -e 'const b=require("fs").readFileSync(process.argv[1]);console.log(b.readUInt32BE(20))' "$D/shots/desktop/seznam.png")" -ge 590 ]
+  # the first shot's wait follows the setting: 2 s for a text that never comes fails in seconds, not 15
+  yq -i '.ui.first_shot_timeout_s = 2' "$P/.aid-o/config/project.yaml"
+  echo '{"base": "proto", "shots": [{"name": "nic", "path": "/index.html", "steps": [{"wait": {"for": {"text": "nikdy"}}}]}]}' > "$D/shots.json"
+  local t0=$SECONDS; run _k shots; [ "$status" -ne 0 ]; (( SECONDS - t0 < 12 ))
   yq -i '.ui.first_shot_timeout_s = 500' "$P/.aid-o/config/project.yaml"
   run _k shots; [ "$status" -ne 0 ]; [[ "$output" == *"first_shot_timeout_s must be whole seconds from 1 to 120"* ]]
 }

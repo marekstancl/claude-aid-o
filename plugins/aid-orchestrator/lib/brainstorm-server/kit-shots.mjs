@@ -93,11 +93,13 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
       for (const s of shots) {
         if (s.only && !s.only.includes(vp.name)) continue;
         const where = `shot '${s.name}' (${vp.name})`;
-        const wait = isFirst ? first * 1000 : 15000;
-        await page.goto(at(s.path || '/', where), { waitUntil: 'networkidle', timeout: Math.max(wait, 30000) });
+        // the first shot waits ui.first_shot_timeout_s for what it waits on (a page load never less than the
+        // browser's 30 s: the setting lengthens the first wait, it never shortens a load)
+        const wait = isFirst ? first * 1000 : 15000, nav = isFirst ? Math.max(first * 1000, 30000) : 30000;
+        await page.goto(at(s.path || '/', where), { waitUntil: 'networkidle', timeout: nav });
         for (const [k, stp] of (s.steps || []).entries()) {
           const w = `${where} step ${k + 1}`;
-          if ('goto' in stp) await page.goto(at(stp.goto, w), { waitUntil: 'networkidle' });
+          if ('goto' in stp) await page.goto(at(stp.goto, w), { waitUntil: 'networkidle', timeout: nav });
           else if ('click' in stp) await (await one(page, stp.click, w)).click();
           else if ('fill' in stp) await (await one(page, stp.fill, w)).fill(String(stp.value ?? ''));
           else if ('select' in stp) await (await one(page, stp.select, w)).selectOption(String(stp.value ?? ''));

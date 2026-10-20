@@ -29,7 +29,9 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
   // never outside the repository, never over the kit's own files; they are not part of the copy's manifest, so a
   // change to them is never an option's file (spolecne/soubory list files inside proto/ only).
   const KIT = new Set(['proto', 'shots', 'proto.json', 'proto-manifest.json', 'proto.log', 'server.json', 'mocks.json', 'shots.json', 'navrh.json', 'answers.jsonl', 'proposal.json']);
-  const SECRET = /(^|\/)(\.env[^/]*|[^/]*secret[^/]*|[^/]*credential[^/]*|[^/]*\.(pem|key|p12|pfx)|id_(rsa|ed25519)[^/]*)$/i;
+  // any component of the path (a file inside .env.d/ or credentials/ is as secret as the directory)
+  const SECRET_PART = /^(\.env.*|.*secret.*|.*credential.*|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519).*|\.ssh|\.aws|\.gnupg)$/i;
+  const secretPath = p => p.split(/[\\/]/).some(c => SECRET_PART.test(c));
   const copyExtra = (src, dest) => {
     const extra = UI.copy_extra || [];
     if (!Array.isArray(extra)) die('proto: ui.copy_extra must be a list of repository paths');
@@ -39,12 +41,23 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
       const from = path.resolve(PROJECT, e);
       let real = ''; try { real = fs.realpathSync(from); } catch { die(`proto: ui.copy_extra[${i}] ${e} does not exist`); }
       if (real !== repo && !real.startsWith(repo + path.sep)) die(`proto: ui.copy_extra[${i}] ${e} is outside the repository`);
-      if (SECRET.test(path.relative(repo, real))) die(`proto: ui.copy_extra[${i}] ${e} looks like a secret (.env, a key, credentials) — it never goes into the copy`);
+      if (secretPath(path.relative(repo, real)) || secretPath(e)) die(`proto: ui.copy_extra[${i}] ${e} looks like a secret (.env, a key, credentials) — it never goes into the copy`);
       if (fs.statSync(real).isDirectory()) die(`proto: ui.copy_extra[${i}] ${e} is a directory — list the files`);
       const to = path.resolve(dest, path.relative(src, from));
       if (!to.startsWith(path.resolve(DIR) + path.sep) || to.startsWith(path.resolve(dest) + path.sep)) die(`proto: ui.copy_extra[${i}] ${e} would land at ${to}, not beside the copy in ${DIR}`);
       if (KIT.has(path.relative(DIR, to).split(path.sep)[0])) die(`proto: ui.copy_extra[${i}] ${e} would overwrite the kit's own ${path.relative(DIR, to)}`);
-      fs.mkdirSync(path.dirname(to), { recursive: true }); fs.copyFileSync(real, to);
+      // no link on the way: a link inside the companion directory could steer the write outside it or onto the
+      // kit's own files (Codex review of P117 F) — every existing component is checked, then the real parent
+      const dirReal = fs.realpathSync(DIR);
+      for (let c = path.dirname(to); c.startsWith(path.resolve(DIR) + path.sep); c = path.dirname(c)) {
+        if (fs.existsSync(c) && fs.lstatSync(c).isSymbolicLink()) die(`proto: ui.copy_extra[${i}] ${e}: ${c} is a link — the companion directory holds no links`);
+      }
+      if (fs.existsSync(to) && fs.lstatSync(to).isSymbolicLink()) die(`proto: ui.copy_extra[${i}] ${e}: ${to} is a link`);
+      fs.mkdirSync(path.dirname(to), { recursive: true });
+      const parentReal = fs.realpathSync(path.dirname(to));
+      if (!(parentReal + path.sep).startsWith(dirReal + path.sep) || (parentReal + path.sep).startsWith(fs.realpathSync(dest) + path.sep)
+          || KIT.has(path.relative(dirReal, path.join(parentReal, path.basename(to))).split(path.sep)[0])) die(`proto: ui.copy_extra[${i}] ${e} does not land beside the copy`);
+      fs.copyFileSync(real, to);
     }
   };
   const need = k => die(`proto: project.yaml has no ui.${k} — add it, for example:\n  ui:\n    dir: ui\n    components: ui/src/components/shared\n    dev_cmd: ["npx", "vite", "--port", "{port}", "--host", "127.0.0.1", "--strictPort"]\n    ready_path: /\n    api_prefix: /api/`);

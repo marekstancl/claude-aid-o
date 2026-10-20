@@ -91,7 +91,14 @@ aid_plan_tests_bad() {
   [[ "$(jq -r .run_by "$f")" == "aid-plan-fsm.sh plan-finalize --stage produce" ]] || { echo "plan-tests.json was not written by the close"; return 1; }
   # the close's own record of writing it (stage-writes.jsonl; its digest is verified by decide's integrity check)
   if [[ -n "$tree" ]]; then
-    grep -q '"path":"plan-tests.json"' "${rd}/stage-writes.jsonl" 2>/dev/null || { echo "plan-tests.json has no record of the close writing it (stage-writes.jsonl)"; return 1; }
+    # the LAST record of plan-tests.json and of every log it names is the produce stage's, with today's digest
+    local f2 last
+    for f2 in plan-tests.json $(jq -r '.tests[].log // empty' "$f"); do
+      last="$(jq -c -s --arg p "$f2" 'map(select(.path == $p)) | last // empty' "${rd}/stage-writes.jsonl" 2>/dev/null)"
+      [[ -n "$last" && "$(jq -r .stage <<< "$last")" == produce \
+         && "$(jq -r .sha256 <<< "$last")" == "sha256:$(sha256sum "${rd}/${f2}" 2>/dev/null | cut -d' ' -f1)" ]] \
+        || { echo "${f2} has no record of the close's produce stage writing it as it is now (stage-writes.jsonl)"; return 1; }
+    done
     # the plan and the configuration it ran under are the ones decided on now (their digests, Codex review)
     [[ "$(sha256sum "$plan" 2>/dev/null | cut -d' ' -f1)" == "$(jq -r .plan_sha256 "$f")" ]] || { echo "the plan changed after the close ran its tests — produce again"; return 1; }
     [[ "$( [[ -f "$ex" ]] && sha256sum "$ex" | cut -d' ' -f1 || echo none)" == "$(jq -r .execution_yaml_sha256 "$f")" ]] || { echo "execution.yaml changed after the close ran the plan's tests — produce again"; return 1; }
