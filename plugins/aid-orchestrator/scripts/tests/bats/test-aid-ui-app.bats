@@ -594,3 +594,11 @@ app_handover() {
   mutate '.screens[2].tables[0].rows = [["vstup", "1"]] | .screens[2].tables[0].caption = "Za {dni} dní"'
   run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"tables/0/caption"* ]]
 }
+
+@test "screens: a step that sends a form without one of its required fields is refused" {
+  mutate '.screens[1].fields = [{name: "nazev", label: "Název", required: true}, {name: "stitek", label: "Štítek", required: true}]'
+  run python3 "$SCR" check "$APP"
+  [ "$status" -eq 1 ]; [[ "$output" == *"odešle formulář formular bez povinného pole stitek"* ]]
+  mutate '(.tasks[0].steps[1].input.stitek) = "doma"'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}

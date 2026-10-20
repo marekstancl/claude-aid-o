@@ -157,6 +157,13 @@ def violations(m, proj):
             if lead and st["screen"] != lead:
                 out.append(f"{sa}/screen: úloha {t['id']} krok {k + 1} stojí na {st['screen']}, předchozí akce vede na {lead}")
             submits = submits or a["kind"] == "submit"
+            if a["kind"] == "submit" and "item" not in a:   # the screen's form sends its required fields too (P116 pilot: zmenit-paku)
+                own = {n for tt in m["tasks"] if isinstance(tt, dict) for x in tt.get("steps") or [] if isinstance(x, dict) and x.get("screen") == st["screen"]
+                       and "item" in (acts.get((st["screen"], x.get("action"))) or {}) for n in x.get("input") or {}}
+                need = [f["name"] for f in screens[st["screen"]].get("fields") or [] if f.get("required") and f["name"] not in own]
+                miss = [n for n in need if n not in (st.get("input") or {})]
+                if miss:
+                    out.append(f"{sa}/input: úloha {t['id']} krok {k + 1} odešle formulář {st['screen']} bez povinného pole {', '.join(miss)}")
             lead = a["to"]
         if t.get("mode") and t["mode"] not in modes:
             out.append(f"{at}/mode: režim {t['mode']} model nezná (modes)")
