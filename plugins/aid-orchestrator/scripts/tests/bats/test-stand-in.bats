@@ -47,6 +47,8 @@ _verify() {
   _verify scope_extension '{"step": 0, "paths": ["src/new.py"]}'; [[ "$output" == *"does not cover this action"* ]]
   _verify scope_extension '{"step": 1, "paths": ["src/other.py"]}'; [[ "$output" == *"does not cover this action"* ]]
   _verify no_change_step '{"step": 1}'; [[ "$output" == *"is for scope_extension"* ]]
+  # a permission for two paths does not cover one of them alone (Codex review: no piecemeal reuse)
+  jq '.paths = ["src/new.py", "src/second.py"]' "$D/proposal.json" > /dev/null
   # asked again: the same decision, nothing dispatched
   _ask; [ "$status" -eq 0 ]; [[ "$output" == *"already decided"* ]]
   # the approved proposal edited afterwards is no permission
@@ -71,6 +73,26 @@ _verify() {
   # the project's own protected_paths count too
   mkdir -p .aid-o/config; printf 'protected_paths:\n  - "billing/**"\n' > .aid-o/config/execution.yaml
   _prop '{"kind": "scope_extension", "step": 1, "paths": ["billing/rates.py"]}'; _ask; [ "$status" -eq 3 ]
+}
+
+@test "stand-in: a bracket closed over another file vouches for nothing; a permission for [a, b] does not cover a alone; a blocked step is the stand-in's in --auto" {
+  _prop '{"kind": "scope_extension", "step": 1, "paths": ["src/new.py", "src/second.py"]}'; _ask; [ "$status" -eq 4 ]
+  ID="$(grep -oE 'stand-in-[0-9a-f]{16}' <<< "$output" | head -1 | sed 's/^stand-in-//')"; D="$EV/stand-in/$ID"
+  bash "$EMIT" start --focus "stand-in-$ID" --agent-id claude:stand-in --evidence-dir "$EV" >/dev/null
+  echo '{"harmless": true}' > "$BATS_TEST_TMPDIR/other.json"
+  bash "$EMIT" complete --focus "stand-in-$ID" --output-file "$BATS_TEST_TMPDIR/other.json" --evidence-dir "$EV" >/dev/null
+  jq -n --arg i "$ID" '{id: $i, answer: "approve", class: "technical", reason: "x", provider: "claude"}' > "$D/verdict.json"
+  _record; [ "$status" -eq 1 ]; [[ "$output" == *"stand_in_verdict_unbound"* ]]
+  # the verdict changed after its own bracket closed: refused too
+  bash "$EMIT" start --focus "stand-in-$ID" --agent-id claude:stand-in --evidence-dir "$EV" >/dev/null
+  bash "$EMIT" complete --focus "stand-in-$ID" --output-file "$D/verdict.json" --evidence-dir "$EV" >/dev/null
+  jq '.reason = "edited later"' "$D/verdict.json" > "$D/v" && mv "$D/v" "$D/verdict.json"
+  _record; [ "$status" -eq 1 ]; [[ "$output" == *"stand_in_verdict_unbound"* ]]
+  _claude approve technical; _record; [ "$status" -eq 0 ]
+  _verify scope_extension '{"step": 1, "paths": ["src/new.py"]}'; [[ "$output" == *"does not cover this action"* ]]
+  _verify scope_extension '{"step": 1, "paths": ["src/second.py", "src/new.py"]}'; [ "$output" = PERMITTED ]
+  _prop '{"kind": "blocked_step", "step": 1, "action": "redispatch", "why": "the agent ran out of context twice"}'
+  _ask contract_return_not_done; [ "$status" -eq 4 ]; _claude approve technical; _record; [ "$status" -eq 0 ]
 }
 
 @test "stand-in: a verdict classing it protected goes to the PM; a Claude verdict without its bracket, or one that left a file, is refused" {

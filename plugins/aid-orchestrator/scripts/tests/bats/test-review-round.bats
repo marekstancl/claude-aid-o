@@ -962,6 +962,12 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   jq '.findings[0].claim = "something else"' "$(FD 1)/merged.json" > "$ROOT/m" && cp "$ROOT/m" "$(FD 1)/merged.json"
   _stale "$head"; [ "$status" -eq 1 ]; [[ "$output" == *"is not the one the PM accepted"* ]]
   echo extra >> "$card"; _stale "$head"; [ "$status" -eq 1 ]; [[ "$output" == *"card"*"changed after the PM answered"* ]]
+  # a finding added to the round after the PM's decision: the set is not the one accepted
+  cp "$(FD 1)/merged.json" "$ROOT/m0"; head -c -0 "$card" >/dev/null
+  git -C "$R" checkout -q -- . 2>/dev/null || true
+  jq '.findings[0].claim = "the changelog claims an import the app never makes"' "$ROOT/m0" | jq '.findings += [(.findings[0] | .fingerprint = "sha256:\("0" * 64)" | .status = "open" | .dispute = null)]' > "$(FD 1)/merged.json"
+  sed -i '$d' "$card"
+  _stale "$head"; [ "$status" -eq 1 ]; [[ "$output" == *"not the set the PM accepted"* || "$output" == *"changed after"* ]]
   rm "$(FD 1)/accepted-risk.json"; _stale "$head"; [ "$status" -eq 1 ]; [[ "$output" == *"without the PM's record"* ]]
 }
 
@@ -1043,6 +1049,10 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [ "$(jq -r '.carried_from // {} | length' "$(FD 1)/round.json")" -eq 0 ]           # a code fix carries nobody
   [ -s "$(FD 1)/packet/fix.patch" ]; [ "$(jq '.findings | length' "$(FD 1)/packet/open-findings.json")" -eq 1 ]
   grep -q "This is a confirmation round" "$(FD 1)/prompt-final_generalist.md"
+  # P117 (16): after a failing round the next attempt is a FULL round — the open findings to re-check, and the whole plan
+  [ "$(jq -r .mode "$(FD 1)/round.json")" = full ]
+  grep -q "This is a FULL round over the new candidate" "$(FD 1)/prompt-final_generalist.md"
+  ! grep -q "Do not review the rest again" "$(FD 1)/prompt-final_generalist.md"
 }
 
 @test "cp7: a finding of a final role validates against the finding schema's checkpoint and role lists" {
@@ -1063,6 +1073,18 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq -r '.carried_from // {} | length' "$(FD 1)/round.json")" -eq 0 ]
   [ -f "$(FD 1)/prompt-final_criteria.md" ] && [ -f "$(FD 1)/prompt-final_generalist.md" ]
+  # P117 (15): the previous candidate passed a full round and the fix is docs only — a confirmation round
+  [ "$(jq -r .mode "$(FD 1)/round.json")" = confirmation ]
+  grep -q "This is a confirmation round over the whole plan" "$(FD 1)/prompt-final_generalist.md"
+  grep -q "read the WHOLE candidate" "$(FD 1)/prompt-final_generalist.md"; [ -s "$(FD 1)/packet/fix.patch" ]
+  # decide accepts it only with that predecessor: the previous candidate's head, a docs-only fix
+  _conf() { run bash -c "source '$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh' >/dev/null 2>&1; _pfsm_cp7_confirmation_bad '$E'"; }
+  jq --arg h "$(jq -r .head_sha "$first/cp7/round-1/round.json")" '.previous_candidate = $h' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
+  _conf; [ "$status" -eq 0 ]
+  jq '.docs_only = false' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
+  _conf; [ "$status" -eq 1 ]; [[ "$output" == *"not documentation only"* ]]
+  jq '.docs_only = true | .previous_candidate = "0000000000000000000000000000000000000000"' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
+  _conf; [ "$status" -eq 1 ]; [[ "$output" == *"not the previous candidate"* ]]
 }
 @test "cp7-zadani: a fix that touched only the plan's criteria asks both roles again (final_generalist reads the criteria too), never carries final_criteria" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null

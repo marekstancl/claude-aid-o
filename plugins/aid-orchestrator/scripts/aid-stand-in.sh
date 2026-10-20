@@ -131,9 +131,12 @@ cmd_record() {
     jq -e -nR --arg i "$ID" --arg s "$sha" 'any(inputs; (try fromjson catch null) as $j | $j != null and $j.event? == "stand_in_codex_verdict" and $j.id? == $i and $j.sha256? == $s)' "$TL" >/dev/null 2>&1 \
       || _refuse stand_in_verdict_unbound "a codex verdict without the runner's record (no stand_in_codex_verdict event with this sha256 in ${TL})" "let aid-stand-in.sh ask run Codex"
   elif [[ "$provider" == claude ]]; then
-    jq -e -s --arg f "stand-in-${ID}" --arg o "$(realpath "$VERDICT")" \
-      'any(.[]; .event == "verifier_dispatch_start" and .focus == $f and .agent_id == "claude:stand-in") and any(.[]; .event == "verifier_dispatch_complete" and .focus == $f)' "$TL" >/dev/null 2>&1 \
-      || _refuse stand_in_verdict_unbound "a Claude verdict without its closed bracket stand-in-${ID} (agent claude:stand-in)" "dispatch inside the bracket, then record"
+    # the bracket closed over THIS file with THIS content (Codex review of P117 D: a bracket over another file vouched for nothing)
+    jq -e -s --arg f "stand-in-${ID}" --arg o "$(realpath "$VERDICT")" --arg s "$sha" \
+      'any(.[]; .event == "verifier_dispatch_start" and .focus == $f and .agent_id == "claude:stand-in")
+       and any(.[]; .event == "verifier_dispatch_complete" and .focus == $f and .output_sha256 == $s
+                    and ((.output_file // "") as $p | ($p == $o) or ($p | endswith("/stand-in/" + ($f | ltrimstr("stand-in-")) + "/verdict.json"))))' "$TL" >/dev/null 2>&1 \
+      || _refuse stand_in_verdict_unbound "a Claude verdict without its closed bracket stand-in-${ID} (agent claude:stand-in) over this verdict file and its content" "dispatch inside the bracket, write the verdict, complete the bracket with --output-file ${VERDICT}, then record"
     [[ -f "${d}/status-before" ]] || _refuse delegation_left_files "no record of the worktree before the stand-in ran (${d}/status-before)" "ask again (it records the tree first)"
     local left; left="$(comm -13 "${d}/status-before" <(_tree_state) | sed 's/^...//' | head -20 || true)"
     [[ -z "$left" ]] || _refuse delegation_left_files "the stand-in left files in ${TROOT}: $(tr '\n' ' ' <<< "$left")" "remove them, then record again"
@@ -147,11 +150,13 @@ cmd_record() {
   jq -n --arg id "$ID" --arg code "$(jq -r '.code // ""' "${d}/meta.json" 2>/dev/null)" --arg kind "$(jq -r .kind "${d}/proposal.json")" \
     --arg ps "$(sha256sum "${d}/proposal.json" | cut -d' ' -f1)" --arg vs "$sha" --arg p "$provider" --argjson ok "$approved" \
     --arg r "$(jq -r .reason "$VERDICT")" --arg sr "$SROOT" --arg pid "$PID" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{id: $id, code: $code, kind: $kind, approved: $ok, reason: $r, provider: $p, proposal_sha256: $ps, verdict_sha256: $vs, state_root: $sr, plan: $pid, at: $at}' > "${d}/auth.json"
+    '{id: $id, code: $code, kind: $kind, approved: $ok, reason: $r, provider: $p, proposal_sha256: $ps, verdict_sha256: $vs, state_root: $sr, plan: $pid, at: $at}' > "${d}/auth.json.tmp" \
+    && mv "${d}/auth.json.tmp" "${d}/auth.json" || _refuse stand_in_write_failed "${d}/auth.json could not be written" "fix the disk, then record again"
   local ledger; ledger="$(aid_delegate_ledger "$SROOT" "$PID")"; mkdir -p "$(dirname "$ledger")"
   jq -nc --arg id "$ID" --arg k "$(jq -r .kind "${d}/proposal.json")" --arg a "$answer" --arg c "$class" --arg r "$(jq -r .reason "$VERDICT")" \
     --arg p "$provider" --arg v "$(realpath "$VERDICT")" --arg vs "$sha" --arg run "$EVID" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{checkpoint: "stand_in", id: $id, kind: $k, answer: $a, class: $c, reason: $r, provider: $p, verdict_file: $v, verdict_sha256: $vs, run: $run, at: $at}' >> "$ledger"
+    '{checkpoint: "stand_in", id: $id, kind: $k, answer: $a, class: $c, reason: $r, provider: $p, verdict_file: $v, verdict_sha256: $vs, run: $run, at: $at}' >> "$ledger" \
+    || { rm -f "${d}/auth.json"; _refuse stand_in_write_failed "the ledger ${ledger} could not be written; the permission is withdrawn" "fix the disk, then record again"; }
   log_event "$TL" stand_in_recorded id="$ID" answer="$answer" provider="$provider" || true
   echo "stand-in ${ID}: ${answer} by ${provider} — $(jq -r .reason "$VERDICT") (permission: ${d}/auth.json)"
 }

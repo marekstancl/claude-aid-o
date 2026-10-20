@@ -1820,6 +1820,7 @@ PLAN
     aid_plan_json_steps_from_plan "$g/P930-plan.md" > "$g/steps.json"
     aid_plan_json_build --steps-json "$g/steps.json" --out "$td/plan.json" --epic-id E-930-1_1 --plan "$g/P930-plan.md" \
       --direct --execution "$g/execution.yaml" ) >/dev/null 2>&1
+  [[ -n "${ZP_KEEP_PLAN:-}" ]] && { mkdir -p "$(dirname "$ZP_KEEP_PLAN")"; cp "$g/P930-plan.md" "$ZP_KEEP_PLAN"; }   # the plan itself, when a case needs it
   rm -rf "$g"
 }
 _zp_state() {   # <td> <state> <current_step>
@@ -2189,7 +2190,12 @@ _si_permit() {
 }
 
 @test "amend-contract: a pure rename of the current step's path on the stand-in's permission; another directory, a collision or no permission is refused (P117 (13))" {
-  local td="$TEST_EVIDENCE_DIR"; _zp_plan_json "$td"; _zp_state "$td" EXECUTE 0
+  local td="$TEST_EVIDENCE_DIR" pp="$TEST_PROJECT_ROOT/.aid-o/plans/P930-plan.md"; ZP_KEEP_PLAN="$pp" _zp_plan_json "$td"
+  mkdir -p "$TEST_PROJECT_ROOT/src"; echo x > "$TEST_PROJECT_ROOT/src/a.py"
+  sed -i '/^zadani:/d; /^zadani_sha256:/d; s/^\*\*Zavírá:\*\* AC2$/**Zavírá:** AC1/; s/^\*\*Zavírá:\*\* AC3$/**Zavírá:** —/' "$pp"
+  ( source "$AID_PLUGIN_PATH/scripts/tests/lib/aid-test-plan-fixture.sh"; aid_fixture_write_brief "$TEST_PROJECT_ROOT" "$pp" >/dev/null )
+  jq --arg s "$(sha256sum "$pp" | cut -d' ' -f1)" '.source_plan_sha256 = $s' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"
+  _zp_state "$td" EXECUTE 0; printf 'plan_path: %s\n' "$pp" >> "$td/fsm-state.yaml"
   mkdir -p "$td/steps/step_1_backend"
   ( source "$AID_PLUGIN_PATH/scripts/lib/aid-dispatch-contract.sh"; aid_dispatch_contract_build "$td/plan.json" 0 "$td/steps/step_1_backend/contract.json" ) >/dev/null
   local v0; v0="$(jq -r .version "$td/steps/step_1_backend/contract.json")"
@@ -2210,6 +2216,11 @@ _si_permit() {
   run bash "$FSM" amend-contract "$td/fsm-state.yaml" --rename src/a.py=src/b.py --reason "the project lint forbids the plan's name" --stand-in "$auth"
   echo "$output"; [ "$status" -eq 0 ]
   ! grep -q 'src/a\.py' "$td/plan.json"; grep -q 'src/b\.py' "$td/plan.json"
+  grep -q 'src/b\.py' "$pp"; ! grep -q 'src/a\.py' "$pp"
+  [ "$(jq -r .source_plan_sha256 "$td/plan.json")" = "$(sha256sum "$pp" | cut -d' ' -f1)" ]
+  # the permission was used: another rename on it is refused
+  run bash "$FSM" amend-contract "$td/fsm-state.yaml" --rename src/b.py=src/a.py --reason "the project lint forbids the plan's name" --stand-in "$auth"
+  [ "$status" -ne 0 ]
   [ "$(jq -r '.superseded_versions[0]' "$td/steps/step_1_backend/contract.json")" = "$v0" ]
   [ "$(jq -r .version "$td/steps/step_1_backend/contract.json")" != "$v0" ]
   [ "$(grep '^plan_json_hash:' "$td/fsm-state.yaml" | awk '{print $2}')" = "$(sha256sum "$td/plan.json" | cut -d' ' -f1)" ]

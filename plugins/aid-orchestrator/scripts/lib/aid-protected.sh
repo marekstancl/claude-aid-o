@@ -31,7 +31,7 @@ aid_protected_impact() {
     || { echo "unevaluable: the proposal ${prop} is not a JSON object with a kind"; return 1; }
   kind="$(jq -r .kind "$prop")"
   case "$kind" in
-    scope_extension|no_change_step|visual_check|measurement_failed|rename) ;;
+    scope_extension|no_change_step|visual_check|measurement_failed|rename|blocked_step) ;;
     *) echo "unevaluable: the proposal kind '${kind}' is not one the stand-in may decide"; return 1 ;;
   esac
   ex="$(jq -r '(.external // [])[]' "$prop" 2>/dev/null)"

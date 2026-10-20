@@ -346,6 +346,17 @@ _previous_attempt_round() {
   done
 }
 _is_carried() { jq -e --arg r "$2" '(.carried_from // {}) | has($r)' "$1/round.json" >/dev/null 2>&1; }
+# _previous_attempt_full_pass — cp7 (P117 (15)(16)): the previous attempt's last closed round, when it was a FULL
+# round and passed. Only after such a round, and only for a fix that touched documentation alone
+# (fix-class.json docs_only), is the next attempt's round a confirmation round; anything else is full again.
+_previous_attempt_full_pass() {
+  local d
+  for d in $(_prev_attempt_rounds); do
+    [[ -f "$d/measurement.json" ]] || continue
+    [[ "$(jq -r '.verdict // ""' "$d/measurement.json")" == pass && "$(jq -r '.mode // "full"' "$d/round.json" 2>/dev/null)" == full ]] && echo "$d"
+    return 0
+  done
+}
 
 # _restart_attempt — prepare --round 1 --restart (P109): the only sanctioned way
 # to restart a plan review. Allowed when the live attempt's last fix-check
@@ -589,7 +600,11 @@ cmd_prepare() {
     for role in "${roles[@]}"; do aid_plan_review_prompt_render "$role" "$ROUND" "$dir" || exit 1; done
   else
     local prevdir=""; (( ROUND >= 2 )) && prevdir="$(_round_dir $((ROUND - 1)))"
+    local cp7_mode=full
     [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 ]] && prevdir="$(_previous_attempt_round)"
+    if [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 && -z "$prevdir" ]] && jq -e '.docs_only == true' "${EVID}/fix-class.json" >/dev/null 2>&1; then
+      prevdir="$(_previous_attempt_full_pass)"; [[ -n "$prevdir" ]] && cp7_mode=confirmation
+    fi
     if [[ "$CHECKPOINT" == cp7 ]]; then
       # P110: the round argues from the isolated close measurement and the brief
       # the plan is bound to — never from a pre-2.116.0 measurement or another brief.
@@ -616,9 +631,11 @@ cmd_prepare() {
       --argjson degraded "$([[ "$RC_DEGRADED" == 1 ]] && echo true || echo false)" \
       --argjson stub "$([[ "$STUB" == 1 ]] && echo true || echo false)" \
       --arg conf "$([[ -z "$prevdir" ]] || { (( ROUND >= 2 )) && echo "round-$((ROUND - 1))" || echo "$prevdir"; })" --argjson carried "$carried" \
+      --arg mode "${cp7_mode:-full}" \
       '{checkpoint: $cp, step: $step, round: $round, head_sha: $h, step_check_sha256: $scs,
         reviewers_expected: $ARGS.positional, min_answers_effective: $min, degraded: $degraded, stub: $stub,
         confirmation_of: (if $conf == "" then null else $conf end), started_at: $at}
+       + (if $cp == "cp7" then {mode: $mode} else {} end)
        + (if ($carried | length) > 0 then {carried_from: $carried} else {} end)
        + (if $standing then {standing: true} else {} end)' --argjson standing "${standing:-false}" \
       --args "${roles[@]}" > "${dir}/round.json"

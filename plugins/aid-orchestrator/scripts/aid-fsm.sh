@@ -1194,7 +1194,7 @@ _fsm_refusal_next() {
     plan_manifest_missing|plan_branch_mismatch)
       next="start the plan's run again through plan-run, which writes the manifest entry and runs init: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}" --restart --reason "<why>")" ;;
     contract_return_missing|contract_return_not_done)
-      next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent or hand over with a Blocked card), then: $inc" ;;
+      next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent; blocked again in an --auto run: the stand-in decides how to go on — $(_fsm_cmd bash "${SCRIPT_DIR}/aid-stand-in.sh" ask --evidence-dir "$(dirname "$sf")" --code contract_return_not_done --proposal "<{\"kind\": \"blocked_step\", \"step\": N, \"action\": \"redispatch|rename|amend_scope\", \"why\": …}>") and the approved action runs through its own command; otherwise a Blocked card), then: $inc" ;;
     missing_step_verify|verify_no_ac_checklist|verify_no_memory_used|verify_no_memory_written|step_verify_not_pass|verify_no_commit_ref)
       next="write $(_fsm_cmd "$vf") (pipeline.md §Output verification), then: $inc" ;;
     binding_wrong_commit|binding_plan_step_hash_mismatch|incomplete_step_binding)
@@ -4583,6 +4583,7 @@ _fsm_stand_in_permits() {
   local why
   why="$(aid_stand_in_verify "$1" "$_FSM_STAND_IN" "$2" "$(jq -nc --argjson s "$3" '{step: $s}')" "$(aid_invoke_root 2>/dev/null || pwd)")" \
     || { echo "--stand-in ${_FSM_STAND_IN} does not permit ${2} of step ${3}: ${why}" >&2; return 1; }
+  aid_stand_in_consume "$_FSM_STAND_IN" "$(jq -nc --argjson s "$3" '{step: $s}')"
   local tl; tl="${1}/timeline.jsonl"; log_event "$tl" stand_in_applied kind="$2" step="$3" auth="$_FSM_STAND_IN" || true
   return 0
 }
@@ -4609,6 +4610,7 @@ _fsm_defer_criterion() {
     why="$(aid_stand_in_verify "$ev" "$stand_in" measurement_failed "$(jq -nc --argjson s "$n" --arg c "$label" '{step: $s, criterion: $c}')" "$(aid_invoke_root 2>/dev/null || pwd)")" \
       || _defer_fail "--stand-in ${stand_in}: ${why}"
     by=stand_in card=""
+    aid_stand_in_consume "$stand_in" "$(jq -nc --argjson s "$n" --arg c "$label" '{step: $s, criterion: $c}')"
   else
     why="$(aid_pm_card_check "$card" "$label")" || _defer_fail "$why"
   fi
@@ -5596,6 +5598,7 @@ cmd_amend_scope() {
       _si_why="$(aid_stand_in_verify "$(dirname "$state_file")" "$stand_in" scope_extension "$_si_exp" "$(aid_invoke_root 2>/dev/null || pwd)")" \
         || die "amend-scope: --stand-in ${stand_in} does not permit this widening: ${_si_why}"
       _pm_decision="$(jq -nc --arg a "$stand_in" --arg s "$(jq -r .verdict_sha256 "$stand_in")" '{stand_in: $a, verdict_sha256: $s}')"
+      _SI_CONSUME="$stand_in"; _SI_EXPECT="$_si_exp"
     elif [[ -z "$_zp_set" ]]; then
       echo "amend-scope: step $(( _zp_cs + 1 )) closes no point of the brief — a widening here is a scope change for the PM (rule 11)" >&2
       _fsm_refusal_next amend_scope_no_brief_point || true
@@ -5728,6 +5731,7 @@ cmd_amend_scope() {
   # Known limit: the generation-time D5 gate (gates/aid-contract-validate.sh)
   # compares plan.json against the EPIC's scope blocks; it runs at generation,
   # not mid-EPIC, and a REGENERATION resets the amendment by design.
+  [[ -n "${_SI_CONSUME:-}" ]] && aid_stand_in_consume "$_SI_CONSUME" "$_SI_EXPECT"
   log_event "${evidence_dir}/timeline.jsonl" "scope_amended" step="$cs" step_id="$step_id" paths="$(jq -r 'join(",")' <<<"$add_json")" reason="$reason" zadani_point="${_zp_point:-null}" pm_card="$(jq -r '.card // "null"' <<< "${_pm_decision:-null}")"
   fsm_emit_audit_log "scope_amended" --evidence-dir "$evidence_dir" --step "$cs" --paths "$(jq -r 'join(",")' <<<"$add_json")" --reason "$reason" 2>/dev/null || true
   echo "amend-scope: step ${cs} (${step_id}) may now also change: $(jq -r 'join(", ")' <<<"$add_json") — recorded in ${amend#${evidence_dir}/} and the timeline; plan_json_hash re-stamped. Continue the step; the agent's return must list these files like any other."

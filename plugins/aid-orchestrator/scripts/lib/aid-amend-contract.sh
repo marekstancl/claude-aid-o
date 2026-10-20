@@ -63,6 +63,7 @@ aid_amend_contract_rename() {
     why="$(aid_stand_in_verify "$ev" "$auth" rename "$(jq -nc --argjson s "$cs" --arg o "$old" --arg n "$new" '{step: $s, rename: {old: $o, new: $n}}')" "$troot")" \
       || _ac_fail rename_refused "--stand-in ${auth}: ${why}" "ask the stand-in for this rename, or the PM"
     decision="$(jq -nc --arg a "$auth" --arg s "$(jq -r .verdict_sha256 "$auth")" '{stand_in: $a, verdict_sha256: $s}')"
+    local si_expect; si_expect="$(jq -nc --argjson s "$cs" --arg o "$old" --arg n "$new" '{step: $s, rename: {old: $o, new: $n}}')"
   elif [[ -n "$card" ]]; then
     declare -F aid_pm_card_check >/dev/null || source "${_AID_AC_LIB}/aid-decision-card.sh"
     for f in "$old" "$new"; do why="$(aid_pm_card_check "$card" "$f")" || _ac_fail rename_refused "--pm-card: ${why}" "the PM's answered card quotes both paths"; done
@@ -76,7 +77,6 @@ aid_amend_contract_rename() {
     bash "${_AID_AC_LIB}/../aid-plan-check.sh" "$plan" --project-root "$troot" --quiet >/dev/null 2>&1 \
       && bash "${_AID_AC_LIB}/../aid-generation-readiness.sh" "$plan" --total 1 --project-root "$troot" >/dev/null 2>&1
   }
-  local ok_before=0; [[ -n "$plan" ]] && _ac_plan_ok && ok_before=1
 
   # the transaction: every file is backed up first and put back on any failure
   local bk; bk="$(mktemp -d)"; local -a files=("$pj" "$sf"); [[ -f "$contract" ]] && files+=("$contract")
@@ -111,15 +111,25 @@ aid_amend_contract_rename() {
   [[ -n "$seal" && -f "$seal" && -n "$plan" ]] && { jq --arg s "$(sha256sum "$plan" | cut -d' ' -f1)" '.plan_sha256 = $s' "$seal" > "${seal}.tmp" && mv "${seal}.tmp" "$seal"; }
 
   # the plan still passes its check and readiness, or nothing changed
-  if (( ok_before )) && ! _ac_plan_ok; then
+  # the plan passes its check and readiness after the rename, or nothing changed (Codex review: always, not only
+  # when it passed before — a plan inside a run passed both at its start)
+  if [[ -n "$plan" ]] && ! _ac_plan_ok; then
     local out; out="$(bash "${_AID_AC_LIB}/../aid-plan-check.sh" "$plan" --project-root "$troot" 2>&1; bash "${_AID_AC_LIB}/../aid-generation-readiness.sh" "$plan" --total 1 --project-root "$troot" 2>&1)"
-    _ac_undo; _ac_fail rename_breaks_plan "the plan passed its check and readiness before the rename and does not after: $(grep -E 'BLOCK|FAIL' <<< "$out" | head -3 | tr '\n' ' ')" "choose another name"
+    _ac_undo; _ac_fail rename_breaks_plan "after the rename the plan does not pass its check and readiness: $(grep -E 'BLOCK|FAIL' <<< "$out" | head -3 | tr '\n' ' ')" "choose another name"
   fi
   rm -rf "$bk"
 
-  # the step's measurement and review were of the old name: moved aside, never deleted
-  local at; at="$(date -u +%Y%m%dT%H%M%SZ)"
-  [[ -d "${ev}/cp2/step-${cs}" ]] && mv "${ev}/cp2/step-${cs}" "${ev}/cp2/step-${cs}.renamed-${at}"
+  # the measurement and review of every step that names the path (the current one, and any other that reads it)
+  # were of the old name: moved aside, never deleted
+  local at k sf2 moved=""; at="$(date -u +%Y%m%dT%H%M%SZ)"; sf2="$(mktemp)"
+  for (( k=0; k<total; k++ )); do
+    jq --argjson i "$k" '.steps[$i]' "$pj" > "$sf2"
+    if (( k == cs )) || _aid_ac_has "$sf2" "$new"; then
+      [[ -d "${ev}/cp2/step-${k}" ]] && { mv "${ev}/cp2/step-${k}" "${ev}/cp2/step-${k}.renamed-${at}"; moved+=" $((k + 1))"; }
+    fi
+  done
+  rm -f "$sf2"
+  [[ -n "${si_expect:-}" ]] && aid_stand_in_consume "$auth" "$si_expect"
   mkdir -p "$cdir"
   local rec="${cdir}/contract-amendments.json"; [[ -f "$rec" ]] || echo '[]' > "$rec"
   jq --arg o "$old" --arg n "$new" --arg r "$reason" --argjson d "$decision" --arg at "$at" \
@@ -127,5 +137,5 @@ aid_amend_contract_rename() {
      '. + [{rename: {old: $o, new: $n}, reason: $r, decision: $d, replacements: $c, at: $at}]' "$rec" > "${rec}.tmp" && mv "${rec}.tmp" "$rec"
   log_event "${ev}/timeline.jsonl" contract_renamed step="$cs" old="$old" new="$new" reason="$reason" || true
   declare -F fsm_emit_audit_log >/dev/null && fsm_emit_audit_log "contract_renamed" --evidence-dir "$ev" --reason "${old} → ${new}: ${reason}" >/dev/null 2>&1 || true
-  echo "renamed ${old} → ${new} in step $((cs + 1)): plan.json ${n_pj}, contract ${n_c}, plan ${n_plan}, brief ${n_z} (verze +$(( n_z > 0 ? 1 : 0 ))); the step's measurement and review start again (${rec})"
+  echo "renamed ${old} → ${new} in step $((cs + 1)): plan.json ${n_pj}, contract ${n_c}, plan ${n_plan}, brief ${n_z} (verze +$(( n_z > 0 ? 1 : 0 ))); measurement and review start again for step(s)${moved:- none} (${rec})"
 }

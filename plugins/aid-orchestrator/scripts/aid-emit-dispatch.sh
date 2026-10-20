@@ -251,9 +251,11 @@ cmd_complete() {
   local late_flag=""
   [[ "$duration_sec" -gt 1800 ]] && late_flag=" (LATE: >1800s ceiling)"
 
+  # the output's digest at completion (P117): a file swapped after the bracket closed is not the bracketed answer
+  local out_sha="null"; [[ -f "$output_file" ]] && out_sha="$(sha256sum "$output_file" | cut -d' ' -f1)"
   log_event "${evidence_dir}/timeline.jsonl" "verifier_dispatch_complete" \
     focus="$focus" agent_id="$agent_id" step_n="$step_n" \
-    evidence_dir="$evidence_dir" output_file="$output_file" \
+    evidence_dir="$evidence_dir" output_file="$output_file" output_sha256="$out_sha" \
     duration_sec="$duration_sec"
 
   if [[ -n "$late_flag" ]]; then

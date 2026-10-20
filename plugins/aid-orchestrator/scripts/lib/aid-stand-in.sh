@@ -49,14 +49,25 @@ aid_stand_in_record_ok() {
     || { echo "the proposal ${prop} is not the one the stand-in approved"; return 1; }
   [[ "$(sha256sum "$verdict" 2>/dev/null | cut -d' ' -f1)" == "$(jq -r .verdict_sha256 "$auth")" ]] \
     || { echo "the verdict ${verdict} is not the one recorded"; return 1; }
-  # exact: an array of the action is a subset of the approved one, every other field equal (contains() would
-  # match strings as substrings — AC12 would cover AC1)
+  # exact: every field of the action equals the approved one, an array as a set (contains() would match strings
+  # as substrings — AC12 would cover AC1 — and a subset would let [a, b] authorise a and then b separately)
   jq -e --argjson x "$expect" '. as $p | $x | to_entries | all(.key as $k | .value as $v
-      | if ($v | type) == "array" then (($v - ($p[$k] // [])) | length) == 0 else $p[$k] == $v end)' "$prop" >/dev/null 2>&1 \
+      | if ($v | type) == "array" then (($v | unique) == (($p[$k] // []) | unique)) else $p[$k] == $v end)' "$prop" >/dev/null 2>&1 \
     || { echo "the approved proposal does not cover this action (expected ${expect}, approved $(jq -c '{step, paths, criterion, rename}' "$prop"))"; return 1; }
   ledger="$(aid_delegate_ledger "$sroot" "$pid")"
   jq -e -s --arg i "$(jq -r .id "$auth")" --arg s "$(jq -r .verdict_sha256 "$auth")" \
     'any(.[]; .checkpoint == "stand_in" and .id == $i and .verdict_sha256 == $s)' "$ledger" >/dev/null 2>&1 \
     || { echo "the plan's ledger ${ledger} does not record this permission"; return 1; }
+  # used once: a repeat of the SAME action is idempotent, another action is refused
+  if [[ -f "${d}/consumed.json" ]] && [[ "$(jq -cS . "${d}/consumed.json" | jq -c .action)" != "$(jq -cS . <<< "$expect")" ]]; then
+    echo "the permission was already used for $(jq -c .action "${d}/consumed.json")"; return 1
+  fi
   return 0
+}
+
+# aid_stand_in_consume <auth.json> <expect-json> — mark the permission used for this action (after it applied)
+aid_stand_in_consume() {
+  local d; d="$(dirname "$1")"
+  [[ -f "${d}/consumed.json" ]] && return 0
+  jq -n --argjson a "$(jq -cS . <<< "$2")" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{action: $a, at: $at}' > "${d}/consumed.json.tmp" && mv "${d}/consumed.json.tmp" "${d}/consumed.json"
 }

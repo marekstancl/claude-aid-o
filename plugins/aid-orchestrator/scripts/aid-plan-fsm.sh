@@ -5044,6 +5044,22 @@ _pfsm_validate_plan_final_close_receipt_json() {
   ' <<< "$json" >/dev/null 2>&1
 }
 
+# _pfsm_cp7_confirmation_bad <run dir> — 0 when the last cp7 round is full, or a confirmation round whose
+# predecessor is a passed full round over the previous candidate and whose fix was documentation only (P117 (15));
+# else prints why and returns 1.
+_pfsm_cp7_confirmation_bad() {
+  local run_dir_abs="$1" _lr _co _fc="${1}/fix-class.json"
+  _lr="$(ls -d "${run_dir_abs}"/cp7/round-* 2>/dev/null | grep -E '/round-[0-9]+$' | sort -t- -k2 -n | tail -1)"
+  [[ -n "$_lr" && "$(jq -r '.mode // "full"' "${_lr}/round.json" 2>/dev/null)" == confirmation ]] || return 0
+  _co="$(jq -r '.confirmation_of // ""' "${_lr}/round.json")"
+  if ! jq -e '.docs_only == true' "$_fc" >/dev/null 2>&1; then echo "the fix since the previous candidate is not documentation only"; return 1; fi
+  if [[ ! -f "${_co}/measurement.json" || "$(jq -r .verdict "${_co}/measurement.json")" != pass || "$(jq -r '.mode // "full"' "${_co}/round.json")" != full ]]; then
+    echo "${_co:-<none>} is no passed full round"; return 1; fi
+  if [[ "$(jq -r .head_sha "${_co}/round.json")" != "$(jq -r .previous_candidate "$_fc")" ]]; then
+    echo "${_co} reviewed $(jq -r '.head_sha[:12]' "${_co}/round.json"), not the previous candidate"; return 1; fi
+  return 0
+}
+
 # _pfsm_accepted_risk_stale <run dir> <candidate> <root> — every cp7 accepted-risk.json is for this candidate,
 # its card unchanged, and each finding it names unchanged (P117 (14)); prints why not and returns 1.
 _pfsm_accepted_risk_stale() {
@@ -5063,6 +5079,11 @@ _pfsm_accepted_risk_stale() {
     if [[ "$(jq -r .candidate_sha "$_ar")" != "$candidate" ]]; then echo "${_ar#"${root}/"} was given for candidate $(jq -r '.candidate_sha[:12]' "$_ar"), not ${candidate:0:12}"; return 1; fi
     if [[ "$(sha256sum "$(jq -r .card "$_ar")" 2>/dev/null | cut -d' ' -f1)" != "$(jq -r .card_sha256 "$_ar")" ]]; then echo "the card of ${_ar#"${root}/"} changed after the PM answered it"; return 1; fi
     _m="$(dirname "$_ar")/merged.json"
+    # the whole set: every blocker/major the round holds open or accepted is exactly the set the PM accepted
+    if [[ "$(jq -c '[.findings[] | select((.severity | IN("blocker", "major")) and ((.status | IN("open", "disputed", "form_invalid")) or (.dispute.pm.accepted_risk == true))) | .fingerprint] | unique' "$_m")" \
+          != "$(jq -c '[.findings[].fingerprint] | unique' "$_ar")" ]]; then
+      echo "the open findings of $(dirname "${_ar#"${root}/"}") are not the set the PM accepted"; return 1
+    fi
     while IFS=$'\t' read -r _fp _fs; do
       [[ "$(jq -cS --arg f "$_fp" 'first(.findings[] | select(.fingerprint == $f)) | {fingerprint, severity, claim, evidence, command, rule}' "$_m" | sha256sum | cut -d' ' -f1)" == "$_fs" ]] \
         || { echo "finding ${_fp:0:23} of ${_ar#"${root}/"} is not the one the PM accepted"; return 1; }
@@ -5238,6 +5259,15 @@ _pfsm_finalize_decide() {
   if [[ "$round_rc" -ne 0 && "$round_msg" != *"reason=review_round_failed"* ]]; then
     echo "${round_msg%reason=*}" >&2
     return 1
+  fi
+
+  # P117 (15): the last whole-plan round is FULL over this candidate, or a confirmation round that follows a passed
+  # full round of the previous candidate after a documentation-only fix
+  local _c7bad=""
+  if ! _c7bad="$(_pfsm_cp7_confirmation_bad "$run_dir_abs")"; then
+    echo "REFUSED (cp7_confirmation_not_enough): plan-finalize --stage decide: the last whole-plan round is a confirmation round, and ${_c7bad} — a full round over ${candidate:0:12} is needed" >&2
+    echo "next: aid-review-round.sh prepare --checkpoint cp7 --evidence-dir ${run_dir_rel} --round <next> (a full round), then close it and decide again" >&2
+    echo "(pipeline.md §When AID refuses: cp7_confirmation_not_enough)" >&2; return 1
   fi
 
   # P117 (14): the PM's acceptance of open findings holds only for its candidate and its set of findings
