@@ -1,4 +1,4 @@
-# Zadání: /aid-ui svižné a přesné (P117, verze 2, 20. 10. 2026)
+# Zadání: /aid-ui svižné a přesné (P118, verze 2, 20. 10. 2026; PM 20. 10.: 1A hlášení po kole neblokuje, 2A stavba na větvi P116, vydání spolu jako 3.8.0)
 
 Verze 2 zapracovává dva nezávislé posudky verze 1 (Codex; Claude Opus s čistým kontextem, který měřil v kódu, datech
 pilotu a přepisu sezení). Co z kterého posudku je, uvádí sloupec „zdroj“ v oddíle Změny.
