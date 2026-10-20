@@ -5279,7 +5279,7 @@ _pfsm_finalize_decide() {
   declare -F aid_plan_tests_bad >/dev/null || source "${SCRIPT_DIR}/lib/aid-plan-tests.sh"
   local _pt_bad="" _pt_plan; _pt_plan="$(aid_lifecycle_plan_file "$plan_id" "$root" 2>/dev/null || true)"
   if [[ -f "${run_dir_abs}/plan-tests.json" ]] || { [[ -n "$_pt_plan" ]] && aid_plan_tests_needed "$troot" "${root}/.aid-o/config/execution.yaml" "$_pt_plan"; }; then
-    if ! _pt_bad="$(aid_plan_tests_bad "$run_dir_abs" "$candidate")"; then
+    if ! _pt_bad="$(aid_plan_tests_bad "$run_dir_abs" "$candidate" "$troot" "${root}/.aid-o/config/execution.yaml" "${_pt_plan:-/dev/null}")"; then
       echo "REFUSED (plan_tests_failed): plan-finalize --stage decide: ${_pt_bad}" >&2
       echo "next: fix what the log shows on the plan branch, then plan-finalize ${plan_id} --stage freeze and produce again (the close runs the tests itself)" >&2
       echo "(pipeline.md §When AID refuses: plan_tests_failed)" >&2; return 1
@@ -8591,7 +8591,8 @@ _pfsm_finalize_produce() {
   # P117 (17): the plan's own nightly tests, run here at the candidate and bound to it (plan-tests.json)
   declare -F aid_plan_tests_run >/dev/null || source "${SCRIPT_DIR}/lib/aid-plan-tests.sh"
   aid_plan_tests_run "$pd_cwd" "${root}/.aid-o/config/execution.yaml" "$plan_file" "$candidate" "$run_dir_abs"
-  aid_stage_writes_record "$run_dir_abs" produce plan-tests.json $(cd "$run_dir_abs" && compgen -G 'plan-tests/*.log') >/dev/null 2>&1 || true
+  aid_stage_writes_record "$run_dir_abs" produce plan-tests.json $(cd "$run_dir_abs" && compgen -G 'plan-tests/*.log') >/dev/null 2>&1 \
+    || { echo "PRECONDITION FAIL: plan-finalize --stage produce: the record of plan-tests.json could not be written (stage-writes.jsonl)" >&2; return 1; }
   [[ "$(jq '.tests | length' "${run_dir_abs}/plan-tests.json")" == 0 ]] \
     || echo "plan-tests: $(jq -r '[.tests[] | "\(.path) \(if .exit == 0 then "pass" elif .exit == null then "not run: \(.reason)" else "exit \(.exit)" end)"] | join("; ")' "${run_dir_abs}/plan-tests.json")"
   local pd_verdict=""

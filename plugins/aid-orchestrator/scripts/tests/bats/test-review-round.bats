@@ -505,6 +505,9 @@ _mplan() {
   jq '.steps[0].outputs += ["Modify: `CHANGELOG.md` — the line"]' "$E/plan.json" > "$E/p" && mv "$E/p" "$E/plan.json"; _sc
   run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"prompt-final_claims.md"* ]]
   [ "$(jq -r '.reviewers_expected | index("final_claims") != null' "$(D 1)/round.json")" = true ]
+  # a project policy that lists no final_claims still gets it for a documentation step (a policy replaces the block)
+  rm -rf "$E/cp2"; yq -i 'del(.review_checkpoints.step_review.reviewers[] | select(.role == "final_claims"))' "$R/.aid-o/config/policies/review-checkpoints.yaml"; _sc
+  run _S prepare --round 1; [ "$status" -eq 0 ]; [[ "$output" == *"prompt-final_claims.md"* ]]
 }
 
 @test "step: prepare needs a step check at HEAD and a review verdict; the default asks security on every reviewed step, a gated project only on a pattern" {
@@ -1948,6 +1951,11 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   sed -i "${line}s/.*/the fix/" "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "fix the cited line"
   run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_fix_pending"* ]]
   [ "$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .status' "$(D 1)/merged.json")" = disputed ]   # never marked fixed by itself
+  git -C "$R" reset -q --hard HEAD~1
+  # a second citation of the finding fixed: the same (every citation counts)
+  local m="$(D 1)/merged.json"; jq --arg f "$FP" '.findings |= map(if .fingerprint == $f then .evidence = (.evidence + "; src/new.py:1") else . end)' "$m" > "$m.t" && mv "$m.t" "$m"
+  echo "fixed too" > "$R/src/new.py"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "fix the second citation"
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_fix_pending"* ]]
   git -C "$R" reset -q --hard HEAD~1
   echo "an unrelated line" >> "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "elsewhere"
   run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]

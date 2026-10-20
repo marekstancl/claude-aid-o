@@ -42,6 +42,19 @@ _aid_pt_nightly() {
   [[ -f "$1/$3" ]] && [[ "$(aid_test_tier_of "$1/$3" 2>/dev/null)" == t2 ]]
 }
 
+# aid_plan_tests_expected <tree> <exec_yaml> <plan_file> — the set the close must run: [{path, command, timeout_s}]
+aid_plan_tests_expected() {
+  local p line cmd t rows="[]"
+  while IFS= read -r p; do
+    [[ -n "$p" ]] && _aid_pt_nightly "$1" "$2" "$p" || continue
+    cmd=""; t=600
+    if line="$(aid_plan_tests_command "$2" "$p")"; then cmd="$(cut -f1 <<< "$line")"; cmd="${cmd//\{path\}/$p}"; t="$(cut -f2 <<< "$line")"; fi
+    [[ "$t" =~ ^[1-9][0-9]*$ ]] || t=600; (( t > 1800 )) && t=1800
+    rows="$(jq -c --arg p "$p" --arg c "$cmd" --argjson t "$t" '. + [{path: $p, command: (if $c == "" then null else $c end), timeout_s: $t}]' <<< "$rows")"
+  done < <(aid_plan_tests_named "$3")
+  printf '%s\n' "$rows"
+}
+
 # aid_plan_tests_needed <tree> <exec_yaml> <plan_file> — 0 when the plan names a test the close must run
 aid_plan_tests_needed() {
   local p
@@ -68,13 +81,23 @@ aid_plan_tests_run() {
       --arg s "$(sha256sum "$log" | cut -d' ' -f1)" '. + [{path: $p, command: $c, exit: $e, duration_s: $d, timeout_s: $t, log: $l, log_sha256: $s}]' <<< "$rows")"
   done < <(aid_plan_tests_named "$plan")
   jq -n --arg c "$cand" --argjson r "$rows" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{artifact_type: "plan_tests", candidate_sha: $c, tests: $r, run_at: $at, run_by: "aid-plan-fsm.sh plan-finalize --stage produce"}' > "${rd}/plan-tests.json"
+     --arg ps "$(sha256sum "$plan" | cut -d' ' -f1)" --arg es "$( [[ -f "$ex" ]] && sha256sum "$ex" | cut -d' ' -f1 || echo none)" \
+    '{artifact_type: "plan_tests", candidate_sha: $c, plan_sha256: $ps, execution_yaml_sha256: $es, tests: $r, run_at: $at, run_by: "aid-plan-fsm.sh plan-finalize --stage produce"}' > "${rd}/plan-tests.json"
 }
 
 aid_plan_tests_bad() {
-  local rd="$1" cand="$2" f="${1}/plan-tests.json" row p
+  local rd="$1" cand="$2" f="${1}/plan-tests.json" row p tree="${3:-}" ex="${4:-}" plan="${5:-}"
   [[ -f "$f" ]] || { echo "no plan-tests.json — the close did not run the plan's nightly tests (plan-finalize --stage produce)"; return 1; }
   [[ "$(jq -r .run_by "$f")" == "aid-plan-fsm.sh plan-finalize --stage produce" ]] || { echo "plan-tests.json was not written by the close"; return 1; }
+  # the close's own record of writing it (stage-writes.jsonl; its digest is verified by decide's integrity check)
+  if [[ -n "$tree" ]]; then
+    grep -q '"path":"plan-tests.json"' "${rd}/stage-writes.jsonl" 2>/dev/null || { echo "plan-tests.json has no record of the close writing it (stage-writes.jsonl)"; return 1; }
+    # exactly the set the current plan and execution.yaml ask (Codex review of P117 E)
+    local want got
+    want="$(aid_plan_tests_expected "$tree" "$ex" "$plan" | jq -cS 'map({path, command, timeout_s}) | sort_by(.path)')"
+    got="$(jq -cS '.tests | map({path, command, timeout_s: (.timeout_s // 600)}) | sort_by(.path)' "$f")"
+    [[ "$want" == "$got" ]] || { echo "plan-tests.json ran $(jq -c 'map(.path)' <<< "$got"), the plan and execution.yaml now ask $(jq -c 'map(.path)' <<< "$want") — produce again"; return 1; }
+  fi
   [[ "$(jq -r .candidate_sha "$f")" == "$cand" ]] || { echo "plan-tests.json is of candidate $(jq -r '.candidate_sha[:12]' "$f"), not ${cand:0:12}"; return 1; }
   while IFS= read -r row; do
     p="$(jq -r .path <<< "$row")"

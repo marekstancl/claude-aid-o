@@ -1562,18 +1562,23 @@ _dlg_supersede() {
 # cites (its first evidence path:line, or the file when no line is given): the fix is judged by the next round's
 # confirmation, never by an adjudicator, and never marks itself fixed (P117 (19))
 _dlg_fix_touched() {
-  local dir="$1" ev file line rh
+  local dir="$1" ev c file line rh
   rh="$(jq -r '.head_sha // ""' "${dir}/round.json" 2>/dev/null)"; [[ -n "$rh" && "$rh" != null ]] || return 1
   [[ "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)" != "$rh" ]] || return 1
-  ev="$(jq -r '.evidence // ""' <<< "$2")"; ev="${ev%%;*}"; ev="$(sed -E 's/^[0-9a-f]{7,40}://' <<< "$ev")"
-  file="${ev%%:*}"; line="${ev#*:}"; line="${line%%[!0-9]*}"
-  [[ -n "$file" ]] || return 1
-  git -C "$ROOT" diff --quiet "$rh" HEAD -- "$file" 2>/dev/null && return 1
-  [[ -n "$line" ]] || return 0
-  git -C "$ROOT" diff -U0 "$rh" HEAD -- "$file" 2>/dev/null | awk -v l="$line" '
-    /^@@/ { split($2, o, ","); s = substr(o[1], 2) + 0; n = (o[2] == "" ? 1 : o[2] + 0)
-            if (n == 0) { if (l == s || l == s + 1) hit = 1 } else if (l >= s && l < s + n) hit = 1 }
-    END { exit !hit }'
+  ev="$(jq -r '.evidence // ""' <<< "$2")"
+  # every citation (`a.c:10; b.c:20`): a fix that changed any of them is the next round's (Codex review of P117 E)
+  while IFS= read -r c; do
+    c="$(sed -E 's/^[[:space:]]+//; s/^[0-9a-f]{7,40}://' <<< "$c")"
+    file="${c%%:*}"; line=""; [[ "$c" == *:* ]] && { line="${c#*:}"; line="${line%%[!0-9]*}"; }
+    [[ -n "$file" ]] || continue
+    git -C "$ROOT" diff --quiet "$rh" HEAD -- "$file" 2>/dev/null && continue
+    [[ -n "$line" ]] || return 0
+    git -C "$ROOT" diff -U0 "$rh" HEAD -- "$file" 2>/dev/null | awk -v l="$line" '
+      /^@@/ { split($2, o, ","); s = substr(o[1], 2) + 0; n = (o[2] == "" ? 1 : o[2] + 0)
+              if (n == 0) { if (l == s || l == s + 1) hit = 1 } else if (l >= s && l < s + n) hit = 1 }
+      END { exit !hit }' && return 0
+  done < <(tr ';' '\n' <<< "$ev")
+  return 1
 }
 # _dlg_kind <finding-json> — dispute | open_after_rounds
 _dlg_kind() { [[ "$(jq -r .status <<< "$1")" == disputed ]] && echo dispute || echo open_after_rounds; }

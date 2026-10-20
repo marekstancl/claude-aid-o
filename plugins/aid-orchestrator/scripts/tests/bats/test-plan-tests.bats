@@ -25,6 +25,12 @@ setup() {
   grep -q '^ran tests/test-night.bats$' "$RD/$(jq -r '.tests[0].log' "$RD/plan-tests.json")"
   L "aid_plan_tests_bad '$RD' cafe"; [ "$status" -eq 0 ]
   L "aid_plan_tests_bad '$RD' beef"; [ "$status" -eq 1 ]; [[ "$output" == *"not cafe"* || "$output" == *"of candidate cafe"* ]]
+  # decide's full check: the close's own record of writing it, and exactly the set the plan and execution.yaml ask
+  L "aid_plan_tests_bad '$RD' cafe '$T' '$EX' '$T/plan.md'"; [ "$status" -eq 1 ]; [[ "$output" == *"no record of the close writing it"* ]]
+  L "source '$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh'; cd '$RD' && aid_stage_writes_record '$RD' produce plan-tests.json plan-tests/1.log plan-tests/2.log"
+  L "aid_plan_tests_bad '$RD' cafe '$T' '$EX' '$T/plan.md'"; echo "$output"; [ "$status" -eq 0 ]
+  printf -- '- Test: `tests/test-more.bats` — another\n' >> "$T/plan.md"; printf '# aid-tier: t2\n' > "$T/tests/test-more.bats"
+  L "aid_plan_tests_bad '$RD' cafe '$T' '$EX' '$T/plan.md'"; [ "$status" -eq 1 ]; [[ "$output" == *"the plan and execution.yaml now ask"* ]]
   echo tampered >> "$RD/plan-tests/1.log"; L "aid_plan_tests_bad '$RD' cafe"; [ "$status" -eq 1 ]; [[ "$output" == *"log changed"* ]]
 }
 
