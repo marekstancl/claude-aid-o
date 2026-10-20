@@ -981,3 +981,15 @@ PY
   [ "$(cat "$PROJ/.aid-ui/precheck/result.json")" = '{"sentinel": 1}' ]   # the precheck's result untouched
   jq -e '[.rows[] | select(.check == "app_flows" and .page == "zalozit" and .state == "normal")] | length == 1' "$PROJ/.aid-ui/quick/result.json" >/dev/null
 }
+
+@test "app-gate (P118): a version changed under a running gate gives no result" {
+  app_gate
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$T/appsite" >/dev/null
+  rm -f "$RES"
+  ( bash "$SC/aid-ui-verify.sh" "$PROJ" > "$T/gate.log" 2>&1; echo "exit=$?" >> "$T/gate.log" ) &
+  for _ in $(seq 100); do pgrep -f "[a]id-ui-verify.mjs --state.*$PROJ" >/dev/null && break; sleep 0.1; done
+  sleep 2; echo '<!-- změna během běhu -->' >> "$T/appsite/index.html"
+  wait
+  grep -q "changed during the run" "$T/gate.log" || { cat "$T/gate.log"; return 1; }
+  ! grep -q '^exit=0' "$T/gate.log"
+}

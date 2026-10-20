@@ -126,6 +126,16 @@ Zápis `aid-ui-quality.py self <projekt> --place <místo> --file <kontrola.json>
 na otisk podkladů místa; `round` bez platné kontroly nad touto verzí nespustí. **Vlastní známky výrobce se nepíšou**
 (P118: v pilotu vždy „9“, role 4,9-8,8 - nic nerozhodovaly).
 
+## Smyčka bez čekání, výrobce v čerstvém kontextu (P118, PM 20. 10. 2026)
+
+- **Po kole hlas a pokračuj.** Hlášení PM (co role navrhly, co se udělalo, cena a čas) se pošle a smyčka jede dál;
+  zastaví se jen na rozhodnutí, které je PM (P116: čekání bylo 3 h 21 min ze 6 h kola).
+- **Opravy dělá podagent v čerstvém kontextu.** `aid-ui-quality.py brief <projekt> --place <místo>` napíše brief
+  (nálezy k opravě, co dodal klient, lint, otevřené body ověřovatele, červené řádky rychlé kontroly); podagent dostane
+  jen jeho cestu a vrátí u každého nálezu větu do `fixed --evidence`. Hlavní vlákno řídí a výpisy brány nečte
+  (P116: 605 tis. tokenů kontextu na tah, 92 % ceny).
+- **Plugin se během běhu studia nemění**; jeho verze se zapisuje ke kolu (`round.json` `plugin`).
+
 ## Opravy po přijatém kole: delta kolo, ne znovuotevření (P118, místa kromě hotového webu)
 
 Když místo prošlo a výrobce verzi ještě opraví (nálezy přijatého kola), smyčka hlásí `delta`: jedno další kolo nad

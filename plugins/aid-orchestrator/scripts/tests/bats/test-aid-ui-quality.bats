@@ -627,3 +627,15 @@ SH
   f="$(python3 "$SC/aid-ui-critic.py" bundle-files "$P" --place sdeleni | head -1)"; echo "Nesouvisející úprava." >> "$P/$f"
   [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = verdict ]
 }
+
+@test "brief (P118): the producer's brief holds the findings to fix, what the client supplied and the verifier's open points - nothing else" {
+  ans 6 7; qround "$P" --web "$W" >/dev/null
+  python3 "$Q" triage "$P" r1-owner-f1 accepted --expected "+1" >/dev/null
+  python3 "$Q" triage "$P" r1-tech-f1 rejected_with_reason --reason "už je konkrétní" >/dev/null
+  WHOLE_OPEN="cena na úvodu nesedí s ceníkem" verified web
+  run python3 "$Q" brief "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  B="$output"; [ -f "$B" ]
+  grep -q '^- \*\*r1-owner-f1\*\*' "$B"; ! grep -q 'r1-tech-f1' "$B"            # only what is accepted and not fixed
+  grep -q 'vlastní fotky: missing' "$B"                                         # the client's answers (qround: missing)
+  grep -q 'cena na úvodu nesedí s ceníkem' "$B"
+}

@@ -31,6 +31,10 @@ rounds/<n>/{owner,tech}/ (the ratings), rounds/<n>/history-<role>.json (the memo
   fixed <project> <finding> --evidence <t> --method <t>
       An accepted finding is fixed; the evidence names what changed and where (the role sees it next round), the
       method which procedure made it (a step, an adopted skill) or "z hlavy: <why none>" - the round report to the PM.
+  brief <project> [--place <p>]
+      (P118) The brief for the producer of the fixes in a fresh, small context: the findings to fix, what the client
+      supplied, the model's lint, the verifier's open points over this version and the quick check's red rows.
+      Writes .aid-ui/critic/fix-brief[-<place>].md and prints its path; the main thread hands only that over.
   status <project>
       {decision, why, rounds, repair_rounds, scores, best} with decision one of
       triage | supply | fix | round | delta | close | audit | verdict | stop:conflict | stop:stagnation | stop:round_cap | done.
@@ -591,7 +595,11 @@ def do_round(p, web):
         finds += [mark_client(dict(f, id="r%d-%s-%s" % (n, role, bare(f["id"], [x["id"] for x in ans["findings"]])), role=role, state=None)) for f in ans["findings"]]
     score = merge(runs)
     shas = {role: hashlib.sha256(open(os.path.join(out, "answer.json"), "rb").read()).hexdigest() for role, (_, out) in res.items()}
-    rec = {"n": n, "at": at, "place": PLACE, "delta": st["decision"] == "delta", "answers": shas, "web": web, "site_sha": runs["owner"]["site_sha"], "frozen_sha": runs["owner"]["frozen_sha"],
+    try:   # P118: the plugin does not change during a run - its version is part of the round's record
+        plug = json.load(open(os.path.join(HERE, "..", ".claude-plugin", "plugin.json"), encoding="utf-8")).get("version")
+    except (OSError, ValueError):
+        plug = None
+    rec = {"n": n, "at": at, "place": PLACE, "delta": st["decision"] == "delta", "plugin": plug, "answers": shas, "web": web, "site_sha": runs["owner"]["site_sha"], "frozen_sha": runs["owner"]["frozen_sha"],
            "provider": {r: runs[r].get("provider") for r in ROLES}, "score": score, "findings": finds, "readiness": score["readiness"],
            "task_test": task_row(p), "usd_equiv": usd_since(p, at)}
     save_round(p, rec)
@@ -815,6 +823,43 @@ def launch_status(p, pkg):
     print("launch rating accepted: %s (owner %s, tech %s)" % (v.get("url"), v.get("owner"), v.get("tech")))
 
 
+def brief(p):
+    """P118: what the producer of the fixes needs and nothing more (a fresh, small context instead of the whole
+    session): the findings to fix, what the client supplied, the model's lint, the verifier's open points and the
+    quick check's red rows, with the paths to read. Writes .aid-ui/critic/fix-brief[-<place>].md and prints its path."""
+    rs = rounds(p)
+    last = rs[-1] if rs else {"n": 0, "findings": []}
+    todo = [f for f in last["findings"] if f.get("state") == "accepted" and not f.get("evidence")]
+    sup = memory.supply_records(p, PLACE)
+    L = [f"# Opravy místa {PLACE} po kole {last['n']} (P118: výrobce v čerstvém kontextu)", "",
+         "Oprav jen tyto věci. Model `docs/design/screens.json`, fakta `docs/design/app-facts.json` (je-li) a postup",
+         "`skills/ui-design/references/local/aplikace-postup.md`. Po každé úpravě `aid-ui-screens.py check` a `aid-ui-verify.sh --quick`.",
+         "Na konci vrať u každého nálezu jednu větu, co se změnilo a kde (ta jde do `aid-ui-quality.py fixed --evidence`).", "",
+         "## Nálezy k opravě", ""]
+    L += [f"- **{f['id']}** ({f.get('role')}, {f.get('criterion')}, {f.get('severity')}): {f['text']}" + (f" - očekávání: {f['expected']}" if f.get("expected") else "") for f in todo] or ["- žádné"]
+    L += ["", "## Co dodal klient", ""] + ([f"- {r.get('text')}: {r.get('status')} - {r.get('answer') or r.get('missing')}" + (f" ({r.get('source')})" if r.get("source") else "") for r in sup.values()] or ["- nic"])
+    model = os.path.join(p, "docs", "design", "screens.json")
+    if os.path.isfile(model):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("aid_ui_screens", os.path.join(HERE, "aid-ui-screens.py"))
+        smod = importlib.util.module_from_spec(spec); spec.loader.exec_module(smod)
+        lint = smod.violations(json.load(open(model, encoding="utf-8")), p)
+        L += ["", "## Lint modelu", ""] + ([f"- {x}" for x in lint] or ["- bez nálezu"])
+    art = site_sha(p)
+    opn = [o for r in memory.verify_records(p, PLACE, art) for o in (r.get("open") or []) if isinstance(o, dict)]
+    L += ["", "## Otevřené body ověřovatele nad touto verzí", ""] + ([f"- {o.get('where')}: {o.get('what')} ({o.get('why') or ''})" for o in opn] or ["- žádné (nebo ověřovatel nad touto verzí neběžel)"])
+    try:
+        q = json.load(open(os.path.join(p, ".aid-ui", "quick", "result.json"), encoding="utf-8"))
+        red = [r for r in q.get("rows") or [] if r.get("status") != "pass"]
+        L += ["", "## Červené řádky rychlé kontroly", ""] + ([f"- {r['check']} {r['page']} {r.get('state') or ''}: {str(r.get('detail') or '')[:160]}" for r in red[:30]] or ["- žádné"])
+    except (OSError, ValueError):
+        pass
+    f = os.path.join(cdir(p), "fix-brief.md" if PLACE == "web" else f"fix-brief-{PLACE}.md")
+    with open(f, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(L) + "\n")
+    print(f)
+
+
 def main(a):
     if len(a) < 2:
         die("usage: round|triage|fixed|status|audit <project> ... (see the header)", 2)
@@ -855,6 +900,8 @@ def main(a):
         launch_status(p, opts.get("package"))
     elif cmd == "reopen":
         reopen(p, opts.get("reason"))
+    elif cmd == "brief":
+        brief(p)
     elif cmd == "fixed" and len(rest) == 1:
         fixed(p, rest[0], opts.get("evidence"), opts.get("method"))
     else:

@@ -68,6 +68,12 @@ fs.mkdirSync(out, { recursive: true });
 // page key -> URL: a/index.html -> /a/, index.html -> /, x.html -> /x.html
 const urlOf = p => new URL(p === 'index.html' ? '' : p.endsWith('/index.html') ? p.slice(0, -10) : p, base).href;
 const sha = f => createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+// P118: one artifact per run - the site (and an app's model and scenarios) as they were when the run began; a run
+// whose version changed under it writes no result (a gate over half the old and half the new version proves nothing)
+const treeSha = d => { const h = createHash('sha256'); const walk = x => { if (!fs.existsSync(x)) return; for (const e of fs.readdirSync(x, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+  const f = path.join(x, e.name); if (e.isDirectory()) walk(f); else if (e.isFile()) h.update(path.relative(d, f) + '\0' + sha(f) + '\n'); } }; walk(d); return h.digest('hex'); };
+const artifactNow = () => [treeSha(site), project ? treeSha(path.join(project, '.aid-ui', 'scenarios')) : '', project && fs.existsSync(path.join(project, 'docs/design/screens.json')) ? sha(path.join(project, 'docs/design/screens.json')) : ''].join('|');
+const ARTIFACT = artifactNow();
 const inside = (root, f) => { const r = path.resolve(root, f); return r === root || r.startsWith(root + path.sep) ? r : null; };
 // site file behind a same-origin URL, or null (outside the site or not a file)
 function siteFile(u) {
@@ -1516,7 +1522,8 @@ if (want('all_pages')) {
 
 // P118: the matrix's order whatever ran first; a stable sort keeps each matrix row's checks in the order they were written
 rows.sort((a, b) => ROWAT.get(a) - ROWAT.get(b));
-const result = { run_at: new Date().toISOString(), build_id: st.build?.id, matrix, rows, fingerprints: fps, ...(APPV ? { model_sha256: APPV.model_sha256 } : {}) };
+if (artifactNow() !== ARTIFACT) { console.error('aid-ui-verify.mjs: the version (site, model or scenarios) changed during the run; no result - run the gate again on one version'); process.exit(1); }
+const result = { run_at: new Date().toISOString(), artifact: createHash('sha256').update(ARTIFACT).digest('hex'), build_id: st.build?.id, matrix, rows, fingerprints: fps, ...(APPV ? { model_sha256: APPV.model_sha256 } : {}) };
 fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 1));
 const count = rows.reduce((a, r) => (a[r.status] = (a[r.status] || 0) + 1, a), {});
 console.log(`VERIFY: ${JSON.stringify(count)} -> ${path.join(out, 'result.json')}`);
