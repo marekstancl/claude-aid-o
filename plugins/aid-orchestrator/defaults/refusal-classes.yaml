@@ -11,7 +11,12 @@
 #   not_in_run                plan writing, the plan review (CP1), or the EPIC path removed in 3.0.0
 # test-refusal-classes.bats refuses a printed code missing here. Source: .aid-o/plans/P117-registr.md.
 codes:
+  DISPATCH_ORPHANED: {class: agent_fix, how: "osiřelý start: aid-emit-dispatch.sh cancel/repair, bez --force"}
+  GATE_TIMEOUT: {class: incident, how: "brána nedoběhla v limitu: žebřík obnovy ji pustí znovu; trvá-li, prostředí se opraví"}
+  JOB_LOST: {class: incident, how: "úloha na pozadí zmizela: žebřík obnovy ji pustí znovu"}
   REVIEW_EXHAUSTED: {class: stand_in, how: "delegate (P112), opakování po novém důkazu (12)"}
+  TRANSIENT_INFRA: {class: incident, how: "přechodná chyba prostředí: počkat a pustit znovu"}
+  UNCLASSIFIED: {class: pm, how: "žebřík obnovy nezařadil příčinu: rozhoduje PM"}
   abandon_needs_reason: {class: pm, how: "opuštění běhu je rozhodnutí PM"}
   accepted_risk_stale: {class: pm, how: "přijetí rizika PM platí jen pro svého kandidáta a svou sadu nálezů: nová karta"}
   active_runs_unreadable: {class: incident, how: "poškozený soubor stavu"}

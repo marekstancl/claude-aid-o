@@ -1222,13 +1222,9 @@ _fsm_refusal_next() {
   aid_refusal_class_line "$reason" >&2 || true
 }
 
-# aid_refusal_class <code> — the class of a refusal code from defaults/refusal-classes.yaml (P117): who acts on
-# it in an --auto run. Unknown or unreadable = pm (fail-closed). aid_refusal_class_line prints "class: …".
-aid_refusal_class() {
-  local f="${SCRIPT_DIR}/../defaults/refusal-classes.yaml" c
-  c="$(C="$1" yq -r '.codes[strenv(C)].class // ""' "$f" 2>/dev/null)" || c=""
-  printf '%s\n' "${c:-pm}"
-}
+# aid_refusal_class / aid_refusal_class_how: lib/aid-refusal-class.sh (the one reader, P117)
+# shellcheck source=lib/aid-refusal-class.sh
+source "${SCRIPT_DIR}/lib/aid-refusal-class.sh"
 aid_refusal_class_line() {
   local c; c="$(aid_refusal_class "$1")"
   case "$c" in

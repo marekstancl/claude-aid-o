@@ -32,7 +32,7 @@ aid_plan_tests_command() {
   [[ -f "$ex" ]] || return 1
   while IFS=$'\t' read -r g c t n; do
     _aid_ancillary_glob_match "$p" "$g" && { printf '%s\t%s\t%s\n' "$c" "$t" "$n"; return 0; }
-  done < <(yq -r '(.plan_tests // [])[] | [(.glob // ""), (.command // ""), ((.timeout_s // 600) | tostring), ((.nightly // false) | tostring)] | @tsv' "$ex" 2>/dev/null)
+  done < <(yq -o=json '.plan_tests // []' "$ex" 2>/dev/null | jq -r '.[] | [(.glob // ""), (.command // ""), ((.timeout_s // 600) | tostring), ((.nightly // false) | tostring)] | @tsv')
   return 1
 }
 

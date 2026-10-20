@@ -598,7 +598,8 @@ while INNER: progs(INNER.pop(0), "")
       if (( pc_rc == 124 )); then _block "B11" "$EXEC_YAML" "project plan check '${pc_name}' did not finish in ${pc_t} s"
       elif (( pc_rc != 0 )); then _block "B11" "$PLAN" "project plan check '${pc_name}' refuses the plan (exit ${pc_rc}): $(tail -3 <<< "$pc_out" | tr '\n' ' ')"
       fi
-    done < <(yq -r '.plan_checks[] | [(.name // "unnamed"), (.command // ""), ((.timeout_s // "") | tostring)] | @tsv' "$EXEC_YAML" 2>/dev/null)
+    # through JSON, not yq's @tsv: @tsv quotes a field holding a quote, and the command would reach bash as one word
+    done < <(yq -o=json '.plan_checks' "$EXEC_YAML" 2>/dev/null | jq -r '.[] | [(.name // "unnamed"), (.command // ""), ((.timeout_s // "") | tostring)] | @tsv')
     rm -f "$_np"
   fi
   # B13 — a test the plan names that the close cannot run (P117 (2)/(17); WAN P111: the close profile never ran

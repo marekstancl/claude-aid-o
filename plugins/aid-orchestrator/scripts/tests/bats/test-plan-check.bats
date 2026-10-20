@@ -144,6 +144,10 @@ _plan() { # <file> <strict|legacy> [dep2] [files1...]
   _plan p.md strict; run "$CHECK" p.md; echo "$output"; [ "$status" -eq 0 ]
   _plan p.md strict '- Depends on: Step 1' '- Create: `tests/test_p117_thing.py` — the test'
   run "$CHECK" p.md; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK B11"*"test_names"*"refuses the plan"* ]]
+  # a command with quotes in it reaches bash as the command, not as one quoted word
+  printf '%s\n' 'plan_checks:' '  - name: inline' "    command: '! grep -E \"(^|/)test_p[0-9]{3}\"'" > .aid-o/config/execution.yaml
+  run "$CHECK" p.md; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"'inline' refuses the plan (exit 1)"* ]]
+  _plan p.md strict; run "$CHECK" p.md; [ "$status" -eq 0 ]
   printf 'plan_checks:\n  - name: slow\n    command: "sleep 5"\n    timeout_s: 1\n' > .aid-o/config/execution.yaml
   _plan p.md strict; run "$CHECK" p.md; [ "$status" -eq 1 ]; [[ "$output" == *"BLOCK B11"*"'slow' did not finish in 1 s"* ]]
 }

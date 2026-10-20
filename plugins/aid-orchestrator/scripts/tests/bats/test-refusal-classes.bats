@@ -32,3 +32,17 @@ setup() {
   echo "$output"
   [[ "${lines[0]}" == stand_in ]]; [[ "${lines[1]}" == pm ]]; [[ "${lines[2]}" == "class: stand_in"* ]]
 }
+
+@test "refusal class: a numbered code reads its <n> row (gates_runner_exit_1 is agent_fix, not pm); the uppercase codes of the recovery ladder have classes; aid-fsm.sh and aid-stand-in.sh read the registry through the one library" {
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-refusal-class.sh'; aid_refusal_class gates_runner_exit_1; aid_refusal_class gates_runner_exit_137"
+  [ "${lines[0]}" = agent_fix ]; [ "${lines[1]}" = agent_fix ]
+  local c missing=""
+  for c in $(bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-recovery-ladder.sh' >/dev/null 2>&1; _aid_ladder_class_constants"); do
+    yq -e ".codes.\"$c\"" "$REG" >/dev/null 2>&1 || missing+=" $c"
+  done
+  [ -z "$missing" ] || { echo "uppercase codes without a class:$missing"; false; }
+  grep -q 'lib/aid-refusal-class.sh' "$AID_PLUGIN_PATH/scripts/aid-fsm.sh"
+  grep -q 'lib/aid-refusal-class.sh' "$AID_PLUGIN_PATH/scripts/aid-stand-in.sh"
+  ! grep -q 'refusal-classes.yaml' "$AID_PLUGIN_PATH/scripts/aid-stand-in.sh" "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" | grep -v '^#'
+  ! grep -E 'refusal-classes\.yaml"' "$AID_PLUGIN_PATH/scripts/aid-stand-in.sh" "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" | grep -vE '^\S+:\s*#'
+}

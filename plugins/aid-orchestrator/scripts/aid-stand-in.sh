@@ -21,6 +21,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/aid-roots.sh"
 source "${SCRIPT_DIR}/lib/aid-stage-log.sh"
 source "${SCRIPT_DIR}/lib/aid-stand-in.sh"
+source "${SCRIPT_DIR}/lib/aid-refusal-class.sh"   # the same reader as aid-fsm.sh
 
 CMD="${1:-}"; shift || true
 EVID="" CODE="" PROPOSAL="" ID="" VERDICT="" TROOT=""
@@ -60,7 +61,7 @@ _tree_state() {   # the worktree as a stand-in must leave it (the delegate's rec
 
 cmd_ask() {
   [[ -n "$CODE" && -f "$PROPOSAL" ]] || { echo "ask needs --code and --proposal <file>" >&2; exit 2; }
-  local class; class="$(C="$CODE" yq -r '.codes[strenv(C)].class // ""' "${SCRIPT_DIR}/../defaults/refusal-classes.yaml" 2>/dev/null)"
+  local class; class="$(aid_refusal_class "$CODE")"
   [[ "$class" == stand_in || "$class" == agent_fix_then_stand_in ]] \
     || _refuse stand_in_not_allowed "${CODE} is class ${class:-pm (unknown code)}, not one a stand-in decides" "follow the refusal's own next: line"
   [[ -n "$PID" ]] || _refuse delegation_missing "cannot tell the plan of ${EVID} (fsm-state.yaml plan_path)" "run from the plan's run"
@@ -77,7 +78,7 @@ cmd_ask() {
   {
     cat "${SCRIPT_DIR}/../defaults/templates/stand-in-decision.md"
     printf '\n## The decision\n\nRefusal: `%s` (class %s): %s\n\nRun evidence: %s\nPlan: %s\nBrief (the PM'"'"'s points of done): %s\n\n' \
-      "$CODE" "$class" "$(C="$CODE" yq -r '.codes[strenv(C)].how // ""' "${SCRIPT_DIR}/../defaults/refusal-classes.yaml")" "$EVID" "$PLAN_PATH" "${brief:-none}"
+      "$CODE" "$class" "$(aid_refusal_class_how "$CODE")" "$EVID" "$PLAN_PATH" "${brief:-none}"
     printf '## The proposal\n\n```json\n'; cat "${d}/proposal.json"; printf '```\n\n'
     printf 'Your final message is ONE JSON object and nothing else: {"id": "%s", "answer": "approve"|"reject", "class": "technical"|"brief"|"money"|"data"|"security"|"production"|"foreign_api"|"foreign_repo"|"gate", "reason": "<one sentence the PM can check>", "provider": "codex"|"claude"}.\n' "$ID"
     printf 'In a read-only sandbox do not write a file: your final message is saved to %s. A stand-in that can write files writes that object there.\n' "${d}/verdict.json"
@@ -108,7 +109,7 @@ cmd_record() {
   # the same gates as ask (security review of P117): a code the stand-in may decide, the delegation in force,
   # the id of THIS code and proposal, and the runner's record that ask asked it
   CODE="$(jq -r '.code // ""' "${d}/meta.json" 2>/dev/null)"
-  local _cl; _cl="$(C="$CODE" yq -r '.codes[strenv(C)].class // ""' "${SCRIPT_DIR}/../defaults/refusal-classes.yaml" 2>/dev/null)"
+  local _cl; _cl="$(aid_refusal_class "$CODE")"
   [[ "$_cl" == stand_in || "$_cl" == agent_fix_then_stand_in ]] || _refuse stand_in_not_allowed "${CODE:-<no code>} is not a code the stand-in decides" "ask through aid-stand-in.sh ask"
   [[ -n "$PID" ]] && aid_delegate_in_force "$SROOT" "$PID" || _refuse delegation_missing "no delegation is in force for ${PID:-<no plan>}" "the PM decides on a Decision card"
   [[ "$(aid_stand_in_id "$CODE" "${d}/proposal.json")" == "$ID" ]] || _refuse stand_in_missing "${ID} is not the id of its code and proposal (edited after ask?)" "ask again"
