@@ -116,7 +116,10 @@ detaily. Před každým kolem místa (`aid-ui-quality.py round`, všechna místa
 4. **Nezávislý ověřovatel jako nástroj:** `aid-ui-client.py verify <projekt> --place <místo> --web <adresa verze>`.
    Nástroj sám nafotí, co člověk na každé adrese verze vidí, a Codex (záskok Claude Opus) to porovná s modelem,
    fakty a podklady projektu: ověří opravy minulého kola a hledá rozpory v celé verzi. Výsledek je podepsaný záznam
-   mimo projekt; výrobce do něj nic nepíše. Rozpor platí, dokud se verze nezmění; opakovaný běh ho nesmaže.
+   mimo projekt, který píše jen nástroj (podpis brání omylu a ruční úpravě, ne úmyslu toho, kdo zná klíč); u každého
+   výroku stojí, kde ho ověřovatel viděl (klíč výpisu nebo soubor:řádek), a záznam nese číslo kola. Nástroj odmítne
+   adresu, která neslouží právě tuhle verzi, a neúplné nafocení. Stavy vzniklé až akcí (dialog, výsledek, selhání)
+   ověřují scénáře brány, ne výpis. Rozpor platí, dokud se verze nezmění; opakovaný běh ho nesmaže.
 5. **Strojové kontroly zelené:** u aplikace `aid-ui-verify.sh <projekt> --precheck` nad kostrou (úlohy, stavy,
    klávesnice, obnova, axe; minuty, P118), u hotového webu brána a `gate-check`.
 Zápis `aid-ui-quality.py self <projekt> --place <místo> --file <kontrola.json>` (jen soupis požadavků) to ověří a váže

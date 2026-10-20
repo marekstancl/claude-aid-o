@@ -19,6 +19,7 @@ Známá omezení kostry nejsou rozpor: jedna ukázka na stránku (parametry adre
 všechny režimy, výsledek akce nemění čísla jinde na stránce, obecné adresy vnějších odkazů.
 
 Vrať jen JSON:
-{{"fixes": {{"<id nálezu>": {{"verdict": "overeno" | "nepravda" | "castecne", "seen": "co přesně jsi viděl kde (klíč výpisu, soubor:řádek)"}}}},
- "open": [{{"where": "klíč výpisu nebo soubor:řádek", "what": "co si odporuje", "why": "proti čemu (druhé místo, pravidlo, kód)"}}]}}
+{{"fixes": {{"<id nálezu>": {{"verdict": "overeno" | "nepravda" | "castecne", "where": "přesný klíč výpisu nebo soubor:řádek", "seen": "co přesně jsi tam viděl"}}}},
+ "open": [{{"where": "přesný klíč výpisu nebo soubor:řádek", "what": "co si odporuje", "why": "proti čemu (druhé místo, pravidlo, kód)"}}]}}
+`where` je klíč z výpisu přesně, jak v něm stojí, nebo `<soubor>:<řádek>` v projektu; nástroj ho kontroluje.
 `fixes` obsahuje každý nález ze seznamu výše (je-li), `open` každý rozpor, který ve verzi teď je (prázdný seznam = žádný).

@@ -238,6 +238,13 @@ def self_problems(p, doc):
                 bad.append("předběžná brána kostry je neúplná, chybí řádky: " + "; ".join(miss[:5]))
             if red:
                 bad.append("předběžná brána kostry není zelená: " + "; ".join(red[:5]))
+    if model is not None and os.path.isfile(os.path.join(p, "docs", "design", "screens.json")):   # the lint of the model (P118)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("aid_ui_screens", os.path.join(HERE, "aid-ui-screens.py"))
+        smod = importlib.util.module_from_spec(spec); spec.loader.exec_module(smod)
+        lint = smod.violations(json.load(open(os.path.join(p, "docs", "design", "screens.json"), encoding="utf-8")), p)
+        if lint:
+            bad.append("lint modelu: " + "; ".join(lint[:5]) + (f" (+{len(lint) - 5})" if len(lint) > 5 else ""))
     bad += verify_problems(p)
     return bad
 
@@ -254,14 +261,17 @@ def verify_problems(p):
     out = []
     opn = {}
     for r in recs:
-        for o in r.get("open") or []:
-            opn.setdefault((str(o.get("where")), str(o.get("what"))), o)
+        for o in r.get("open") if isinstance(r.get("open"), list) else []:
+            if isinstance(o, dict):
+                opn.setdefault((str(o.get("where")), str(o.get("what"))), o)
     if opn:
         out.append("verify: ve verzi zůstávají rozpory: " + "; ".join(f"{k[0]}: {k[1][:80]}" for k in list(opn)[:5]) + (f" (+{len(opn) - 5})" if len(opn) > 5 else ""))
     rs = rounds(p)
+    now_n = rs[-1]["n"] if rs else 0
+    mine = [r for r in recs if r.get("round") == now_n and isinstance(r.get("fixes"), dict)]   # fixes of this round, not an older one's
     for f in (rs[-1]["findings"] if rs else []):
         if f.get("state") == "accepted" and f.get("evidence"):
-            v = next((r["fixes"][f["id"]] for r in reversed(recs) if f["id"] in (r.get("fixes") or {})), None)
+            v = next((r["fixes"][f["id"]] for r in reversed(mine) if isinstance(r["fixes"].get(f["id"]), dict)), None)
             if not v or v.get("verdict") != "overeno":
                 out.append(f"verify {f['id']}: ověřovatel opravu {'neověřoval' if not v else 'neviděl (' + str(v.get('verdict')) + ': ' + str(v.get('seen'))[:80] + ')'}")
     return out

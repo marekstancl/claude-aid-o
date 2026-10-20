@@ -74,8 +74,8 @@ spec = importlib.util.spec_from_file_location("c", os.environ["SC"] + "/aid-ui-c
 p, pl = sys.argv[1], sys.argv[2]
 art = c.site_sha(os.path.join(p, "site")) if pl == "web" else c.place_bundle(p, pl)[1]
 rs = m.rounds(p, pl)
-fx = {f["id"]: {"verdict": os.environ.get("FIXCHECK", "overeno"), "seen": "úvod: nová věta je vidět"} for f in (rs[-1]["findings"] if rs else []) if f.get("state") == "accepted" and f.get("evidence")}
-m.verify_append(p, pl, {"artifact": art, "at": "t", "provider": "test", "fixes": fx, "open": [{"where": "index", "what": os.environ["WHOLE_OPEN"]}] if os.environ.get("WHOLE_OPEN") else []})
+fx = {f["id"]: {"verdict": os.environ.get("FIXCHECK", "overeno"), "where": "page /", "seen": "úvod: nová věta je vidět"} for f in (rs[-1]["findings"] if rs else []) if f.get("state") == "accepted" and f.get("evidence")}
+m.verify_append(p, pl, {"artifact": art, "at": "t", "provider": "test", "round": rs[-1]["n"] if rs else 0, "fixes": fx, "open": [{"where": "index", "what": os.environ["WHOLE_OPEN"]}] if os.environ.get("WHOLE_OPEN") else []})
 PY2
 }
 # qround <project> [args] - a round after the producer's own check of the current version (PM 18. 10. 2026)
@@ -536,7 +536,7 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
 @test "verify (P118): the command captures the version, asks the verifier, signs the record; open points and unseen fixes exit 3" {
   ans 6 7; qround "$P" --web "$W" >/dev/null; cycle
   ids="$(python3 "$Q" status "$P" | jq -c '[.history[-1].findings[] | select(.state == "accepted" and .evidence) | .id]')"
-  jq -n --argjson i "$ids" '{fixes: ([$i[] | {key: ., value: {verdict: "overeno", seen: "index: nová věta"}}] | from_entries), open: []}' > "$T/ans-verify.json"
+  jq -n --argjson i "$ids" '{fixes: ([$i[] | {key: ., value: {verdict: "overeno", where: "page /", seen: "index: nová věta"}}] | from_entries), open: []}' > "$T/ans-verify.json"
   run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"VERIFY web over"*"0 open, fixes 2/2 seen"* ]]
   d="$(ls -d "$P"/.aid-ui/verify/*-web | tail -1)"; jq -e '."page /" | contains("chleba")' "$d/capture.json" >/dev/null
@@ -545,6 +545,13 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   jq '.open = [{where: "page /", what: "cena 10 tady, 12 jinde"}]' "$T/ans-verify.json" > "$T/a2" && mv "$T/a2" "$T/ans-verify.json"
   run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 3 ]
   run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"cena 10 tady"* ]]
+  jq '.open = [] | .fixes[] .where = "nikde"' "$T/ans-verify.json" > "$T/a2" && mv "$T/a2" "$T/ans-verify.json"   # a place that is neither a capture key nor file:line
+  run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 1 ]
+  mkdir -p "$T/old"; echo '<html lang="cs"><body>stará verze</body></html>' > "$T/old/index.html"   # an address serving another version than the files
+  OP=$(( 38900 + RANDOM % 90 )); python3 -m http.server $OP --bind 127.0.0.1 --directory "$T/old" >/dev/null 2>&1 & OS=$!
+  for _ in $(seq 50); do curl -s "http://127.0.0.1:$OP/" >/dev/null && break; sleep 0.1; done
+  run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "http://127.0.0.1:$OP/"; kill $OS
+  [ "$status" -eq 1 ]; [[ "$output" == *"serves another version"* ]]
   echo '{"fixes": {}, "open": []}' > "$T/ans-verify.json"   # a fix without a verdict is no valid answer (twice, then the stand-in fails)
   run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 1 ]
 }

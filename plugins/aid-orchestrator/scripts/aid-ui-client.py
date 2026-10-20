@@ -993,11 +993,27 @@ def verify(project, place, web):
     out = os.path.join(project, ".aid-ui", "verify", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + place)
     os.makedirs(out, exist_ok=True)
     lst = capture_list(project, web)
+    # the address serves this very version: every page's HTML there is the local file's (else the record would vouch
+    # for a build nobody checked)
+    site = os.path.join(project, "site")
+    for path in sorted({urlsplit(x["url"]).path for x in lst}):
+        local = os.path.join(site, path.strip("/"), "index.html") if not path.endswith(".html") else os.path.join(site, path.strip("/"))
+        try:
+            served = urllib.request.urlopen(web.rstrip("/") + path, timeout=20).read()
+        except (urllib.error.URLError, OSError) as e:
+            die(f"VERIFY: {web.rstrip('/')}{path} does not answer ({e}); verify the address that serves this version")
+        if not os.path.isfile(local) or hashlib.sha256(served).hexdigest() != sha_file(local):
+            die(f"VERIFY: {web.rstrip('/')}{path} serves another version than {os.path.relpath(local, project)}; rebuild or point --web at this one")
     wj(os.path.join(out, "capture-list.json"), lst)
     r = subprocess.run(["node", os.path.join(HERE, "..", "lib", "ui-fidelity", "aid-ui-capture.mjs"), os.path.join(out, "capture-list.json"),
                         os.path.join(out, "capture.json")], capture_output=True, text=True)
     if r.returncode:
         die("VERIFY: the version could not be captured: " + (r.stderr or r.stdout).strip()[-300:])
+    cap = json.load(open(os.path.join(out, "capture.json"), encoding="utf-8"))
+    broken = [k for k in (x["key"] for x in lst) if not str(cap.get(k) or "").strip() or str(cap.get(k)).startswith(("HTTP ", "could not open"))]
+    if broken:
+        die("VERIFY: the capture is not whole - " + "; ".join(f"{k}: {str(cap.get(k))[:60]}" for k in broken[:5]) + (f" (+{len(broken) - 5})" if len(broken) > 5 else ""))
+    keys = set(cap)
     rs = memory.rounds(project, place)
     fixed = [{"id": f["id"], "text": f["text"], "evidence": f["evidence"]} for f in (rs[-1]["findings"] if rs else [])
              if f.get("state") == "accepted" and f.get("evidence")]
@@ -1016,11 +1032,19 @@ def verify(project, place, web):
         a = parse_json(text)
         if not isinstance(a, dict) or not isinstance(a.get("open"), list) or not isinstance(a.get("fixes", {}), dict):
             return None, "need {fixes: {...}, open: [...]}"
-        miss = [i for i in ids if not isinstance((a.get("fixes") or {}).get(i), dict) or a["fixes"][i].get("verdict") not in ("overeno", "nepravda", "castecne")
-                or not str(a["fixes"][i].get("seen") or "").strip()]
-        bad = [o for o in a["open"] if not (isinstance(o, dict) and str(o.get("where") or "").strip() and str(o.get("what") or "").strip())]
+        def place_ok(w):   # where it was seen: a key of the capture or <file>:<line> of the project
+            w = str(w or "").strip()
+            if w in keys:
+                return True
+            mm = re.fullmatch(r"(\S+?):([1-9][0-9]*)(?:-[1-9][0-9]*)?", w)
+            return bool(mm) and os.path.isfile(os.path.join(project, mm.group(1))) and ".." not in mm.group(1).split("/")
+        fx = a.get("fixes") or {}
+        miss = [i for i in ids if not isinstance(fx.get(i), dict) or fx[i].get("verdict") not in ("overeno", "nepravda", "castecne")
+                or not str(fx[i].get("seen") or "").strip() or not place_ok(fx[i].get("where"))]
+        bad = [o for o in a["open"] if not (isinstance(o, dict) and str(o.get("what") or "").strip() and place_ok(o.get("where")))]
         if miss or bad:
-            return None, ("fixes without a verdict and what was seen: " + ", ".join(miss) if miss else "") + (" open points need where and what" if bad else "")
+            return None, ("fixes without a verdict, what was seen and where (a capture key or file:line): " + ", ".join(miss) if miss else "") \
+                + (" open points need what and where (a capture key or file:line)" if bad else "")
         return a, None
 
     old = os.environ.get("AID_UI_STANDIN_MODEL")
@@ -1037,7 +1061,7 @@ def verify(project, place, web):
         die("VERIFY %s: no valid answer from Codex nor the Opus stand-in (%s)" % (place, mrec.get("stand_in_reason")))
     rec = memory.verify_append(project, place, {"artifact": artifact, "at": now(), "provider": mrec.get("provider"), "model": mrec.get("model"),
                                                 "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(), "capture_sha256": sha_file(os.path.join(out, "capture.json")),
-                                                "fixes": {i: a["fixes"][i] for i in ids}, "open": a["open"], "turn": rel(out)})
+                                                "round": rs[-1]["n"] if rs else 0, "fixes": {i: a["fixes"][i] for i in ids}, "open": a["open"], "turn": rel(out)})
     notseen = [i for i in ids if rec["fixes"][i]["verdict"] != "overeno"]
     log("VERIFY %s over %s: %d open, fixes %d/%d seen%s" % (place, artifact[:12], len(rec["open"]), len(ids) - len(notseen), len(ids),
                                                           "" if not rec["open"] else " - " + "; ".join(str(o["what"])[:80] for o in rec["open"][:5])))
@@ -1083,7 +1107,7 @@ def main(a):
         return verify(os.path.abspath(a[1]), opt("--place"), opt("--web"))
     if len(a) == 2 and a[0] == "decided":
         return decided(os.path.abspath(a[1]))
-    die("usage: answer <project> --studio <url> [--once] [--dry] [--watch <s>] | supply <project> --place <p> [--dry] | decided <project> | critic <project> --web <url> --role owner|tech [--history <json>] [--audit] [--out <dir>] | competitors <project> | costs <project>", 2)
+    die("usage: answer <project> --studio <url> [--once] [--dry] [--watch <s>] | verify <project> --place <p> --web <url> | supply <project> --place <p> [--dry] | decided <project> | critic <project> --web <url> --role owner|tech [--history <json>] [--audit] [--out <dir>] | competitors <project> | costs <project>", 2)
 
 
 if __name__ == "__main__":
