@@ -359,10 +359,12 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
   const settled = still ? { ok: true, ms: 0 } : await settleMotion(page);
   await scrollAll(page);
   // reveals fire while scrolling: settle again before anything is measured or photographed
-  const settled2 = still ? settled : settled.ok ? await settleMotion(page) : settled;
+  const still2 = still && await page.evaluate(() => !document.getAnimations().length).catch(() => false);   // scrolling may start a reveal
+  const settled2 = still2 ? settled : settled.ok ? await settleMotion(page) : settled;
   // script motion watched once per page, width and browser (3 s each)
   const smKey = `${url}@${page.viewportSize()?.width}@${page.context().browser()?.browserType().name()}`;   // per width (whole review: a phone-only loop)
-  const scripted = !settled2.ok || !applies('motion_settled') ? null : SCRIPTED.has(smKey) ? SCRIPTED.get(smKey) : SCRIPTED.set(smKey, await scriptMotion(page)).get(smKey);
+  if (settled2.ok && applies('motion_settled') && !SCRIPTED.has(smKey)) SCRIPTED.set(smKey, scriptMotion(page));   // the promise: rows at once watch once
+  const scripted = !settled2.ok || !applies('motion_settled') ? null : await SCRIPTED.get(smKey);
   res.motion_settled = !settled2.ok ? ['fail', settled2.why] : scripted ? ['fail', `skriptová animace běží dál: ${scripted}`]
     : ['pass', `settled after ${settled.ms} ms, ${settled2.ms} ms after scrolling, no script motion`];
   // H1 (12. 10. 2026, klient-Codex retro): what the visitor sees without scripts and before any scroll
@@ -1309,7 +1311,12 @@ const applies = (check, m) => { const a = AP[check] || {};
 // P118: rows run on this many browser contexts at once (AID_UI_GATE_WORKERS; default the CPUs less two, at most 10;
 // 1 = one after another). Results are the same and in the same order whatever the number (measured: F1 Trading 2112 rows)
 const WORKERS = Math.max(1, Math.min(16, Number(process.env.AID_UI_GATE_WORKERS) || Math.min(10, os.cpus().length - 2)));
-const put = (m, check, status, detail, more) => { if (want(check) && applies(check, m)) rows.push({ check, ...m, status, detail: detail || '', ...(more || {}) }); };
+const ROWAT = new WeakMap();   // P118: result row -> its matrix row's index (rows of one matrix row are written by one worker, in order)
+const put = (m, check, status, detail, more) => {
+  if (!(want(check) && applies(check, m))) return;
+  const r = { check, ...m, status, detail: detail || '', ...(more || {}) };
+  ROWAT.set(r, matrix.indexOf(m)); rows.push(r);
+};
 const facts = factLeaves(), brand = brandFiles();
 const seo = want('seo') || want('ai_search') ? runSeo() : null;
 // ai: false -> the seo row (every finding not named ai-*), true -> the ai_search row. Site-wide
@@ -1433,7 +1440,9 @@ for (const b of BRS) {
       const key = [b, v, `${m.page}${m.role ? '.' + m.role : ''}${m.state ? '.' + m.state : ''}.png`.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+/, '_')];
       // P116: every app row in a fresh context (one task's data or login never leaks into the next), with the project's
       // stored test login (.aid-ui/test-storage.json, Playwright storageState) when it has one
-      const rctx = app || WORKERS > 1 ? await browser.newContext({ viewport: { width: Number(v), height: HEIGHT[v] || 900 }, ...(STORAGE ? { storageState: STORAGE } : {}) }) : ctx;
+      // rows at once never share a context; a page row starts as it would in the shared one (no stored login)
+      const rctx = app ? await browser.newContext({ viewport: { width: Number(v), height: HEIGHT[v] || 900 }, ...(STORAGE ? { storageState: STORAGE } : {}) })
+        : WORKERS > 1 ? await browser.newContext({ viewport: { width: Number(v), height: HEIGHT[v] || 900 } }) : ctx;
       let r;
       try { r = await pageRows(rctx, rowUrl || (flow ? base : urlOf(m.page)), key, m.role, m.state, run, facts, brand, c => want(c) && applies(c, m)); }   // P118: only what this gate names is measured
       finally { if (rctx !== ctx) await rctx.close().catch(() => {}); }
@@ -1451,8 +1460,9 @@ for (const b of BRS) {
       for (const c of PAGE_CHECKS) put(m, c, ...r[c]);
       if (!flow) {
         const k = `${b}/${v}`, f0 = firstShape[k] || (firstShape[k] = { page: m.page, header: r.header, footer: r.footer });
-        const diff = [r.header !== f0.header && 'header', r.footer !== f0.footer && 'footer'].filter(Boolean);
-        put(m, 'brand_consistency', ...(r.brand_consistency[0] === 'fail' || !diff.length ? r.brand_consistency
+        const diff = f0.failed ? [] : [r.header !== f0.header && 'header', r.footer !== f0.footer && 'footer'].filter(Boolean);
+        if (f0.failed && r.brand_consistency[0] !== 'fail') put(m, 'brand_consistency', 'not_covered', `the reference page ${f0.page} failed: header and footer not compared`);
+        else put(m, 'brand_consistency', ...(r.brand_consistency[0] === 'fail' || !diff.length ? r.brand_consistency
           : ['fail', `${diff.join(' and ')} differ from page ${f0.page}`]));
       } else put(m, 'brand_consistency', ...r.brand_consistency);
       put(m, 'app_task_states', 'pass', flow ? `scenario ${m.page} / ${m.state} passed` : (isApp ? 'a page, not a task' : 'not an application'));
@@ -1484,6 +1494,7 @@ for (const b of BRS) {
     // P118: the first page row alone (brand_consistency compares every page with it), then a pool of WORKERS
     const firstPage = ms.find(m => !(APPV?.rows.find(a => a.page === m.page && a.state === m.state) || flows.find(f => String(f.id) === m.page && m.state)));
     if (firstPage) await rowFn(firstPage);
+    if (firstPage && !firstShape[`${b}/${v}`]) firstShape[`${b}/${v}`] = { page: firstPage.page, failed: true };   // never a reference picked by timing
     const rest = ms.filter(m => m !== firstPage);
     let next = 0;
     await Promise.all(Array.from({ length: Math.min(WORKERS, rest.length) }, async () => { while (next < rest.length) await rowFn(rest[next++]); }));
@@ -1503,11 +1514,8 @@ if (want('all_pages')) {
   for (const m of matrix) put(m, 'all_pages', ...st2);
 }
 
-{   // P118: the same order whatever ran first - the matrix's order, then the check's
-  const at = new Map(matrix.map((m, k) => [m, k]));
-  rows.sort((a, b) => (at.get(matrix.find(m => m.page === a.page && m.state === a.state && m.viewport === a.viewport && m.browser === a.browser && m.role === a.role)) ?? 0)
-    - (at.get(matrix.find(m => m.page === b.page && m.state === b.state && m.viewport === b.viewport && m.browser === b.browser && m.role === b.role)) ?? 0) || a.check.localeCompare(b.check));
-}
+// P118: the matrix's order whatever ran first; a stable sort keeps each matrix row's checks in the order they were written
+rows.sort((a, b) => ROWAT.get(a) - ROWAT.get(b));
 const result = { run_at: new Date().toISOString(), build_id: st.build?.id, matrix, rows, fingerprints: fps, ...(APPV ? { model_sha256: APPV.model_sha256 } : {}) };
 fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 1));
 const count = rows.reduce((a, r) => (a[r.status] = (a[r.status] || 0) + 1, a), {});
