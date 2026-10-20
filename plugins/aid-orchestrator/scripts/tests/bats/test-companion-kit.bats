@@ -97,6 +97,26 @@ _ws() {
   kill -0 "$foreign"; kill "$foreign"
 }
 
+@test "kit F (P117): ui.copy_extra copies repository files beside the copy and refuses secrets and outside paths; a scrolling container is captured whole; the first-shot limit is 1..120 s" {
+  mkdir -p "$P/shared"; echo "body{}" > "$P/shared/base.css"; echo "SECRET=1" > "$P/.env.local"
+  yq -i '.ui.copy_extra = [".env.local"]' "$P/.aid-o/config/project.yaml"
+  run _k proto; [ "$status" -ne 0 ]; [[ "$output" == *"looks like a secret"* ]]; rm -rf "$D/proto" "$D/proto-manifest.json"
+  yq -i '.ui.copy_extra = ["../etc/hostname"]' "$P/.aid-o/config/project.yaml"
+  run _k proto; [ "$status" -ne 0 ]; rm -rf "$D/proto" "$D/proto-manifest.json"
+  yq -i '.ui.copy_extra = ["shared/base.css"]' "$P/.aid-o/config/project.yaml"
+  # a container that scrolls: 100 px tall, 600 px of content
+  sed -i 's|</body>|<div id="list" style="height:100px;overflow:auto"><div style="height:600px">dlouhy seznam</div></div></body>|' "$P/ui/index.html"
+  run _k proto; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(cat "$D/shared/base.css")" = "body{}" ]                                   # ../shared/base.css from the copy
+  ! jq -e '.files | keys | any(test("base.css"))' "$D/proto-manifest.json" >/dev/null 2>&1   # not part of the copy's own files
+  echo '[{"method": "GET", "path": "/api/**", "status": 204, "body": ""}]' > "$D/mocks.json"
+  echo '{"base": "proto", "shots": [{"name": "seznam", "path": "/index.html", "capture": {"scroll": {"css": "#list"}}}]}' > "$D/shots.json"
+  run _k shots; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(node -e 'const b=require("fs").readFileSync(process.argv[1]);console.log(b.readUInt32BE(20))' "$D/shots/desktop/seznam.png")" -ge 590 ]
+  yq -i '.ui.first_shot_timeout_s = 500' "$P/.aid-o/config/project.yaml"
+  run _k shots; [ "$status" -ne 0 ]; [[ "$output" == *"first_shot_timeout_s must be whole seconds from 1 to 120"* ]]
+}
+
 @test "AC5 down: a recorded prototype whose identity does not match (pid reused) is not killed" {
   sleep 300 & local other=$!
   jq -n --argjson p "$other" '{pid: $p, pgid: $p, starttime: "1", cmd: "python3", port: 1, url: "x"}' > "$D/proto.json" 2>/dev/null || { mkdir -p "$D"; jq -n --argjson p "$other" '{pid: $p, pgid: $p, starttime: "1", cmd: "python3", port: 1, url: "x"}' > "$D/proto.json"; }
@@ -276,6 +296,8 @@ EOF
   have="$(sed -n '/^case "\$step" in/,/^esac/p' "$KIT" | grep -oE '^\s+[a-z|]+\)' | tr -d ' )' | tr '|' '\n' | sort -u | tr '\n' ' ')"
   [ "$named" = "$have" ] || { echo "guide names: $named / script has: $have"; false; }
   ! grep -q 'baseline.html' "$g"   # the copied-page path of 2.114.0 is gone
+  # P117 (20): Vite with a config outside ui.dir runs through the config runner, the copy is never rewritten
+  grep -q -- '"--configLoader", "runner"' "$g"; grep -q 'copy_extra' "$g"; grep -q '{"scroll": <selector>}' "$g"; grep -q 'first_shot_timeout_s' "$g"
 }
 
 @test "AC8 /aid-init proposes the kit's ui keys for a Vite project, and says what it cannot find" {

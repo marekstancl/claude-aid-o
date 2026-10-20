@@ -92,6 +92,9 @@ aid_plan_tests_bad() {
   # the close's own record of writing it (stage-writes.jsonl; its digest is verified by decide's integrity check)
   if [[ -n "$tree" ]]; then
     grep -q '"path":"plan-tests.json"' "${rd}/stage-writes.jsonl" 2>/dev/null || { echo "plan-tests.json has no record of the close writing it (stage-writes.jsonl)"; return 1; }
+    # the plan and the configuration it ran under are the ones decided on now (their digests, Codex review)
+    [[ "$(sha256sum "$plan" 2>/dev/null | cut -d' ' -f1)" == "$(jq -r .plan_sha256 "$f")" ]] || { echo "the plan changed after the close ran its tests — produce again"; return 1; }
+    [[ "$( [[ -f "$ex" ]] && sha256sum "$ex" | cut -d' ' -f1 || echo none)" == "$(jq -r .execution_yaml_sha256 "$f")" ]] || { echo "execution.yaml changed after the close ran the plan's tests — produce again"; return 1; }
     # exactly the set the current plan and execution.yaml ask (Codex review of P117 E)
     local want got
     want="$(aid_plan_tests_expected "$tree" "$ex" "$plan" | jq -cS 'map({path, command, timeout_s}) | sort_by(.path)')"

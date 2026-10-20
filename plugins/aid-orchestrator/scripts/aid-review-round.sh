@@ -290,7 +290,7 @@ _expected_roles() {
     [[ " ${roles//$'\n'/ } " == *" ${ONLY} "* ]] || _die "role ${ONLY} is not expected in this round"
     roles="$ONLY"
   fi
-  printf '%s\n' $roles
+  printf '%s\n' $roles | awk 'NF && !seen[$0]++'   # one role once (final_claims may be listed under two conditions)
 }
 
 # _index_add <round> <sha> — the round index: a JSON array for CP1 (its gate

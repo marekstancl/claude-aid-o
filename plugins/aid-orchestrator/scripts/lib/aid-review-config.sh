@@ -152,7 +152,9 @@ aid_review_config_load() {
   done < <(yq -r "${b}.reviewers // [] | .[] | [.role, .provider, .model, (.effort // \"medium\"), (.when // \"-\"), (.full_when // \"-\")] | @tsv" "$RC_CONFIG_FILE")
   # P117 (18): a step that changes documentation has its claims checked in its own review — whatever a project
   # policy lists, the role is there (a project policy replaces the default block whole)
-  if [[ "$block" == step_review && " ${RC_ROLE[*]} " != *" final_claims "* ]]; then
+  local _dsi _has_docs=0
+  for _dsi in "${!RC_ROLE[@]}"; do [[ "${RC_ROLE[$_dsi]}" == final_claims && "${RC_WHEN[$_dsi]}" == docs_surface ]] && _has_docs=1; done
+  if [[ "$block" == step_review ]] && (( ! _has_docs )); then
     RC_ROLE+=(final_claims); RC_PROVIDER+=(claude); RC_MODEL+=(opus); RC_EFFORT+=(low); RC_WHEN+=(docs_surface); RC_FULL_WHEN+=("")
   fi
   # The model a Claude stand-in runs at when a codex role gives no answer.

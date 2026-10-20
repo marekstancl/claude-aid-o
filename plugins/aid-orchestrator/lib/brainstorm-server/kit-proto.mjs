@@ -24,6 +24,29 @@ function portOwners(port) {
 }
 
 export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
+  // ui.copy_extra[] (P117 (20), WAN P112): files of the repository outside ui.dir the app reads by a relative path
+  // (../tsconfig.base.json, ../shared/x.ts), copied beside the copy at the same relative place. Never a secret,
+  // never outside the repository, never over the kit's own files; they are not part of the copy's manifest, so a
+  // change to them is never an option's file (spolecne/soubory list files inside proto/ only).
+  const KIT = new Set(['proto', 'shots', 'proto.json', 'proto-manifest.json', 'proto.log', 'server.json', 'mocks.json', 'shots.json', 'navrh.json', 'answers.jsonl', 'proposal.json']);
+  const SECRET = /(^|\/)(\.env[^/]*|[^/]*secret[^/]*|[^/]*credential[^/]*|[^/]*\.(pem|key|p12|pfx)|id_(rsa|ed25519)[^/]*)$/i;
+  const copyExtra = (src, dest) => {
+    const extra = UI.copy_extra || [];
+    if (!Array.isArray(extra)) die('proto: ui.copy_extra must be a list of repository paths');
+    const repo = fs.realpathSync(PROJECT);
+    for (const [i, e] of extra.entries()) {
+      if (typeof e !== 'string' || !e || path.isAbsolute(e)) die(`proto: ui.copy_extra[${i}] must be a path relative to the repository`);
+      const from = path.resolve(PROJECT, e);
+      let real = ''; try { real = fs.realpathSync(from); } catch { die(`proto: ui.copy_extra[${i}] ${e} does not exist`); }
+      if (real !== repo && !real.startsWith(repo + path.sep)) die(`proto: ui.copy_extra[${i}] ${e} is outside the repository`);
+      if (SECRET.test(path.relative(repo, real))) die(`proto: ui.copy_extra[${i}] ${e} looks like a secret (.env, a key, credentials) — it never goes into the copy`);
+      if (fs.statSync(real).isDirectory()) die(`proto: ui.copy_extra[${i}] ${e} is a directory — list the files`);
+      const to = path.resolve(dest, path.relative(src, from));
+      if (!to.startsWith(path.resolve(DIR) + path.sep) || to.startsWith(path.resolve(dest) + path.sep)) die(`proto: ui.copy_extra[${i}] ${e} would land at ${to}, not beside the copy in ${DIR}`);
+      if (KIT.has(path.relative(DIR, to).split(path.sep)[0])) die(`proto: ui.copy_extra[${i}] ${e} would overwrite the kit's own ${path.relative(DIR, to)}`);
+      fs.mkdirSync(path.dirname(to), { recursive: true }); fs.copyFileSync(real, to);
+    }
+  };
   const need = k => die(`proto: project.yaml has no ui.${k} — add it, for example:\n  ui:\n    dir: ui\n    components: ui/src/components/shared\n    dev_cmd: ["npx", "vite", "--port", "{port}", "--host", "127.0.0.1", "--strictPort"]\n    ready_path: /\n    api_prefix: /api/`);
   if (!UI.dir) need('dir');
   if (!Array.isArray(UI.dev_cmd) || !UI.dev_cmd.length) need('dev_cmd (a list of arguments, one of them {port})');
@@ -65,6 +88,7 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
       fs.symlinkSync(path.join(src, 'node_modules', e), path.join(nm, e));
     }
     fs.writeFileSync(manFile, JSON.stringify(manifest(dest), null, 1));
+    copyExtra(src, dest);
   } else if (!fs.existsSync(manFile)) {
     die(`proto: ${dest} exists without its manifest (${manFile}) — the copy's changes cannot be told from the app; move ${dest} away and run proto again`);
   }

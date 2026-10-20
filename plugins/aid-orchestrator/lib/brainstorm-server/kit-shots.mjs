@@ -64,6 +64,10 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
     return l;
   };
   const written = [];
+  // the first page of a run waits longer: a dev server compiles on its first request (P117 (20), WAN P112)
+  const first = UI.first_shot_timeout_s === undefined ? 15 : Number(UI.first_shot_timeout_s);
+  if (!Number.isInteger(first) || first < 1 || first > 120) die(`shots: ui.first_shot_timeout_s must be whole seconds from 1 to 120 (got ${UI.first_shot_timeout_s})`);
+  let isFirst = true;
   try {
     for (const vp of VIEWPORTS) {
       const ctx = await b.newContext({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1 });
@@ -89,7 +93,8 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
       for (const s of shots) {
         if (s.only && !s.only.includes(vp.name)) continue;
         const where = `shot '${s.name}' (${vp.name})`;
-        await page.goto(at(s.path || '/', where), { waitUntil: 'networkidle' });
+        const wait = isFirst ? first * 1000 : 15000;
+        await page.goto(at(s.path || '/', where), { waitUntil: 'networkidle', timeout: Math.max(wait, 30000) });
         for (const [k, stp] of (s.steps || []).entries()) {
           const w = `${where} step ${k + 1}`;
           if ('goto' in stp) await page.goto(at(stp.goto, w), { waitUntil: 'networkidle' });
@@ -101,14 +106,23 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
           else if ('wait' in stp) {
             if (typeof stp.wait === 'number') await page.waitForTimeout(stp.wait);
             else if (stp.wait === 'network') await page.waitForLoadState('networkidle');
-            else if (stp.wait && stp.wait.for) { await loc(page, stp.wait.for, w).first().waitFor({ timeout: 15000 }); await one(page, stp.wait.for, w); }
+            else if (stp.wait && stp.wait.for) { await loc(page, stp.wait.for, w).first().waitFor({ timeout: wait }); await one(page, stp.wait.for, w); }
           }
         }
         await page.waitForTimeout(300);
         const file = path.join(DIR, 'shots', vp.name, `${s.name}.png`);
         const cap = s.capture || 'viewport';
         if (cap && typeof cap === 'object' && cap.element) await (await one(page, cap.element, `${where} capture`)).screenshot({ path: file });
+        else if (cap && typeof cap === 'object' && cap.scroll) {
+          // a scrolling container captured whole (P117 (20)): opened to its full height for the shot, then put back
+          const el = await one(page, cap.scroll, `${where} capture`);
+          const before = await el.evaluate(n => { const s = n.getAttribute('style'); n.style.setProperty('max-height', 'none', 'important');
+            n.style.setProperty('height', n.scrollHeight + 'px', 'important'); n.style.setProperty('overflow', 'visible', 'important'); return s; });
+          await el.screenshot({ path: file });
+          await el.evaluate((n, s) => { if (s === null) n.removeAttribute('style'); else n.setAttribute('style', s); }, before);
+        }
         else await page.screenshot({ path: file, fullPage: cap === 'full' });
+        isFirst = false;
         written.push(file);
       }
       await ctx.close();
