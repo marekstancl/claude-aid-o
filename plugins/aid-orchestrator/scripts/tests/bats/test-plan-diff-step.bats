@@ -328,7 +328,7 @@ _verdicts() { jq -c '[.results[] | .verdict]' "$1"; }
   AID_PLAN_DIFF_AC_TIMEOUT_FLOOR=2000 run bash "$PD" --plan "$PLAN" --evidence-dir "$EV" --base-commit HEAD; [ "$status" -eq 10 ]
 }
 
-@test "verification_env: the step measurement runs with the project's verification_env (names in the result, never values) — the same reader as the close (WAN P110/P112)" {
+@test "verification_env: the step measurement runs with the project's verification_env (names in the result, never values) — the same reader as the close" {
   mkdir -p .aid-o/config; printf 'verification_env:\n  WAN_TEST_DOCKER_MODE: run\n' > .aid-o/config/execution.yaml
   _pj "1:AC1"
   { printf -- '---\nid: P950\n---\n# Plan\n\n## Implementation Steps\n\n### Step 1: one\n\n**Zavírá:** AC1\n\n## Acceptance Criteria\n\n- [ ] AC1: env\n'; _blk 'test \"$WAN_TEST_DOCKER_MODE\" = run'; } > "$PLAN"
@@ -338,7 +338,7 @@ _verdicts() { jq -c '[.results[] | .verdict]' "$1"; }
   ! grep -q '"run"' "$EV/cp2/step-0/plan-diff.json"
 }
 
-@test "effective timeout: a point without timeout: gets the plan_diff gate's timeout_seconds, its own timeout: wins, the floor raises, 1800 is the ceiling (WAN P110 AC13)" {
+@test "effective timeout: a point without timeout: gets the plan_diff gate's timeout_seconds, its own timeout: wins, the floor raises, 1800 is the ceiling" {
   mkdir -p .aid-o/config; printf 'gates:\n  plan_diff:\n    timeout_seconds: 600\n' > .aid-o/config/execution.yaml
   _pj "1:AC1,AC4"
   { printf -- '---\nid: P950\n---\n# Plan\n\n## Implementation Steps\n\n### Step 1: one\n\n**Zavírá:** AC1, AC4\n\n## Acceptance Criteria\n\n- [ ] AC1: plain\n'; _blk "true"; printf -- '- [ ] AC4: own\n'; _blk "true" 7; } > "$PLAN"
@@ -359,7 +359,7 @@ _verdicts() { jq -c '[.results[] | .verdict]' "$1"; }
   _run --step 0; [ "$(_out 0 | jq -r .ac_timeout_default_s)" = 120 ]
 }
 
-@test "redact: a failing point's output is kept (8 KiB per stream, truncation said), the verification_env value and token-shaped strings never reach the disk (WAN P111 AC10)" {
+@test "redact: a failing point's output is kept (8 KiB per stream, truncation said), the verification_env value and token-shaped strings never reach the disk" {
   mkdir -p .aid-o/config; printf 'verification_env:\n  DB_PASSWORD: hunter2-canary\n' > .aid-o/config/execution.yaml
   _pj "1:AC1"
   { printf -- '---\nid: P950\n---\n# Plan\n\n## Implementation Steps\n\n### Step 1: one\n\n**Zavírá:** AC1\n\n## Acceptance Criteria\n\n- [ ] AC1: fails loudly\n'; _blk 'echo pw=$DB_PASSWORD; echo Bearer abc.def.ghi; echo ghp_ABCDEFGHIJKLMNOPQRSTUV >&2; head -c 20000 /dev/zero | tr "\\\\0" a; echo; echo tail=$DB_PASSWORD; printf x=hunter2-; sleep 0.2; printf "canary\\n"; printf "Bearer " >&2; head -c 20000 /dev/zero | tr "\\\\0" Q >&2; echo >&2; echo end >&2; exit 2'; } > "$PLAN"

@@ -508,7 +508,7 @@ _p040_seed_increment_preconditions() {
 }
 
 # P117 (9): the refusal names a targeted repair, and the repair is enough — no --force.
-@test "increment-step: malformed ledger → repair; orphan start → cancel; both advance without --force (P117)" {
+@test "increment-step: malformed ledger → repair; orphan start → cancel; both advance without --force" {
   local state_file="$TEST_EVIDENCE_DIR/fsm-state.yaml" emit="${BATS_TEST_DIRNAME}/../../aid-emit-dispatch.sh"
   _p040_seed_increment_preconditions "$state_file"
   printf '%s\n' 'this is not json {{{' '{"ts":"2026-05-31T00:00:00Z","event":"start","focus":"cp2-step-1","agent_id":"aid-orchestrator:verifier","step_n":1,"evidence_dir":"x","expected_duration_max":60}' \
@@ -1909,7 +1909,7 @@ SC_WHY="the PM moved this point to the close of the plan"
   [[ "$output" != *'AC1 "the ok file exists"'* ]]      # not listed as a missing change
   [ "$(_cur)" = 0 ]
 }
-@test "stand-in: a point whose step measurement ran out of time moves to the close on the stand-in's permission; the step advances (P117 (11))" {
+@test "stand-in: a point whose step measurement ran out of time moves to the close on the stand-in's permission; the step advances" {
   _sc_seed
   sed -i 's|cmd: "test -f ok.txt"|cmd: "sleep 3"|; s|    expected_exit: 0|    expected_exit: 0\n    timeout: 1|' "$SC_PLAN"
   run "$FSM" increment-step "$SF"; [ "$status" -eq 1 ]; [[ "$output" == *"AC1 (timeout: neměřeno"* ]]
@@ -2174,7 +2174,7 @@ _si_permit() {
   echo "$d/auth.json"
 }
 
-@test "amend-scope-zadani: in an --auto run a step closing no point widens on the stand-in's permission; another path or step is refused (P117 (11))" {
+@test "amend-scope-zadani: in an --auto run a step closing no point widens on the stand-in's permission; another path or step is refused" {
   local td="$TEST_EVIDENCE_DIR"; _zp_plan_json "$td"
   jq '.steps[0].zavira = [] | .steps[1].zavira = []' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"
   _zp_state "$td" EXECUTE 0
@@ -2189,7 +2189,7 @@ _si_permit() {
   [ "$(jq -r '.[-1].pm_decision.stand_in' "$td/steps/step_1_backend/scope-amendment.json")" = "$auth" ]
 }
 
-@test "amend-contract: a pure rename of the current step's path on the stand-in's permission; another directory, a collision or no permission is refused (P117 (13))" {
+@test "amend-contract: a pure rename of the current step's path on the stand-in's permission; another directory, a collision or no permission is refused" {
   local td="$TEST_EVIDENCE_DIR" pp="$TEST_PROJECT_ROOT/.aid-o/plans/P930-plan.md"; ZP_KEEP_PLAN="$pp" _zp_plan_json "$td"
   mkdir -p "$TEST_PROJECT_ROOT/src"; echo x > "$TEST_PROJECT_ROOT/src/a.py"
   sed -i '/^zadani:/d; /^zadani_sha256:/d; s/^\*\*Zavírá:\*\* AC2$/**Zavírá:** AC1/; s/^\*\*Zavírá:\*\* AC3$/**Zavírá:** —/' "$pp"

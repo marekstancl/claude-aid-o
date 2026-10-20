@@ -4821,7 +4821,7 @@ enforcements:
     verdict: ALIGNED
     tier: t1
     description: "P117 (WAN P110-P112, eight PM stops in --auto): every refusal code the plugin prints has a class (agent_fix, prevent, agent_fix_then_stand_in, stand_in, pm, incident, not_in_run) and every refusal prints it; an unknown code is pm. The orphan and malformed dispatch ledger name targeted repairs (aid-emit-dispatch.sh cancel / repair) instead of --force."
-    test: "scripts/tests/bats/test-refusal-classes.bats + scripts/tests/bats/test-aid-fsm.bats (grep: 'P117')"
+    test: "scripts/tests/bats/test-refusal-classes.bats + scripts/tests/bats/test-aid-fsm.bats (grep: 'malformed ledger → repair')"
   - id: step_commit_transactional
     type: 1
     source: "scripts/lib/aid-dispatch-contract.sh (aid_dispatch_contract_commit)"
@@ -4865,7 +4865,7 @@ enforcements:
     verdict: ALIGNED
     tier: t2
     description: "P117 (WAN P110: a whole run, then every point unmeasured at the close): plan-run of a plan with cmd points asks the close's own isolation probe and refuses no_isolation before anything is created."
-    test: "scripts/tests/bats/test-plan-run.bats (grep: 'no_isolation, P117')"
+    test: "scripts/tests/bats/test-plan-run.bats (grep: 'a host where the close could measure no cmd point')"
   - id: cp1_dependency_root
     type: 1
     source: "scripts/lib/aid-plan-dependency.sh + scripts/aid-review-round.sh (cmd_prepare) + scripts/aid-plan-fsm.sh (plan-run)"

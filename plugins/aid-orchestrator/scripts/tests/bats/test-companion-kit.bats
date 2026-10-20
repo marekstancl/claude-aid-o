@@ -97,7 +97,7 @@ _ws() {
   kill -0 "$foreign"; kill "$foreign"
 }
 
-@test "kit F (P117): ui.copy_extra copies repository files beside the copy and refuses secrets and outside paths; a scrolling container is captured whole; the first-shot limit is 1..120 s" {
+@test "kit F: ui.copy_extra copies repository files beside the copy and refuses secrets and outside paths; a scrolling container is captured whole; the first-shot limit is 1..120 s" {
   mkdir -p "$P/shared"; echo "body{}" > "$P/shared/base.css"; echo "SECRET=1" > "$P/.env.local"
   yq -i '.ui.copy_extra = [".env.local"]' "$P/.aid-o/config/project.yaml"
   run _k proto; [ "$status" -ne 0 ]; [[ "$output" == *"looks like a secret"* ]]; rm -rf "$D/proto" "$D/proto-manifest.json"

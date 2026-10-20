@@ -489,7 +489,7 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   [[ "$output" != *"not committed here"* ]]
 }
 
-@test "contract: a deletion committed by the step's own commit is still a deletion when increment-step validates again; a later unrelated commit does not borrow it (WAN P112 krok 4, 20. 10. 2026)" {
+@test "contract: a deletion committed by the step's own commit is still a deletion when increment-step validates again; a later unrelated commit does not borrow it" {
   git init -q -b main . 2>/dev/null || git init -q .
   git config user.email t@t; git config user.name T
   : > src/old.sh; git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
@@ -512,7 +512,7 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   [ "$status" -eq 1 ]; [[ "$output" == *"src/old.sh (not a tracked file"* ]]
 }
 
-@test "contract: AID state other than the step's evidence (.aid-o/work/backlog.md) in changed_files is refused aloud, the evidence is left to AID (WAN P111 krok 10)" {
+@test "contract: AID state other than the step's evidence (.aid-o/work/backlog.md) in changed_files is refused aloud, the evidence is left to AID" {
   git init -q -b main . 2>/dev/null || git init -q .
   git config user.email t@t; git config user.name T
   git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
@@ -525,7 +525,7 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   [ -z "$(git diff --cached --name-only)" ]
 }
 
-@test "contract: transaction — a commit the hook refuses leaves the index exactly as it was before the step's staging (WAN P112)" {
+@test "contract: transaction — a commit the hook refuses leaves the index exactly as it was before the step's staging" {
   git init -q -b main . 2>/dev/null || git init -q .
   git config user.email t@t; git config user.name T
   git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
@@ -538,7 +538,7 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   [ "$(git diff --cached --name-status)" = "$before" ]
 }
 
-@test "contract: transaction — a file the user staged is refused before anything is staged, the index byte for byte as it was; the step's commit is built in a temporary index (Codex, P117)" {
+@test "contract: transaction — a file the user staged is refused before anything is staged, the index byte for byte as it was; the step's commit is built in a temporary index" {
   git init -q -b main . 2>/dev/null || git init -q .
   git config user.email t@t; git config user.name T
   git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main

@@ -497,7 +497,7 @@ _mplan() {
   echo "nález $fp" >> "$card"; touch -d '-10 seconds' "$card"
   run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]; [[ "$output" == *"no PM prompt after"* ]]
 }
-@test "step: a step that changes documentation gets final_claims in its own review (when: docs_surface); a step that does not, does not (P117 (18))" {
+@test "step: a step that changes documentation gets final_claims in its own review (when: docs_surface); a step that does not, does not" {
   _repo; _sc
   run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" != *"prompt-final_claims.md"* ]]
   rm -rf "$E/cp2"
@@ -945,7 +945,7 @@ _fanswer() {
 }
 _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blocker", claim: "the changelog claims an import the app never makes", command: "grep -n import src/app.py", evidence: "src/app.py:1", fix: "import new", rule: "every change the changelog claims is in the code"}] | del(.no_findings_reason)'
 
-@test "accept-risk: the PM closes with an open blocker on ONE card naming the candidate and the finding; a card missing either is refused, the record is bound to both (P117 (14))" {
+@test "accept-risk: the PM closes with an open blocker on ONE card naming the candidate and the finding; a card missing either is refused, the record is bound to both" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
   _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_BLOCKER"
   _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null || true
@@ -1924,7 +1924,7 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   run _DLG --fingerprint "$FP"; [ "$status" -eq 0 ]; [[ "$output" == *"already settled"*"nothing dispatched"* ]]
   [ "$(grep -c . "$R/.aid-o/work/evidence/P950/delegated-disputes.jsonl")" = 1 ]
 }
-@test "delegate: new evidence (a new commit) allows ONE new verdict; the old one is superseded in merged.json, the ledger and on disk (P117 (12))" {
+@test "delegate: new evidence (a new commit) allows ONE new verdict; the old one is superseded in merged.json, the ledger and on disk" {
   _dlg auto; _dispute; _fake_codex
   export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "fine on the worktree", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
   _DLG --fingerprint "$FP" >/dev/null
@@ -1943,7 +1943,7 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   run _DLG --fingerprint "$FP"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_out_of_scope"*"a third opinion is not asked"* ]]
   [ "$(grep -c . "$L")" = 2 ]
 }
-@test "delegate: a fix that changed the cited lines goes to the next round's confirmation, not to the adjudicator; a change elsewhere does not (P117 (19))" {
+@test "delegate: a fix that changed the cited lines goes to the next round's confirmation, not to the adjudicator; a change elsewhere does not" {
   _dlg auto; _dispute; _fake_codex
   export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "fine", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
   local ev; ev="$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .evidence' "$(D 1)/merged.json")"
@@ -2141,7 +2141,7 @@ _dep() {
   git -C "$ROOT/.aid-worktrees/plan-$1" add -A; git -C "$ROOT/.aid-worktrees/plan-$1" -c user.email=t@t -c user.name=t commit -qm "$1"
 }
 
-@test "prepare: a plan standing on one unmerged plan is checked in its worktree, the binding is recorded and held; two unmerged plans are refused (P117 (3), WAN P112)" {
+@test "prepare: a plan standing on one unmerged plan is checked in its worktree, the binding is recorded and held; two unmerged plans are refused" {
   _dep P899
   sed -i 's/^type: regular$/type: regular\ndepends_on_plans: [P899]/' "$PLAN"
   # step 1 extends a file only the dependency's worktree has (WAN P112)
