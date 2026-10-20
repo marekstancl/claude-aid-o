@@ -971,3 +971,12 @@ PY
   run bash "$SC/aid-ui-verify.sh" "$PROJ" --precheck; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ -z "$(find "$PROJ/.aid-ui/precheck" -name '*.png' 2>/dev/null)" ]
 }
+
+@test "app-gate (P118): --quick runs the precheck's rows at the widest width only, into its own folder; the precheck's result is untouched" {
+  app_gate; python3 "$SC/lib/aid-ui-skeleton.py" build "$PROJ" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ" --quick; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"QUICK: "*"(0 open rows)"* ]]
+  [ "$(jq -c '[.rows[].viewport] | unique' "$PROJ/.aid-ui/quick/result.json")" = '["1440"]' ]
+  [ ! -e "$PROJ/.aid-ui/precheck/result.json" ]
+  jq -e '[.rows[] | select(.check == "app_flows" and .page == "zalozit" and .state == "normal")] | length == 1' "$PROJ/.aid-ui/quick/result.json" >/dev/null
+}

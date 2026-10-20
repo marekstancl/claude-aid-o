@@ -69,6 +69,8 @@ aplikaci nekopíruje: tytéž nástroje, větev podle druhu.
    potvrzení. Dokud vlastník model neschválí, nese každá stránka pruh „model čeká na schválení vlastníkem".
 5a. **Lišta aplikace** (STOP, Panika, režim - co je na každé obrazovce) je obrazovka s `shell: true`: její akce kostra
    vykreslí na každé stránce, krok úlohy na ní smí stát odkudkoli.
+5a2. **Po každé úpravě modelu nebo kostry** `aid-ui-verify.sh <projekt> --quick` (stejné řádky jako předběžná brána,
+   jen na nejširší šířce, asi minuta); o kole ani předání nerozhoduje.
 5b. **Před kolem rolí** (SKILL.md „Verze 1 je kompletní“): lint bez nálezu, `aid-ui-client.py verify <projekt> --place
    struktura --web <adresa kostry>` bez otevřeného rozporu a se všemi opravami minulého kola viděnými, `aid-ui-verify.sh
    <projekt> --precheck` zelené nad modelem teď a `aid-ui-quality.py self <projekt> --place struktura --file
