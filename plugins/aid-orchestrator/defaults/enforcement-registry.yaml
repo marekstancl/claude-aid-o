@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 690 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 699 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
   # ── Plan amendments recorded here because this file is the TRACKED authority ──
   # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
   # `git check-ignore`; `docs/extending-aid.md` is the tracked exception), so an
@@ -4877,3 +4877,102 @@ enforcements:
     tier: t1
     description: "P117 (WAN P112: CP1 checked a dependent plan against the main checkout and refused real paths): a plan standing on one unmerged plan (its plan/<id> not in the target branch) is checked in that plan's worktree; round 1 records plan, worktree, branch and HEAD in the state root's evidence, later rounds refuse a moved or missing dependency, plan-run refuses a dependency merged without the reviewed commit; two unmerged dependencies are refused."
     test: "scripts/tests/bats/test-plan-dependency.bats + scripts/tests/bats/test-review-round.bats (grep: 'standing on one unmerged')"
+  - id: stand_in_permission
+    type: 1
+    source: "scripts/aid-stand-in.sh + scripts/lib/aid-stand-in.sh (aid_stand_in_verify, aid_stand_in_consume)"
+    instruction: "commands/aid-run.md (Run decisions by the stand-in)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P117 (WAN P110-P112: eight PM stops in --auto on technical decisions): a run decision of class stand_in / agent_fix_then_stand_in is decided by Codex, or a Claude stand-in whose bracket closed over the exact verdict file and its digest; record repeats ask's gates; the permission is this run's, of one exact action, used once (the plan's ledger); every consumer verifies it again."
+    test: "scripts/tests/bats/test-stand-in.bats + scripts/tests/bats/test-aid-fsm.bats (grep: 'stand-in')"
+  - id: protected_impact_detector
+    type: 1
+    source: "scripts/lib/aid-protected.sh (aid_protected_impact)"
+    instruction: "skills/pipeline.md (stand_in_protected)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P117: code, never a model, says what the stand-in may not decide: the brief and the plan, AID's configuration, the project's protected_paths (default .env*, *secret*, *credential*, deploy/**, production compose; .gitignore-like at any depth, case-insensitive), a repository outside repo_roots, an outside service the proposal declares, a kind it does not know, a measurement that ran (not a technical failure). Checked at ask, at record and by every consumer."
+    test: "scripts/tests/bats/test-stand-in.bats (grep: 'protected impact')"
+  - id: amend_contract_rename
+    type: 1
+    source: "scripts/lib/aid-amend-contract.sh + scripts/aid-fsm.sh (cmd_amend_contract)"
+    instruction: "commands/aid-run.md (Run decisions by the stand-in)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P117 (13): a rename in the frozen plan is a whole-path token swap in plan.json, the contract (old version superseded), the plan and the brief (verze + 1), fingerprints refreshed in order, the measurement and review of every step naming the path moved aside, the plan check and readiness again — any failure puts every file back; only plain paths, in place, on the stand-in's or the PM's permission; a retry is idempotent."
+    test: "scripts/tests/bats/test-aid-fsm.bats (grep: 'amend-contract')"
+  - id: accepted_risk_bound
+    type: 1
+    source: "scripts/aid-review-round.sh (cmd_accept_risk) + scripts/aid-plan-fsm.sh (_pfsm_accepted_risk_stale)"
+    instruction: "skills/pipeline.md (accepted_risk_stale)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P117 (14): the PM's decision to close with open findings is one card naming the candidate and every finding; the record binds candidate, card and each finding's digest and the set digest; decide refuses it for another candidate, a changed card or finding, a changed set, or a finding marked accepted without the record."
+    test: "scripts/tests/bats/test-review-round.bats (grep: 'accept-risk')"
+  - id: cp7_full_or_confirmation
+    type: 1
+    source: "scripts/aid-review-round.sh (cp7_mode) + scripts/lib/aid-step-review-packet.sh + scripts/aid-plan-fsm.sh (_pfsm_cp7_confirmation_bad) + scripts/lib/aid-docs-surface.sh"
+    instruction: "skills/pipeline.md (cp7_confirmation_not_enough)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P117 (15)(16): after a fix the CP7 round is a confirmation round only when the previous candidate passed a FULL round and the fix is documentation by the built-in list (never skills, agents, commands, templates, defaults, the plan, execution.yaml); otherwise a full round; decide refuses a confirmation round without that predecessor."
+    test: "scripts/tests/bats/test-review-round.bats (grep: 'cp7: after a docs-only fix')"
+  - id: plan_tests_at_close
+    type: 1
+    source: "scripts/lib/aid-plan-tests.sh + scripts/aid-plan-fsm.sh (produce, decide)"
+    instruction: "defaults/execution.yaml (plan_tests:)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P117 (17): the close runs the nightly tests the plan names (execution.yaml plan_tests) at the candidate; plan-tests.json is bound to the candidate, the plan and execution.yaml, recorded by the produce stage with every log; decide refuses a failed, missing, stale or foreign result (plan_tests_failed); the plan check blocks a plan-named test no entry runs (B13)."
+    test: "scripts/tests/bats/test-plan-tests.bats"
+  - id: cp2_final_claims_docs
+    type: 1
+    source: "scripts/aid-review-round.sh (_expected_roles) + scripts/lib/aid-review-config.sh"
+    instruction: "skills/step-review-roles.md (final_claims)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P117 (18): a step whose changed files include documentation (lib/aid-docs-surface.sh, plus the project's help_paths) gets the final_claims role in its own review, whatever a project policy lists."
+    test: "scripts/tests/bats/test-review-round.bats (grep: 'changes documentation gets final_claims')"
+  - id: delegation_fix_pending
+    type: 1
+    source: "scripts/aid-review-round.sh (_dlg_fix_touched)"
+    instruction: "commands/aid-run.md (Escalations settled by an independent agent)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P117 (19): a finding any of whose cited lines a commit after the round changed is never settled by an adjudicator and never marks itself fixed; the next round's confirmation judges the fix."
+    test: "scripts/tests/bats/test-review-round.bats (grep: 'cited lines')"
+  - id: companion_copy_extra_scroll
+    type: 1
+    source: "lib/brainstorm-server/kit-proto.mjs + lib/brainstorm-server/kit-shots.mjs"
+    instruction: "skills/visual-companion/SKILL.md"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t2
+    description: "P117 (20, WAN P112): ui.copy_extra copies repository files beside the copy, never a secret in any path component, never outside the repository, through no link, never over the kit's files; capture {scroll} shoots a scrolling container whole; ui.first_shot_timeout_s (1..120) governs the first shot's waits."
+    test: "scripts/tests/bats/test-companion-kit.bats (grep: 'kit F')"
