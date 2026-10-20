@@ -962,6 +962,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   jq '.findings[0].claim = "something else"' "$(FD 1)/merged.json" > "$ROOT/m" && cp "$ROOT/m" "$(FD 1)/merged.json"
   _stale "$head"; [ "$status" -eq 1 ]; [[ "$output" == *"is not the one the PM accepted"* ]]
   echo extra >> "$card"; _stale "$head"; [ "$status" -eq 1 ]; [[ "$output" == *"card"*"changed after the PM answered"* ]]
+  rm "$(FD 1)/accepted-risk.json"; _stale "$head"; [ "$status" -eq 1 ]; [[ "$output" == *"without the PM's record"* ]]
 }
 
 @test "cp7: produce's inputs hold the plan's criteria and the EPIC findings; prepare prints the two default prompts with cp7 foci" {

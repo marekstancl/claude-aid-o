@@ -2199,6 +2199,8 @@ _si_permit() {
   [ "$status" -ne 0 ]; [[ "$output" == *"rename_outside_step"* ]]
   run bash "$FSM" amend-contract "$td/fsm-state.yaml" --rename src/a.py=tests/test_a.py --reason "the project lint forbids the plan's name"
   [ "$status" -ne 0 ]; [[ "$output" == *"rename_outside_step"* ]]
+  run bash "$FSM" amend-contract "$td/fsm-state.yaml" --rename 'src/a.py=src/a b;rm.py' --reason "the project lint forbids the plan's name"
+  [ "$status" -ne 0 ]; [[ "$output" == *"letters, digits"* ]]
   run bash "$FSM" amend-contract "$td/fsm-state.yaml" --rename tests/test_a.py=tests/test_b.py --reason "the project lint forbids the plan's name"
   [ "$status" -ne 0 ]; [[ "$output" == *"not a path of the current step"* ]]
   local auth; auth="$(_si_permit "$td" contract_return_rejected '{"kind": "rename", "step": 0, "rename": {"old": "src/a.py", "new": "src/b.py"}, "why": "the project lint forbids the name"}')"

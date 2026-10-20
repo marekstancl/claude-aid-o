@@ -22,7 +22,7 @@ import re, sys
 f, old, new = sys.argv[1:4]
 s = open(f, encoding="utf-8").read()
 pat = re.compile(r"(?<![A-Za-z0-9_./-])" + re.escape(old) + r"(?![A-Za-z0-9_/-]|\.[A-Za-z0-9])")
-t, n = pat.subn(new, s)
+t, n = pat.subn(lambda m: new, s)   # the new path literally, never a regex template
 if n: open(f, "w", encoding="utf-8").write(t)
 print(n)
 PY
@@ -39,6 +39,8 @@ aid_amend_contract_rename() {
   (( ${#reason} >= 20 )) || _ac_fail rename_refused "--reason needs at least 20 characters (the audit record)" "say why the name changes"
   [[ -n "$old" && -n "$new" && "$old" != "$new" ]] || _ac_fail rename_refused "--rename takes <old>=<new>, two different paths" "--rename old/path=new/path"
   [[ "$old" != /* && "$new" != /* && "$old$new" != *..* ]] || _ac_fail rename_refused "absolute paths and .. are not renamed here" "a path relative to the repository"
+  # a path, nothing else: no whitespace, quotes, backslashes or shell characters can ride into a command (security review)
+  [[ "$old" =~ ^[A-Za-z0-9._/-]+$ && "$new" =~ ^[A-Za-z0-9._/-]+$ ]] || _ac_fail rename_refused "a path of letters, digits and . _ / - only" "rename to a plain path"
   [[ "$(dirname "$old")" == "$(dirname "$new")" ]] || _ac_fail rename_outside_step "the new name moves the file to another directory ($(dirname "$new"))" "rename in place; a move is a scope change (amend-scope)"
   cs="$(yaml_field "$sf" current_step)"; total="$(jq '.steps | length' "$pj")"; (( cs >= total && total > 0 )) && cs=$(( total - 1 ))
   sid="$(jq -r --argjson i "$cs" '.steps[$i].id' "$pj")"

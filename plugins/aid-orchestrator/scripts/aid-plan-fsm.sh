@@ -5047,7 +5047,17 @@ _pfsm_validate_plan_final_close_receipt_json() {
 # _pfsm_accepted_risk_stale <run dir> <candidate> <root> — every cp7 accepted-risk.json is for this candidate,
 # its card unchanged, and each finding it names unchanged (P117 (14)); prints why not and returns 1.
 _pfsm_accepted_risk_stale() {
-  local run_dir_abs="$1" candidate="$2" root="$3" _ar _m _fp _fs
+  local run_dir_abs="$1" candidate="$2" root="$3" _ar _m _fp _fs _rd
+  # every finding a round marks as an accepted risk needs the record of that decision (security review: a deleted
+  # accepted-risk.json must not leave the acceptance standing)
+  for _m in "${run_dir_abs}"/cp7/round-*/merged.json; do
+    [[ -f "$_m" ]] || continue; _rd="$(dirname "$_m")"
+    while IFS= read -r _fp; do
+      [[ -n "$_fp" ]] || continue
+      jq -e --arg f "$_fp" 'any(.findings[]; .fingerprint == $f)' "${_rd}/accepted-risk.json" >/dev/null 2>&1 \
+        || { echo "finding ${_fp:0:23} of ${_rd#"${root}/"} is marked an accepted risk without the PM's record (accepted-risk.json)"; return 1; }
+    done < <(jq -r '.findings[] | select(.dispute.pm.accepted_risk == true) | .fingerprint' "$_m")
+  done
   for _ar in "${run_dir_abs}"/cp7/round-*/accepted-risk.json; do
     [[ -f "$_ar" ]] || continue
     if [[ "$(jq -r .candidate_sha "$_ar")" != "$candidate" ]]; then echo "${_ar#"${root}/"} was given for candidate $(jq -r '.candidate_sha[:12]' "$_ar"), not ${candidate:0:12}"; return 1; fi
