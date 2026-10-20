@@ -102,27 +102,26 @@ vstup klienta není kritérium práce studia. Schválit otázku místa jde jen s
 i míst, na kterých stojí. Projekt bez pohybu značky jen výjimkou PM (`place-record --place pohyb --without <odpověď>`).
 `aid-ui-state.sh decide --step` bere přesný název kroku z `sections.json` (sdělení i logo patří do „Zadání a obsah“).
 
-## Verze 1 je kompletní, kritik jen dolaďuje (PM 18. 10. 2026, všechna místa)
+## Verze 1 je kompletní, kritik jen dolaďuje (PM 18. 10. 2026; P118 20. 10. 2026, všechna místa)
 
 Kdo vyrábí verzi pro role, dodá ji **se vším ze zadání a ověřenou**: role ji mají nezávisle hodnotit 9-10 a najít jen
-detaily. Před každým kolem místa (`aid-ui-quality.py round`, všechna místa, web i aplikace):
+detaily. Před každým kolem místa (`aid-ui-quality.py round`, všechna místa, web i aplikace), v tomto pořadí:
 1. **Soupis požadavků** ze zadání projektu (zadání, plán fáze, podklady) - každý bod se zdrojem `soubor:řádek`, pokrytý
    (`covered_by`: kde) nebo `out_of_scope` s důvodem. U aplikace na místě struktura míří `covered_by` na `task:<id>` nebo
    `screen:<id>` modelu.
-2. **Návrh se píše proti nejvyšší kotvě** měřítek obou rolí místa (agent je čte v metodě kroku), ne proti „projde“.
-3. **Vlastní strojové kontroly zelené:** u aplikace `aid-ui-verify.sh <projekt> --precheck` nad kostrou (úlohy, stavy,
-   klávesnice, obnova, axe), u hotového webu brána a `gate-check`.
-4. **Vlastní projití všech kritérií** obou rolí: každé aspoň 9 s důkazem, pod 9 agent opraví sám.
-5. **Opravy z minulého kola ověří nezávislý ověřovatel v postavené verzi** (Codex, nebo Claude agent s čistým
-   kontextem; nikdy výrobce): dostane nálezy, doklady oprav a adresu verze, u každé napíše overeno / nepravda /
-   castecne a co kde viděl. Do kontroly jde jako `fix_check`; bez výroku `overeno` u každé opravy `self` neprojde
-   (P116, 19. 10. 2026: dvě opravy byly zapsané jako hotové a nebyly - ověřené slovem v modelu, ne v kostře).
-   Týž ověřovatel projde i **celou verzi** a hledá rozpory: stejná věc s jinými čísly, časy nebo stavy, ukázka, která
-   porušuje pravidlo, které verze sama uvádí, odkaz nebo text, který slibuje, co verze nemá. Do kontroly jde jako
-   `whole_check` {by, seen, open}; s otevřeným rozporem `self` neprojde (P116 kolo 4: role i ověřovatel našli 8 rozporů,
-   které výrobce při opravách neviděl).
-Zápis `aid-ui-quality.py self <projekt> --place <místo> --file <kontrola.json>` to ověří a váže na otisk podkladů místa;
-`round` bez platné vlastní kontroly nad touto verzí nespustí. Po každé opravě se kontrola dělá znovu.
+2. **Návrh se píše proti nejvyšší kotvě** měřítek obou rolí místa a u existující aplikace proti tomu, **co appka
+   opravdu dělá** (kód, roadmapa, runbook), ne proti zadání obrazovek (P116 kolo 5: tři ukázky popisovaly chování,
+   které appka nemá).
+3. **Lint modelu** (`aid-ui-screens.py check`, sekundy) bez nálezu.
+4. **Nezávislý ověřovatel jako nástroj:** `aid-ui-client.py verify <projekt> --place <místo> --web <adresa verze>`.
+   Nástroj sám nafotí, co člověk na každé adrese verze vidí, a Codex (záskok Claude Opus) to porovná s modelem,
+   fakty a podklady projektu: ověří opravy minulého kola a hledá rozpory v celé verzi. Výsledek je podepsaný záznam
+   mimo projekt; výrobce do něj nic nepíše. Rozpor platí, dokud se verze nezmění; opakovaný běh ho nesmaže.
+5. **Strojové kontroly zelené:** u aplikace `aid-ui-verify.sh <projekt> --precheck` nad kostrou (úlohy, stavy,
+   klávesnice, obnova, axe; minuty, P118), u hotového webu brána a `gate-check`.
+Zápis `aid-ui-quality.py self <projekt> --place <místo> --file <kontrola.json>` (jen soupis požadavků) to ověří a váže
+na otisk podkladů místa; `round` bez platné kontroly nad touto verzí nespustí. **Vlastní známky výrobce se nepíšou**
+(P118: v pilotu vždy „9“, role 4,9-8,8 - nic nerozhodovaly).
 
 ## Co role nechají na klientovi, dodá klient-agent (P116, PM 19. 10. 2026, všechna místa)
 

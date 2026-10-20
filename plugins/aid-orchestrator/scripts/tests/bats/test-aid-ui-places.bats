@@ -6,6 +6,7 @@
 # of the workshop's trial business is in the plugin, and every place freezes.
 
 setup() {
+  export AID_UI_VERIFY_HOME="$BATS_TEST_TMPDIR/vh" AID_UI_VERIFY_KEY="$BATS_TEST_TMPDIR/vk"   # P118: never the real home
   SC="$BATS_TEST_DIRNAME/../.."
   C="$SC/aid-ui-critic.py"; K="$SC/../skills/ui-design/critic"
   P="$BATS_TEST_TMPDIR/p"; mkdir -p "$P/docs/content" "$P/site"
@@ -164,5 +165,10 @@ PY
   run python3 "$Q" self "$P" --place struktura --file "$P/s2.json"
   [ "$status" -eq 1 ]; [[ "$output" == *"task:nikdy není úloha ani obrazovka modelu"* ]]
   run python3 "$Q" self "$P" --place struktura --file "$P/self.json"
-  [ "$status" -eq 0 ]; [[ "$output" == *"SELF struktura: 1 požadavků"* ]]
+  [ "$status" -eq 1 ]; [[ "$output" == *"neproběhl nezávislý ověřovatel"* ]]   # P118: the verifier's signed record over this version
+  python3 -c 'import sys,subprocess; sys.path.insert(0, sys.argv[2] + "/lib"); import aid_ui_memory as m
+art = subprocess.run([sys.executable, sys.argv[2] + "/aid-ui-critic.py", "bundle-sha", sys.argv[1], "--place", "struktura"], capture_output=True, text=True).stdout.strip()
+m.verify_append(sys.argv[1], "struktura", {"artifact": art, "at": "t", "fixes": {}, "open": []})' "$P" "$SC"
+  run python3 "$Q" self "$P" --place struktura --file "$P/self.json"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }; [[ "$output" == *"SELF struktura: 1 požadavků"* ]]
 }

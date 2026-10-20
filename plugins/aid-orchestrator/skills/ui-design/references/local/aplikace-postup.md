@@ -63,9 +63,10 @@ aplikaci nekopíruje: tytéž nástroje, větev podle druhu.
    potvrzení. Dokud vlastník model neschválí, nese každá stránka pruh „model čeká na schválení vlastníkem".
 5a. **Lišta aplikace** (STOP, Panika, režim - co je na každé obrazovce) je obrazovka s `shell: true`: její akce kostra
    vykreslí na každé stránce, krok úlohy na ní smí stát odkudkoli.
-5b. **Před kolem rolí:** `aid-ui-verify.sh <projekt> --precheck` zelené nad modelem teď, vlastní projití obou měřítek
-   (každé kritérium ≥ 9 s důkazem), opravy minulého kola ověřené nezávislým ověřovatelem v kostře (`fix_check`, SKILL.md
-   „Verze 1 je kompletní“ bod 5) a `aid-ui-quality.py self <projekt> --place struktura --file <kontrola.json>`.
+5b. **Před kolem rolí** (SKILL.md „Verze 1 je kompletní“): lint bez nálezu, `aid-ui-client.py verify <projekt> --place
+   struktura --web <adresa kostry>` bez otevřeného rozporu a se všemi opravami minulého kola viděnými, `aid-ui-verify.sh
+   <projekt> --precheck` zelené nad modelem teď a `aid-ui-quality.py self <projekt> --place struktura --file
+   <kontrola.json>` (soupis požadavků).
 6. Kolo místa `struktura` (`aid-ui-quality.py round <projekt> --place struktura --web <adresa kostry>`): role
    proklikávají kostru a čtou model. Klient-role je vlastník produktu a klíčový uživatel, postavená z kódu a zadání
    projektu.

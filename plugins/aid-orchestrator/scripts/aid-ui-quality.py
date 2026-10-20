@@ -10,18 +10,13 @@ rounds/<n>/{owner,tech}/ (the ratings), rounds/<n>/history-<role>.json (the memo
 {owner,tech}/, loop.json (the summary the studio shows, with every round's cost and time), verdict.json.
 
   self <project> [--place <p>] --file <kontrola.json>
-      (kontrola.json also fix_check {by, results: {<finding>: {verdict: overeno|nepravda|castecne, seen}}} when the last
-      round has fixed findings: an independent verifier saw every fix in the built version - P116, PM 19. 10. 2026) and
-      always whole_check {by, seen, open: []}: the verifier went through the whole built version for contradictions
-      (numbers, times, states, a rule its own sample breaks, a promise without the function) and none is left open
-      The producer's own check (PM 18. 10. 2026: the version that goes to the roles has everything of the brief and is
-      checked; the roles fine-tune it). kontrola.json {requirements: [{id, source "<file>:<line>" in the project, text,
-      covered_by: [where] | out_of_scope: <why>}], scores: {owner|tech: {<criterion>: {score, evidence}}}}: every
-      requirement of the brief with its source, covered or out of scope with a reason (a webapp's structure: covered_by
-      names task:<id> | screen:<id> of the model); every criterion of both frozen roles (the extra rubrics' ids with
-      their prefix) rated by the producer at 9 or more with evidence; a webapp's struktura and vzhled also a green
-      precheck of the skeleton on the model now (aid-ui-verify.sh --precheck). Refused naming each gap; recorded in
-      .aid-ui/critic/self/<place>.json bound to the place's bundle and frozen critic.
+      The check before the roles (P118): kontrola.json {requirements: [{id, source "<file>:<line>" in the project, text,
+      covered_by: [where] | out_of_scope: <why>}]} - every requirement of the brief with its source, covered or out of
+      scope (a webapp's structure: covered_by names task:<id> | screen:<id>); a webapp's struktura and vzhled also a
+      green precheck of the skeleton on the model now (aid-ui-verify.sh --precheck); and the independent verifier's
+      signed records over this very version (aid-ui-client.py verify): no open point in any run over it, every fix of
+      the last round seen. No marks of the producer (they never matched the roles). Refused naming each gap; recorded
+      in .aid-ui/critic/self/<place>.json bound to the place's bundle and frozen critic.
   round <project> --web <url>
       One round on the current site. Refused without a self record over the bundle and the critic now (not in the
       launch loop: it rates the deployment of a handed-over web). Refused while the previous round has a finding without a state, an accepted
@@ -147,7 +142,6 @@ def site_sha(p):
 
 # ---------------------------------------------------------------- the producer's own check before every round (PM 18. 10. 2026)
 LAUNCH = False   # set only by this command line (launch | --launch), never by the environment
-SELF_MIN = 9   # the version handed to the roles is complete: the producer rates it at 9+ on every criterion itself
 REQ_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
 
 
@@ -219,16 +213,8 @@ def self_problems(p, doc):
             miss = [x for x in cov if x not in refs]
             if miss:
                 bad.append(f"{r['id']}: {', '.join(miss)} není úloha ani obrazovka modelu (task:<id> | screen:<id>)")
-    rec = frozen_rec(p)
-    sc = doc.get("scores") or {}
-    for role in ("owner", "tech"):
-        got = sc.get(role) if isinstance(sc.get(role), dict) else {}
-        for c in criteria_ids(rec, role):
-            x = got.get(c) if isinstance(got.get(c), dict) else {}
-            if not isinstance(x.get("score"), (int, float)) or not str(x.get("evidence") or "").strip():
-                bad.append(f"{role}.{c}: chybí vlastní známka s důkazem")
-            elif x["score"] < SELF_MIN:
-                bad.append(f"{role}.{c}: {x['score']} pod {SELF_MIN} - oprav před kritikem ({str(x.get('evidence'))[:80]})")
+    # P118: no marks of the producer - they never matched the roles (always 9, roles 4.9-8.8); what the independent
+    # verifier recorded over this version decides, below
     if model is not None and PLACE in ("struktura", "vzhled"):   # an app's skeleton passed its own gate on this model first
         pre = os.path.join(p, ".aid-ui", "precheck", "result.json")
         try:
@@ -252,35 +238,32 @@ def self_problems(p, doc):
                 bad.append("předběžná brána kostry je neúplná, chybí řádky: " + "; ".join(miss[:5]))
             if red:
                 bad.append("předběžná brána kostry není zelená: " + "; ".join(red[:5]))
-    bad += fix_check_problems(p, doc)
+    bad += verify_problems(p)
     return bad
 
 
-def fix_check_problems(p, doc):
-    """P116 (PM 19. 10. 2026, round 3: two fixes were recorded and were not there): every fix of the last round was
-    checked in the built version by an independent verifier with a clean context (Codex or a Claude agent - never the
-    producer), and it saw each one done. doc.fix_check {by, results: {<finding id>: {verdict: overeno|nepravda|castecne,
-    seen: <what it saw where>}}}."""
-    rs = rounds(p)
+def verify_problems(p):
+    """P118: the independent verifier (aid-ui-client.py verify) went over this very version: its signed records outside
+    the project (aid_ui_memory.verify_records) over the place's artifact now. Every open point of every run over it
+    stays until the version changes; every fix of the last round was seen (verdict overeno) by the latest run that
+    names it. The producer writes nothing of this."""
+    art = site_sha(p)
+    recs = memory.verify_records(p, PLACE, art)
+    if not recs:
+        return [f"verify: nad touto verzí ({art[:12]}) neproběhl nezávislý ověřovatel - aid-ui-client.py verify {p} --place {PLACE} --web <adresa verze>"]
     out = []
-    wc = doc.get("whole_check") if isinstance(doc.get("whole_check"), dict) else {}
-    wby = str(wc.get("by") or "").strip()
-    if not wby or wby.lower() in ("self", "agent", "studio", "producer", "vyrobce", "výrobce") or not str(wc.get("seen") or "").strip():
-        out.append("whole_check: celou verzi neprošel nezávislý ověřovatel (rozpory čísel, časů, stavů, pravidlo proti ukázce, slib bez funkce; whole_check.by, seen)")
-    elif wc.get("open"):
-        out.append("whole_check: ve verzi zůstávají rozpory, které ověřovatel našel: " + "; ".join(str(x)[:80] for x in wc["open"][:5]))
-    fixed = [f["id"] for f in (rs[-1]["findings"] if rs else []) if f.get("state") == "accepted" and f.get("evidence")]
-    if not fixed:
-        return out
-    fc = doc.get("fix_check") if isinstance(doc.get("fix_check"), dict) else {}
-    by, res = str(fc.get("by") or "").strip(), fc.get("results") if isinstance(fc.get("results"), dict) else {}
-    if not by or by.lower() in ("self", "agent", "studio", "producer", "vyrobce", "výrobce"):
-        return out + ["fix_check: opravy kola %d neověřil nezávislý ověřovatel v postavené verzi (fix_check.by = kdo, s čistým kontextem)" % rs[-1]["n"]]
-    for fid in fixed:
-        x = res.get(fid) if isinstance(res.get(fid), dict) else {}
-        v, seen = str(x.get("verdict") or ""), str(x.get("seen") or "").strip()
-        if v != "overeno" or not seen:
-            out.append(f"fix_check {fid}: ověřovatel {by} opravu neviděl ({v or 'bez výroku'}: {seen[:100]}) - oprav ji a nech ověřit znovu")
+    opn = {}
+    for r in recs:
+        for o in r.get("open") or []:
+            opn.setdefault((str(o.get("where")), str(o.get("what"))), o)
+    if opn:
+        out.append("verify: ve verzi zůstávají rozpory: " + "; ".join(f"{k[0]}: {k[1][:80]}" for k in list(opn)[:5]) + (f" (+{len(opn) - 5})" if len(opn) > 5 else ""))
+    rs = rounds(p)
+    for f in (rs[-1]["findings"] if rs else []):
+        if f.get("state") == "accepted" and f.get("evidence"):
+            v = next((r["fixes"][f["id"]] for r in reversed(recs) if f["id"] in (r.get("fixes") or {})), None)
+            if not v or v.get("verdict") != "overeno":
+                out.append(f"verify {f['id']}: ověřovatel opravu {'neověřoval' if not v else 'neviděl (' + str(v.get('verdict')) + ': ' + str(v.get('seen'))[:80] + ')'}")
     return out
 
 
@@ -294,10 +277,10 @@ def self_record(p, f):
     if bad:
         die("self refused (verze ještě nejde ke kritikovi):\n  " + "\n  ".join(bad))
     rec = {"place": PLACE, "bundle_sha": site_sha(p), "frozen_sha": frozen_sha(p), "requirements": doc.get("requirements") or (model_of(p) or {}).get("requirements"),
-           "scores": doc["scores"], "fix_check": doc.get("fix_check"), "whole_check": doc.get("whole_check"), "at": now()}
+           "at": now()}
     os.makedirs(os.path.dirname(self_path(p)), exist_ok=True)
     wj(self_path(p), rec)
-    print(f"SELF {PLACE}: {len(rec['requirements'])} požadavků, všechna kritéria ≥ {SELF_MIN}; kolo smí běžet nad {rec['bundle_sha'][:12]}")
+    print(f"SELF {PLACE}: {len(rec['requirements'])} požadavků, ověřovatel bez otevřených bodů; kolo smí běžet nad {rec['bundle_sha'][:12]}")
 
 
 def self_ok(p):

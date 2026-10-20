@@ -24,6 +24,12 @@
       into .aid-ui/critic/competitors/<host>/ with manifest.json (the date of the shots); once per loop.
   costs <project>
       The project's cost book in one JSON line (aid_ui_costs.summary).
+  verify <project> --place <p> --web <url>
+      (P118) The independent verifier over the version now: aid-ui-capture.mjs records what a person sees on every
+      address (an app: every screen in every mode and state, every task state and result; a web: its pages), then
+      Codex (stand-in Claude Opus, AID_UI_VERIFY_STANDIN) reads it with the model, the facts and the project's files
+      (skills/ui-design/critic/verifier.md) and returns {fixes, open}; the answer goes to a signed record outside the
+      project (aid_ui_memory.verify_append). Exit 0 clean, 3 open points or a fix not seen, 1 no valid answer.
   supply <project> --place <p> [--dry]
       (P116, PM 19. 10. 2026) The client role answers what the place's last round left to the client (findings with
       owner client and the round's readiness; aid_ui_memory.supply_items, each keyed by place, round, kind, id and
@@ -944,6 +950,100 @@ def decided(project):
     print("\n".join(out).rstrip())
 
 
+# ---------------------------------------------------------------- verify (P118)
+
+def capture_list(project, web):
+    """[{key, url}]: every address a person can see in this version - an app's screens in every mode and state, its
+    tasks' states and results; a web's pages."""
+    base = web.rstrip("/") + "/"
+    mp = os.path.join(project, "docs", "design", "screens.json")
+    if not os.path.isfile(mp):
+        return [{"key": "page /" + rel, "url": base + rel} for rel in site_pages(os.path.join(project, "site"))]
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("aid_ui_screens", os.path.join(HERE, "aid-ui-screens.py"))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    m = mod.resolved(json.load(open(mp, encoding="utf-8")))
+    modes = [x["id"] for x in m.get("modes") or []] or [""]
+    out = []
+    for scr in m["screens"]:
+        if scr.get("shell"):
+            continue
+        for md in modes:
+            for st in ("filled", "empty", "loading", "error"):
+                q = "?aid-test=1&stav=" + st + ("&rezim=" + md if md else "")
+                out.append({"key": f"screen {scr['id']} | režim {md or '-'} | stav {st}", "url": base + mod.screen_url(scr).lstrip("/") + q})
+    for t in m["tasks"]:
+        u, _ = mod.task_state_url(m, t)
+        md = t.get("mode") or modes[0]
+        for st in ("validation", "empty", "loading", "failure", "permission", "recovery"):
+            out.append({"key": f"task {t['id']} | stav {st}", "url": base + u.lstrip("/") + f"?aid-test=1&stav={t['id']}.{st}" + (f"&rezim={md}" if md else "")})
+        scr = next(x for x in m["screens"] if x["id"] == t["done_when"]["screen"])
+        after = t.get("then_mode") or md
+        out.append({"key": f"task {t['id']} | výsledek", "url": base + mod.screen_url(scr).lstrip("/") + f"?vysledek={t['id']}" + (f"&rezim={after}" if after else "")})
+    return out
+
+
+def verify(project, place, web):
+    """The independent verifier over the version now: what a person sees (captured here), the model, the facts and the
+    project's files; a signed record outside the project (memory.verify_append). Exit 0 clean, 3 open points or a fix
+    not seen, 1 no valid answer."""
+    if place not in memory.PLACES:
+        die("--place must be one of " + ", ".join(memory.PLACES), 2)
+    artifact = site_sha(os.path.join(project, "site")) if place == "web" else place_bundle(project, place)[1]
+    out = os.path.join(project, ".aid-ui", "verify", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + place)
+    os.makedirs(out, exist_ok=True)
+    lst = capture_list(project, web)
+    wj(os.path.join(out, "capture-list.json"), lst)
+    r = subprocess.run(["node", os.path.join(HERE, "..", "lib", "ui-fidelity", "aid-ui-capture.mjs"), os.path.join(out, "capture-list.json"),
+                        os.path.join(out, "capture.json")], capture_output=True, text=True)
+    if r.returncode:
+        die("VERIFY: the version could not be captured: " + (r.stderr or r.stdout).strip()[-300:])
+    rs = memory.rounds(project, place)
+    fixed = [{"id": f["id"], "text": f["text"], "evidence": f["evidence"]} for f in (rs[-1]["findings"] if rs else [])
+             if f.get("state") == "accepted" and f.get("evidence")]
+    rel = lambda f: os.path.relpath(f, project)
+    facts = os.path.join(project, "docs", "design", "app-facts.json")
+    block = ("" if not fixed else "\nOpravy minulého kola, které máš ověřit ve verzi (u každé: overeno / nepravda / castecne a co kde):\n"
+             + json.dumps(fixed, ensure_ascii=False, indent=1) + "\n")
+    prompt = open(os.path.join(SKILL, "critic", "verifier.md"), encoding="utf-8").read().format(
+        capture=rel(os.path.join(out, "capture.json")), model="docs/design/screens.json" if os.path.isfile(os.path.join(project, "docs", "design", "screens.json")) else "(web: bez modelu)",
+        facts=rel(facts) if os.path.isfile(facts) else "(fakta zatím nejsou)", fixes_block=block)
+    with open(os.path.join(out, "prompt.md"), "w", encoding="utf-8") as fh:
+        fh.write(prompt)
+    ids = {f["id"] for f in fixed}
+
+    def valid(text):
+        a = parse_json(text)
+        if not isinstance(a, dict) or not isinstance(a.get("open"), list) or not isinstance(a.get("fixes", {}), dict):
+            return None, "need {fixes: {...}, open: [...]}"
+        miss = [i for i in ids if not isinstance((a.get("fixes") or {}).get(i), dict) or a["fixes"][i].get("verdict") not in ("overeno", "nepravda", "castecne")
+                or not str(a["fixes"][i].get("seen") or "").strip()]
+        bad = [o for o in a["open"] if not (isinstance(o, dict) and str(o.get("where") or "").strip() and str(o.get("what") or "").strip())]
+        if miss or bad:
+            return None, ("fixes without a verdict and what was seen: " + ", ".join(miss) if miss else "") + (" open points need where and what" if bad else "")
+        return a, None
+
+    old = os.environ.get("AID_UI_STANDIN_MODEL")
+    os.environ["AID_UI_STANDIN_MODEL"] = os.environ.get("AID_UI_VERIFY_STANDIN", "opus")   # the stand-in is Opus, never the cheap one
+    try:
+        a, mrec = ask(project, prompt, [], project, out, valid, "verify")
+    finally:
+        if old is None:
+            os.environ.pop("AID_UI_STANDIN_MODEL", None)
+        else:
+            os.environ["AID_UI_STANDIN_MODEL"] = old
+    wj(os.path.join(out, "turn.json"), {"place": place, "artifact": artifact, "answer": a, "model": mrec, "at": now()})
+    if a is None:
+        die("VERIFY %s: no valid answer from Codex nor the Opus stand-in (%s)" % (place, mrec.get("stand_in_reason")))
+    rec = memory.verify_append(project, place, {"artifact": artifact, "at": now(), "provider": mrec.get("provider"), "model": mrec.get("model"),
+                                                "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(), "capture_sha256": sha_file(os.path.join(out, "capture.json")),
+                                                "fixes": {i: a["fixes"][i] for i in ids}, "open": a["open"], "turn": rel(out)})
+    notseen = [i for i in ids if rec["fixes"][i]["verdict"] != "overeno"]
+    log("VERIFY %s over %s: %d open, fixes %d/%d seen%s" % (place, artifact[:12], len(rec["open"]), len(ids) - len(notseen), len(ids),
+                                                          "" if not rec["open"] else " - " + "; ".join(str(o["what"])[:80] for o in rec["open"][:5])))
+    sys.exit(0 if not rec["open"] and not notseen else 3)
+
+
 def answer(project, url, once, dry, watch):
     s = Studio(project, url)
     stop = os.path.join(s.dir, "stop")
@@ -979,6 +1079,8 @@ def main(a):
         return answer(os.path.abspath(a[1]), opt("--studio"), "--once" in a, "--dry" in a, int(w) if w else 0)
     if len(a) >= 2 and a[0] == "supply" and opt("--place"):
         return supply(os.path.abspath(a[1]), opt("--place"), "--dry" in a)
+    if len(a) >= 2 and a[0] == "verify" and opt("--place") and opt("--web"):
+        return verify(os.path.abspath(a[1]), opt("--place"), opt("--web"))
     if len(a) == 2 and a[0] == "decided":
         return decided(os.path.abspath(a[1]))
     die("usage: answer <project> --studio <url> [--once] [--dry] [--watch <s>] | supply <project> --place <p> [--dry] | decided <project> | critic <project> --web <url> --role owner|tech [--history <json>] [--audit] [--out <dir>] | competitors <project> | costs <project>", 2)

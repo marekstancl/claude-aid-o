@@ -186,3 +186,58 @@ def role_memory(p, role, place):
     here["other_places"] = {pl: m for pl in PLACES if pl != place for m in [place_memory(p, role, pl)] if m}
     here["my_studio_answers"], here["pm_decisions"] = studio_answers(p)
     return here
+
+
+# ---------------------------------------------------------------- verify records (P118)
+# What the independent verifier saw over one version (artifact = the place's bundle sha, the web's site sha) is kept
+# outside the project, signed with a key outside it (HMAC): the producer hands in inputs, never the result. It stops
+# a slip, not an attack by someone who can read the key.
+
+def verify_home(p):
+    import hashlib
+    base = os.path.expanduser(os.environ.get("AID_UI_VERIFY_HOME") or "~/.local/state/aid-ui/verify")
+    return os.path.join(base, hashlib.sha256(os.path.realpath(p).encode()).hexdigest()[:16])
+
+
+def _verify_key():
+    import secrets
+    f = os.path.expanduser(os.environ.get("AID_UI_VERIFY_KEY") or "~/.config/aid-ui/verify.key")
+    if not os.path.isfile(f):
+        os.makedirs(os.path.dirname(f), mode=0o700, exist_ok=True)
+        fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        os.write(fd, secrets.token_bytes(32)); os.close(fd)
+    return open(f, "rb").read()
+
+
+def _verify_sig(rec):
+    import hashlib, hmac
+    body = json.dumps({k: v for k, v in rec.items() if k != "sig"}, sort_keys=True, ensure_ascii=False).encode()
+    return hmac.new(_verify_key(), body, hashlib.sha256).hexdigest()
+
+
+def verify_append(p, place, rec):
+    d = verify_home(p)
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    rec = dict(rec, place=place)
+    rec["sig"] = _verify_sig(rec)
+    with open(os.path.join(d, place + ".jsonl"), "a", encoding="utf-8") as f:
+        f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    return rec
+
+
+def verify_records(p, place, artifact):
+    """Every signed record of the place over this artifact, oldest first; an unsigned or altered line is no record."""
+    import hmac
+    out = []
+    try:
+        lines = open(os.path.join(verify_home(p), place + ".jsonl"), encoding="utf-8").read().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(r, dict) and r.get("artifact") == artifact and r.get("place") == place and hmac.compare_digest(str(r.get("sig") or ""), _verify_sig(r)):
+            out.append(r)
+    return out

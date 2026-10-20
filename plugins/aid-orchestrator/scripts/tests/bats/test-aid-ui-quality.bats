@@ -25,6 +25,7 @@ setup() {
   # P113: role calls go to Claude Opus first; these cases stub Codex, so Codex goes first and a real Claude is never
   # reachable from a test (a stub that fails loudly: no model call in any test, llm-test-cost-control)
   export AID_UI_ROLE_FIRST=codex
+  export AID_UI_VERIFY_HOME="$T/verify-home" AID_UI_VERIFY_KEY="$T/verify.key"   # P118: verify records never in the real home
   printf '#!/usr/bin/env bash\necho "a real claude was called from a test" >&2; exit 1\n' > "$T/bin/claude"
   printf '#!/usr/bin/env bash\n[[ -e "$BATS_TEST_TMPDIR/gate-red" ]] && { echo "ERROR: gate-check refused: fail row" >&2; exit 1; }; echo GATE OK\n' > "$T/bin/state"
   cat > "$T/bin/tool" <<'SH'
@@ -38,6 +39,7 @@ SH
 [[ "\$1" == --version ]] && exit 0
 p="\$(cat)"; role=owner; grep -q "$(yq -r '.criteria[0].id' "$K/web-local.tech.yaml")" <<<"\$p" && role=tech
 grep -q "# Co po tobě studio chce" <<<"\$p" && role=supply
+grep -q "nezávislý ověřovatel verze" <<<"\$p" && role=verify
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":100000,"cached_input_tokens":0,"output_tokens":1000}}))' "$T/ans-\$role.json"
 SH
   chmod +x "$T/bin/"*
@@ -57,22 +59,29 @@ rec = json.load(open(f)); out = {}
 for r in ("owner", "tech"):
     out[r] = {("" if e["key"] == pl else e["key"] + ".") + c["id"]: {"score": sc, "evidence": "úvod: nadpis a cena chleba"}
               for e in rec["roles"][r]["rubrics"] for c in e["rubric"]["criteria"]}
-# every fix of the last round seen by an independent verifier (FIXCHECK=nepravda / none to test the refusal)
-d = os.path.join(p, ".aid-ui/critic/rounds", *([] if pl == "web" else [pl])); ns = sorted(int(x) for x in os.listdir(d) if x.isdigit()) if os.path.isdir(d) else []
-last = json.load(open(os.path.join(d, str(ns[-1]), "round.json"))) if ns and os.path.isfile(os.path.join(d, str(ns[-1]), "round.json")) else {"findings": []}
-fx = {f["id"]: {"verdict": os.environ.get("FIXCHECK", "overeno"), "seen": "úvod: nová věta je vidět"} for f in last["findings"] if f.get("state") == "accepted" and f.get("evidence")}
-doc = {"requirements": [{"id": "r1", "source": "docs/content/product-context.md:2", "text": "Kváskový chleba v Brně", "covered_by": ["index.html"]}], "scores": out}
-if os.environ.get("WHOLE") != "none":
-    doc["whole_check"] = {"by": "claude", "seen": "11 stránek, žádný rozpor", "open": [x for x in [os.environ.get("WHOLE_OPEN")] if x]}
-if os.environ.get("FIXCHECK") != "none":
-    doc["fix_check"] = {"by": "codex", "results": fx}
+doc = {"requirements": [{"id": "r1", "source": "docs/content/product-context.md:2", "text": "Kváskový chleba v Brně", "covered_by": ["index.html"]}]}
 print(json.dumps(doc))
+PY2
+}
+# verified [place] - the signed record a verifier run over the version now would write (FIXCHECK=nepravda: a fix not
+# seen; WHOLE_OPEN=<text>: an open point; FIXCHECK=none: no record); the real command has its own case below
+verified() {
+  [[ "${FIXCHECK:-}" == none ]] && return 0
+  python3 - "$P" "${1:-web}" <<'PY2'
+import importlib.util, json, os, sys
+sys.path.insert(0, os.environ["SC"] + "/lib"); import aid_ui_memory as m
+spec = importlib.util.spec_from_file_location("c", os.environ["SC"] + "/aid-ui-client.py"); c = importlib.util.module_from_spec(spec); spec.loader.exec_module(c)
+p, pl = sys.argv[1], sys.argv[2]
+art = c.site_sha(os.path.join(p, "site")) if pl == "web" else c.place_bundle(p, pl)[1]
+rs = m.rounds(p, pl)
+fx = {f["id"]: {"verdict": os.environ.get("FIXCHECK", "overeno"), "seen": "úvod: nová věta je vidět"} for f in (rs[-1]["findings"] if rs else []) if f.get("state") == "accepted" and f.get("evidence")}
+m.verify_append(p, pl, {"artifact": art, "at": "t", "provider": "test", "fixes": fx, "open": [{"where": "index", "what": os.environ["WHOLE_OPEN"]}] if os.environ.get("WHOLE_OPEN") else []})
 PY2
 }
 # qround <project> [args] - a round after the producer's own check of the current version (PM 18. 10. 2026)
 qround() {
   local pl=web a; for a in "$@"; do [[ "${prev:-}" == --place ]] && pl="$a"; prev="$a"; done; prev=""
-  [[ -f "$P/.aid-ui/critic/$([[ $pl == web ]] && echo frozen.json || echo frozen/$pl.json)" ]] && selfdoc 9 "$pl" && { python3 "$Q" self "$P" --place "$pl" --file "$T/self.json" >/dev/null || return; }
+  [[ -f "$P/.aid-ui/critic/$([[ $pl == web ]] && echo frozen.json || echo frozen/$pl.json)" ]] && selfdoc 9 "$pl" && verified "$pl" && { python3 "$Q" self "$P" --place "$pl" --file "$T/self.json" >/dev/null || return; }
   python3 "$Q" round "$@" || return
   supply_missing "$pl"
 }
@@ -410,14 +419,11 @@ snap() { (cd "$P/.aid-ui/critic" && find . -path ./launch -prune -o -type f -pri
 }
 
 
-@test "self: no round without the producer's own check of this version; a criterion under 9, a requirement without a source or cover, a stale check refuse it" {
-  ans 9; selfdoc 9
+@test "self: no round without the check of this version; a requirement without a source or cover, a stale check refuse it" {
+  ans 9; selfdoc 9; verified web
   run python3 "$Q" round "$P" --web "$W"
   [ "$status" -eq 1 ]; [[ "$output" == *"no round: the version is not ready for the roles - vlastní kontrola chybí"* ]]
-  selfdoc 8
-  run python3 "$Q" self "$P" --file "$T/self.json"
-  [ "$status" -eq 1 ]; [[ "$output" == *"pod 9 - oprav před kritikem"* ]]
-  selfdoc 9; jq '.requirements[0].source = "docs/content/product-context.md:99"' "$T/self.json" > "$T/s2.json"
+  jq '.requirements[0].source = "docs/content/product-context.md:99"' "$T/self.json" > "$T/s2.json"
   run python3 "$Q" self "$P" --file "$T/s2.json"
   [ "$status" -eq 1 ]; [[ "$output" == *"není soubor:řádek v projektu"* ]]
   jq 'del(.requirements[0].covered_by)' "$T/self.json" > "$T/s2.json"
@@ -425,9 +431,6 @@ snap() { (cd "$P/.aid-ui/critic" && find . -path ./launch -prune -o -type f -pri
   [ "$status" -eq 1 ]; [[ "$output" == *"buď covered_by"*"nebo out_of_scope"* ]]
   jq '.requirements[0] |= (del(.covered_by) | .out_of_scope = "pekárna neprodává po internetu")' "$T/self.json" > "$T/s2.json"
   run python3 "$Q" self "$P" --file "$T/s2.json"; [ "$status" -eq 0 ]
-  jq 'del(.scores.tech[(.scores.tech | keys)[0]])' "$T/self.json" > "$T/s2.json"
-  run python3 "$Q" self "$P" --file "$T/s2.json"
-  [ "$status" -eq 1 ]; [[ "$output" == *"chybí vlastní známka s důkazem"* ]]
   # a check over another version of the site does not let the round run
   python3 "$Q" self "$P" --file "$T/self.json" >/dev/null
   echo '<html lang="cs"><body>chleba a rohlíky</body></html>' > "$P/site/index.html"
@@ -465,7 +468,7 @@ PY2
 }
 
 @test "supply: what the roles left to the client is answered by the client role before the next round - a fact with its quoted source, an owner's choice, or missing" {
-  ans 6 7; selfdoc 9 web; python3 "$Q" self "$P" --place web --file "$T/self.json" >/dev/null
+  ans 6 7; selfdoc 9 web; verified web; python3 "$Q" self "$P" --place web --file "$T/self.json" >/dev/null
   python3 "$Q" round "$P" --web "$W" >/dev/null
   for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f1" accepted --expected "+1" >/dev/null; done
   [ "$(dec)" = supply ]; python3 "$Q" status "$P" | jq -r .why | grep -q "aid-ui-client.py supply"
@@ -513,14 +516,35 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   jq -e '.decision == "stop:stagnation" and (.why | contains("waits on what the client has not supplied (r1-owner-f2, r1-tech-f2)"))' <<<"$output" >/dev/null || { echo "$output"; return 1; }
 }
 
-@test "self: the fixes of the last round count only when an independent verifier saw each one in the built version" {
+@test "self (P118): the round needs the independent verifier's signed record over this version - none, an open point, a fix not seen, a forged line or an older version refuse it" {
   ans 6 7; qround "$P" --web "$W" >/dev/null; cycle
-  FIXCHECK=none selfdoc 9 web; run python3 "$Q" self "$P" --place web --file "$T/self.json"
-  [ "$status" -eq 1 ]; [[ "$output" == *"fix_check: opravy kola 1 neověřil nezávislý ověřovatel"* ]]
-  FIXCHECK=nepravda selfdoc 9 web; run python3 "$Q" self "$P" --place web --file "$T/self.json"
-  [ "$status" -eq 1 ]; [[ "$output" == *"fix_check r1-owner-f1: ověřovatel codex opravu neviděl (nepravda"* ]]
-  jq '.fix_check.by = "self"' <(FIXCHECK=overeno selfdoc 9 web; cat "$T/self.json") > "$T/s2.json"; run python3 "$Q" self "$P" --place web --file "$T/s2.json"; [ "$status" -eq 1 ]
-  WHOLE=none selfdoc 9 web; run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"whole_check: celou verzi neprošel"* ]]
-  WHOLE_OPEN="cena 10 na úvodu, 12 v ceníku" selfdoc 9 web; run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"zůstávají rozpory"*"cena 10"* ]]
+  selfdoc 9 web
+  run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"verify r1-owner-f1: ověřovatel opravu neověřoval"* ]]   # the run before the round named no fix
+  FIXCHECK=nepravda verified web; run python3 "$Q" self "$P" --place web --file "$T/self.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"verify r1-owner-f1: ověřovatel opravu neviděl (nepravda"* ]]
+  rm -r "$T/verify-home"; WHOLE_OPEN="cena 10 na úvodu, 12 v ceníku" verified web; verified web   # a later clean run does not erase it
+  run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"zůstávají rozpory"*"cena 10"* ]]
+  rm -r "$T/verify-home"; verified web
+  f="$(ls "$T"/verify-home/*/web.jsonl)"; jq -c '.open = [] | .fixes = {}' "$f" > "$T/forged" && cp "$T/forged" "$f"   # edited by hand: the signature no longer holds
+  run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"neproběhl nezávislý ověřovatel"* ]]
+  rm -r "$T/verify-home"; verified web
+  run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  echo '<html lang="cs"><body>chleba, jinak</body></html>' > "$P/site/index.html"   # another version: the record is not over it
+  run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"neproběhl nezávislý ověřovatel"* ]]
+}
+
+@test "verify (P118): the command captures the version, asks the verifier, signs the record; open points and unseen fixes exit 3" {
+  ans 6 7; qround "$P" --web "$W" >/dev/null; cycle
+  ids="$(python3 "$Q" status "$P" | jq -c '[.history[-1].findings[] | select(.state == "accepted" and .evidence) | .id]')"
+  jq -n --argjson i "$ids" '{fixes: ([$i[] | {key: ., value: {verdict: "overeno", seen: "index: nová věta"}}] | from_entries), open: []}' > "$T/ans-verify.json"
+  run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"VERIFY web over"*"0 open, fixes 2/2 seen"* ]]
+  d="$(ls -d "$P"/.aid-ui/verify/*-web | tail -1)"; jq -e '."page /" | contains("chleba")' "$d/capture.json" >/dev/null
+  grep -q "nezávislý ověřovatel verze" "$d/prompt.md"; grep -q "r1-owner-f1" "$d/prompt.md"
   selfdoc 9 web; run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq '.open = [{where: "page /", what: "cena 10 tady, 12 jinde"}]' "$T/ans-verify.json" > "$T/a2" && mv "$T/a2" "$T/ans-verify.json"
+  run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 3 ]
+  run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"cena 10 tady"* ]]
+  echo '{"fixes": {}, "open": []}' > "$T/ans-verify.json"   # a fix without a verdict is no valid answer (twice, then the stand-in fails)
+  run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 1 ]
 }
