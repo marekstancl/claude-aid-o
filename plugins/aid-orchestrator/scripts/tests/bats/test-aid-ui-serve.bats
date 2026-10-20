@@ -566,3 +566,29 @@ J
   out="$(node "$BATS_TEST_TMPDIR/nf.mjs")"; [ "$out" = "true" ] || { echo "$out"; return 1; }
   "$SERVE" stop skeleton
 }
+
+@test "app-skeleton: the mode after a task, an action shown after a task, an outside link, the action's own failure text, a draft that survives a reload, a confirm by Space" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '.modes = [{id: "bezi", label: "Běží"}, {id: "pauza", label: "Pauza"}] | (.tasks[] | select(.id == "smazat")) += {then_mode: "pauza"}
+      | .screens[0].actions += [{id: "vratit", label: "Vrátit smazanou", to: "seznam", kind: "navigate", after: "smazat"}, {id: "web", label: "Web", to: "seznam", kind: "navigate", external: "https://example.org/"}]
+      | .screens[1].fields = [{name: "nazev", label: "Název", draft: true}]' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  run python3 "$BATS_TEST_DIRNAME/../../aid-ui-screens.py" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  "$SERVE" skeleton "$P" >/dev/null
+  grep -q 'href="/seznam/?vysledek=smazat&amp;rezim=pauza" data-aid-confirm-yes="detail.smazat"' "$P/site/detail/index.html"
+  grep -q 'href="https://example.org/" target="_blank" rel="noopener"' "$P/site/seznam/index.html"
+  FAIL="$(jq -r '.tasks[] | select(.id == "smazat") | .states.failure' "$P/docs/design/screens.json")"
+  cat > "$BATS_TEST_TMPDIR/n.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); const B = 'http://127.0.0.1:39918'; const r = [];
+await pg.goto(B + '/seznam/'); r.push(await pg.locator('[data-aid-action="seznam.vratit"]').isVisible());
+await pg.goto(B + '/seznam/?vysledek=smazat'); r.push(await pg.locator('[data-aid-action="seznam.vratit"]').isVisible());
+await pg.goto(B + '/detail/'); await pg.click('[data-aid-action="detail.smazat"]'); await pg.route('**/seznam/**', x => x.abort());
+await pg.focus('[data-aid-confirm-yes="detail.smazat"]'); await pg.keyboard.press(' '); await pg.waitForTimeout(500);
+r.push(await pg.locator('[data-aid-fail-for="detail.smazat"]').innerText()); await pg.unroute('**/seznam/**');
+await pg.goto(B + '/formular/'); await pg.fill('[name="nazev"]', 'Rozepsáno'); await pg.reload(); r.push(await pg.inputValue('[name="nazev"]'));
+console.log(r.join(' | ')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/n.mjs")"; [ "$out" = "false | true | $FAIL | Rozepsáno" ] || { echo "$out"; return 1; }
+  "$SERVE" stop skeleton
+}

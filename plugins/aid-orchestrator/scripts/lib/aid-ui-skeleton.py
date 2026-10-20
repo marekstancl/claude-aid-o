@@ -259,12 +259,16 @@ document.querySelectorAll('[data-aid-mode-is]').forEach(function(e){e.hidden=e.d
 document.querySelectorAll('[data-aid-modes]').forEach(function(b){var off=b.dataset.aidModes.split(' ').indexOf(rz)<0;b.toggleAttribute('disabled',off);b.setAttribute('aria-disabled',off?'true':'false');
 if(b.tagName==='A'){if(off&&b.hasAttribute('href')){b.dataset.href=b.getAttribute('href');b.removeAttribute('href');}else if(!off&&b.dataset.href)b.setAttribute('href',b.dataset.href);}
 var r=document.getElementById(b.dataset.aidReason);if(r)r.hidden=!off;});}
-var an=document.querySelector('[data-aid-stav-oznameni]');if(an&&q.get('stav'))an.textContent='Zobrazen stav: '+(document.querySelector('[data-aid-stav-link="'+st+'"]')||{}).textContent;
+var an=document.querySelector('[data-aid-stav-oznameni]');if(an&&q.get('stav'))setTimeout(function(){an.textContent='Zobrazen stav: '+(document.querySelector('[data-aid-stav-link="'+st+'"]')||{}).textContent;},400);   // after load: a reader announces it
+document.querySelectorAll('[data-aid-after]').forEach(function(e){e.hidden=done.indexOf(e.dataset.aidAfter)<0;});
+document.querySelectorAll('[data-aid-draft]').forEach(function(i){var k='aid-draft:'+location.pathname+':'+i.id;try{var v=localStorage.getItem(k);if(v!==null&&!i.value)i.value=v;}catch(e){}
+i.addEventListener('input',function(){try{localStorage.setItem(k,i.value);}catch(e){}});});
 document.querySelectorAll('[data-aid-result]').forEach(function(e){e.hidden=done.indexOf(e.dataset.aidResult)<0;});
 document.querySelectorAll('dialog[data-aid-confirm]').forEach(function(d){d.close();var b=document.querySelector('[data-aid-action="'+d.dataset.aidConfirm+'"]');
 if(b)b.addEventListener('click',function(){d.showModal();d.querySelector('[data-aid-confirm-no]').focus();});
 d.querySelector('[data-aid-confirm-no]').addEventListener('click',function(){d.close();if(b)b.focus();});
-var y=d.querySelector('[data-aid-confirm-yes]'),ge=document.querySelector('[data-aid-error-global]');y.addEventListener('click',function(ev){ev.preventDefault();
+var y=d.querySelector('[data-aid-confirm-yes]'),ge=document.querySelector('[data-aid-fail-for="'+d.dataset.aidConfirm+'"]')||document.querySelector('[data-aid-error-global]');
+y.setAttribute('role','button');y.addEventListener('keydown',function(ev){if(ev.key===' '){ev.preventDefault();y.click();}});y.addEventListener('click',function(ev){ev.preventDefault();
 fetch(y.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=y.href;}).catch(function(){d.close();ge.hidden=false;ge.focus();});});});
 document.querySelectorAll('a[data-aid-checked]').forEach(function(a){a.addEventListener('click',function(ev){if(!a.href)return;ev.preventDefault();var ge=document.querySelector('[data-aid-error-global]');
 fetch(a.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=a.href;}).catch(function(){if(ge){ge.hidden=false;ge.focus();}});});});
@@ -273,8 +277,8 @@ f.addEventListener('submit',function(ev){ev.preventDefault();var bad=null;f.quer
 if(e)e.hidden=i.checkValidity();if(!i.checkValidity()){i.setAttribute('aria-invalid','true');bad=bad||i;}else i.removeAttribute('aria-invalid');});
 if(bad){bad.focus();return;}var b=ev.submitter,to=(b&&b.getAttribute('formaction'))||f.getAttribute('action'),d=new URLSearchParams(new FormData(f));
 if(b&&b.name)d.set(b.name,b.value);var x=new URL(to,location.href);d.forEach(function(v,k){x.searchParams.set(k,v);});var u=x.pathname+x.search;f.setAttribute('aria-busy','true');if(b)b.disabled=true;
-fetch(u).then(function(r){if(!r.ok)throw new Error(r.status);location.href=u;}).catch(function(){f.removeAttribute('aria-busy');if(b)b.disabled=false;
-err.hidden=false;err.focus();});});});})();"""
+fetch(u).then(function(r){if(!r.ok)throw new Error(r.status);f.querySelectorAll('[data-aid-draft]').forEach(function(i){try{localStorage.removeItem('aid-draft:'+location.pathname+':'+i.id);}catch(e){}});location.href=u;}).catch(function(){f.removeAttribute('aria-busy');if(b)b.disabled=false;
+var fe=(b&&b.dataset.aidAction&&document.querySelector('[data-aid-fail-for="'+b.dataset.aidAction+'"]'))||err;fe.hidden=false;fe.focus();});});});})();"""
 
 
 def app_kind(p):
@@ -321,8 +325,12 @@ def actions_html(m, scr, url, fields, ends, item=None):
     else:
         fields = [n for t in m["tasks"] for st in t["steps"] if st["screen"] == sid and any(a["id"] == st["action"] for a in mine) for n in st.get("input") or {}]
         fields = list(dict.fromkeys(fields))
-    def tail(a):   # the target's parameters: a deep link (query) and the tasks the action ends (vysledek)
-        ps = ([a["query"]] if a.get("query") else []) + ([f"vysledek={','.join(ends[a['id']])}"] if ends.get(a["id"]) else [])
+    then = {t["id"]: t["then_mode"] for t in m["tasks"] if t.get("then_mode")}
+    def after_mode(a):   # the mode a task this action ends leaves the app in (STOP -> pozastaveno)
+        return next((then[t] for t in ends.get(a["id"]) or [] if t in then), None)
+    def tail(a):   # the target's parameters: a deep link (query), the tasks the action ends (vysledek), the mode after them
+        ps = ([a["query"]] if a.get("query") else []) + ([f"vysledek={','.join(ends[a['id']])}"] if ends.get(a["id"]) else []) \
+            + ([f"rezim={after_mode(a)}"] if after_mode(a) else [])
         return esc("?" + "&".join(ps)) if ps else ""
     # a link whose failure the model names (failure_paths at its step) checks the way first and stays on error (P116 pilot:
     # a plain link that fails lands on the browser's error page, the screen and the way back are gone)
@@ -330,16 +338,23 @@ def actions_html(m, scr, url, fields, ends, item=None):
              if fp["at_step"] <= len(t["steps"]) and t["steps"][fp["at_step"] - 1]["screen"] == sid}
     acts, btns = [], []
     for a in mine:
-        da = f'data-aid-action="{esc(sid)}.{esc(a["id"])}"'
+        da = f'data-aid-action="{esc(sid)}.{esc(a["id"])}"' + (f' data-aid-after="{esc(a["after"])}" hidden' if a.get("after") else "")
+        fail = next((t["states"]["failure"] for t in m["tasks"] for x in t["steps"] if x["screen"] == sid and x["action"] == a["id"]), None)
+        if fail and a["kind"] != "navigate":   # the task's own failure text, shown when this action fails (not the screen's load error)
+            acts.append(f'<p class="chyba" role="alert" tabindex="-1" data-aid-fail-for="{esc(sid)}.{esc(a["id"])}" hidden>{esc(fail)}</p>')
         if a["kind"] == "navigate":
             back = " data-aid-back" if a.get("back") else ""
             ga, why = gate_attrs(sid, a)
             chk = " data-aid-checked" if a["id"] in risky and not a.get("back") else ""
-            acts.append(f'<a class="akce" href="{esc(url[a["to"]])}{tail(a)}" {da}{back}{chk}{ga}>{esc(a["label"])}</a>{why}')
+            if a.get("external"):
+                acts.append(f'<a class="akce" href="{esc(a["external"])}" target="_blank" rel="noopener" {da}{ga}>{esc(a["label"])} (otevře se v nové kartě)</a>{why}')
+            else:
+                acts.append(f'<a class="akce" href="{esc(url[a["to"]])}{tail(a)}" {da}{back}{chk}{ga}>{esc(a["label"])}</a>{why}')
         elif a["kind"] == "submit":
             v = f' name="vysledek" value="{esc(",".join(ends[a["id"]]))}"' if ends.get(a["id"]) else ""
             ga, why = gate_attrs(sid, a)
-            q = f'?{esc(a["query"])}' if a.get("query") else ""
+            q = "&".join(([esc(a["query"])] if a.get("query") else []) + ([f"rezim={esc(after_mode(a))}"] if after_mode(a) else []))
+            q = f"?{q}" if q else ""
             btns.append(f'<button type="submit" formaction="{esc(url[a["to"]])}{q}"{v} {da}{ga}>{esc(a["label"])}</button>{why}')
         else:   # destructive: the button opens its confirm dialog (the focus on Zrušit); without JS it stands open under it
             k = f'{esc(sid)}.{esc(a["id"])}'
@@ -357,7 +372,7 @@ def actions_html(m, scr, url, fields, ends, item=None):
             hint = f' aria-describedby="{hid} {fid}-chyba"' if f.get("hint") else f' aria-describedby="{fid}-chyba"'
             note = f'<span id="{hid}" class="napoveda">{esc(f["hint"])}</span>' if f.get("hint") else ""
             note += f'<span id="{fid}-chyba" class="chyba-pole" role="alert" hidden>{esc(f.get("error") or "Zkontrolujte hodnotu.")}</span>'
-            lim = (" required" if f.get("required") else "") + (f' maxlength="{f["maxlength"]}"' if f.get("maxlength") else "")
+            lim = (" required" if f.get("required") else "") + (" data-aid-draft" if f.get("draft") else "") + (f' maxlength="{f["maxlength"]}"' if f.get("maxlength") else "")
             if "min" in f or "max" in f:
                 lim += ' type="number" step="any"' + (f' min="{f["min"]}"' if "min" in f else "") + (f' max="{f["max"]}"' if "max" in f else "")
             if f.get("choices"):
@@ -423,7 +438,7 @@ def app_page(m, scr, approved, fields, results, ends, shell):
     banner = "" if approved else '<p class="navrh" role="status" data-aid-draft>Návrh: model čeká na schválení vlastníkem.</p>'
     return (f'<!doctype html>\n<html lang="cs" {MARK} data-aid-app>\n<head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(scr["title"])} · {esc(m.get("app") or "aplikace")}</title>'
-            '<style>body{font:16px/1.5 system-ui,sans-serif;margin:0}header,main,footer{padding:16px;max-width:1100px;margin:auto}'
+            '<style>[hidden]{display:none!important}body{font:16px/1.5 system-ui,sans-serif;margin:0}header,main,footer{padding:16px;max-width:1100px;margin:auto}'
             'nav ul{display:flex;flex-wrap:wrap;gap:12px;list-style:none;padding:0}.stav{border:1px solid #888;padding:12px;margin:12px 0}'
             '.navrh{background:#fe9;padding:8px 16px;margin:0}.chyba{border:2px solid #b00;padding:8px}.lista{border-bottom:2px solid #333;padding:8px 0}'
             'a,button,summary,input{min-height:44px}a,button{display:inline-block;margin:4px 8px 4px 0}'

@@ -100,6 +100,11 @@ počtem buněk), ne jen větu shrnutí. Akce jedné položky seznamu (Provést u
 `item` = řádek ukázky; kostra ji kreslí u něj i s jejími poli, ne pod celým seznamem.
 Co platí jen v jednom režimu (stav na Režimu a burze, čekající vstup, který Vypnuto zruší), patří do `mode_sample`
 (režim → řádky); kostra ho ukáže jen v tom režimu, ať si ukázka a režim neodporují.
+Úloha, která mění režim (STOP, Panika, Vypnout), nese `then_mode` - kostra s výsledkem přepne i režim. Akce, která má smysl
+až po jiné úloze (Vrátit po Zahodit), nese `after`. Odkaz ven (appka burzy) je `external`. Pole s rozepsaným textem,
+který má přežít zavření karty, má `draft`. Selhání akce kostra ukáže textem `states.failure` její úlohy, ne chybou
+načtení obrazovky. Chování modelu (co appka dělá sama, třeba při odmítnutém SL) se kontroluje i proti plánu a roadmapě
+projektu, ne jen proti zadání obrazovek (P116 kolo 5).
 
 ## 5. Brána
 1. `aid-ui-flows.py generate <projekt>` napíše z modelu do `.aid-ui/scenarios/` jeden test na úlohu (kroky, pak

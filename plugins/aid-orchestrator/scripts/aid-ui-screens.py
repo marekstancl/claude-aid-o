@@ -99,6 +99,10 @@ def violations(m, proj):
             for md in a.get("modes") or []:
                 if md not in modes:
                     out.append(f"{at}/modes: režim {md} model nezná (modes)")
+            if a.get("after") and a["after"] not in {t.get("id") for t in m["tasks"] if isinstance(t, dict)}:
+                out.append(f"{at}/after: úloha {a['after']} v modelu není (akce {s['id']}.{a['id']} se ukáže po ní)")
+            if a.get("external") and a["kind"] != "navigate":
+                out.append(f"{at}/external: vnější adresu má jen akce navigate")
             if "item" in a and a["item"] >= len(s.get("sample") or []):
                 out.append(f"{at}: akce {s['id']}.{a['id']} patří k řádku ukázky {a['item']}, obrazovka má {len(s.get('sample') or [])} řádků (sample)")
             if a.get("modes") and not a.get("disabled_reason"):
@@ -134,6 +138,8 @@ def violations(m, proj):
         if t["id"] in tids:
             out.append(f"{at}/id: úloha {t['id']} je v modelu dvakrát")
         tids.add(t["id"])
+        if t.get("then_mode") and t["then_mode"] not in modes:
+            out.append(f"{at}/then_mode: režim {t['then_mode']} model nezná (modes)")
         lead = None   # the screen the previous action leads to
         submits = False
         for k, st in enumerate(t["steps"]):
