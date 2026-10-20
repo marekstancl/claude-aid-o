@@ -555,3 +555,30 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   echo '{"fixes": {}, "open": []}' > "$T/ans-verify.json"   # a fix without a verdict is no valid answer (twice, then the stand-in fails)
   run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 1 ]
 }
+
+@test "facts (P118): two independent readers; a fact both back with an overlapping source is agreed, the rest open and block the lint; a stale quote too" {
+  mkdir -p "$P/src" "$P/docs/design"
+  printf 'def on_rejected_sl(p):\n    close_market(p)\n    pause()\n' > "$P/src/execute.py"
+  printf '# Roadmapa\nOdmítnutý SL → okamžité zavření marketem + alert.\n' > "$P/docs/content/roadmap.md"
+  F1='{"id": "sl-odmitnut", "kind": "observed_current", "statement": "Odmítnutý SL appka zavře trhem a pozastaví se.", "conditions": "SL nejde nastavit", "result": "zavření a pauza", "unwanted": "pozice bez SL", "sources": [{"source": "src/execute.py:1-3", "quote": "close_market(p)", "source_kind": "code"}]}'
+  F2='{"id": "zavreni-sl", "kind": "required_target", "statement": "Při odmítnutém SL zavřít marketem a poslat alert.", "sources": [{"source": "src/execute.py:2", "quote": "close_market(p)", "source_kind": "code"}]}'
+  F3='{"id": "jen-codex", "kind": "assumption", "statement": "Alert jde i do Telegramu.", "sources": [{"source": "docs/content/roadmap.md:2", "quote": "zavření marketem + alert", "source_kind": "roadmap"}]}'
+  echo "{\"facts\": [$F1, $F3]}" > "$T/ans-owner.json"   # the Codex stub answers what the owner file holds for a prompt without the tech rubric
+  printf '#!/usr/bin/env bash\ncat >/dev/null; python3 -c '"'"'import json,sys; print(json.dumps({"result": open(sys.argv[1]).read(), "usage": {}}))'"'"' "%s"\n' "$T/ans-claude.json" > "$T/bin/claude"
+  echo "{\"facts\": [$F2]}" > "$T/ans-claude.json"
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '(.facts | map(.id)) == ["sl-odmitnut"] and .facts[0].agreed_by == ["codex", "opus"] and (.open | map(.fact.id)) == ["jen-codex"]' "$P/docs/design/app-facts.json" >/dev/null
+  # the model of an existing app: an open question and a writing task without facts are refused
+  mkdir -p "$P/docs/design"; cp "$SC/tests/fixtures/aid-ui/app/docs/design/screens.json" "$P/docs/design/screens.json"
+  run python3 "$SC/aid-ui-screens.py" check "$P"; [ "$status" -eq 1 ]
+  [[ "$output" == *"1 otevřených otázek"*"jen-codex"* ]]; [[ "$output" == *"úloha zalozit zapisuje, ale neodkazuje na fakta appky"* ]]
+  run python3 "$SC/aid-ui-client.py" facts "$P" --drop jen-codex; [ "$status" -eq 2 ]
+  python3 "$SC/aid-ui-client.py" facts "$P" --drop jen-codex --reason "Telegram se v UI neřeší" >/dev/null
+  jq '(.tasks[] | .facts) = ["sl-odmitnut"]' "$P/docs/design/screens.json" > "$T/m.json" && mv "$T/m.json" "$P/docs/design/screens.json"
+  run python3 "$SC/aid-ui-screens.py" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  sed -i 's/close_market(p)/close_limit(p)/' "$P/src/execute.py"   # the code changed under the fact
+  run python3 "$SC/aid-ui-screens.py" check "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"/app-facts/sl-odmitnut: zdroj zestárl"* ]]
+  # a quote that is not in the file is no valid answer; with no stand-in the run stops
+  sed -i 's/close_limit(p)/close_market(p)/' "$P/src/execute.py"; echo '{"facts": [{"id": "x", "kind": "unknown", "statement": "y", "sources": [{"source": "src/execute.py:1", "quote": "nic takového tu není", "source_kind": "code"}]}]}' > "$T/ans-claude.json"
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"no valid answer from opus"* ]]
+}

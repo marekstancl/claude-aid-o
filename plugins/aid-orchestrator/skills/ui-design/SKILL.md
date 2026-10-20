@@ -111,7 +111,7 @@ detaily. Před každým kolem místa (`aid-ui-quality.py round`, všechna místa
    `screen:<id>` modelu.
 2. **Návrh se píše proti nejvyšší kotvě** měřítek obou rolí místa a u existující aplikace proti tomu, **co appka
    opravdu dělá** (kód, roadmapa, runbook), ne proti zadání obrazovek (P116 kolo 5: tři ukázky popisovaly chování,
-   které appka nemá).
+   které appka nemá). Fakta vytěží dva nezávislí čtenáři: `aid-ui-client.py facts <projekt>` (postup aplikace 3b).
 3. **Lint modelu** (`aid-ui-screens.py check`, sekundy) bez nálezu.
 4. **Nezávislý ověřovatel jako nástroj:** `aid-ui-client.py verify <projekt> --place <místo> --web <adresa verze>`.
    Nástroj sám nafotí, co člověk na každé adrese verze vidí, a Codex (záskok Claude Opus) to porovná s modelem,

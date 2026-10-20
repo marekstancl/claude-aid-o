@@ -213,6 +213,25 @@ def violations(m, proj):
         if not full.startswith(os.path.realpath(proj) + os.sep) or not os.path.isfile(full) \
                 or not 1 <= int(f[1]) <= len(open(full, encoding="utf-8", errors="replace").read().splitlines()):
             out.append(f"{at}/source: {r['source']} není soubor:řádek v projektu")
+    # P118: the facts of an existing app (aid-ui-client.py facts): no open question, no quote that left its source
+    facts_ids = None
+    ff = os.path.join(proj, "docs", "design", "app-facts.json") if proj else None
+    if ff and os.path.isfile(ff):
+        sys.path.insert(0, os.path.join(HERE, "lib"))
+        import aid_ui_memory as mem
+        try:
+            fd = json.load(open(ff, encoding="utf-8"))
+        except ValueError as e:
+            fd = {}; out.append(f"/app-facts: docs/design/app-facts.json není čitelný JSON ({e})")
+        facts_ids = {x.get("id") for x in fd.get("facts") or [] if isinstance(x, dict)}
+        if fd.get("open"):
+            out.append(f"/app-facts: {len(fd['open'])} otevřených otázek (oba vytěžovače se neshodly): " + ", ".join(str(o.get("fact", {}).get("id")) for o in fd["open"][:6])
+                       + " - aid-ui-client.py facts --focus, nebo --drop <id> --reason")
+        for x in fd.get("facts") or []:
+            for so in x.get("sources") or []:
+                e = mem.source_ok(proj, so.get("source"), so.get("quote"))
+                if e:
+                    out.append(f"/app-facts/{x.get('id')}: zdroj zestárl ({e}) - vytěž fakta znovu")
     # P118 lint: the classes of findings the roles kept raising in the P116 pilot, decided by code before any gate
     KEY = re.compile(r"\{[a-z][a-z0-9_]*\}")
     UNIT = re.compile(r"(?<![\w{])[+−-]?[$€]?\d[\d\u00a0 ,.]*\s?(?:USDT|USD|EUR|CZK|Kč|R|%|×|x)(?![\w])|[$€]\s?\d[\d\u00a0 ,.]*")
@@ -264,6 +283,12 @@ def violations(m, proj):
             continue
         if not wsteps:
             continue
+        if facts_ids is not None:   # an existing app: the task's behaviour rests on agreed facts of what the app does
+            miss = [x for x in t.get("facts") or [] if x not in facts_ids]
+            if not t.get("facts"):
+                out.append(f"/tasks/{i}/facts: úloha {t['id']} zapisuje, ale neodkazuje na fakta appky (app-facts.json), o která se její chování opírá")
+            elif miss:
+                out.append(f"/tasks/{i}/facts: {', '.join(miss)} není dohodnutý fakt v app-facts.json")
         perm = str(t["states"]["permission"]).strip()
         if perm.lower().startswith(("nenastává", "nenastane")) or len(perm) < 20:
             out.append(f"/tasks/{i}/states/permission: úloha {t['id']} zapisuje - stav oprávnění říká, kdo nesmí a co uvidí (ne „nenastává“ ani prázdná věta)")

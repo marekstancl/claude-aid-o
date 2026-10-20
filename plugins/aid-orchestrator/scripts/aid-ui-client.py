@@ -30,6 +30,12 @@
       Codex (stand-in Claude Opus, AID_UI_VERIFY_STANDIN) reads it with the model, the facts and the project's files
       (skills/ui-design/critic/verifier.md) and returns {fixes, open}; the answer goes to a signed record outside the
       project (aid_ui_memory.verify_append). Exit 0 clean, 3 open points or a fix not seen, 1 no valid answer.
+  facts <project> [--focus <t>] [--drop <id> --reason <t>]
+      (P118) What an existing app really does, from two independent readers (Codex, Claude Opus - no stand-in for each
+      other; skills/ui-design/critic/facts-extractor.md): every quote checked in its file (aid_ui_memory.source_ok); a
+      fact both back with an overlapping source span is agreed, the rest are open questions in
+      docs/design/app-facts.json, which block the model's lint until a later run agrees or --drop closes one with a
+      reason. Agreed facts are kept across runs; a fact whose quote left its source is stale (lint).
   supply <project> --place <p> [--dry]
       (P116, PM 19. 10. 2026) The client role answers what the place's last round left to the client (findings with
       owner client and the round's readiness; aid_ui_memory.supply_items, each keyed by place, round, kind, id and
@@ -1068,6 +1074,96 @@ def verify(project, place, web):
     sys.exit(0 if not rec["open"] and not notseen else 3)
 
 
+# ---------------------------------------------------------------- facts (P118)
+
+FACT_KINDS = ("observed_current", "required_target", "business_rule", "assumption", "unknown")
+FACT_SOURCES = ("code", "pm_decision", "runbook", "roadmap", "brief")
+
+
+def facts_file(project):
+    return os.path.join(project, "docs", "design", "app-facts.json")
+
+
+def facts(project, focus, drop=None, reason=None):
+    """What the app really does, from two independent extractors (Codex and Claude Opus, no stand-in for each other):
+    every quote is checked in its file; a fact both back with an overlapping source span is agreed, the rest are open
+    questions (the model's lint blocks while any is open). --drop <id> --reason <t> closes an open question on purpose
+    (kept in the file with its reason). Writes docs/design/app-facts.json."""
+    f = facts_file(project)
+    cur = json.load(open(f, encoding="utf-8")) if os.path.isfile(f) else {"facts": [], "open": [], "dropped": []}
+    if drop:
+        if not (reason or "").strip():
+            die("--drop needs --reason", 2)
+        hit = [o for o in cur["open"] if o["fact"]["id"] == drop]
+        if not hit:
+            die(f"no open question {drop}")
+        cur["open"] = [o for o in cur["open"] if o["fact"]["id"] != drop]
+        cur.setdefault("dropped", []).append(dict(hit[0], reason=reason.strip(), at=now()))
+        wj(f, cur)
+        log(f"FACTS: {drop} dropped ({reason.strip()[:60]})")
+        return
+    prompt = open(os.path.join(SKILL, "critic", "facts-extractor.md"), encoding="utf-8").read().format(
+        focus=("\nZaměř se hlavně na tyto otázky (podloží-li je podklady):\n" + focus + "\n") if focus else "")
+    out = os.path.join(project, ".aid-ui", "facts", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()))
+    os.makedirs(out, exist_ok=True)
+
+    def valid(text):
+        a = parse_json(text)
+        if not isinstance(a, dict) or not isinstance(a.get("facts"), list) or not a["facts"]:
+            return None, "need {facts: [...]} with at least one fact"
+        errs = []
+        for x in a["facts"]:
+            if not isinstance(x, dict) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", str(x.get("id") or "")) or x.get("kind") not in FACT_KINDS \
+                    or not str(x.get("statement") or "").strip() or not isinstance(x.get("sources"), list) or not x["sources"]:
+                errs.append(f"{x.get('id') if isinstance(x, dict) else x}: id, kind, statement and sources are required"); continue
+            for so in x["sources"]:
+                e = memory.source_ok(project, (so or {}).get("source"), (so or {}).get("quote")) if isinstance(so, dict) else "not an object"
+                if e or (so.get("source_kind") not in FACT_SOURCES):
+                    errs.append(f"{x['id']}: {e or 'source_kind must be one of ' + ', '.join(FACT_SOURCES)}")
+        return (None, "; ".join(errs[:10])) if errs else (a, None)
+
+    got = {}
+    saved = {k: os.environ.get(k) for k in ("AID_UI_STANDIN", "AID_UI_ROLE_FIRST")}
+    os.environ["AID_UI_STANDIN"] = "off"   # two independent readers: neither stands in for the other
+    try:
+        for name, role in (("codex", False), ("opus", True)):
+            os.environ["AID_UI_ROLE_FIRST"] = "claude"
+            d = os.path.join(out, name); os.makedirs(d, exist_ok=True)
+            a, mrec = ask(project, prompt, [], project, d, valid, "facts", role=role)
+            wj(os.path.join(d, "turn.json"), {"answer": a, "model": mrec, "at": now()})
+            if a is None:
+                die(f"FACTS: no valid answer from {name} ({mrec.get('stand_in_reason') or 'invalid'}); both readers are needed")
+            got[name] = a["facts"]
+    finally:
+        for k, v in saved.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+
+    def spans(x):
+        out_ = []
+        for so in x["sources"]:
+            mm = re.fullmatch(r"(\S+?):([0-9]+)(?:-([0-9]+))?", so["source"])
+            out_.append((mm.group(1), int(mm.group(2)), int(mm.group(3) or mm.group(2))))
+        return out_
+    overlap = lambda a, b: any(fa == fb and sa <= eb and sb <= ea for fa, sa, ea in spans(a) for fb, sb, eb in spans(b))
+    agreed, used_b = list(cur.get("facts") or []), set()
+    have = {x["id"] for x in agreed}
+    opn = []
+    for x in got["codex"]:
+        twin = next((y for k, y in enumerate(got["opus"]) if overlap(x, y)), None)
+        if twin is not None:
+            used_b.add(id(twin))
+            if x["id"] not in have:
+                agreed.append(dict(x, statement_b=twin["statement"], kind_b=twin["kind"], sources=x["sources"] + [s2 for s2 in twin["sources"] if s2 not in x["sources"]],
+                                   agreed_by=["codex", "opus"], at=now()))
+                have.add(x["id"])
+        else:
+            opn.append({"from": "codex", "fact": x})
+    opn += [{"from": "opus", "fact": y} for y in got["opus"] if id(y) not in used_b]
+    opn = [o for o in opn if o["fact"]["id"] not in have and o["fact"]["id"] not in {d["fact"]["id"] for d in cur.get("dropped") or []}]
+    wj(f, {"facts": agreed, "open": opn, "dropped": cur.get("dropped") or [], "extracted_at": now(), "run": os.path.relpath(out, project)})
+    log(f"FACTS: {len(agreed)} agreed, {len(opn)} open questions -> {os.path.relpath(f, project)}")
+
+
 def answer(project, url, once, dry, watch):
     s = Studio(project, url)
     stop = os.path.join(s.dir, "stop")
@@ -1105,9 +1201,11 @@ def main(a):
         return supply(os.path.abspath(a[1]), opt("--place"), "--dry" in a)
     if len(a) >= 2 and a[0] == "verify" and opt("--place") and opt("--web"):
         return verify(os.path.abspath(a[1]), opt("--place"), opt("--web"))
+    if len(a) >= 2 and a[0] == "facts":
+        return facts(os.path.abspath(a[1]), opt("--focus"), opt("--drop"), opt("--reason"))
     if len(a) == 2 and a[0] == "decided":
         return decided(os.path.abspath(a[1]))
-    die("usage: answer <project> --studio <url> [--once] [--dry] [--watch <s>] | verify <project> --place <p> --web <url> | supply <project> --place <p> [--dry] | decided <project> | critic <project> --web <url> --role owner|tech [--history <json>] [--audit] [--out <dir>] | competitors <project> | costs <project>", 2)
+    die("usage: answer <project> --studio <url> [--once] [--dry] [--watch <s>] | verify <project> --place <p> --web <url> | facts <project> [--focus <t>] [--drop <id> --reason <t>] | supply <project> --place <p> [--dry] | decided <project> | critic <project> --web <url> --role owner|tech [--history <json>] [--audit] [--out <dir>] | competitors <project> | costs <project>", 2)
 
 
 if __name__ == "__main__":

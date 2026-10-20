@@ -52,6 +52,12 @@ aplikaci nekopíruje: tytéž nástroje, větev podle druhu.
 3. **Výsledek každé úlohy** (`done_when`): obrazovka, na které úloha skončí, a text, který tam musí být. Úloha, která
    odesílá data, má cestu selhání (`failure_paths`: krok, druh selhání, vstup zůstane, akce obnovy), nebo
    „nenastává, protože …" ve stavu selhání. U existující aplikace úloha, která nahrazuje dnešní, nese `replaces`.
+3b. **Fakta appky jako první (existující aplikace, P118):** `aid-ui-client.py facts <projekt>` - Codex a Claude Opus
+   nezávisle vytěží z kódu, plánů, rozhodnutí a runbooků, co appka opravdu dělá; do `docs/design/app-facts.json` jde
+   jen to, co oba podloží týmž místem zdroje (citace ověřená v souboru), zbytek jsou otevřené otázky. Dokud nějaká
+   zůstává, lint model nepustí: `facts --focus "<otázka>"` je nechá dočíst, `--drop <id> --reason` uzavře vědomě.
+   Každá zapisující úloha modelu odkazuje na fakta, o která se opírá (`facts: [id]`); fakt, jehož citace ze zdroje
+   zmizí, lint hlásí jako zastaralý.
 4. Model zapiš nástrojem Write do `docs/design/screens.json` (tvar `references/screens.schema.json`) a zkontroluj:
    `aid-ui-screens.py check <projekt>` (exit 0).
    Kontrola obsahuje lint z tříd nálezů pilotu P116 (P118): částka, R, procento či páka napsaná přímo místo pojmenované
