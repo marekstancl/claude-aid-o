@@ -489,6 +489,22 @@ cmd_prepare() {
       elif [[ -z "$_pr_why" ]] && ! _pr_out="$(bash "${SCRIPT_DIR}/aid-generation-readiness.sh" "$PLAN" --total 1 --project-root "$DEP_ROOT" 2>&1)"; then
         _pr_why="readiness fails: $(tail -3 <<< "$_pr_out" | tr '\n' ' ')"
       fi
+      # P117 (2), AC4: every cmd point runs in the close's own measurement (isolation, verification_env, limit) —
+      # in a throwaway copy at HEAD, so what a point writes stays there. A point that fails because the work is
+      # not built yet is expected; one whose program is missing (127), that runs out of time or cannot be
+      # measured at all would stop the run, so the round is not prepared over it.
+      if [[ -z "$_pr_why" && "${AID_REVIEW_READINESS_STUB:-}" != pass ]] && grep -qE '^[[:space:]]*type:[[:space:]]*cmd' "$PLAN"; then
+        local _mt _me _mrc=0 _bad; _mt="$(mktemp -d)"; _me="$(mktemp -d)"
+        if git -C "$DEP_ROOT" worktree add -q --detach "$_mt/tree" HEAD >/dev/null 2>&1; then
+          ( cd "$DEP_ROOT" && bash "${SCRIPT_DIR}/aid-plan-diff.sh" --plan "$PLAN" --evidence-dir "$_me" --base-commit HEAD --isolated --cwd "$_mt/tree" ) >/dev/null 2>&1 || _mrc=$?
+          git -C "$DEP_ROOT" worktree remove --force "$_mt/tree" >/dev/null 2>&1 || true
+          if [[ -s "$_me/plan-diff.json" ]]; then
+            _bad="$(jq -r '[.results[] | select((.evidence // "") | test("^exit=127 |reason=(timeout|no_isolation|no_verification_env|verification_env_unset|env_stripped)")) | "\(.ac_label): \(.evidence | split(";")[0] | .[0:90])"] | join("; ")' "$_me/plan-diff.json")"
+            [[ -z "$_bad" ]] || _pr_why="points the measurement cannot run (in a copy at HEAD, the close's isolation and limits): ${_bad}"
+          fi
+        fi
+        rm -rf "$_mt" "$_me"
+      fi
       if [[ -n "$_pr_why" ]]; then
         echo "${CMD}: REFUSED (plan_not_ready): ${_pr_why}" >&2
         echo "next: fix the plan, then bash ${SCRIPT_DIR}/aid-plan-check.sh ${PLAN} --json ${check} && bash ${SCRIPT_DIR}/aid-generation-readiness.sh ${PLAN} --total 1$([[ "$DEP_ROOT" != "$ROOT" ]] && echo " --project-root ${DEP_ROOT}"); prepare again" >&2

@@ -2178,6 +2178,18 @@ _dep() {
   [ "$status" -eq 1 ]; [[ "$output" == *"dependency_roots_many"*"P899 P898"* ]]
 }
 
+@test "prepare: a point the close's measurement cannot run (its program missing) gets no round; a point that only fails yet does" {
+  git -C "$ROOT" add -A >/dev/null 2>&1; git -C "$ROOT" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1
+  unset AID_REVIEW_READINESS_STUB
+  _ac() { _plan regular; printf '\n## Acceptance Criteria\n\n- [ ] AC1: x\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "%s"\n    expected_exit: 0\n  ```\n' "$1" >> "$PLAN"; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"; }
+  _ac "no-such-tool-xyz --run"
+  run "$ROUND_SH" prepare "$PLAN" --round 1; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"plan_not_ready"*"points the measurement cannot run"*"AC1: exit=127"* ]]; [ ! -d "$CP1/round-1/packet" ]
+  [ -z "$(git -C "$ROOT" worktree list | sed 1d)" ]          # the throwaway copy is gone
+  _ac "false"
+  run "$ROUND_SH" prepare "$PLAN" --round 1; echo "$output"; [ "$status" -eq 0 ]
+}
+
 @test "prepare: a plan whose check did not pass, or that fails readiness, gets no round (AID 10. and 11. 10. 2026)" {
   jq '.pass = false' "$EV/plan-check.json" > "$EV/p" && mv "$EV/p" "$EV/plan-check.json"
   run "$ROUND_SH" prepare "$PLAN" --round 1
