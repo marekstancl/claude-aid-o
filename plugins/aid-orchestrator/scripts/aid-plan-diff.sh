@@ -565,7 +565,7 @@ if [[ "$SCOPE" == step && -f "${STEP_DIR}/deferred.json" ]]; then
       # P117: honoured while the permission holds AND the fresh measurement still fails for a technical reason
       declare -F aid_stand_in_record_ok >/dev/null || source "${SCRIPT_DIR}/lib/aid-stand-in.sh"
       dreason="$(jq -r --arg l "$dlabel" 'first(.[] | select(.ac_label == $l) | .reason // "") // ""' <<< "$results_json")"
-      if ! why="$(aid_stand_in_record_ok "$dauth" measurement_failed "$(jq -nc --argjson s "${STEP_N:-0}" --arg c "$dlabel" '{step: $s, criterion: $c}')")"; then
+      if ! why="$(aid_stand_in_record_ok "$EVIDENCE_DIR" "$dauth" measurement_failed "$(jq -nc --argjson s "${STEP_N:-0}" --arg c "$dlabel" '{step: $s, criterion: $c}')")"; then
         echo "aid-plan-diff: deferral of ${dlabel} not honoured: ${why}" >&2; continue
       elif [[ ! "$dreason" =~ $AID_PD_UNMEASURED_RE ]]; then
         echo "aid-plan-diff: deferral of ${dlabel} not honoured: the point was measured now (${dreason:-ran}) — the stand-in deferred only a technical failure" >&2; continue

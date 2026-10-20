@@ -337,7 +337,8 @@ aid_dispatch_contract_validate() {
   got="$(jq -r '.contract_version // ""' "$r")"
   if [[ -z "$got" ]]; then
     _add reasons "the return does not confirm a contract version (expected ${want})"
-  elif [[ "$got" != "$want" ]]; then
+  elif [[ "$got" != "$want" ]] && ! jq -e --arg g "$got" '(.superseded_versions // []) | index($g) != null' "$c" >/dev/null 2>&1; then
+    # a version superseded by an audited rename (amend-contract, P117 (13)) is the same instructions under a new name
     _add reasons "the return confirms contract version ${got}, the dispatched packet is ${want} — the agent worked against stale instructions"
   fi
 

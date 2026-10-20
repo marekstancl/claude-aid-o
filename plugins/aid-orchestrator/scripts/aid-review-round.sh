@@ -1604,7 +1604,12 @@ cmd_delegate() {
     if [[ "$(jq -r '(.delegated // .dispute.delegated).evidence_sha256 // ""' <<< "$finding")" == "$ev_sha" ]]; then
       echo "finding ${FINGERPRINT}: already settled in round ${ROUND} on this evidence; nothing dispatched"; return 0
     fi
-    # P117 (12): new evidence since the verdict — one new verdict, the old one superseded
+    # P117 (12): new evidence since the verdict — one new verdict, the old one superseded; ONCE per finding and
+    # round: a second disagreement after a superseded verdict is the PM's (no verdict shopping, security review)
+    if jq -e '(.delegated_history // []) | length >= 1' <<< "$finding" >/dev/null; then
+      _dlg_refuse delegation_out_of_scope "finding ${FINGERPRINT} already had one verdict superseded by new evidence in round ${ROUND}; a third opinion is not asked" \
+        "the finding goes to the PM's card (close routes it); the PM answers with dispute --pm … --finding-card <card>"
+    fi
     _dlg_supersede "$dir" "$FINGERPRINT" "${dir}/adjudicator-delegated-$(aid_delegate_fp16 "$FINGERPRINT").json"
     finding="$(jq -c --arg f "$FINGERPRINT" 'first(.findings[] | select(.fingerprint == $f))' "${dir}/merged.json")"
     echo "finding ${FINGERPRINT}: new evidence since its verdict — the old verdict is superseded, a new one is asked"
@@ -1734,6 +1739,43 @@ cmd_delegate() {
   echo "finding ${FINGERPRINT}: ${kind} settled by ${provider} — ${answer} (${reason})"
 }
 
+# accept-risk --checkpoint cp7 --evidence-dir <run> --round N --finding-card <card> --reason "<the PM's words>"
+# P117 (14): the PM's ONE decision to close with the round's open blocker/major findings — bound to the
+# candidate (HEAD), the card and the whole set (each finding's content digest). The card quotes the candidate
+# (12 hex) and every finding (16 hex of its fingerprint); decide refuses the record once the candidate or the
+# set changed. In an --auto run the technical findings were settled by the delegate; what is left is protected.
+_ar_finding_sha() { jq -cS '{fingerprint, severity, claim, evidence, command, rule}' <<< "$1" | sha256sum | cut -d' ' -f1; }
+cmd_accept_risk() {
+  [[ "$MODE" == step && "$CHECKPOINT" == cp7 ]] || _die "accept-risk is the PM's decision at the close (cp7)" 2
+  local dir; dir="$(_existing_round)" || exit 1
+  [[ -f "${dir}/merged.json" ]] || _die "round ${ROUND} not collected"
+  (( ${#REASON} >= 20 )) || _die "--reason must quote the PM's words (at least 20 characters)" 2
+  local head set f fp16 why; head="$(_head)"
+  set="$(jq -c '[.findings[] | select((.status | IN("open", "disputed", "form_invalid")) and (.severity | IN("blocker", "major")))]' "${dir}/merged.json")"
+  [[ "$(jq 'length' <<< "$set")" -gt 0 ]] || _die "round ${ROUND} has no open blocker or major finding; nothing to accept"
+  why="$(aid_pm_card_check "$CARD" "${head:0:12}")" || _die "accept-risk: the card must name the candidate ${head:0:12}: ${why}"
+  local rows="[]" row
+  while IFS= read -r f; do
+    fp16="$(aid_delegate_fp16 "$(jq -r .fingerprint <<< "$f")")"
+    why="$(aid_pm_card_check "$CARD" "$fp16")" || _die "accept-risk: ${why}"
+    row="$(jq -nc --arg fp "$(jq -r .fingerprint <<< "$f")" --arg sev "$(jq -r .severity <<< "$f")" --arg s "$(_ar_finding_sha "$f")" '{fingerprint: $fp, severity: $sev, finding_sha256: $s}')"
+    rows="$(jq -c --argjson r "$row" '. + [$r]' <<< "$rows")"
+  done < <(jq -c '.[]' <<< "$set")
+  local rec="${dir}/accepted-risk.json"
+  jq -n --arg h "$head" --arg c "$CARD" --arg cs "$(sha256sum "$CARD" | cut -d' ' -f1)" --argjson rows "$rows" \
+     --arg ss "$(jq -cS 'sort_by(.fingerprint)' <<< "$rows" | sha256sum | cut -d' ' -f1)" --arg w "$REASON" --arg at "$(_now)" \
+    '{artifact_type: "accepted_risk", choice: "close_with_open_findings", by: "pm", candidate_sha: $h, card: $c, card_sha256: $cs,
+      findings: $rows, set_sha256: $ss, words: $w, at: $at}' > "$rec"
+  jq --argjson rows "$rows" --arg why "$REASON" --arg at "$(_now)" --arg card "$CARD" '
+    ($rows | map(.fingerprint)) as $fps
+    | .findings |= map(if (.fingerprint | IN($fps[])) then .status = "fixed" | .dispute.pm = {answer: "accepted", words: $why, at: $at, card: $card, accepted_risk: true} else . end)' \
+    "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
+  _dlg_resync "$dir" accepted-risk
+  aid_stage_writes_record "$EVID" "cp7-accepted-risk" "cp7/round-${ROUND}/accepted-risk.json" >/dev/null 2>&1 || true
+  _log accepted_risk round="$ROUND" candidate="$head" findings="$(jq 'length' <<< "$rows")"
+  echo "the PM accepted the risk of $(jq 'length' <<< "$rows") finding(s) for candidate ${head:0:12} (${rec}); a new candidate or another set of findings voids it"
+}
+
 cmd_override() {
   [[ "$ROUNDS" =~ ^[1-3]$ ]] || _die "--rounds takes 1, 2 or 3" 2
   (( ${#REASON} >= 20 )) || _die "--reason must quote the PM's words (at least 20 characters)" 2
@@ -1762,6 +1804,7 @@ case "$CMD" in
   fix-check) cmd_fix_check ;;
   finalize)  cmd_finalize ;;
   dispute)   cmd_dispute ;;
+  accept-risk) cmd_accept_risk ;;
   override)  cmd_override ;;
   standing)  cmd_standing ;;
   delegate)  cmd_delegate ;;

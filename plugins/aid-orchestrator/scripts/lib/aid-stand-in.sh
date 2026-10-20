@@ -15,6 +15,7 @@
 # Needs lib/aid-protected.sh and lib/aid-delegate.sh (the ledger).
 
 _AID_SI_LIB="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+declare -F aid_state_root >/dev/null || source "${_AID_SI_LIB}/aid-roots.sh"
 declare -F aid_protected_impact >/dev/null || source "${_AID_SI_LIB}/aid-protected.sh"
 declare -F aid_delegate_ledger >/dev/null || source "${_AID_SI_LIB}/aid-delegate.sh"
 
@@ -23,16 +24,24 @@ aid_stand_in_id() { { printf '%s\n' "$1"; jq -cS . "$2"; } | sha256sum | cut -c1
 
 aid_stand_in_verify() {
   local ev="$1" auth="$2" kind="$3" expect="$4" troot="$5" why
-  aid_stand_in_record_ok "$auth" "$kind" "$expect" || return 1
-  why="$(aid_protected_impact "$(jq -r .state_root "$auth")" "$troot" "$(dirname "$auth")/proposal.json" "$ev")" || { echo "protected impact — the PM's: ${why}"; return 1; }
+  aid_stand_in_record_ok "$ev" "$auth" "$kind" "$expect" || return 1
+  why="$(aid_protected_impact "$(aid_state_root "$(dirname "$(realpath -m "$ev")")" 2>/dev/null || jq -r .state_root "$auth")" "$troot" "$(dirname "$auth")/proposal.json" "$ev")" || { echo "protected impact — the PM's: ${why}"; return 1; }
   return 0
 }
 
-# aid_stand_in_record_ok <auth.json> <kind> <expect-json> — the permission's own record holds (approved, kind,
-# proposal and verdict by sha, the ledger); the caller adds the detector (aid_stand_in_verify does).
+# aid_stand_in_record_ok <evidence_dir> <auth.json> <kind> <expect-json> — the permission's own record holds
+# FOR THIS RUN (it lives under <evidence_dir>/stand-in/, names this run's plan, the delegation is in force now),
+# approved, of this kind, proposal and verdict by sha, the ledger; the caller adds the detector.
 aid_stand_in_record_ok() {
-  local auth="$1" kind="$2" expect="$3" d prop verdict sroot pid ledger
+  local ev="$1" auth="$2" kind="$3" expect="$4" d prop verdict sroot pid ledger pp
   [[ -f "$auth" ]] || { echo "no stand-in permission at ${auth}"; return 1; }
+  [[ "$(realpath "$auth")" == "$(realpath -m "$ev")/stand-in/"*/auth.json ]] \
+    || { echo "the permission ${auth} is not one of this run's (${ev}/stand-in/<id>/auth.json)"; return 1; }
+  pp="$(yq -r '.plan_path // ""' "${ev}/fsm-state.yaml" 2>/dev/null)"
+  pid="$( [[ -f "$pp" ]] && _aid_fm_get "$pp" id 2>/dev/null)"
+  sroot="$(aid_state_root "$(dirname "$(realpath -m "$ev")")" 2>/dev/null || jq -r .state_root "$auth")"
+  [[ -n "$pid" && "$(jq -r .plan "$auth")" == "$pid" ]] || { echo "the permission names plan $(jq -r .plan "$auth"), this run is ${pid:-<no plan>}"; return 1; }
+  aid_delegate_in_force "$sroot" "$pid" || { echo "no delegation is in force for ${pid} now (the PM stopped the run, or it is not --auto)"; return 1; }
   jq -e '.approved == true' "$auth" >/dev/null 2>&1 || { echo "the stand-in did not approve it (${auth})"; return 1; }
   [[ "$(jq -r .kind "$auth")" == "$kind" ]] || { echo "the permission is for $(jq -r .kind "$auth"), not ${kind}"; return 1; }
   d="$(dirname "$auth")"; prop="${d}/proposal.json"; verdict="${d}/verdict.json"
@@ -45,7 +54,7 @@ aid_stand_in_record_ok() {
   jq -e --argjson x "$expect" '. as $p | $x | to_entries | all(.key as $k | .value as $v
       | if ($v | type) == "array" then (($v - ($p[$k] // [])) | length) == 0 else $p[$k] == $v end)' "$prop" >/dev/null 2>&1 \
     || { echo "the approved proposal does not cover this action (expected ${expect}, approved $(jq -c '{step, paths, criterion, rename}' "$prop"))"; return 1; }
-  sroot="$(jq -r .state_root "$auth")"; pid="$(jq -r .plan "$auth")"; ledger="$(aid_delegate_ledger "$sroot" "$pid")"
+  ledger="$(aid_delegate_ledger "$sroot" "$pid")"
   jq -e -s --arg i "$(jq -r .id "$auth")" --arg s "$(jq -r .verdict_sha256 "$auth")" \
     'any(.[]; .checkpoint == "stand_in" and .id == $i and .verdict_sha256 == $s)' "$ledger" >/dev/null 2>&1 \
     || { echo "the plan's ledger ${ledger} does not record this permission"; return 1; }

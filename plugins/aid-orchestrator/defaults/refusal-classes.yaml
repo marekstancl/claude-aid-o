@@ -13,6 +13,7 @@
 codes:
   REVIEW_EXHAUSTED: {class: stand_in, how: "delegate (P112), opakování po novém důkazu (12)"}
   abandon_needs_reason: {class: pm, how: "opuštění běhu je rozhodnutí PM"}
+  accepted_risk_stale: {class: pm, how: "přijetí rizika PM platí jen pro svého kandidáta a svou sadu nálezů: nová karta"}
   active_runs_unreadable: {class: incident, how: "poškozený soubor stavu"}
   active_runs_write_failed: {class: incident, how: "zápis stavu selhal"}
   amend_scope_no_brief_point: {class: stand_in, how: "rozšíření uvnitř repozitáře a cíle; chráněná cesta → PM"}
@@ -91,6 +92,10 @@ codes:
   project_tests_evidence_missing: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
   project_tests_not_selected: {class: pm, how: "waiver testů (předejít 2)"}
   project_tests_undeclared: {class: agent_fix, how: "jen rada (advisory), běh nezastaví"}
+  rename_breaks_plan: {class: agent_fix, how: "zvolí jiné jméno; nic se nezměnilo"}
+  rename_collision: {class: agent_fix, how: "zvolí jméno, které nic nejmenuje"}
+  rename_outside_step: {class: agent_fix, how: "přejmenuje jen cestu aktuálního kroku na místě; přesun jinam je rozšíření rozsahu (amend-scope)"}
+  rename_refused: {class: agent_fix, how: "doplní oprávnění (zástupce v --auto, karta PM jinak), důvod nebo tvar <old>=<new>"}
   repo_root_invalid: {class: incident, how: "neplatný repo_roots – psaní plánu"}
   restart_after_step: {class: prevent, how: "restart"}
   restart_controller_live: {class: prevent, how: "restart"}
@@ -104,6 +109,11 @@ codes:
   run_abandoned: {class: pm, how: "běh opuštěn PM"}
   second_round_needs_open_blocker: {class: not_in_run, how: "jen v CP1 (revize plánu): kolo navíc za blocker s opravou, jinak override PM"}
   semantic_wiring_blocked: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  stand_in_missing: {class: agent_fix, how: "zeptá se přes aid-stand-in.sh ask, verdikt zapíše na jeho místo"}
+  stand_in_not_allowed: {class: agent_fix, how: "kód není pro zástupce; jde se podle next: odmítnutí"}
+  stand_in_protected: {class: pm, how: "chráněný dopad: rozhoduje PM na kartě, ať verdikt říká cokoli"}
+  stand_in_verdict_invalid: {class: agent_fix, how: "zástupce odpoví úplným JSON verdiktem"}
+  stand_in_verdict_unbound: {class: agent_fix, how: "verdikt Codexu přes ask, Claude jen v závorce stand-in-<id>"}
   step_criteria_failed: {class: agent_fix_then_stand_in, how: "bod nesplněn: agent opraví krok; spor o měření nebo opakované selhání → zástupce; vypuštění bodu → PM"}
   step_verify_not_pass: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
   steps_incomplete: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}

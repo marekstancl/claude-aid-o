@@ -2188,6 +2188,33 @@ _si_permit() {
   [ "$(jq -r '.[-1].pm_decision.stand_in' "$td/steps/step_1_backend/scope-amendment.json")" = "$auth" ]
 }
 
+@test "amend-contract: a pure rename of the current step's path on the stand-in's permission; another directory, a collision or no permission is refused (P117 (13))" {
+  local td="$TEST_EVIDENCE_DIR"; _zp_plan_json "$td"; _zp_state "$td" EXECUTE 0
+  mkdir -p "$td/steps/step_1_backend"
+  ( source "$AID_PLUGIN_PATH/scripts/lib/aid-dispatch-contract.sh"; aid_dispatch_contract_build "$td/plan.json" 0 "$td/steps/step_1_backend/contract.json" ) >/dev/null
+  local v0; v0="$(jq -r .version "$td/steps/step_1_backend/contract.json")"
+  run bash "$FSM" amend-contract "$td/fsm-state.yaml" --rename src/a.py=src/b.py --reason "the project lint forbids the plan's name"
+  [ "$status" -ne 0 ]; [[ "$output" == *"rename_refused"*"no permission"* ]]
+  run bash "$FSM" amend-contract "$td/fsm-state.yaml" --rename src/a.py=lib/a.py --reason "the project lint forbids the plan's name"
+  [ "$status" -ne 0 ]; [[ "$output" == *"rename_outside_step"* ]]
+  run bash "$FSM" amend-contract "$td/fsm-state.yaml" --rename src/a.py=tests/test_a.py --reason "the project lint forbids the plan's name"
+  [ "$status" -ne 0 ]; [[ "$output" == *"rename_outside_step"* ]]
+  run bash "$FSM" amend-contract "$td/fsm-state.yaml" --rename tests/test_a.py=tests/test_b.py --reason "the project lint forbids the plan's name"
+  [ "$status" -ne 0 ]; [[ "$output" == *"not a path of the current step"* ]]
+  local auth; auth="$(_si_permit "$td" contract_return_rejected '{"kind": "rename", "step": 0, "rename": {"old": "src/a.py", "new": "src/b.py"}, "why": "the project lint forbids the name"}')"
+  [ "$(jq -r .approved "$auth")" = true ]
+  run bash "$FSM" amend-contract "$td/fsm-state.yaml" --rename src/a.py=src/c.py --reason "the project lint forbids the plan's name" --stand-in "$auth"
+  [ "$status" -ne 0 ]; [[ "$output" == *"does not cover this action"* ]]
+  run bash "$FSM" amend-contract "$td/fsm-state.yaml" --rename src/a.py=src/b.py --reason "the project lint forbids the plan's name" --stand-in "$auth"
+  echo "$output"; [ "$status" -eq 0 ]
+  ! grep -q 'src/a\.py' "$td/plan.json"; grep -q 'src/b\.py' "$td/plan.json"
+  [ "$(jq -r '.superseded_versions[0]' "$td/steps/step_1_backend/contract.json")" = "$v0" ]
+  [ "$(jq -r .version "$td/steps/step_1_backend/contract.json")" != "$v0" ]
+  [ "$(grep '^plan_json_hash:' "$td/fsm-state.yaml" | awk '{print $2}')" = "$(sha256sum "$td/plan.json" | cut -d' ' -f1)" ]
+  [ "$(jq -r '.[-1].rename.new' "$td/steps/step_1_backend/contract-amendments.json")" = src/b.py ]
+  grep -q '"event":"contract_renamed"' "$td/timeline.jsonl"
+}
+
 @test "amend-scope-zadani: a step closing no point widens with the PM's card quoting every added path; a card missing one is refused (aidlab-apps 15. 10. 2026)" {
   local td="$TEST_EVIDENCE_DIR"; _zp_plan_json "$td"
   jq '.steps[0].zavira = [] | .steps[1].zavira = []' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"

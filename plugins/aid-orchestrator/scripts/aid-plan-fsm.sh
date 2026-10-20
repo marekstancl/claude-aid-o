@@ -5044,6 +5044,23 @@ _pfsm_validate_plan_final_close_receipt_json() {
   ' <<< "$json" >/dev/null 2>&1
 }
 
+# _pfsm_accepted_risk_stale <run dir> <candidate> <root> — every cp7 accepted-risk.json is for this candidate,
+# its card unchanged, and each finding it names unchanged (P117 (14)); prints why not and returns 1.
+_pfsm_accepted_risk_stale() {
+  local run_dir_abs="$1" candidate="$2" root="$3" _ar _m _fp _fs
+  for _ar in "${run_dir_abs}"/cp7/round-*/accepted-risk.json; do
+    [[ -f "$_ar" ]] || continue
+    if [[ "$(jq -r .candidate_sha "$_ar")" != "$candidate" ]]; then echo "${_ar#"${root}/"} was given for candidate $(jq -r '.candidate_sha[:12]' "$_ar"), not ${candidate:0:12}"; return 1; fi
+    if [[ "$(sha256sum "$(jq -r .card "$_ar")" 2>/dev/null | cut -d' ' -f1)" != "$(jq -r .card_sha256 "$_ar")" ]]; then echo "the card of ${_ar#"${root}/"} changed after the PM answered it"; return 1; fi
+    _m="$(dirname "$_ar")/merged.json"
+    while IFS=$'\t' read -r _fp _fs; do
+      [[ "$(jq -cS --arg f "$_fp" 'first(.findings[] | select(.fingerprint == $f)) | {fingerprint, severity, claim, evidence, command, rule}' "$_m" | sha256sum | cut -d' ' -f1)" == "$_fs" ]] \
+        || { echo "finding ${_fp:0:23} of ${_ar#"${root}/"} is not the one the PM accepted"; return 1; }
+    done < <(jq -r '.findings[] | "\(.fingerprint)\t\(.finding_sha256)"' "$_ar")
+  done
+  return 0
+}
+
 # _pfsm_seal_plan_final_close_evidence <root> <plan> <candidate> <run> <target>
 #   <target_head_before> <merge_commit> <merged_tree> <tag> <gates_report>
 #   <release_decision.json> <pm_decision_file> [<merged_head> <review_equivalence>]
@@ -5211,6 +5228,14 @@ _pfsm_finalize_decide() {
   if [[ "$round_rc" -ne 0 && "$round_msg" != *"reason=review_round_failed"* ]]; then
     echo "${round_msg%reason=*}" >&2
     return 1
+  fi
+
+  # P117 (14): the PM's acceptance of open findings holds only for its candidate and its set of findings
+  local _ar_bad=""
+  if ! _ar_bad="$(_pfsm_accepted_risk_stale "$run_dir_abs" "$candidate" "$root")"; then
+    echo "REFUSED (accepted_risk_stale): plan-finalize --stage decide: ${_ar_bad} — the PM's decision does not carry over" >&2
+    echo "next: render a new Decision card for the current candidate and its open findings; the PM answers with aid-review-round.sh accept-risk" >&2
+    echo "(pipeline.md §When AID refuses: accepted_risk_stale)" >&2; return 1
   fi
 
   local tampered=""

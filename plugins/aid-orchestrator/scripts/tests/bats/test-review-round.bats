@@ -932,6 +932,38 @@ _fanswer() {
 }
 _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blocker", claim: "the changelog claims an import the app never makes", command: "grep -n import src/app.py", evidence: "src/app.py:1", fix: "import new", rule: "every change the changelog claims is in the code"}] | del(.no_findings_reason)'
 
+@test "accept-risk: the PM closes with an open blocker on ONE card naming the candidate and the finding; a card missing either is refused, the record is bound to both (P117 (14))" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_BLOCKER"
+  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null || true
+  local fp f16 head card; fp="$(jq -r '.findings[0].fingerprint' "$(FD 1)/merged.json")"; f16="$(sed 's/^sha256://' <<< "$fp" | cut -c1-16)"
+  head="$(git -C "$R" rev-parse HEAD)"; card="$ROOT/card.md"
+  export AID_HOOK_AUDIT="$ROOT/audit.jsonl"
+  printf 'Rozhodnutí 1: zavřít %s s otevřeným nálezem
+' "${head:0:12}" > "$card"; touch -d '-10 seconds' "$card"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
+  run _F accept-risk --round 1 --finding-card "$card" --reason "PM: zavřít s tímto rizikem, oprava v dalším plánu"
+  [ "$status" -ne 0 ]; [[ "$output" == *"does not quote ${f16}"* ]]
+  printf -- '- nález %s: přijímám riziko\n' "$f16" >> "$card"; touch -d '-10 seconds' "$card"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$AID_HOOK_AUDIT"
+  run _F accept-risk --round 1 --finding-card "$card" --reason "PM: zavřít s tímto rizikem, oprava v dalším plánu"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '"\(.candidate_sha) \(.findings | length) \(.by)"' "$(FD 1)/accepted-risk.json")" = "${head} 1 pm" ]
+  [ "$(jq -r '.findings[0] | "\(.status) \(.dispute.pm.accepted_risk)"' "$(FD 1)/merged.json")" = "fixed true" ]
+  [ "$(jq -r .verdict "$E/cp7/rounds.json")" = pass ]
+  # no card naming the candidate: refused
+  printf -- '- nález %s\n' "$f16" > "$ROOT/card2.md"; touch -d '-10 seconds' "$ROOT/card2.md"
+  run _F accept-risk --round 1 --finding-card "$ROOT/card2.md" --reason "PM: zavřít s tímto rizikem, oprava v dalším plánu"
+  [ "$status" -ne 0 ]
+  # decide holds the record to its candidate, its card and its findings
+  _stale() { run bash -c "source '$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh' >/dev/null 2>&1; _pfsm_accepted_risk_stale '$E' '$1' '$R'"; }
+  _stale "$head"; [ "$status" -eq 0 ]
+  _stale "$(printf 'a%.0s' {1..40})"; [ "$status" -eq 1 ]; [[ "$output" == *"was given for candidate ${head:0:12}"* ]]
+  jq '.findings[0].claim = "something else"' "$(FD 1)/merged.json" > "$ROOT/m" && cp "$ROOT/m" "$(FD 1)/merged.json"
+  _stale "$head"; [ "$status" -eq 1 ]; [[ "$output" == *"is not the one the PM accepted"* ]]
+  echo extra >> "$card"; _stale "$head"; [ "$status" -eq 1 ]; [[ "$output" == *"card"*"changed after the PM answered"* ]]
+}
+
 @test "cp7: produce's inputs hold the plan's criteria and the EPIC findings; prepare prints the two default prompts with cp7 foci" {
   _frepo; _fsc
   grep -q "the app imports new" "$E/cp7/criteria.md"; grep -q "it works end to end" "$E/cp7/criteria.md"
@@ -1868,6 +1900,10 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   [ "$(grep -c . "$L")" = 2 ]; [ "$(tail -1 "$L" | jq -r '.supersedes | length')" = 64 ]
   # without new evidence no new verdict
   run _DLG --fingerprint "$FP"; [ "$status" -eq 0 ]; [[ "$output" == *"on this evidence; nothing dispatched"* ]]
+  [ "$(grep -c . "$L")" = 2 ]
+  # yet more evidence: no third opinion — the PM decides (no verdict shopping)
+  git -C "$R" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "more"
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_out_of_scope"*"a third opinion is not asked"* ]]
   [ "$(grep -c . "$L")" = 2 ]
 }
 @test "delegate: after /aid-stop (the run declared manual) the automatic delegation is not in force" {

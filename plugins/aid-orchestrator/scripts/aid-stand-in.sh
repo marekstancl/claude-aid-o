@@ -70,6 +70,8 @@ cmd_ask() {
   local d; d="$(aid_stand_in_dir "$EVID" "$ID")"; mkdir -p "$d"
   if [[ -f "${d}/auth.json" ]]; then echo "stand-in ${ID}: already decided — $(jq -r '"\(if .approved then "approved" else "rejected" end): \(.reason)"' "${d}/auth.json") (${d}/auth.json)"; return 0; fi
   jq -S . "$PROPOSAL" > "${d}/proposal.json"; jq -n --arg c "$CODE" '{code: $c}' > "${d}/meta.json"
+  # the runner's record of the question: record accepts a verdict only for a decision asked through here
+  log_event "$TL" stand_in_asked id="$ID" code="$CODE" proposal_sha256="$(sha256sum "${d}/proposal.json" | cut -d' ' -f1)" || true
   local why; why="$(aid_protected_impact "$SROOT" "$TROOT" "${d}/proposal.json" "$EVID")" || _to_pm "$why"
   local brief; brief="$(jq -r '.zadani // ""' "${EVID}/plan.json" 2>/dev/null)"
   {
@@ -103,6 +105,15 @@ cmd_record() {
   [[ -n "$ID" ]] || { echo "record needs --id" >&2; exit 2; }
   local d; d="$(aid_stand_in_dir "$EVID" "$ID")"
   [[ -f "${d}/proposal.json" ]] || _refuse stand_in_missing "no proposal for ${ID} under ${d}" "aid-stand-in.sh ask first"
+  # the same gates as ask (security review of P117): a code the stand-in may decide, the delegation in force,
+  # the id of THIS code and proposal, and the runner's record that ask asked it
+  CODE="$(jq -r '.code // ""' "${d}/meta.json" 2>/dev/null)"
+  local _cl; _cl="$(C="$CODE" yq -r '.codes[strenv(C)].class // ""' "${SCRIPT_DIR}/../defaults/refusal-classes.yaml" 2>/dev/null)"
+  [[ "$_cl" == stand_in || "$_cl" == agent_fix_then_stand_in ]] || _refuse stand_in_not_allowed "${CODE:-<no code>} is not a code the stand-in decides" "ask through aid-stand-in.sh ask"
+  [[ -n "$PID" ]] && aid_delegate_in_force "$SROOT" "$PID" || _refuse delegation_missing "no delegation is in force for ${PID:-<no plan>}" "the PM decides on a Decision card"
+  [[ "$(aid_stand_in_id "$CODE" "${d}/proposal.json")" == "$ID" ]] || _refuse stand_in_missing "${ID} is not the id of its code and proposal (edited after ask?)" "ask again"
+  jq -e -nR --arg i "$ID" --arg s "$(sha256sum "${d}/proposal.json" | cut -d' ' -f1)" 'any(inputs; (try fromjson catch null) as $j | $j != null and $j.event? == "stand_in_asked" and $j.id? == $i and $j.proposal_sha256? == $s)' "$TL" >/dev/null 2>&1 \
+    || _refuse stand_in_missing "the run's timeline has no stand_in_asked record for ${ID} with this proposal" "aid-stand-in.sh ask"
   [[ -f "$VERDICT" && "$(realpath "$VERDICT")" == "$(realpath -m "${d}/verdict.json")" ]] \
     || _refuse stand_in_missing "the verdict of ${ID} is ${d}/verdict.json" "have the stand-in write it there, then record"
   local f
@@ -123,6 +134,7 @@ cmd_record() {
     jq -e -s --arg f "stand-in-${ID}" --arg o "$(realpath "$VERDICT")" \
       'any(.[]; .event == "verifier_dispatch_start" and .focus == $f and .agent_id == "claude:stand-in") and any(.[]; .event == "verifier_dispatch_complete" and .focus == $f)' "$TL" >/dev/null 2>&1 \
       || _refuse stand_in_verdict_unbound "a Claude verdict without its closed bracket stand-in-${ID} (agent claude:stand-in)" "dispatch inside the bracket, then record"
+    [[ -f "${d}/status-before" ]] || _refuse delegation_left_files "no record of the worktree before the stand-in ran (${d}/status-before)" "ask again (it records the tree first)"
     local left; left="$(comm -13 "${d}/status-before" <(_tree_state) | sed 's/^...//' | head -20 || true)"
     [[ -z "$left" ]] || _refuse delegation_left_files "the stand-in left files in ${TROOT}: $(tr '\n' ' ' <<< "$left")" "remove them, then record again"
   else

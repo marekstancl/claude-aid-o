@@ -49,19 +49,20 @@ aid_protected_impact() {
       if [[ "$p" == "${troot%/}/"* ]]; then rel="${p#"${troot%/}/"}"
       else
         local inside=0 r
-        while IFS= read -r r; do [[ -n "$r" && "$p" == "${r%/}/"* ]] && inside=1; done <<< "$rr"
+        while IFS= read -r r; do [[ -n "$r" && "$p" == "${r%/}/"* ]] && { inside=1; rel="${p#"${r%/}/"}"; }; done <<< "$rr"
         (( inside )) || { echo "foreign_repo: ${p} is outside the plan's worktree and its repo_roots"; return 1; }
-        rel="${p##*/}"
       fi
     else rel="${p#./}"; fi
-    case "$rel" in
+    local lrel; lrel="$(tr '[:upper:]' '[:lower:]' <<< "$rel")"   # case-insensitive: .ENV is .env on many disks
+    case "$lrel" in
       .aid-o/config/*|*/.aid-o/config/*|execution.yaml|*/execution.yaml)
         echo "gate: ${p} is AID's configuration (gates, profiles, waivers)"; return 1 ;;
-      .aid-o/plans/*)
+      .aid-o/plans/*|*/.aid-o/plans/*)
         echo "brief: ${p} is the plan or its brief"; return 1 ;;
     esac
+    rel="$lrel"
     [[ -n "$zf" && ( "$rel" == "$zf" || "$p" == "$zf" ) ]] && { echo "brief: ${p} is the brief"; return 1; }
-    for g in $globs; do
+    for g in $(tr '[:upper:]' '[:lower:]' <<< "$globs"); do
       # a pattern without a slash matches a file or a directory at any depth (as in .gitignore)
       { _aid_prot_glob "$rel" "$g" || { [[ "$g" != */* ]] && { _aid_prot_glob "$rel" "**/$g" || _aid_prot_glob "$rel" "**/$g/**"; }; }; } \
         && { echo "security: ${p} matches the protected path ${g}"; return 1; }

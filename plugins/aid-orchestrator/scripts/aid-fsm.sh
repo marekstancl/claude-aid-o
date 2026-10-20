@@ -5518,6 +5518,24 @@ _FSM_ALWAYS_ALLOWED=(".aid-o/work/backlog.md" ".aid-o/work/aid-plugin-issues.md"
 # last one, whose scope the GATES/DONE union holds), never removes a path, and
 # refuses a path outside the tree unless it is an absolute path some step of
 # this plan already declared (P100 Step 4).
+# amend-contract <state_file> --rename <old>=<new> --reason "<why>" (--stand-in <auth.json> | --pm-card <card>)
+# P117 (13): a pure rename of a path of the current step in the frozen plan (lib/aid-amend-contract.sh).
+cmd_amend_contract() {
+  local sf="" pair="" reason="" auth="" card=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --rename)   pair="${2:-}"; shift 2 ;;
+      --reason)   reason="${2:-}"; shift 2 ;;
+      --stand-in) auth="${2:-}"; shift 2 ;;
+      --pm-card)  card="${2:-}"; shift 2 ;;
+      *) [[ -z "$sf" ]] || die "amend-contract: unexpected argument '$1'"; sf="$1"; shift ;;
+    esac
+  done
+  [[ -n "$sf" && -f "$sf" && "$pair" == *=* ]] || die "amend-contract: usage: aid-fsm.sh amend-contract <state_file> --rename <old>=<new> --reason \"<why>\" (--stand-in <auth.json> | --pm-card <card>)"
+  declare -F aid_amend_contract_rename >/dev/null || source "${SCRIPT_DIR}/lib/aid-amend-contract.sh"
+  aid_amend_contract_rename "$sf" "${pair%%=*}" "${pair#*=}" "$reason" "$auth" "$card"
+}
+
 cmd_amend_scope() {
   local state_file="" reason="" pm_card="" stand_in=""; local -a add=()
   while [[ $# -gt 0 ]]; do
@@ -7006,6 +7024,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     set-field)         shift; cmd_set_field "$@" ;;
     auto-mode)         shift; cmd_auto_mode "$@" ;;
     amend-scope)       shift; cmd_amend_scope "$@" ;;
+    amend-contract)    shift; cmd_amend_contract "$@" ;;
     rebase-plan)       shift; cmd_rebase_plan "$@" ;;
     done-advance)               shift; cmd_done_advance "$@" ;;
     abandon)                    shift; cmd_abandon "$@" ;;
