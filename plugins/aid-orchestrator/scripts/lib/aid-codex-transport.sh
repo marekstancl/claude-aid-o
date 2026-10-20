@@ -23,7 +23,7 @@ aid_codex_binary() {
   # An explicit choice beats every rule: a wrapper, a pinned install, or a test
   # shim that must win whatever version it claims.
   if [[ -n "${AID_CODEX_BIN:-}" && -x "${AID_CODEX_BIN}" ]]; then
-    v="$("${AID_CODEX_BIN}" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
+    v="$("${AID_CODEX_BIN}" --version </dev/null 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
     printf '%s\t%s\n' "${AID_CODEX_BIN}" "${v:-unknown}"
     return 0
   fi
@@ -33,7 +33,7 @@ aid_codex_binary() {
     [[ -x "$bin" && ! -d "$bin" ]] || continue
     if [[ -z "$first" ]]; then
       first="$bin"
-      v="$("$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
+      v="$("$bin" --version </dev/null 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
       # A codex that will not say its version cannot be ranked, and a wrapper or
       # a test shim put FIRST on PATH is a deliberate choice. PATH order wins
       # there; the version rule is only for deciding between two real installs.
@@ -41,7 +41,7 @@ aid_codex_binary() {
       best="$bin"; best_v="$v"
       continue
     fi
-    v="$("$bin" --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
+    v="$("$bin" --version </dev/null 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)" || true
     [[ -n "$v" ]] || continue
     if [[ "$(printf '%s\n%s\n' "$best_v" "$v" | sort -V | tail -1)" == "$v" && "$best_v" != "$v" ]]; then
       best="$bin"; best_v="$v"

@@ -1940,6 +1940,18 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   run _DLG --fingerprint "$FP"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_out_of_scope"*"a third opinion is not asked"* ]]
   [ "$(grep -c . "$L")" = 2 ]
 }
+@test "delegate: a fix that changed the cited lines goes to the next round's confirmation, not to the adjudicator; a change elsewhere does not (P117 (19))" {
+  _dlg auto; _dispute; _fake_codex
+  export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "fine", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
+  local ev; ev="$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .evidence' "$(D 1)/merged.json")"
+  local file="${ev%%:*}" line="${ev#*:}"; line="${line%%[!0-9]*}"
+  sed -i "${line}s/.*/the fix/" "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "fix the cited line"
+  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_fix_pending"* ]]
+  [ "$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .status' "$(D 1)/merged.json")" = disputed ]   # never marked fixed by itself
+  git -C "$R" reset -q --hard HEAD~1
+  echo "an unrelated line" >> "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "elsewhere"
+  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]
+}
 @test "delegate: after /aid-stop (the run declared manual) the automatic delegation is not in force" {
   _dlg auto; _dispute
   mkdir -p "$R/.aid-o/work"; echo 'mode: manual' > "$R/.aid-o/work/auto-mode-state.yaml"

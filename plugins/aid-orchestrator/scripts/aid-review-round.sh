@@ -1558,6 +1558,23 @@ _dlg_supersede() {
   _SUPERSEDED_SHA="${old:-}"
   _log delegate_superseded fingerprint="$fp" old_verdict_sha256="${old:-null}"
 }
+# _dlg_fix_touched <round dir> <finding-json> — 0 when a commit after the round changed the lines the finding
+# cites (its first evidence path:line, or the file when no line is given): the fix is judged by the next round's
+# confirmation, never by an adjudicator, and never marks itself fixed (P117 (19))
+_dlg_fix_touched() {
+  local dir="$1" ev file line rh
+  rh="$(jq -r '.head_sha // ""' "${dir}/round.json" 2>/dev/null)"; [[ -n "$rh" && "$rh" != null ]] || return 1
+  [[ "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)" != "$rh" ]] || return 1
+  ev="$(jq -r '.evidence // ""' <<< "$2")"; ev="${ev%%;*}"; ev="$(sed -E 's/^[0-9a-f]{7,40}://' <<< "$ev")"
+  file="${ev%%:*}"; line="${ev#*:}"; line="${line%%[!0-9]*}"
+  [[ -n "$file" ]] || return 1
+  git -C "$ROOT" diff --quiet "$rh" HEAD -- "$file" 2>/dev/null && return 1
+  [[ -n "$line" ]] || return 0
+  git -C "$ROOT" diff -U0 "$rh" HEAD -- "$file" 2>/dev/null | awk -v l="$line" '
+    /^@@/ { split($2, o, ","); s = substr(o[1], 2) + 0; n = (o[2] == "" ? 1 : o[2] + 0)
+            if (n == 0) { if (l == s || l == s + 1) hit = 1 } else if (l >= s && l < s + n) hit = 1 }
+    END { exit !hit }'
+}
 # _dlg_kind <finding-json> — dispute | open_after_rounds
 _dlg_kind() { [[ "$(jq -r .status <<< "$1")" == disputed ]] && echo dispute || echo open_after_rounds; }
 # _dlg_pending <round dir> <last 0|1> — fingerprints that await a verdict: every
@@ -1646,6 +1663,10 @@ cmd_delegate() {
   fi
   [[ "$(jq -r .status <<< "$finding")" == fixed && -z "$VERDICT" ]] && _die "finding ${FINGERPRINT} is fixed — nothing to settle"
   kind="$(_dlg_kind "$finding")"
+  if [[ -z "$VERDICT" ]] && _dlg_fix_touched "$dir" "$finding"; then
+    _dlg_refuse delegation_fix_pending "a commit after round ${ROUND} changed the lines finding ${FINGERPRINT} cites ($(jq -r '.evidence' <<< "$finding" | cut -d';' -f1)) — a fix is judged by the next round, not by an adjudicator" \
+      "freeze the new candidate (cp7) or prepare the next round (cp2): its confirmation lists the finding and the fix"
+  fi
   [[ "$kind" == dispute ]] || (( last )) \
     || _die "finding ${FINGERPRINT} is open but round ${ROUND} is not the last one the plan allows — the fix loop goes on; nothing is escalated yet"
   fp16="$(aid_delegate_fp16 "$FINGERPRINT")"
