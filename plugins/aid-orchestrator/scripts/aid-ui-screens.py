@@ -213,6 +213,41 @@ def violations(m, proj):
         if not full.startswith(os.path.realpath(proj) + os.sep) or not os.path.isfile(full) \
                 or not 1 <= int(f[1]) <= len(open(full, encoding="utf-8", errors="replace").read().splitlines()):
             out.append(f"{at}/source: {r['source']} není soubor:řádek v projektu")
+    # P118 lint: the classes of findings the roles kept raising in the P116 pilot, decided by code before any gate
+    UNIT = re.compile(r"(?<![\w{])[+−-]?\d[\d  ,.]*\s?(?:USDT|USD|R|%|×)(?![\w])")
+    TIMEISH = re.compile(r"\b\d{1,2}:\d{2}\b|\d[\d  ,.]*\s?(?:USDT|USD|R|%|×|min|s|h)(?![\w])")
+    def lit(txt, where):   # an amount, R, percent or leverage written out instead of a named value: two places can disagree
+        for x in UNIT.findall(re.sub(r"\{[a-z][a-z0-9_]*\}", "", str(txt or ""))):
+            out.append(f"{where}: číslo s jednotkou „{x.strip()}“ napsané přímo - patří do values a sem jako {{klíč}} (jedno číslo, jedno místo)")
+    for i, s in good_s:
+        if TIMEISH.search(s["purpose"]):
+            out.append(f"/screens/{i}/purpose: účel obrazovky nese číslo, čas nebo pravidlo („{TIMEISH.search(s['purpose']).group(0)}“) - to patří do ukázky, stavu nebo values")
+        for j, x in enumerate(s.get("sample") or []):
+            lit(x, f"/screens/{i}/sample/{j}")
+        for md, rows in (s.get("mode_sample") or {}).items():
+            for j, x in enumerate(rows):
+                lit(x, f"/screens/{i}/mode_sample/{md}/{j}")
+        for j, tb in enumerate(s.get("tables") or []):
+            for r, row in enumerate(tb["rows"]):
+                for c, x in enumerate(row):
+                    lit(x, f"/screens/{i}/tables/{j}/rows/{r}/{c}")
+        for k, x in s["states"].items():
+            lit(x, f"/screens/{i}/states/{k}")
+        for j, a in enumerate(s["actions"]):
+            for k in ("label", "confirm", "confirm_yes", "confirm_no", "disabled_reason"):
+                lit(a.get(k), f"/screens/{i}/actions/{j}/{k}")
+    for i, t in good_t:
+        for k, x in t["states"].items():
+            lit(x, f"/tasks/{i}/states/{k}")
+        lit(t["done_when"]["expect"], f"/tasks/{i}/done_when/expect")
+        writes = any((acts.get((st["screen"], st["action"])) or {}).get("kind") in ("submit", "destructive") for st in t["steps"])
+        local = str(t["states"]["failure"]).strip().lower().startswith("nenastává")   # it never reaches a server (writes in the browser only)
+        if writes and not local:   # a task that changes data says who may not and what each failure looks like (P118: roles marked it 6 rounds)
+            if str(t["states"]["permission"]).strip().lower().startswith("nenastává"):
+                out.append(f"/tasks/{i}/states/permission: úloha {t['id']} zapisuje, stav oprávnění (kdo nesmí a co uvidí) nesmí být „nenastává“")
+            kinds = {fp["kind"] for fp in t["failure_paths"]}
+            if "network" not in kinds or not kinds & {"server", "validation"}:
+                out.append(f"/tasks/{i}/failure_paths: úloha {t['id']} zapisuje - potřebuje cestu selhání sítě (network) i odmítnutí serverem (server nebo validation), každou se svým textem")
     return out
 
 

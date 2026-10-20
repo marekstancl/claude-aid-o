@@ -54,6 +54,10 @@ aplikaci nekopíruje: tytéž nástroje, větev podle druhu.
    „nenastává, protože …" ve stavu selhání. U existující aplikace úloha, která nahrazuje dnešní, nese `replaces`.
 4. Model zapiš nástrojem Write do `docs/design/screens.json` (tvar `references/screens.schema.json`) a zkontroluj:
    `aid-ui-screens.py check <projekt>` (exit 0).
+   Kontrola obsahuje lint z tříd nálezů pilotu P116 (P118): částka, R, procento či páka napsaná přímo místo pojmenované
+   hodnoty (`values`), číslo nebo čas v účelu obrazovky, zapisující úloha bez stavu oprávnění nebo bez cesty selhání
+   sítě i serveru (kromě úlohy, která na server nesahá: selhání „nenastává“). Lint běží v sekundách; co projde, se
+   nemusí honit v bráně ani v kole rolí.
 5. Kostra: `aid-ui-serve.sh skeleton <projekt>` postaví z modelu proklikávací aplikaci na stálé adrese: navigace,
    každá obrazovka s přepínačem stavů (`?stav=empty|loading|error|filled`), akce vedou na své obrazovky, mazání přes
    potvrzení. Dokud vlastník model neschválí, nese každá stránka pruh „model čeká na schválení vlastníkem".

@@ -274,7 +274,7 @@ ans_by() {
   t() { sed -n 's/^const T = \(.*\);$/\1/p' "$APP/.aid-ui/scenarios/$1.mjs"; }
   [ "$(t zalozit | jq -c .done)" = '{"screen":"detail","expect":"Nákup na sobotu"}' ]
   t zalozit | jq -e '.variants["fail-1"] == {at_step: 2, kind: "network", recover: "znovu", generated: false}' >/dev/null
-  t smazat | jq -e '.variants == {} and .kinds["detail.smazat"] == "destructive"' >/dev/null
+  t smazat | jq -e '(.variants | keys) == ["fail-1", "fail-2"] and .variants["fail-2"].kind == "server" and .kinds["detail.smazat"] == "destructive"' >/dev/null
   # the runtime: a result is done only when the result screen shows the expected text; a missing state is refused
   grep -q 'done: !!ok' "$APP/.aid-ui/scenarios/zalozit.mjs"; grep -q 'nemá stav scénáře' "$APP/.aid-ui/scenarios/zalozit.mjs"
   node --check "$APP/.aid-ui/scenarios/zalozit.mjs"
@@ -430,13 +430,13 @@ app_handover() {
   "$SCRIPT" chapter-all "$PROJ" --by PM --answer h1 >/dev/null
   run python3 "$PKGPY" zadani "$PROJ/docs/ui/predani.json" --plan-id P001
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  [[ "$output" == *"úlohy 2, selhání 1, smlouva 1, spuštění 1"* ]]
+  [[ "$output" == *"úlohy 2, selhání 4, smlouva 1, spuštění 1"* ]]
   B="$PROJ/.aid-o/plans/P001-zadani.md"
   run bash "$BATS_TEST_DIRNAME/../../aid-plan-lint.sh" --zadani "$B"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   grep -q '^- \[ \] AC1: Aplikace běží na adrese' "$B"; grep -q '^- \[ \] AC2: Smlouva stavby' "$B"
   grep -q 'AC3: Úloha „Založit poznámku“ projde včetně výsledku' "$B"; grep -q 'AC4: Selhání network v kroku 2 úlohy „Založit poznámku“' "$B"
-  grep -q 'AC5: Úloha „Smazat poznámku“' "$B"
+  grep -q 'AC5: Selhání server v kroku 2 úlohy „Založit poznámku“' "$B"; grep -q 'AC6: Úloha „Smazat poznámku“' "$B"
   grep -q -- "--package-gate .aid-o/plans/P001-zadani.md --launch" "$B"
   grep -q "live-row docs/ui/predani.json task_recovery --detail 'zalozit / fail-1: výsledek nastal'" "$B"
   grep -q 'verified_on: skeleton' "$B"
@@ -517,12 +517,12 @@ app_handover() {
       actions: [{id: "stop", label: "STOP", to: "seznam", kind: "submit"}],
       states: {empty: "nenastává, protože lišta je vždy", loading: "Zastavuji…", error: "STOP nedoběhl; Zkusit znovu.", filled: "Lišta."}}]
     | .tasks += [{id: "zastavit", title: "Zastavit", roles: ["uživatel"], steps: [{screen: "seznam", action: "otevrit"}, {screen: "lista", action: "stop"}],
-      done_when: {screen: "seznam", expect: "Pozastaveno"}, states: .tasks[1].states, failure_paths: [{at_step: 2, kind: "network", keeps_input: true, recover: "stop"}]}]'
+      done_when: {screen: "seznam", expect: "Pozastaveno"}, states: .tasks[1].states, failure_paths: [{at_step: 2, kind: "network", keeps_input: true, recover: "stop"}, {at_step: 2, kind: "server", keeps_input: true, recover: "stop"}]}]'
   run python3 "$SCR" check "$APP"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   run python3 "$SCR" matrix "$APP"
   [ "$(jq '[.rows[] | select(.page == "screen:lista")] | length' <<<"$output")" -eq 0 ]
-  [ "$(jq '[.rows[] | select(.page == "zastavit")] | length' <<<"$output")" -eq 3 ]
+  [ "$(jq '[.rows[] | select(.page == "zastavit")] | length' <<<"$output")" -eq 4 ]
   mutate '.screens += [.screens[-1] | .id = "lista2"]'
   run python3 "$SCR" check "$APP"
   [ "$status" -eq 1 ]; [[ "$output" == *"lišta (shell: true) je jen jedna"* ]]
@@ -601,4 +601,19 @@ app_handover() {
   [ "$status" -eq 1 ]; [[ "$output" == *"odešle formulář formular bez povinného pole stitek"* ]]
   mutate '(.tasks[0].steps[1].input.stitek) = "doma"'
   run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+@test "screens (P118 lint): an amount, R or percent written out instead of a named value, a number in a purpose, a writing task without permission or both failure kinds are refused" {
+  mutate '.screens[0].sample = ["Celkem 120 USDT"]'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"/screens/0/sample/0: číslo s jednotkou „120 USDT“"* ]]
+  mutate '.values = {celkem: {value: "120 USDT", source: "ukázka"}} | .screens[0].sample = ["Celkem {celkem}"]'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  mutate '.screens[0].purpose = "Seznam poznámek, obnova po 30 s"'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"/screens/0/purpose: účel obrazovky nese číslo"*"30 s"* ]]
+  cp "$FIXA/docs/design/screens.json" "$M"
+  mutate '(.tasks[0].states.permission) = "nenastává, protože je jeden uživatel"'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"úloha zalozit zapisuje, stav oprávnění"* ]]
+  cp "$FIXA/docs/design/screens.json" "$M"
+  mutate '(.tasks[1].failure_paths) = [{at_step: 2, kind: "network", keeps_input: true, recover: "smazat"}]'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"úloha smazat zapisuje - potřebuje cestu selhání sítě"* ]]
 }

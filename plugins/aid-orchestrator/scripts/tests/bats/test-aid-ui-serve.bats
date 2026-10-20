@@ -553,7 +553,7 @@ J
 
 @test "app-skeleton: a link whose failure the model names stays on its screen when the way fails, and the recover walks on" {
   P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
-  jq '(.tasks[] | select(.id == "smazat") | .failure_paths) = [{at_step: 1, kind: "network", keeps_input: true, recover: "otevrit"}]' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  jq '(.tasks[] | select(.id == "smazat") | .failure_paths) = [{at_step: 1, kind: "network", keeps_input: true, recover: "otevrit"}, {at_step: 2, kind: "server", keeps_input: true, recover: "smazat"}]' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
   "$SERVE" skeleton "$P" >/dev/null
   grep -q 'data-aid-action="seznam.otevrit" data-aid-checked' "$P/site/seznam/index.html"; ! grep -q 'data-aid-action="seznam.novy" data-aid-checked' "$P/site/seznam/index.html"
   python3 "$BATS_TEST_DIRNAME/../../aid-ui-flows.py" generate "$P" >/dev/null
