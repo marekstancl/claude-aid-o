@@ -276,3 +276,11 @@ teardown() {
   grep -q '"focus":"cp2-step-1-generalist"' "$ev/pending-dispatches.jsonl.bad"
   grep -q 'verifier_dispatch_repair' "$ev/timeline.jsonl"; grep -qE '"lines":"[0-9a-f]{64}"' "$ev/timeline.jsonl"
 }
+
+@test "repair: a damaged start whose focus cannot be read is refused, even with --focus '?' — nothing is guessed" {
+  local ev="$BATS_TEST_TMPDIR/rep2"; mkdir -p "$ev"; : > "$ev/timeline.jsonl"
+  printf '%s\n' '{"ts":"2026-10-20T10:01:00Z","event":"start","foc' > "$ev/pending-dispatches.jsonl"
+  run bash "$SCRIPT" repair --evidence-dir "$ev" --focus '?' --reason "a killed emit left half a line"
+  [ "$status" -ne 0 ]; [[ "$output" == *"focus cannot be read"* ]]
+  grep -q '"event":"start"' "$ev/pending-dispatches.jsonl"
+}

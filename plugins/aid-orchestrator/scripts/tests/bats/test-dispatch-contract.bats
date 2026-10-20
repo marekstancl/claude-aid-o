@@ -462,6 +462,14 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   git rm -q --cached src/old.sh
   run aid_dispatch_contract_validate c2.json .aid-o/return.json "$TEST_DIR"
   echo "$output"; [ "$status" -eq 0 ]
+  # a deletion already done when the contract is built is not this step's (AC2, Codex review 20. 10. 2026)
+  git checkout -q -- . 2>/dev/null; git reset -q; git checkout -q -- src/old.sh; git rm -q src/old.sh
+  aid_dispatch_contract_build p2.json 0 c4.json; VERSION="$(jq -r .version c4.json)"
+  [ "$(jq -c .deleted_before_start c4.json)" = '["src/old.sh"]' ]
+  _return '{deleted_files: ["src/old.sh"]}'
+  run aid_dispatch_contract_validate c4.json .aid-o/return.json "$TEST_DIR"
+  [ "$status" -eq 1 ]; [[ "$output" == *"src/old.sh (already deleted when the step started"* ]]
+  git reset -q; git checkout -q -- src/old.sh
   # a Delete of a path that was never tracked deletes nothing (Codex review 19. 10. 2026)
   jq '.steps[0].outputs += ["Delete: `src/never.sh` — x"] | .steps[0].allowed_paths += ["src/never.sh"]' plan.json > p3.json
   aid_dispatch_contract_build p3.json 0 c3.json; VERSION="$(jq -r .version c3.json)"

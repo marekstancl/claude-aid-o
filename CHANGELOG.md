@@ -19,10 +19,10 @@ Plán dojede v `--auto` bez PM a uzávěr se netočí (P117, vstup WAN P109–P1
 - **CP1 závislého plánu:** plán na jednom nesloučeném plánu se kontroluje v jeho pracovní kopii, vazba (plán, worktree, větev, HEAD) se drží v dalších kolech i při startu běhu (`dependency_*`).
 - **Uzávěr:** potvrzovací kolo CP7 jen po prošlém plném kole a opravě čistě dokumentace (`lib/aid-docs-surface.sh`), jinak plné kolo; noční testy jmenované plánem pustí uzávěr sám (`execution.yaml` `plan_tests:`, `plan-tests.json` svázaný s kandidátem, plánem a konfigurací); role `final_claims` už v CP2 u kroku, který mění dokumentaci; nález, jehož citované řádky oprava změnila, jde do dalšího kola, ne rozhodčímu (`delegation_fix_pending`).
 - **Companion:** `ui.copy_extra[]` (soubory repa mimo `ui.dir`, nikdy tajemství), `capture: {"scroll": …}`, `ui.first_shot_timeout_s` (1–120 s), návod pro Vite s `--configLoader runner`.
-- **Cílené opravy místo `--force`:** `aid-emit-dispatch.sh repair` (poškozený záznam dispatch), `cancel` (osiřelý start).
+- **Cílené opravy místo `--force`:** `aid-emit-dispatch.sh repair` (poškozený záznam dispatch; start s nečitelným jménem odmítne a nechá člověku), `cancel` (osiřelý start).
 
 ### Fixed
-- **`expected_deletions` po commitu kroku** (regrese 3.7.0, WAN P112 stál na `--force`): smazání prokáže commit kroku; smazání přes `git rm` (připravené v indexu, soubor je ještě v HEAD) platí také (nalezeno pilotem testbedu).
+- **`expected_deletions` po commitu kroku** (regrese 3.7.0, WAN P112 stál na `--force`): smazání prokáže commit kroku; smazání přes `git rm` (připravené v indexu, soubor je ještě v HEAD) platí také (nalezeno pilotem testbedu); smazání hotové už před začátkem kroku (kontrakt ho zapíše jako `deleted_before_start`) se neuzná.
 - **Commit kroku je transakční** (dočasný index; index uživatele se nikdy nezapíše) a `.aid-o/*` v návratu je hlasité odmítnutí, ne tiché zahození.
 - **Jedno prostředí a jeden limit měření** pro krok, bránu i `produce` (`verification_env`, `_pd_effective_timeout`); výstup bodu, který selhal, se ukládá (8 KiB na proud) a tajemství i hesla v URL se redigují dřív, než cokoli jde na disk.
 - **Delegace:** nový verdikt jen na nový důkaz, starý `superseded`, nejvýš jednou na nález a kolo (pak PM).

@@ -337,8 +337,13 @@ cmd_repair() {
   starts="$(while IFS= read -r line || [[ -n "$line" ]]; do
       [[ -n "$line" ]] || continue
       jq -e 'type == "object" and (.event | type == "string") and (.ts | type == "string")' <<< "$line" >/dev/null 2>&1 && continue
-      if grep -q 'start' <<< "$line"; then grep -oE '"focus"[[:space:]]*:[[:space:]]*"[^"]+"' <<< "$line" | sed -E 's/.*"([^"]+)"$/\1/' | head -1 || echo '?'; fi
+      if grep -q 'start' <<< "$line"; then
+        f="$(grep -oE '"focus"[[:space:]]*:[[:space:]]*"[^"]+"' <<< "$line" | sed -E 's/.*"([^"]+)"$/\1/' | head -1)"; echo "${f:-?}"
+      fi
     done < "$pending" | sort -u)"
+  # a start whose focus cannot be read cannot be withdrawn by name — a person looks at it (Codex review round 2)
+  [[ $'\n'"$starts"$'\n' == *$'\n''?'$'\n'* ]] \
+    && { echo "ERROR: a damaged line looks like a start whose focus cannot be read — repair refuses to guess; inspect ${pending} by hand" >&2; exit 1; }
   if [[ -n "$starts" ]]; then
     [[ -n "$focus" && "$starts" == "$focus" ]] \
       || { echo "ERROR: a damaged line looks like the start of ${starts//$'\n'/, } — name it: repair --focus <that focus> --reason …; it is withdrawn on the record, never dropped silently" >&2; exit 1; }

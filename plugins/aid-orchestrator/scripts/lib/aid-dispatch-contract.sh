@@ -163,6 +163,24 @@ aid_dispatch_contract_build() {
     } + (if (($plan[0].repo_roots // []) | length) > 0 and ($plan[0].direct // false)
          then {repo_roots: [($plan[0].repo_roots)[] | {name, worktree, branch, never: .path}]} else {} end)' <<< "$step")" || { echo "contract: could not assemble the packet for step ${idx}" >&2; return 1; }
 
+  # A declared deletion already done in the run's checkout when the contract is built (staged or gone from the
+  # tree) is no deletion of this step (AC2; Codex review 20. 10. 2026) — recorded here, refused by validate.
+  if [[ "$deletions" != "[]" ]]; then
+    local _root _gone='[]' _dp
+    source "${_AID_DCT_LIB_DIR}/aid-roots.sh"
+    _root="$(aid_run_checkout_root "$(dirname "$plan")/fsm-state.yaml" "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null)" || _root=""
+    if [[ -n "$_root" ]] && git -C "$_root" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+      while IFS= read -r _dp; do
+        [[ -n "$_dp" && "$_dp" != /* ]] || continue
+        git -C "$_root" cat-file -e "HEAD:${_dp}" 2>/dev/null || continue
+        if ! git -C "$_root" ls-files --error-unmatch -- "$_dp" >/dev/null 2>&1 || [[ ! -e "${_root}/${_dp}" ]]; then
+          _gone="$(jq -c --arg p "$_dp" '. + [$p]' <<< "$_gone")"
+        fi
+      done < <(jq -r '.[]' <<< "$deletions")
+    fi
+    [[ "$_gone" != "[]" ]] && body_json="$(jq -c --argjson g "$_gone" '. + {deleted_before_start: $g}' <<< "$body_json")"
+  fi
+
   local version; version="$(_aid_dc_version "$body_json")"
   jq --arg v "$version" '. + {version: $v,
       return_shape: {contract_version: "<the version above, quoted back>",
@@ -376,6 +394,9 @@ aid_dispatch_contract_validate() {
     [[ -n "$d" ]] || continue
     [[ "$d" == /* ]] && _d_path="$d" || _d_path="${root}/${d}"
     if [[ -e "$_d_path" ]]; then gone+=("${d} (still on disk)")
+    elif jq -e --arg p "$d" '(.deleted_before_start // []) | index($p) != null' "$c" >/dev/null 2>&1 \
+         && ! _aid_dc_deleted_by_step "$root" "$c" "$d"; then
+      gone+=("${d} (already deleted when the step started — nothing was deleted by this step)")
     elif [[ $'\n'"$deleted"$'\n' != *$'\n'"$d"$'\n'* ]]; then gone+=("${d} (not in deleted_files)")
     # a deletion of a TRACKED file: still in the index (deleted in the tree), staged (`git rm`: in HEAD, not in
     # the index) or gone in a commit of the step
