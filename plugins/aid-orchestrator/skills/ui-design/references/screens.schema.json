@@ -109,6 +109,7 @@
           "roles": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
           "mode": {"$ref": "#/$defs/id", "description": "režim, ve kterém úloha začíná (Pokračovat začíná v pauze)"},
           "facts": {"type": "array", "items": {"$ref": "#/$defs/id"}, "description": "fakta appky (docs/design/app-facts.json), o která se chování úlohy opírá; u existující aplikace povinné pro zapisující úlohu"},
+          "new": {"type": "string", "pattern": "^[A-Za-z0-9._-]{1,64}$", "description": "chování, které appka dnes nemá: id požadavku z requirements, o který se úloha opírá místo faktů appky"},
           "local": {"type": "boolean", "description": "úloha zapisuje jen v prohlížeči (na server nesahá): lint pak nežádá oprávnění ani cesty selhání a stav selhání je „nenastává, protože …“"},
           "then_mode": {"$ref": "#/$defs/id", "description": "režim po dokončení úlohy (STOP → pozastaveno); kostra ho s výsledkem nastaví"},
           "frequency": {"$ref": "#/$defs/text", "description": "jak často úloha nastává (denně, při poruše…): nejčastější patří na hlavní obrazovku"},

@@ -543,7 +543,7 @@ app_handover() {
   printf 'Poznámky\nZaložit poznámku\n' > "$APP/zadani.md"
   mutate '.requirements = [{id: "z1", source: "zadani.md:2", text: "Založit poznámku", covered_by: ["task:zalozit"]}, {id: "z2", source: "zadani.md:1", text: "Export", out_of_scope: "později"}]
     | .glossary = [{term: "Poznámka", meaning: "jeden zápis"}] | .out_of_scope = [{what: "Export", why: "později"}]
-    | .screens[1].fields = [{name: "nazev", label: "Název poznámky", hint: "do 80 znaků"}]
+    | .screens[1].fields = [{name: "nazev", label: "Název poznámky", hint: "krátký a výstižný"}]
     | .screens[0].sample = ["Nákup · 18. 10."] | .screens[0].data = [{what: "seznam", source: "databáze", freshness: "při načtení"}]
     | .screens[2].actions[1].back = true
     | .screens += [{id: "lista", title: "Lišta", purpose: "Nahoře.", nav: false, shell: true, actions: [], states: {empty: "nenastává, protože vždy", loading: "nenastává, protože vždy", error: "nenastává, protože vždy", filled: "3 poznámky"}}]'
@@ -565,10 +565,10 @@ app_handover() {
 @test "merge-path: one number in one place, named confirm buttons, actions by mode, task states on call, field limits, deep links" {
   SK="$BATS_TEST_DIRNAME/../../lib/aid-ui-skeleton.py"
   mkdir -p "$APP/.aid-ui"; echo '{"type": "webapp", "brand": "none", "local": false}' > "$APP/.aid-ui/variant.json"
-  mutate '.values = {pocet: {value: "3", source: "ukázka: tři poznámky"}} | .modes = [{id: "bezi", label: "Běží"}, {id: "pauza", label: "Pauza"}]
+  mutate '.values = {pocet: {value: "3", source: "ukázka: tři poznámky"}, max_nazev: {value: "80 znaků", source: "zadání: krátký název"}} | .modes = [{id: "bezi", label: "Běží"}, {id: "pauza", label: "Pauza"}]
     | .screens[0].sample = ["Poznámek: {pocet}"] | .screens[2].actions[0].confirm = "Smazat 1 z {pocet} poznámek?"
     | .screens[0].actions[1].query = "id=nakup-1" | .screens[0].actions[0].modes = ["bezi"] | .screens[0].actions[0].disabled_reason = "V pauze nové poznámky nejdou."
-    | .screens[1].fields = [{name: "nazev", label: "Název", required: true, maxlength: 80, error: "Název je povinný, nejvýš 80 znaků."}]
+    | .screens[1].fields = [{name: "nazev", label: "Název", required: true, maxlength: 80, error: "Název je povinný, nejvýš {max_nazev}."}]
     | .tasks[1].mode = "bezi"'
   run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   python3 "$SK" build "$APP" >/dev/null

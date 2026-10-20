@@ -237,8 +237,8 @@ def violations(m, proj):
         facts_ids = {x.get("id") for x in fd["facts"]}
         firm = {x.get("id") for x in fd["facts"] if x.get("kind") not in ("assumption", "unknown")}
         if fd.get("open"):
-            out.append(f"/app-facts: {len(fd['open'])} otevřených otázek (oba vytěžovače se neshodly): " + ", ".join(str(o.get("fact", {}).get("id")) for o in fd["open"][:6])
-                       + " - aid-ui-client.py facts --focus, nebo --drop <id> --reason")
+            out.append(f"/app-facts: {len(fd['open'])} otevřených otázek (vytěžovače si odporují): " + ", ".join(str(o.get("fact", {}).get("id")) for o in fd["open"][:6])
+                       + " - rozhodni podle zdroje a aid-ui-client.py facts --drop <id> --reason")
         for x in fd.get("facts") or []:
             for so in [y for y in x.get("sources") or [] if isinstance(y, dict)]:
                 e = mem.source_ok(proj, so.get("source"), so.get("quote"))
@@ -246,9 +246,9 @@ def violations(m, proj):
                     out.append(f"/app-facts/{x.get('id')}: zdroj zestárl ({e}) - vytěž fakta znovu")
     # P118 lint: the classes of findings the roles kept raising in the P116 pilot, decided by code before any gate
     KEY = re.compile(r"\{[a-z][a-z0-9_]*\}")
-    UNIT = re.compile(r"(?<![\w{])[+−-]?[$€]?\d[\d\u00a0 ,.]*\s?(?:USDT|USD|EUR|CZK|Kč|R|%|×|x)(?![\w])|[$€]\s?\d[\d\u00a0 ,.]*")
+    UNIT = re.compile(r"(?<![\w{])[+−-]?[$€]?\d[\d\u00a0 ,.]*\s?(?:USDT|USD|EUR|CZK|Kč|R|%|×|x|znaků|znaky|znak|minut[ay]?|min|sekund[ay]?|hodin[ay]?|h|dní|dny|dnů|den|ks|kB|MB|GB)(?![\w])|[$€]\s?\d[\d\u00a0 ,.]*")
     DIGIT = re.compile(r"(?<![A-Za-z\d])\d")   # a digit that is not part of a code like F1 or R12
-    def lit(txt, where):   # an amount, R, percent or leverage written out instead of a named value: two places can disagree
+    def lit(txt, where):   # an amount, R, percent, leverage or a limit (characters, time, count) written out instead of a named value: two places can disagree
         for x in UNIT.findall(KEY.sub("", str(txt or ""))):
             out.append(f"{where}: číslo s jednotkou „{x.strip()}“ napsané přímo - patří do values a sem jako {{klíč}} (jedno číslo, jedno místo)")
     for i, s in good_s:
@@ -270,6 +270,8 @@ def violations(m, proj):
         for j, f in enumerate(s.get("fields") or []):
             for k in ("label", "hint", "error"):
                 lit(f.get(k), f"/screens/{i}/fields/{j}/{k}")
+            if KEY.search(str(f.get("hint") or "") + str(f.get("error") or "")) and not any(f.get(k) is not None for k in ("maxlength", "min", "max")):
+                out.append(f"/screens/{i}/fields/{j}: pole {f.get('name')} slibuje v nápovědě nebo hlášce mez ({{klíč}}), ale nemá maxlength, min ani max - kostra i appka ji nevynutí")
         for j, d in enumerate(s.get("data") or []):
             for k in ("what", "freshness"):   # source names files and lines: not checked
                 lit(d.get(k), f"/screens/{i}/data/{j}/{k}")
@@ -295,10 +297,13 @@ def violations(m, proj):
             continue
         if not wsteps:
             continue
-        if facts_ids is not None:   # an existing app: the task's behaviour rests on agreed facts of what the app does
+        reqs = {r.get("id") for r in m.get("requirements") or [] if isinstance(r, dict)}
+        if t.get("new") is not None and t["new"] not in reqs:
+            out.append(f"/tasks/{i}/new: {t['new']} není id požadavku v requirements - nové chování se opírá o bod zadání")
+        elif facts_ids is not None and t.get("new") is None:   # an existing app: the task's behaviour rests on agreed facts of what the app does (or is new: a requirement)
             miss = [x for x in t.get("facts") or [] if x not in facts_ids]
             if not t.get("facts"):
-                out.append(f"/tasks/{i}/facts: úloha {t['id']} zapisuje, ale neodkazuje na fakta appky (app-facts.json), o která se její chování opírá")
+                out.append(f"/tasks/{i}/facts: úloha {t['id']} zapisuje, ale neodkazuje na fakta appky (app-facts.json), o která se její chování opírá, ani na požadavek nového chování (new)")
             elif miss:
                 out.append(f"/tasks/{i}/facts: {', '.join(miss)} není dohodnutý fakt v app-facts.json")
             elif not set(t["facts"]) & firm:

@@ -557,7 +557,7 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 1 ]
 }
 
-@test "facts (P118): two independent readers; a fact both back with an overlapping source is agreed, the rest open and block the lint; a stale quote too" {
+@test "facts (P118): two independent readers at once; the judge pairs the same claim at any lines, a contradiction blocks the lint, one reader's fact only informs; agreed facts persist; a stale quote fails" {
   mkdir -p "$P/src" "$P/docs/design"
   printf 'def on_rejected_sl(p):\n    close_market(p)\n    pause()\n' > "$P/src/execute.py"
   printf '# Roadmapa\nOdmítnutý SL → okamžité zavření marketem + alert.\n' > "$P/docs/content/roadmap.md"
@@ -567,18 +567,29 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   echo "{\"facts\": [$F1, $F3]}" > "$T/ans-owner.json"   # the Codex stub answers what the owner file holds for a prompt without the tech rubric
   printf '#!/usr/bin/env bash\ncat >/dev/null; python3 -c '"'"'import json,sys; print(json.dumps({"result": open(sys.argv[1]).read(), "usage": {}}))'"'"' "%s"\n' "$T/ans-claude.json" > "$T/bin/claude"
   echo "{\"facts\": [$F2]}" > "$T/ans-claude.json"
-  echo '{"pairs": [{"n": 0, "same": false, "why": "jeden mluví o alertu"}]}' > "$T/ans-judge.json"   # same lines, different claims: both stay open
+  echo '{"same": [], "conflict": []}' > "$T/ans-judge.json"   # nothing paired: all three only inform, nothing blocks
   run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  jq -e '(.facts | length) == 0 and ([.open[].fact.id] | sort) == ["jen-codex", "sl-odmitnut", "zavreni-sl"]' "$P/docs/design/app-facts.json" >/dev/null
-  echo '{"pairs": [{"n": 0, "same": true, "why": "totéž"}]}' > "$T/ans-judge.json"
+  jq -e '(.facts | length) == 0 and (.open | length) == 0 and ([.unconfirmed[].fact.id] | sort) == ["jen-codex", "sl-odmitnut", "zavreni-sl"]' "$P/docs/design/app-facts.json" >/dev/null
+  echo '{"same": [{"a": 0, "b": 0}]}' > "$T/ans-judge.json"   # the same claim under other ids and other lines
   run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  jq -e '(.facts | map(.id)) == ["sl-odmitnut"] and .facts[0].agreed_by == ["codex", "opus"] and (.open | map(.fact.id)) == ["jen-codex"]' "$P/docs/design/app-facts.json" >/dev/null || { jq -c '[.facts[].id, [.open[].fact.id]]' "$P/docs/design/app-facts.json"; return 1; }
+  jq -e '(.facts | map(.id)) == ["sl-odmitnut"] and .facts[0].agreed_by == ["codex", "opus"] and (.unconfirmed | map(.fact.id)) == ["jen-codex"]' "$P/docs/design/app-facts.json" >/dev/null || { jq -c '[.facts[].id, [.unconfirmed[].fact.id]]' "$P/docs/design/app-facts.json"; return 1; }
+  # a pair of different kinds is no agreement even when the judge says so; a contradiction is open; the agreed fact stays
+  echo '{"same": [{"a": 1, "b": 0}], "conflict": [{"a": 1, "b": 0, "why": "alert vs pauza"}]}' > "$T/ans-judge.json"
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '(.facts | map(.id)) == ["sl-odmitnut"] and (.open | map(.fact.id)) == ["spor-jen-codex"]' "$P/docs/design/app-facts.json" >/dev/null || { jq -c '[.facts[].id, [.open[].fact.id]]' "$P/docs/design/app-facts.json"; return 1; }
+  echo '{"same": [], "conflict": [], "x": "' > "$T/ans-judge.json"   # no valid judge: nothing written
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 1 ]; jq -e '(.open | map(.fact.id)) == ["spor-jen-codex"]' "$P/docs/design/app-facts.json" >/dev/null
   # the model of an existing app: an open question and a writing task without facts are refused
   mkdir -p "$P/docs/design"; cp "$SC/tests/fixtures/aid-ui/app/docs/design/screens.json" "$P/docs/design/screens.json"
   run python3 "$SC/aid-ui-screens.py" check "$P"; [ "$status" -eq 1 ]
-  [[ "$output" == *"1 otevřených otázek"*"jen-codex"* ]]; [[ "$output" == *"úloha zalozit zapisuje, ale neodkazuje na fakta appky"* ]]
-  run python3 "$SC/aid-ui-client.py" facts "$P" --drop jen-codex; [ "$status" -eq 2 ]
-  python3 "$SC/aid-ui-client.py" facts "$P" --drop jen-codex --reason "Telegram se v UI neřeší" >/dev/null
+  [[ "$output" == *"1 otevřených otázek"*"spor-jen-codex"* ]]; [[ "$output" == *"úloha zalozit zapisuje, ale neodkazuje na fakta appky"* ]]
+  jq '.tasks[0].new = "R9"' "$P/docs/design/screens.json" > "$T/m.json" && mv "$T/m.json" "$P/docs/design/screens.json"   # new behaviour needs a real requirement
+  run python3 "$SC/aid-ui-screens.py" check "$P"; [[ "$output" == *"/tasks/0/new: R9 není id požadavku"* ]]
+  jq '.requirements = [{"id": "R9", "source": "docs/content/roadmap.md:2", "text": "zavření a alert", "covered_by": ["task:zalozit"]}]' "$P/docs/design/screens.json" > "$T/m.json" && mv "$T/m.json" "$P/docs/design/screens.json"
+  run python3 "$SC/aid-ui-screens.py" check "$P"; [[ "$output" != *"/tasks/0/"* ]]; [[ "$output" == *"úloha smazat zapisuje, ale neodkazuje na fakta appky"* ]]
+  jq 'del(.tasks[0].new) | del(.requirements)' "$P/docs/design/screens.json" > "$T/m.json" && mv "$T/m.json" "$P/docs/design/screens.json"
+  run python3 "$SC/aid-ui-client.py" facts "$P" --drop spor-jen-codex; [ "$status" -eq 2 ]
+  python3 "$SC/aid-ui-client.py" facts "$P" --drop spor-jen-codex --reason "Telegram se v UI neřeší" >/dev/null
   jq '(.tasks[] | .facts) = ["sl-odmitnut"]' "$P/docs/design/screens.json" > "$T/m.json" && mv "$T/m.json" "$P/docs/design/screens.json"
   run python3 "$SC/aid-ui-screens.py" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   sed -i 's/close_market(p)/close_limit(p)/' "$P/src/execute.py"   # the code changed under the fact
