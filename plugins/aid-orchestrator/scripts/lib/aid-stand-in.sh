@@ -75,7 +75,7 @@ aid_stand_in_consume() {
   pp="$(yq -r '.plan_path // ""' "${ev}/fsm-state.yaml" 2>/dev/null)"; pid="$( [[ -f "$pp" ]] && _aid_fm_get "$pp" id 2>/dev/null)"
   sroot="$(aid_state_root "$(dirname "$(realpath -m "$ev")")" 2>/dev/null || jq -r .state_root "$auth")"
   ledger="$(aid_delegate_ledger "$sroot" "$pid")"
-  jq -e -s --arg i "$(jq -r .id "$auth")" 'any(.[]; .checkpoint == "stand_in_used" and .id == $i)' "$ledger" >/dev/null 2>&1 && return 0
+  jq -e -s --arg i "$(jq -r .id "$auth")" --arg s "$(jq -r .verdict_sha256 "$auth")" 'any(.[]; .checkpoint == "stand_in_used" and .id == $i and .verdict_sha256 == $s)' "$ledger" >/dev/null 2>&1 && return 0
   jq -nc --arg i "$(jq -r .id "$auth")" --arg s "$(jq -r .verdict_sha256 "$auth")" --argjson a "$(jq -cS . <<< "$3")" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     '{checkpoint: "stand_in_used", id: $i, verdict_sha256: $s, action: $a, at: $at}' >> "$ledger"
 }

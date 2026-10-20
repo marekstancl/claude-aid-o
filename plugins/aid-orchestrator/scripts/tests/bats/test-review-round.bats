@@ -497,6 +497,16 @@ _mplan() {
   echo "nález $fp" >> "$card"; touch -d '-10 seconds' "$card"
   run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]; [[ "$output" == *"no PM prompt after"* ]]
 }
+@test "step: a step that changes documentation gets final_claims in its own review (when: docs_surface); a step that does not, does not (P117 (18))" {
+  _repo; _sc
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" != *"prompt-final_claims.md"* ]]
+  rm -rf "$E/cp2"
+  echo "- **New thing** — the app now does it" > "$R/CHANGELOG.md"; git -C "$R" add -A; git -C "$R" commit -qm "docs: changelog"
+  jq '.steps[0].outputs += ["Modify: `CHANGELOG.md` — the line"]' "$E/plan.json" > "$E/p" && mv "$E/p" "$E/plan.json"; _sc
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"prompt-final_claims.md"* ]]
+  [ "$(jq -r '.reviewers_expected | index("final_claims") != null' "$(D 1)/round.json")" = true ]
+}
+
 @test "step: prepare needs a step check at HEAD and a review verdict; the default asks security on every reviewed step, a gated project only on a pattern" {
   _repo
   run _S prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"no step-check.json"* ]]

@@ -219,8 +219,8 @@ aid_review_config_validate() {
     esac
     case "${RC_WHEN[$i]}" in
       "") unconditional=$((unconditional + 1)) ;;
-      review+security) ;;
-      *) _aid_rc_fail "role ${role}: when must be review+security (got '${RC_WHEN[$i]}')"; return 1 ;;
+      review+security|docs_surface) ;;   # docs_surface (P117 (18)): the step changes documentation (lib/aid-docs-surface.sh)
+      *) _aid_rc_fail "role ${role}: when must be review+security or docs_surface (got '${RC_WHEN[$i]}')"; return 1 ;;
     esac
     case "${RC_FULL_WHEN[$i]:-}" in
       ""|review+security) ;;

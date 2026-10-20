@@ -262,8 +262,19 @@ _expected_roles() {
     local verdict i
     verdict="$(jq -r '.verdict' "$STEPCHECK")"
     roles=""
+    local docs=0 f
+    declare -F aid_docs_surface >/dev/null || source "${SCRIPT_DIR}/lib/aid-docs-surface.sh"
+    while IFS= read -r f; do
+      [[ -n "$f" ]] && aid_docs_surface "$f" "$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")/.aid-o/config/execution.yaml" && { docs=1; break; }
+    done < <(jq -r '.files.in_scope[]? // empty' "$STEPCHECK")
     for i in "${!RC_ROLE[@]}"; do
-      [[ -z "${RC_WHEN[$i]}" || "${RC_WHEN[$i]}" == "$verdict" ]] && roles+="${RC_ROLE[$i]} "
+      if [[ "${RC_WHEN[$i]}" == docs_surface ]]; then
+        # P117 (18): the claims a step makes in CHANGELOG, README, docs or the project's help are checked in its
+        # own review (CP2), not first at the close (WAN P111: CP7 found them, a whole attempt per claim)
+        (( docs )) && roles+="${RC_ROLE[$i]} "
+      else
+        [[ -z "${RC_WHEN[$i]}" || "${RC_WHEN[$i]}" == "$verdict" ]] && roles+="${RC_ROLE[$i]} "
+      fi
     done
     if (( n >= 2 )); then
       # The confirmation round asks the reporters of what is still open.
@@ -604,7 +615,7 @@ cmd_prepare() {
     [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 ]] && prevdir="$(_previous_attempt_round)"
     declare -F aid_docs_only >/dev/null || source "${SCRIPT_DIR}/lib/aid-docs-surface.sh"
     if [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 && -z "$prevdir" ]] \
-       && aid_docs_only "${EVID}/fix-class.json" "$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")/.aid-o/config/execution.yaml"; then
+       && aid_docs_only "${EVID}/fix-class.json"; then
       prevdir="$(_previous_attempt_full_pass)"; [[ -n "$prevdir" ]] && cp7_mode=confirmation
     fi
     if [[ "$CHECKPOINT" == cp7 ]]; then

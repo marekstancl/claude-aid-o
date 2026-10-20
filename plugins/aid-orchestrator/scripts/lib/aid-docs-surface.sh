@@ -27,15 +27,18 @@ aid_docs_surface() {
   return 1
 }
 
-# aid_docs_only <fix-class.json> [execution.yaml] — 0 when the fix changed at least one path and every changed,
-# non-ancillary path is documentation (and nothing feeds the criteria: the plan)
+# aid_docs_only <fix-class.json> — 0 when the fix changed at least one path and every changed, non-ancillary path
+# is documentation by the BUILT-IN list alone (and nothing feeds the criteria: the plan). The project's help_paths
+# do not count here: they come from the state root's working copy, and a confirmation round is less review
+# (security review of P117); they only ADD the final_claims role in CP2.
 aid_docs_only() {
-  local fc="$1" ex="${2:-}" p n=0
+  local fc="$1" p n=0
   [[ -f "$fc" ]] || return 1
   jq -e '.reason == null and ((.invalidated_feeds // []) | index("criteria") | not)' "$fc" >/dev/null 2>&1 || return 1
   while IFS= read -r p; do
     [[ -n "$p" ]] || continue; n=$((n + 1))
-    aid_docs_surface "$p" "$ex" || return 1
+    [[ "${p##*/}" == execution.yaml ]] && return 1
+    aid_docs_surface "$p" || return 1
   done < <(jq -r '.changed_paths[] | select((.feeds // []) | length > 0) | .path' "$fc")
   (( n > 0 ))
 }

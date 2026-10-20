@@ -1194,7 +1194,7 @@ _fsm_refusal_next() {
     plan_manifest_missing|plan_branch_mismatch)
       next="start the plan's run again through plan-run, which writes the manifest entry and runs init: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}" --restart --reason "<why>")" ;;
     contract_return_missing|contract_return_not_done)
-      next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent; blocked again in an --auto run: the stand-in decides — $(_fsm_cmd bash "${SCRIPT_DIR}/aid-stand-in.sh" ask --evidence-dir "$(dirname "$sf")" --code contract_return_not_done --proposal "<{\"kind\": \"blocked_step\", \"step\": N, \"action\": \"redispatch\", \"why\": …}>"), then $(_fsm_cmd bash "$fsm" step-redispatch "$sf" --stand-in "<auth.json>" --reason "<why>") and dispatch again (a rename or a widening is asked as its own kind); otherwise a Blocked card), then: $inc" ;;
+      next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent; blocked again in an --auto run: the stand-in decides — $(_fsm_cmd bash "${SCRIPT_DIR}/aid-stand-in.sh" ask --evidence-dir "$(dirname "$sf")" --code contract_return_not_done --proposal "<{\"kind\": \"blocked_step\", \"step\": N, \"action\": \"redispatch\", \"return_sha256\": \"<sha256 of the step's return.json, or none>\", \"why\": …}>"), then $(_fsm_cmd bash "$fsm" step-redispatch "$sf" --stand-in "<auth.json>" --reason "<why>") and dispatch again (a rename or a widening is asked as its own kind); otherwise a Blocked card), then: $inc" ;;
     missing_step_verify|verify_no_ac_checklist|verify_no_memory_used|verify_no_memory_written|step_verify_not_pass|verify_no_commit_ref)
       next="write $(_fsm_cmd "$vf") (pipeline.md §Output verification), then: $inc" ;;
     binding_wrong_commit|binding_plan_step_hash_mismatch|incomplete_step_binding)
@@ -5535,8 +5535,15 @@ cmd_step_redispatch() {
   done
   [[ -n "$sf" && -f "$sf" && -n "$auth" && ${#reason} -ge 20 ]] || die "step-redispatch: usage: aid-fsm.sh step-redispatch <state_file> --stand-in <auth.json> --reason \"<why, 20+ chars>\""
   local ev cs sid why exp at; ev="$(cd "$(dirname "$sf")" && pwd)"; cs="$(yaml_field "$sf" current_step)"
+  [[ "$(yaml_field "$sf" state)" == EXECUTE ]] || die "step-redispatch: the run is in $(yaml_field "$sf" state), not EXECUTE — only a step being worked is dispatched again"
   sid="$(jq -r --argjson i "$cs" '.steps[$i].id // ""' "${ev}/plan.json")"; [[ -n "$sid" ]] || die "step-redispatch: no step ${cs} in ${ev}/plan.json"
-  exp="$(jq -nc --argjson s "$cs" '{step: $s, action: "redispatch"}')"
+  # only a step whose return is missing or not done (a done return advances with increment-step, Codex review)
+  if [[ -f "${ev}/steps/${sid}/return.json" ]] && jq -e '.step_status == "done" and all(.gates[]?; .result != "fail")' "${ev}/steps/${sid}/return.json" >/dev/null 2>&1; then
+    die "step-redispatch: step $((cs + 1)) has a done return — run increment-step; nothing to dispatch again"
+  fi
+  # the permission names THIS blocked return (its digest, or "none"): each new blocked return needs a new decision
+  local rsha=none; [[ -f "${ev}/steps/${sid}/return.json" ]] && rsha="$(sha256sum "${ev}/steps/${sid}/return.json" | cut -d' ' -f1)"
+  exp="$(jq -nc --argjson s "$cs" --arg r "$rsha" '{step: $s, action: "redispatch", return_sha256: $r}')"
   declare -F aid_stand_in_verify >/dev/null || source "${SCRIPT_DIR}/lib/aid-stand-in.sh"
   why="$(aid_stand_in_verify "$ev" "$auth" blocked_step "$exp" "$(aid_invoke_root 2>/dev/null || pwd)")" || die "step-redispatch: --stand-in ${auth}: ${why}"
   aid_stand_in_consume "$ev" "$auth" "$exp" || die "step-redispatch: the use of ${auth} could not be recorded in the plan's ledger"

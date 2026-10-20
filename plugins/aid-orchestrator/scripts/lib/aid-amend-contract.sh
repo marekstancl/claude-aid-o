@@ -43,7 +43,7 @@ aid_amend_contract_rename() {
   [[ "$old" =~ ^[A-Za-z0-9._/-]+$ && "$new" =~ ^[A-Za-z0-9._/-]+$ ]] || _ac_fail rename_refused "a path of letters, digits and . _ / - only" "rename to a plain path"
   # the same rename again after it applied: done, nothing changes (an idempotent retry)
   if jq -e --arg o "$old" --arg n "$new" 'any(.[]; .rename.old == $o and .rename.new == $n)' "${ev}/steps/"*/contract-amendments.json >/dev/null 2>&1 \
-     && ! grep -qF -- "$old" "$pj"; then
+     && ! _aid_ac_has "$pj" "$old"; then
     echo "already renamed ${old} → ${new}; nothing changed"; return 0
   fi
   [[ "$(dirname "$old")" == "$(dirname "$new")" ]] || _ac_fail rename_outside_step "the new name moves the file to another directory ($(dirname "$new"))" "rename in place; a move is a scope change (amend-scope)"

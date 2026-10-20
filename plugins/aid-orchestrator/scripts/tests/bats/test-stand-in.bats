@@ -92,12 +92,21 @@ _verify() {
   _verify scope_extension '{"step": 1, "paths": ["src/new.py"]}'; [[ "$output" == *"does not cover this action"* ]]
   _verify scope_extension '{"step": 1, "paths": ["src/second.py", "src/new.py"]}'; [ "$output" = PERMITTED ]
   _prop '{"kind": "blocked_step", "step": 1, "action": "rename"}'; _ask contract_return_not_done; [ "$status" -eq 3 ]   # its own kind
-  _prop '{"kind": "blocked_step", "step": 1, "action": "redispatch", "why": "the agent ran out of context twice"}'
+  printf 'current_step: 1\nstate: EXECUTE\n' >> "$EV/fsm-state.yaml"; mkdir -p "$EV/steps/s2"
+  echo '{"step_status": "blocked"}' > "$EV/steps/s2/return.json"
+  local rs; rs="$(sha256sum "$EV/steps/s2/return.json" | cut -d' ' -f1)"
+  _prop "{\"kind\": \"blocked_step\", \"step\": 1, \"action\": \"redispatch\", \"return_sha256\": \"$rs\", \"why\": \"the agent ran out of context twice\"}"
   _ask contract_return_not_done; [ "$status" -eq 4 ]; _claude approve technical; _record; [ "$status" -eq 0 ]
-  # the consumer: the blocked return is set aside, the step goes out again; the permission is used once
-  printf 'current_step: 1\nstate: EXECUTE\n' >> "$EV/fsm-state.yaml"; mkdir -p "$EV/steps/s2"; echo '{"status": "blocked"}' > "$EV/steps/s2/return.json"
-  run bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" step-redispatch "$EV/fsm-state.yaml" --stand-in "$D/auth.json" --reason "the agent ran out of context twice"
+  # the consumer: the blocked return is set aside, the step goes out again — once per blocked return
+  local auth="$D/auth.json"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" step-redispatch "$EV/fsm-state.yaml" --stand-in "$auth" --reason "the agent ran out of context twice"
   echo "$output"; [ "$status" -eq 0 ]; [ ! -f "$EV/steps/s2/return.json" ]; ls "$EV/steps/s2/"return.blocked-*.json
+  echo '{"step_status": "blocked", "note": "again"}' > "$EV/steps/s2/return.json"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" step-redispatch "$EV/fsm-state.yaml" --stand-in "$auth" --reason "the agent ran out of context twice"
+  [ "$status" -ne 0 ]                                                  # a new blocked return: a new decision
+  echo '{"step_status": "done", "gates": []}' > "$EV/steps/s2/return.json"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" step-redispatch "$EV/fsm-state.yaml" --stand-in "$auth" --reason "the agent ran out of context twice"
+  [ "$status" -ne 0 ]; [[ "$output" == *"has a done return"* ]]      # a done return is advanced, not dispatched again
   grep -q '"checkpoint":"stand_in_used"' "$R/.aid-o/work/evidence/P950/delegated-disputes.jsonl"
 }
 

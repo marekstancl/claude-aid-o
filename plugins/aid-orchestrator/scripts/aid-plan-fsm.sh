@@ -5053,7 +5053,7 @@ _pfsm_cp7_confirmation_bad() {
   [[ -n "$_lr" && "$(jq -r '.mode // "full"' "${_lr}/round.json" 2>/dev/null)" == confirmation ]] || return 0
   _co="$(jq -r '.confirmation_of // ""' "${_lr}/round.json")"
   declare -F aid_docs_only >/dev/null || source "${SCRIPT_DIR}/lib/aid-docs-surface.sh"
-  if ! aid_docs_only "$_fc" "$(aid_state_root 2>/dev/null || pwd)/.aid-o/config/execution.yaml"; then echo "the fix since the previous candidate is not documentation only"; return 1; fi
+  if ! aid_docs_only "$_fc"; then echo "the fix since the previous candidate is not documentation only"; return 1; fi
   if [[ ! -f "${_co}/measurement.json" || "$(jq -r .verdict "${_co}/measurement.json")" != pass || "$(jq -r '.mode // "full"' "${_co}/round.json")" != full ]]; then
     echo "${_co:-<none>} is no passed full round"; return 1; fi
   if [[ "$(jq -r .head_sha "${_co}/round.json")" != "$(jq -r .previous_candidate "$_fc")" ]]; then
