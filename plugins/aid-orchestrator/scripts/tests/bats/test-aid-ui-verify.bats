@@ -548,7 +548,7 @@ YML
 
 @test "flow ids that are not an allowlisted name are refused and nothing is imported; a symlinked scenario is refused; role/state cannot move a screenshot" {
   mkdir -p "$T/out" "$PROJ/.aid-ui/scenarios"
-  echo '{"viewports":[390],"browsers":["chromium"],"checks":{"http_200":"x","app_task_states":"x"}}' > "$T/ck.json"
+  echo '{"viewports":[390],"browsers":["chromium"],"checks":{"http_200":"x","app_task_states":"x","screenshots_reviewed":"x"}}' > "$T/ck.json"
   for f in "$PROJ/x.mjs" "$PROJ/.aid-ui/x.mjs" "$T/evil.mjs"; do
     echo "import fs from 'node:fs'; fs.writeFileSync('$T/imported', '$f'); export default async () => {};" > "$f"
   done
@@ -956,4 +956,18 @@ PY
   sed -i "s|    notes.forEach(function (n, i) {|    if (localStorage.getItem('navstiveno')) notes = [];\n    notes.forEach(function (n, i) {|" "$T/appsite/app.js"
   gate_app
   [ "$status" -eq 0 ] || { jq -c '.rows[] | select(.status != "pass") | [.check, .page, .state, .detail]' "$RES" | head; return 1; }
+}
+
+@test "app-gate (P118): one worker or four give the same rows in the same order; a gate that names no screenshot takes none" {
+  app_gate
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$T/appsite" >/dev/null
+  AID_UI_GATE_WORKERS=1 run bash "$SC/aid-ui-verify.sh" "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -c '[.rows[] | [.check, .page, .state, .viewport, .status]]' "$RES" > "$T/w1.json"
+  AID_UI_GATE_WORKERS=4 run bash "$SC/aid-ui-verify.sh" "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -c '[.rows[] | [.check, .page, .state, .viewport, .status]]' "$RES" > "$T/w4.json"
+  cmp -s "$T/w1.json" "$T/w4.json" || { diff <(jq -c '.[]' "$T/w1.json") <(jq -c '.[]' "$T/w4.json") | head; return 1; }
+  # the precheck names six checks and no screenshot: none is taken (P118: 70 % of the gate was unread work)
+  python3 "$SC/lib/aid-ui-skeleton.py" build "$PROJ" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ" --precheck; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ -z "$(find "$PROJ/.aid-ui/precheck" -name '*.png' 2>/dev/null)" ]
 }
