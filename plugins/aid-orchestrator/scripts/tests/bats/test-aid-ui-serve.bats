@@ -609,5 +609,15 @@ for (const how of ['abort', '500']) { const pg = await b.newPage(); await pg.got
 console.log(r.join(' | ')); await b.close();
 J
   out="$(node "$BATS_TEST_TMPDIR/k.mjs")"; [ "$out" = "Spojení vypadlo, zkus znovu. | Server smazání odmítl." ] || { echo "$out"; return 1; }
+  # a second try in the same page shows only its own outcome
+  cat > "$BATS_TEST_TMPDIR/k2.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); await pg.goto('http://127.0.0.1:39918/detail/'); let how = 'abort';
+await pg.route('**/seznam/**', x => how === 'abort' ? x.abort() : x.fulfill({ status: 500, body: 'x' }));
+for (const h of ['abort', '500']) { how = h; await pg.click('[data-aid-action="detail.smazat"]'); await pg.click('[data-aid-confirm-yes="detail.smazat"]'); await pg.waitForTimeout(400); }
+console.log((await pg.locator('[data-aid-fail-for="detail.smazat"]:visible').allInnerTexts()).join(' + ')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/k2.mjs")"; [ "$out" = "Server smazání odmítl." ] || { echo "$out"; return 1; }
   "$SERVE" stop skeleton
 }

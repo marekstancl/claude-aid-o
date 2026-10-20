@@ -246,6 +246,7 @@ def write_pages(p, site, entries):
 STATES = (("empty", "Prázdno"), ("loading", "Načítání"), ("error", "Chyba"), ("filled", "Naplněno"))   # the model's order
 APP_JS = """(function(){function failFor(k,e){if(!k)return null;var kind=(e&&/^[0-9]+$/.test(e.message))?'server':'network';   // an HTTP status vs a dropped connection
 return document.querySelector('[data-aid-fail-for="'+k+'"][data-aid-fail-kind="'+kind+'"]')||document.querySelector('[data-aid-fail-for="'+k+'"]:not([data-aid-fail-kind])');}
+function clearFail(){document.querySelectorAll('[data-aid-fail-for],[data-aid-error],[data-aid-error-global]').forEach(function(x){x.hidden=true;});}   // a new try shows only its own outcome
 var q=new URLSearchParams(location.search),st=q.get('stav')||'filled',ok=false,done=(q.get('vysledek')||'').split(',');
 document.querySelectorAll('main [data-aid-state]').forEach(function(e){if(e.dataset.aidState===st)ok=true;});
 if(!ok)st='filled';document.querySelectorAll('main [data-aid-state]').forEach(function(e){e.hidden=e.dataset.aidState!==st;});
@@ -270,12 +271,12 @@ document.querySelectorAll('dialog[data-aid-confirm]').forEach(function(d){d.clos
 if(b)b.addEventListener('click',function(){d.showModal();d.querySelector('[data-aid-confirm-no]').focus();});
 d.querySelector('[data-aid-confirm-no]').addEventListener('click',function(){d.close();if(b)b.focus();});
 var y=d.querySelector('[data-aid-confirm-yes]'),ge=document.querySelector('[data-aid-error-global]');
-y.setAttribute('role','button');y.addEventListener('keydown',function(ev){if(ev.key===' '){ev.preventDefault();y.click();}});y.addEventListener('click',function(ev){ev.preventDefault();
+y.setAttribute('role','button');y.addEventListener('keydown',function(ev){if(ev.key===' '){ev.preventDefault();y.click();}});y.addEventListener('click',function(ev){ev.preventDefault();clearFail();
 fetch(y.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=y.href;}).catch(function(e){d.close();var fe=failFor(d.dataset.aidConfirm,e)||ge;fe.hidden=false;fe.focus();});});});
-document.querySelectorAll('a[data-aid-checked]').forEach(function(a){a.addEventListener('click',function(ev){if(!a.href)return;ev.preventDefault();var ge=document.querySelector('[data-aid-error-global]');
+document.querySelectorAll('a[data-aid-checked]').forEach(function(a){a.addEventListener('click',function(ev){if(!a.href)return;ev.preventDefault();clearFail();var ge=document.querySelector('[data-aid-error-global]');
 fetch(a.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=a.href;}).catch(function(e){var fe=failFor(a.dataset.aidAction,e)||ge;if(fe){fe.hidden=false;fe.focus();}});});});
 document.querySelectorAll('form[data-aid-form]').forEach(function(f){var err=f.querySelector('[data-aid-error]');
-f.addEventListener('submit',function(ev){ev.preventDefault();var bad=null;f.querySelectorAll('input,select').forEach(function(i){var e=document.getElementById(i.id+'-chyba');
+f.addEventListener('submit',function(ev){ev.preventDefault();clearFail();var bad=null;f.querySelectorAll('input,select').forEach(function(i){var e=document.getElementById(i.id+'-chyba');
 if(e)e.hidden=i.checkValidity();if(!i.checkValidity()){i.setAttribute('aria-invalid','true');bad=bad||i;}else i.removeAttribute('aria-invalid');});
 if(bad){bad.focus();return;}var b=ev.submitter,to=(b&&b.getAttribute('formaction'))||f.getAttribute('action'),d=new URLSearchParams(new FormData(f));
 if(b&&b.name)d.set(b.name,b.value);var x=new URL(to,location.href);d.forEach(function(v,k){x.searchParams.set(k,v);});var u=x.pathname+x.search;f.setAttribute('aria-busy','true');if(b)b.disabled=true;
