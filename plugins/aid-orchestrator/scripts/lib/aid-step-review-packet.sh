@@ -344,6 +344,14 @@ aid_step_review_prompt_render() {
       echo "## What the step reviews already judged (do not repeat; read ACROSS the steps)"
       jq -r '.epics[] | "- \(.epic): its steps were reviewed one by one — \(.findings | length) finding(s) the step rounds left open" + ((.findings | map("\n  - [\(.severity), \(.status)] \(.claim) (\(.evidence))") | join("")))' "${dir}/packet/epic-findings.json"
       echo
+      # P117 (17): the plan's nightly tests, run by the close at this candidate
+      local _ptf; _ptf="$(dirname "$(dirname "$dir")")/plan-tests.json"
+      if [[ -f "$_ptf" ]] && [[ "$(jq '.tests | length' "$_ptf")" -gt 0 ]]; then
+        echo "## The plan's nightly tests, run by the close at $(jq -r '.candidate_sha[:12]' "$_ptf") (${_ptf})"
+        jq -r '.tests[] | "- \(.path): \(if .exit == 0 then "pass" elif .exit == null then "NOT RUN — \(.reason)" else "exit \(.exit)" end)\(if .duration_s then " in \(.duration_s) s" else "" end) — \(.command // "")"' "$_ptf"
+        echo "This is the evidence for these tests; do not report them as unproven."
+        echo
+      fi
       echo "## Gates at the candidate (gates_report.json on disk: ${dir}/packet/gates_report.json)"
       jq -r "${AID_GATE_ROW_JQ}"'.gates | gate_rows_normalize | to_entries[] | select((.key|startswith("_")|not) and (.value|type) == "object")
              | "- \(.key): \(.value.status) (\(.value.reason))" + (if .value.waived then " waived" else "" end)

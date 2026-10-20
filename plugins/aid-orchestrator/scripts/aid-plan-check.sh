@@ -601,6 +601,20 @@ while INNER: progs(INNER.pop(0), "")
     done < <(yq -r '.plan_checks[] | [(.name // "unnamed"), (.command // ""), ((.timeout_s // "") | tostring)] | @tsv' "$EXEC_YAML" 2>/dev/null)
     rm -f "$_np"
   fi
+  # B13 — a test the plan names that the close cannot run (P117 (2)/(17); WAN P111: the close profile never ran
+  # the plan's Playwright/T2 tests). With plan_tests declared, every plan-named test needs an entry that runs it;
+  # without them, a plan-named test that is already a t2 suite is a warning (the close would have nothing to run).
+  declare -F aid_plan_tests_named >/dev/null || source "${SCRIPT_DIR}/lib/aid-plan-tests.sh"
+  _pt_decl="$(yq -r '(.plan_tests // []) | length' "$EXEC_YAML" 2>/dev/null || echo 0)"
+  while IFS= read -r _pt; do
+    [[ -n "$_pt" ]] || continue
+    if [[ "${_pt_decl:-0}" -gt 0 ]]; then
+      aid_plan_tests_command "$EXEC_YAML" "$_pt" >/dev/null || _block "B13" "$PLAN" "the plan names the test \`${_pt}\`, and no plan_tests entry in execution.yaml runs it — the close could not prove it"
+    elif [[ -f "$(_abs "$_pt")" && "$(aid_test_tier_of "$(_abs "$_pt")" 2>/dev/null)" == t2 ]]; then
+      _warn "B13" "$PLAN" "the plan names the nightly test \`${_pt}\`; declare plan_tests in execution.yaml so the close runs it and attaches the result"
+    fi
+  done < <(aid_plan_tests_named "$PLAN")
+
   # B12 — a cmd point the measurement cannot run: its program is not here (and no step creates it), or it reads
   # a variable the isolated measurement does not have (env -i keeps PATH, HOME, TMPDIR and verification_env).
   VENV_KEYS="$(yq -r '.verification_env // {} | keys | .[]' "$EXEC_YAML" 2>/dev/null || true)"

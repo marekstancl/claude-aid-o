@@ -73,6 +73,23 @@
 #     ASISTENT_TEST_DATABASE_URL: "${ASISTENT_TEST_DATABASE_URL}"
 # The rule is read from the state root's copy of this file, never the candidate's.
 
+# `plan_tests:` (optional, top level; P117) — how the close runs the nightly
+# tests a plan names (a Test:/Create:/Modify: path that is a test file with the
+# header `aid-tier: t2`, or one an entry marks nightly: true, e.g. e2e). The close
+# (plan-finalize --stage produce) runs them at the candidate and writes
+# plan-tests.json (command, exit, duration, log digest); decide refuses a failed,
+# missing or stale result (plan_tests_failed). With plan_tests declared, the plan
+# check blocks a plan-named test no entry runs (B13). {path} is repo-relative:
+#   plan_tests:
+#     - glob: "**/tests/**/test_*.py"
+#       command: "scripts/pytest.sh {path} -q"
+#     - glob: "ui/e2e/**/*.spec.ts"
+#       command: "cd ui && npx playwright test ${path#ui/}"   # a shell expression is fine
+#       nightly: true
+#       timeout_s: 900
+# `help_paths:` (optional; P117) — globs of the project's in-app help: a step that
+# changes one gets the final_claims role in its review (CP2).
+
 # `plan_checks:` (optional, top level; P117) — the project's own checks of a
 # PLAN, run by aid-plan-check.sh (and so by CP1 and generation readiness) before
 # anything is built: each command runs in the project root with the paths the

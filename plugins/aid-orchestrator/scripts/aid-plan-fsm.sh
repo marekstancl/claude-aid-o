@@ -5275,6 +5275,17 @@ _pfsm_finalize_decide() {
     echo "(pipeline.md §When AID refuses: cp7_confirmation_not_enough)" >&2; return 1
   fi
 
+  # P117 (17): the plan's nightly tests ran at this candidate and passed (a hand-attached proof is never accepted)
+  declare -F aid_plan_tests_bad >/dev/null || source "${SCRIPT_DIR}/lib/aid-plan-tests.sh"
+  local _pt_bad="" _pt_plan; _pt_plan="$(aid_lifecycle_plan_file "$plan_id" "$root" 2>/dev/null || true)"
+  if [[ -f "${run_dir_abs}/plan-tests.json" ]] || { [[ -n "$_pt_plan" ]] && aid_plan_tests_needed "$troot" "${root}/.aid-o/config/execution.yaml" "$_pt_plan"; }; then
+    if ! _pt_bad="$(aid_plan_tests_bad "$run_dir_abs" "$candidate")"; then
+      echo "REFUSED (plan_tests_failed): plan-finalize --stage decide: ${_pt_bad}" >&2
+      echo "next: fix what the log shows on the plan branch, then plan-finalize ${plan_id} --stage freeze and produce again (the close runs the tests itself)" >&2
+      echo "(pipeline.md §When AID refuses: plan_tests_failed)" >&2; return 1
+    fi
+  fi
+
   # P117 (14): the PM's acceptance of open findings holds only for its candidate and its set of findings
   local _ar_bad=""
   if ! _ar_bad="$(_pfsm_accepted_risk_stale "$run_dir_abs" "$candidate" "$root")"; then
@@ -8577,6 +8588,12 @@ _pfsm_finalize_produce() {
     return 1
   fi
   [[ -s "$pd" ]] && echo "plan-diff: isolation $(jq -c '.isolation // {}' "$pd" 2>/dev/null)$(jq -r '.next // "" | if . == "" then "" else " — " + . end' "$pd" 2>/dev/null)"
+  # P117 (17): the plan's own nightly tests, run here at the candidate and bound to it (plan-tests.json)
+  declare -F aid_plan_tests_run >/dev/null || source "${SCRIPT_DIR}/lib/aid-plan-tests.sh"
+  aid_plan_tests_run "$pd_cwd" "${root}/.aid-o/config/execution.yaml" "$plan_file" "$candidate" "$run_dir_abs"
+  aid_stage_writes_record "$run_dir_abs" produce plan-tests.json $(cd "$run_dir_abs" && compgen -G 'plan-tests/*.log') >/dev/null 2>&1 || true
+  [[ "$(jq '.tests | length' "${run_dir_abs}/plan-tests.json")" == 0 ]] \
+    || echo "plan-tests: $(jq -r '[.tests[] | "\(.path) \(if .exit == 0 then "pass" elif .exit == null then "not run: \(.reason)" else "exit \(.exit)" end)"] | join("; ")' "${run_dir_abs}/plan-tests.json")"
   local pd_verdict=""
   if [[ "$pdrc" -eq 0 || "$pdrc" -eq 1 || "$pdrc" -eq 2 ]] && [[ -s "$pd" ]]; then
     pd_verdict="$(jq -r --arg b "$base_commit" --arg h "$candidate" \

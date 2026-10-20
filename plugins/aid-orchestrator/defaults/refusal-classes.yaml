@@ -90,6 +90,7 @@ codes:
   plan_not_ready: {class: not_in_run, how: "CP1 (oprava 3)"}
   plan_page_missing: {class: agent_fix, how: "plan-run: vykreslí stránku plánu a pokračuje"}
   plan_run_already_started: {class: prevent, how: "start běhu"}
+  plan_tests_failed: {class: agent_fix, how: "noční test plánu u kandidáta selhal nebo chybí: opravit na větvi plánu, freeze + produce znovu"}
   profile_skips_project_tests: {class: pm, how: "waiver testů = snížení brány (předejít 2)"}
   project_tests_evidence_missing: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
   project_tests_not_selected: {class: pm, how: "waiver testů (předejít 2)"}
