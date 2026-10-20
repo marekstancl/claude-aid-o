@@ -18,6 +18,7 @@ codes:
   TRANSIENT_INFRA: {class: incident, how: "přechodná chyba prostředí: počkat a pustit znovu"}
   UNCLASSIFIED: {class: pm, how: "žebřík obnovy nezařadil příčinu: rozhoduje PM"}
   abandon_needs_reason: {class: pm, how: "opuštění běhu je rozhodnutí PM"}
+  accept_risk_not_protected: {class: agent_fix, how: "v --auto technický nález nejdřív k delegátovi; na kartu PM jen to, co poslal jako chráněné"}
   accepted_risk_stale: {class: pm, how: "přijetí rizika PM platí jen pro svého kandidáta a svou sadu nálezů: nová karta"}
   active_runs_unreadable: {class: incident, how: "poškozený soubor stavu"}
   active_runs_write_failed: {class: incident, how: "zápis stavu selhal"}

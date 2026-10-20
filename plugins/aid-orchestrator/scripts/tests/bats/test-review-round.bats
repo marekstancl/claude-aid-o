@@ -959,8 +959,14 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [ "$status" -ne 0 ]; [[ "$output" == *"does not quote ${f16}"* ]]
   printf -- '- nález %s: přijímám riziko\n' "$f16" >> "$card"; touch -d '-10 seconds' "$card"
   printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$AID_HOOK_AUDIT"
+  # in an --auto run a finding the delegate did not send to the PM is not the PM's to accept
+  mkdir -p "$R/.aid-o/work/plan-state/P901"; printf 'plan_id: P901\nautonomy: auto\n' > "$R/.aid-o/work/plan-state/P901/plan-state.yaml"
+  run _F accept-risk --round 1 --finding-card "$card" --reason "PM: zavřít s tímto rizikem, oprava v dalším plánu"
+  [ "$status" -ne 0 ]; [[ "$output" == *"accept_risk_not_protected"* ]]
+  rm "$R/.aid-o/work/plan-state/P901/plan-state.yaml"
   run _F accept-risk --round 1 --finding-card "$card" --reason "PM: zavřít s tímto rizikem, oprava v dalším plánu"
   echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.findings[0].resolution' "$(FD 1)/merged.json")" = accepted_risk ]
   [ "$(jq -r '"\(.candidate_sha) \(.findings | length) \(.by)"' "$(FD 1)/accepted-risk.json")" = "${head} 1 pm" ]
   [ "$(jq -r '.findings[0] | "\(.status) \(.dispute.pm.accepted_risk)"' "$(FD 1)/merged.json")" = "fixed true" ]
   [ "$(jq -r .verdict "$E/cp7/rounds.json")" = pass ]

@@ -318,19 +318,33 @@ cmd_cancel() {
 # that parse stay, the others move to pending-dispatches.jsonl.bad, the timeline records it (P117: the only
 # way past a malformed ledger was a PM-authorised increment-step --force).
 cmd_repair() {
-  local evidence_dir="" reason=""
+  local evidence_dir="" reason="" focus=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --evidence-dir) evidence_dir="$2"; shift 2 ;;
       --reason)       reason="$2"; shift 2 ;;
+      --focus)        focus="$2"; shift 2 ;;   # the start a damaged line was (it is withdrawn on the record)
       *) echo "ERROR: unknown arg $1" >&2; exit 1 ;;
     esac
   done
   [[ -n "$evidence_dir" ]] || usage
   [[ ${#reason} -ge 20 ]] || { echo "ERROR: repair needs --reason of at least 20 characters (it goes to the timeline)" >&2; exit 1; }
-  local pending="${evidence_dir}/pending-dispatches.jsonl" lockfile tmp bad kept=0 moved=0 line
+  local pending="${evidence_dir}/pending-dispatches.jsonl" lockfile tmp line
   [[ -f "$pending" ]] || { echo "nothing to repair: no ${pending}"; return 0; }
+  # a damaged line that was a START must not vanish silently (it would hide an open dispatch from the orphan
+  # check): it is named by --focus and withdrawn with an explicit cancel record (Codex whole review of P117)
+  local starts
+  starts="$(while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -n "$line" ]] || continue
+      jq -e 'type == "object" and (.event | type == "string") and (.ts | type == "string")' <<< "$line" >/dev/null 2>&1 && continue
+      if grep -q 'start' <<< "$line"; then grep -oE '"focus"[[:space:]]*:[[:space:]]*"[^"]+"' <<< "$line" | sed -E 's/.*"([^"]+)"$/\1/' | head -1 || echo '?'; fi
+    done < "$pending" | sort -u)"
+  if [[ -n "$starts" ]]; then
+    [[ -n "$focus" && "$starts" == "$focus" ]] \
+      || { echo "ERROR: a damaged line looks like the start of ${starts//$'\n'/, } — name it: repair --focus <that focus> --reason …; it is withdrawn on the record, never dropped silently" >&2; exit 1; }
+  fi
   lockfile="${pending}.lock"; touch "$lockfile"
+  local rec; rec="$(mktemp)"
   (
     flock -x -w 5 200 || { echo "ERROR: flock timeout on $lockfile" >&2; exit 2; }
     tmp="$(mktemp "${pending}.XXXXXX")"
@@ -338,13 +352,15 @@ cmd_repair() {
       [[ -n "$line" ]] || continue
       if jq -e 'type == "object" and (.event | type == "string") and (.ts | type == "string")' <<< "$line" >/dev/null 2>&1; then
         printf '%s\n' "$line" >> "$tmp"
-      else printf '%s\n' "$line" >> "${pending}.bad"; fi
+      else printf '%s\n' "$line" >> "${pending}.bad"; printf '%s\n' "$(printf '%s' "$line" | sha256sum | cut -d' ' -f1)" >> "$rec"; fi
     done < "$pending"
+    [[ -n "$focus" ]] && jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg f "$focus" --arg r "$reason" \
+      '{ts: $ts, event: "cancel", focus: $f, start_nonce: "repaired", reason: ("repaired: " + $r)}' >> "$tmp"
     mv -f "$tmp" "$pending"
   ) 200>"$lockfile"
-  moved="$( [[ -f "${pending}.bad" ]] && grep -c '' "${pending}.bad" || echo 0)"
-  log_event "${evidence_dir}/timeline.jsonl" "verifier_dispatch_repair" moved="$moved" reason="$reason" || true
-  echo "repaired ${pending}: unreadable lines are in ${pending}.bad (${moved} in total)"
+  local shas; shas="$(paste -sd, "$rec")"; rm -f "$rec"
+  log_event "${evidence_dir}/timeline.jsonl" "verifier_dispatch_repair" lines="${shas:-none}" focus="${focus:-none}" reason="$reason" || true
+  echo "repaired ${pending}: $( [[ -n "$shas" ]] && echo "$(tr ',' '\n' <<< "$shas" | grep -c .) unreadable line(s) moved to ${pending}.bad" || echo "nothing unreadable")$( [[ -n "$focus" ]] && echo "; the start ${focus} withdrawn on the record")"
 }
 
 case "${1:-}" in

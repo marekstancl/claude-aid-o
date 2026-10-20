@@ -1061,7 +1061,7 @@ _semantic_final_write() {
          merge_meta: {merged_from: $from, conflicts: []},
          findings: ($f | map({fingerprint, severity: (.severity | sev), lens: (.reported_by[0] // "step_check"),
                               check_id: (.fingerprint[7:23]), target_path: (.evidence | file), finding_class: (.reported_by[0] // "step_check"),
-                              status: (.status | st), detail: "\(.claim) (\(.severity), \(if .dispute.pm.answer == "accepted" then "dismissed by the PM (dispute accepted)" else "reported \(.status)" end); evidence \(.evidence); fix: \(.fix))"}))}}' \
+                              status: (if .resolution == "accepted_risk" then "deferred" else (.status | st) end), detail: "\(.claim) (\(.severity), \(if .resolution == "accepted_risk" then "open, accepted as a risk by the PM" elif .dispute.pm.answer == "accepted" then "dismissed by the PM (dispute accepted)" else "reported \(.status)" end); evidence \(.evidence); fix: \(.fix))"}))}}' \
     "${rounds[@]}" > "$tmp" || { rm -f "$tmp"; return 1; }
   local err
   # A lens is a reviewer of this round, or step_check for a finding of the
@@ -1809,6 +1809,14 @@ cmd_accept_risk() {
   local head set f fp16 why; head="$(_head)"
   set="$(jq -c '[.findings[] | select((.status | IN("open", "disputed", "form_invalid")) and (.severity | IN("blocker", "major")))]' "${dir}/merged.json")"
   [[ "$(jq 'length' <<< "$set")" -gt 0 ]] || _die "round ${ROUND} has no open blocker or major finding; nothing to accept"
+  # in an --auto run the PM's card carries only what the delegate sent to the PM as protected: a technical
+  # finding is the delegate's (Codex whole review of P117)
+  local _pid; _pid="$(_dlg_plan_id 2>/dev/null || true)"
+  if [[ -n "$_pid" ]] && aid_delegate_in_force "$(_dlg_root)" "$_pid"; then
+    local _tech; _tech="$(jq -r '[.[] | select(((.delegated.to_pm // .dispute.delegated.to_pm) // false) != true) | .fingerprint[0:23]] | join(", ")' <<< "$set")"
+    [[ -z "$_tech" ]] || _dlg_refuse accept_risk_not_protected "in an --auto run the PM accepts only protected impacts; ${_tech} was not sent to the PM by the delegate" \
+      "aid-review-round.sh delegate --checkpoint cp7 … --fingerprint <fp> for each; what it classes brief/money/data comes back here"
+  fi
   why="$(aid_pm_card_check "$CARD" "${head:0:12}")" || _die "accept-risk: the card must name the candidate ${head:0:12}: ${why}"
   local rows="[]" row
   while IFS= read -r f; do
@@ -1824,7 +1832,7 @@ cmd_accept_risk() {
       findings: $rows, set_sha256: $ss, words: $w, at: $at}' > "$rec"
   jq --argjson rows "$rows" --arg why "$REASON" --arg at "$(_now)" --arg card "$CARD" '
     ($rows | map(.fingerprint)) as $fps
-    | .findings |= map(if (.fingerprint | IN($fps[])) then .status = "fixed" | .dispute.pm = {answer: "accepted", words: $why, at: $at, card: $card, accepted_risk: true} else . end)' \
+    | .findings |= map(if (.fingerprint | IN($fps[])) then .status = "fixed" | .resolution = "accepted_risk" | .dispute.pm = {answer: "accepted", words: $why, at: $at, card: $card, accepted_risk: true} else . end)' \
     "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
   _dlg_resync "$dir" accepted-risk
   aid_stage_writes_record "$EVID" "cp7-accepted-risk" "cp7/round-${ROUND}/accepted-risk.json" >/dev/null 2>&1 || true

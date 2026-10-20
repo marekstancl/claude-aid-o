@@ -264,3 +264,15 @@ teardown() {
   run bash "$SCRIPT" cancel --focus cp7-final-claims --evidence-dir "$EVID" --reason "nothing is open any more for this focus"
   [ "$status" -eq 2 ]; [[ "$output" == *"nothing to cancel"* ]]
 }
+
+@test "repair: a damaged line that was a start is named and withdrawn on the record, never dropped silently; other damage is moved aside with its digest" {
+  local ev="$BATS_TEST_TMPDIR/rep"; mkdir -p "$ev"; : > "$ev/timeline.jsonl"
+  printf '%s\n' '{"ts":"2026-10-20T10:00:00Z","event":"complete","focus":"cp2-step-0-a"}' '{"ts":"2026-10-20T10:01:00Z","event":"start","focus":"cp2-step-1-generalist","agent_id":"x"' > "$ev/pending-dispatches.jsonl"
+  run bash "$SCRIPT" repair --evidence-dir "$ev" --reason "a killed emit left half a line"
+  [ "$status" -ne 0 ]; [[ "$output" == *"looks like the start of cp2-step-1-generalist"* ]]
+  run bash "$SCRIPT" repair --evidence-dir "$ev" --focus cp2-step-1-generalist --reason "a killed emit left half a line"
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"withdrawn on the record"* ]]
+  jq -e -s 'any(.[]; .event == "cancel" and .focus == "cp2-step-1-generalist")' "$ev/pending-dispatches.jsonl"
+  grep -q '"focus":"cp2-step-1-generalist"' "$ev/pending-dispatches.jsonl.bad"
+  grep -q 'verifier_dispatch_repair' "$ev/timeline.jsonl"; grep -qE '"lines":"[0-9a-f]{64}"' "$ev/timeline.jsonl"
+}
