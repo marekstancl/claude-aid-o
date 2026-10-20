@@ -396,9 +396,12 @@ def app_page(m, scr, approved, fields, results, ends, shell):
     tables = "".join(f'<table><caption>{esc(tb["caption"])}</caption><thead><tr>' + "".join(f'<th scope="col">{esc(c)}</th>' for c in tb["columns"])
                      + "</tr></thead><tbody>" + "".join("<tr>" + "".join(f"<td>{esc(c)}</td>" for c in row) + "</tr>" for row in tb["rows"]) + "</tbody></table>"
                      for tb in scr.get("tables") or [])
-    sample = ("" if not (scr.get("sample") or tables) else '<figure class="ukazka"><figcaption>Ukázka (ne skutečná data)</figcaption>'
-              + ("" if not scr.get("sample") else "<ul>" + "".join(f"<li>{esc(x)}" + (f'<div class="polozka-akce">{actions_html(m, scr, url, fields, ends, k)}</div>' if any(a.get("item") == k for a in scr["actions"]) else "")
-                                                               + "</li>" for k, x in enumerate(scr["sample"])) + "</ul>") + tables + "</figure>")
+    first_mode = (m.get("modes") or [{}])[0].get("id")
+    sample = ("" if not (scr.get("sample") or scr.get("mode_sample") or tables) else '<figure class="ukazka"><figcaption>Ukázka (ne skutečná data)</figcaption>'
+              + ("" if not (scr.get("sample") or scr.get("mode_sample")) else "<ul>" + "".join(f"<li>{esc(x)}" + (f'<div class="polozka-akce">{actions_html(m, scr, url, fields, ends, k)}</div>' if any(a.get("item") == k for a in scr["actions"]) else "")
+                                                               + "</li>" for k, x in enumerate(scr.get("sample") or []))
+                 + "".join(f'<li data-aid-mode-is="{esc(md)}"{"" if md == first_mode else " hidden"}>{esc(x)}</li>' for md, rows in (scr.get("mode_sample") or {}).items() for x in rows)
+                 + "</ul>") + tables + "</figure>")
     states = "".join(f'<section class="stav" data-aid-state="{k}"><h2>{t}</h2><p>{esc(scr["states"][k])}</p>{sample if k == "filled" else ""}'
                      f'{retry if k == "error" and not scr["states"][k].lower().startswith("nenastává") else ""}</section>' for k, t in STATES)
     mine = [t for t in m["tasks"] if any(st["screen"] == sid for st in t["steps"])]

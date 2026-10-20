@@ -98,6 +98,8 @@ tlačítek (`confirm_yes`, `confirm_no`), pole své meze (`required`, `min`, `ma
 na záznam svůj parametr (`query`). Graf má v kostře datovou tabulku (`tables`: popisek, sloupce, řádky se stejným
 počtem buněk), ne jen větu shrnutí. Akce jedné položky seznamu (Provést u nejistého signálu, Vyřídit u své položky) nese
 `item` = řádek ukázky; kostra ji kreslí u něj i s jejími poli, ne pod celým seznamem.
+Co platí jen v jednom režimu (stav na Režimu a burze, čekající vstup, který Vypnuto zruší), patří do `mode_sample`
+(režim → řádky); kostra ho ukáže jen v tom režimu, ať si ukázka a režim neodporují.
 
 ## 5. Brána
 1. `aid-ui-flows.py generate <projekt>` napíše z modelu do `.aid-ui/scenarios/` jeden test na úlohu (kroky, pak

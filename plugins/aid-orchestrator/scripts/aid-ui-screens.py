@@ -113,6 +113,11 @@ def violations(m, proj):
                 + [(f"tables/{j}/columns/{c}", x) for j, tb in enumerate(s.get("tables") or []) for c, x in enumerate(tb["columns"])] \
                 + [(f"tables/{j}/rows/{r}/{c}", x) for j, tb in enumerate(s.get("tables") or []) for r, row in enumerate(tb["rows"]) for c, x in enumerate(row)]:
             refs(txt, f"/screens/{i}/{k}")
+        for md, rows in (s.get("mode_sample") or {}).items():
+            if md not in modes:
+                out.append(f"/screens/{i}/mode_sample: režim {md} model nezná (modes)")
+            for j, x in enumerate(rows):
+                refs(x, f"/screens/{i}/mode_sample/{md}/{j}")
         for j, tb in enumerate(s.get("tables") or []):
             if any(len(row) != len(tb["columns"]) for row in tb["rows"]):
                 out.append(f"/screens/{i}/tables/{j}: řádek tabulky {tb['caption']} nemá tolik buněk, kolik je sloupců")

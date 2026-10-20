@@ -543,6 +543,11 @@ for (const q of ['', '?rezim=pauza']) { await pg.goto('http://127.0.0.1:39918/se
 console.log(r.join(' | ')); await b.close();
 J
   out="$(node "$BATS_TEST_TMPDIR/md.mjs")"; [ "$out" = "Běží: zapisuje | Pauza: nic nového" ] || { echo "$out"; return 1; }
+  # a sample row of one mode shows only in that mode
+  jq '.screens[0].sample = ["vždy"] | .screens[0].mode_sample = {pauza: ["jen v pauze"]}' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  sed -i "s|r.push(await pg.locator('.lista-rezim').innerText());|r.push(await pg.locator('.ukazka').innerText());|" "$BATS_TEST_TMPDIR/md.mjs"
+  out="$(node "$BATS_TEST_TMPDIR/md.mjs")"; [ "$out" = $'Ukázka (ne skutečná data)\nvždy | Ukázka (ne skutečná data)\nvždy\njen v pauze' ] || { echo "$out"; return 1; }
   "$SERVE" stop skeleton
 }
 
