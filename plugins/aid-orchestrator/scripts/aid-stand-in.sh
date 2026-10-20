@@ -135,7 +135,7 @@ cmd_record() {
     jq -e -s --arg f "stand-in-${ID}" --arg o "$(realpath "$VERDICT")" --arg s "$sha" \
       'any(.[]; .event == "verifier_dispatch_start" and .focus == $f and .agent_id == "claude:stand-in")
        and any(.[]; .event == "verifier_dispatch_complete" and .focus == $f and .output_sha256 == $s
-                    and ((.output_file // "") as $p | ($p == $o) or ($p | endswith("/stand-in/" + ($f | ltrimstr("stand-in-")) + "/verdict.json"))))' "$TL" >/dev/null 2>&1 \
+                    and (.output_file // "") == $o)' "$TL" >/dev/null 2>&1 \
       || _refuse stand_in_verdict_unbound "a Claude verdict without its closed bracket stand-in-${ID} (agent claude:stand-in) over this verdict file and its content" "dispatch inside the bracket, write the verdict, complete the bracket with --output-file ${VERDICT}, then record"
     [[ -f "${d}/status-before" ]] || _refuse delegation_left_files "no record of the worktree before the stand-in ran (${d}/status-before)" "ask again (it records the tree first)"
     local left; left="$(comm -13 "${d}/status-before" <(_tree_state) | sed 's/^...//' | head -20 || true)"

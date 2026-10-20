@@ -2218,6 +2218,9 @@ _si_permit() {
   ! grep -q 'src/a\.py' "$td/plan.json"; grep -q 'src/b\.py' "$td/plan.json"
   grep -q 'src/b\.py' "$pp"; ! grep -q 'src/a\.py' "$pp"
   [ "$(jq -r .source_plan_sha256 "$td/plan.json")" = "$(sha256sum "$pp" | cut -d' ' -f1)" ]
+  # the same rename again (a retry): done, nothing changes
+  run bash "$FSM" amend-contract "$td/fsm-state.yaml" --rename src/a.py=src/b.py --reason "the project lint forbids the plan's name" --stand-in "$auth"
+  [ "$status" -eq 0 ]; [[ "$output" == *"already renamed"* ]]
   # the permission was used: another rename on it is refused
   run bash "$FSM" amend-contract "$td/fsm-state.yaml" --rename src/b.py=src/a.py --reason "the project lint forbids the plan's name" --stand-in "$auth"
   [ "$status" -ne 0 ]

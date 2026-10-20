@@ -69,6 +69,9 @@ aid_protected_impact() {
     done
   done < <(jq -r '(.paths // [])[], (.rename.old // empty), (.rename.new // empty)' "$prop" 2>/dev/null)
 
+  if [[ "$kind" == blocked_step ]] && [[ "$(jq -r '.action // ""' "$prop")" != redispatch ]]; then
+    echo "unevaluable: a blocked step is decided as a re-dispatch only; a rename or a widening is asked as its own kind (rename, scope_extension)"; return 1
+  fi
   if [[ "$kind" == measurement_failed ]]; then
     # only a TECHNICAL failure of the step's measurement: the point stays, the close measures it again.
     # A point that ran and failed is the step's to fix, and dropping it is the PM's.

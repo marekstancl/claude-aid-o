@@ -1194,7 +1194,7 @@ _fsm_refusal_next() {
     plan_manifest_missing|plan_branch_mismatch)
       next="start the plan's run again through plan-run, which writes the manifest entry and runs init: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}" --restart --reason "<why>")" ;;
     contract_return_missing|contract_return_not_done)
-      next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent; blocked again in an --auto run: the stand-in decides how to go on — $(_fsm_cmd bash "${SCRIPT_DIR}/aid-stand-in.sh" ask --evidence-dir "$(dirname "$sf")" --code contract_return_not_done --proposal "<{\"kind\": \"blocked_step\", \"step\": N, \"action\": \"redispatch|rename|amend_scope\", \"why\": …}>") and the approved action runs through its own command; otherwise a Blocked card), then: $inc" ;;
+      next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent; blocked again in an --auto run: the stand-in decides — $(_fsm_cmd bash "${SCRIPT_DIR}/aid-stand-in.sh" ask --evidence-dir "$(dirname "$sf")" --code contract_return_not_done --proposal "<{\"kind\": \"blocked_step\", \"step\": N, \"action\": \"redispatch\", \"why\": …}>"), then $(_fsm_cmd bash "$fsm" step-redispatch "$sf" --stand-in "<auth.json>" --reason "<why>") and dispatch again (a rename or a widening is asked as its own kind); otherwise a Blocked card), then: $inc" ;;
     missing_step_verify|verify_no_ac_checklist|verify_no_memory_used|verify_no_memory_written|step_verify_not_pass|verify_no_commit_ref)
       next="write $(_fsm_cmd "$vf") (pipeline.md §Output verification), then: $inc" ;;
     binding_wrong_commit|binding_plan_step_hash_mismatch|incomplete_step_binding)
@@ -4583,7 +4583,7 @@ _fsm_stand_in_permits() {
   local why
   why="$(aid_stand_in_verify "$1" "$_FSM_STAND_IN" "$2" "$(jq -nc --argjson s "$3" '{step: $s}')" "$(aid_invoke_root 2>/dev/null || pwd)")" \
     || { echo "--stand-in ${_FSM_STAND_IN} does not permit ${2} of step ${3}: ${why}" >&2; return 1; }
-  aid_stand_in_consume "$_FSM_STAND_IN" "$(jq -nc --argjson s "$3" '{step: $s}')"
+  aid_stand_in_consume "$1" "$_FSM_STAND_IN" "$(jq -nc --argjson s "$3" '{step: $s}')" || { echo "the use of ${_FSM_STAND_IN} could not be recorded in the plan's ledger" >&2; return 1; }
   local tl; tl="${1}/timeline.jsonl"; log_event "$tl" stand_in_applied kind="$2" step="$3" auth="$_FSM_STAND_IN" || true
   return 0
 }
@@ -4610,7 +4610,7 @@ _fsm_defer_criterion() {
     why="$(aid_stand_in_verify "$ev" "$stand_in" measurement_failed "$(jq -nc --argjson s "$n" --arg c "$label" '{step: $s, criterion: $c}')" "$(aid_invoke_root 2>/dev/null || pwd)")" \
       || _defer_fail "--stand-in ${stand_in}: ${why}"
     by=stand_in card=""
-    aid_stand_in_consume "$stand_in" "$(jq -nc --argjson s "$n" --arg c "$label" '{step: $s, criterion: $c}')"
+    aid_stand_in_consume "$ev" "$stand_in" "$(jq -nc --argjson s "$n" --arg c "$label" '{step: $s, criterion: $c}')" || _defer_fail "the use of the permission could not be recorded in the plan's ledger"
   else
     why="$(aid_pm_card_check "$card" "$label")" || _defer_fail "$why"
   fi
@@ -5520,6 +5520,32 @@ _FSM_ALWAYS_ALLOWED=(".aid-o/work/backlog.md" ".aid-o/work/aid-plugin-issues.md"
 # last one, whose scope the GATES/DONE union holds), never removes a path, and
 # refuses a path outside the tree unless it is an absolute path some step of
 # this plan already declared (P100 Step 4).
+# step-redispatch <state_file> --stand-in <auth.json> --reason "<why>" — P117 (11): a step whose agent returned
+# blocked (or no return) again, re-dispatched on the stand-in's permission (kind blocked_step, action redispatch):
+# the blocked return is set aside (never deleted), the decision is in the timeline and the ledger, and the next
+# return of the same contract is judged afresh.
+cmd_step_redispatch() {
+  local sf="" auth="" reason=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --stand-in) auth="${2:-}"; shift 2 ;;
+      --reason)   reason="${2:-}"; shift 2 ;;
+      *) [[ -z "$sf" ]] || die "step-redispatch: unexpected argument '$1'"; sf="$1"; shift ;;
+    esac
+  done
+  [[ -n "$sf" && -f "$sf" && -n "$auth" && ${#reason} -ge 20 ]] || die "step-redispatch: usage: aid-fsm.sh step-redispatch <state_file> --stand-in <auth.json> --reason \"<why, 20+ chars>\""
+  local ev cs sid why exp at; ev="$(cd "$(dirname "$sf")" && pwd)"; cs="$(yaml_field "$sf" current_step)"
+  sid="$(jq -r --argjson i "$cs" '.steps[$i].id // ""' "${ev}/plan.json")"; [[ -n "$sid" ]] || die "step-redispatch: no step ${cs} in ${ev}/plan.json"
+  exp="$(jq -nc --argjson s "$cs" '{step: $s, action: "redispatch"}')"
+  declare -F aid_stand_in_verify >/dev/null || source "${SCRIPT_DIR}/lib/aid-stand-in.sh"
+  why="$(aid_stand_in_verify "$ev" "$auth" blocked_step "$exp" "$(aid_invoke_root 2>/dev/null || pwd)")" || die "step-redispatch: --stand-in ${auth}: ${why}"
+  aid_stand_in_consume "$ev" "$auth" "$exp" || die "step-redispatch: the use of ${auth} could not be recorded in the plan's ledger"
+  at="$(date -u +%Y%m%dT%H%M%SZ)"
+  [[ -f "${ev}/steps/${sid}/return.json" ]] && mv "${ev}/steps/${sid}/return.json" "${ev}/steps/${sid}/return.blocked-${at}.json"
+  log_event "${ev}/timeline.jsonl" step_redispatch step="$cs" step_id="$sid" auth="$auth" reason="$reason" || true
+  echo "step $((cs + 1)) (${sid}): re-dispatch it with its packet ${ev}/steps/${sid}/contract.json; the blocked return is kept as return.blocked-${at}.json"
+}
+
 # amend-contract <state_file> --rename <old>=<new> --reason "<why>" (--stand-in <auth.json> | --pm-card <card>)
 # P117 (13): a pure rename of a path of the current step in the frozen plan (lib/aid-amend-contract.sh).
 cmd_amend_contract() {
@@ -5731,7 +5757,7 @@ cmd_amend_scope() {
   # Known limit: the generation-time D5 gate (gates/aid-contract-validate.sh)
   # compares plan.json against the EPIC's scope blocks; it runs at generation,
   # not mid-EPIC, and a REGENERATION resets the amendment by design.
-  [[ -n "${_SI_CONSUME:-}" ]] && aid_stand_in_consume "$_SI_CONSUME" "$_SI_EXPECT"
+  [[ -z "${_SI_CONSUME:-}" ]] || aid_stand_in_consume "$evidence_dir" "$_SI_CONSUME" "$_SI_EXPECT" || die "amend-scope: the use of ${_SI_CONSUME} could not be recorded in the plan's ledger — nothing is claimed as permitted"
   log_event "${evidence_dir}/timeline.jsonl" "scope_amended" step="$cs" step_id="$step_id" paths="$(jq -r 'join(",")' <<<"$add_json")" reason="$reason" zadani_point="${_zp_point:-null}" pm_card="$(jq -r '.card // "null"' <<< "${_pm_decision:-null}")"
   fsm_emit_audit_log "scope_amended" --evidence-dir "$evidence_dir" --step "$cs" --paths "$(jq -r 'join(",")' <<<"$add_json")" --reason "$reason" 2>/dev/null || true
   echo "amend-scope: step ${cs} (${step_id}) may now also change: $(jq -r 'join(", ")' <<<"$add_json") — recorded in ${amend#${evidence_dir}/} and the timeline; plan_json_hash re-stamped. Continue the step; the agent's return must list these files like any other."
@@ -7029,6 +7055,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     auto-mode)         shift; cmd_auto_mode "$@" ;;
     amend-scope)       shift; cmd_amend_scope "$@" ;;
     amend-contract)    shift; cmd_amend_contract "$@" ;;
+    step-redispatch)   shift; cmd_step_redispatch "$@" ;;
     rebase-plan)       shift; cmd_rebase_plan "$@" ;;
     done-advance)               shift; cmd_done_advance "$@" ;;
     abandon)                    shift; cmd_abandon "$@" ;;

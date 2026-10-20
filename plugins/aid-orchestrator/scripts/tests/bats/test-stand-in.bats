@@ -91,8 +91,23 @@ _verify() {
   _claude approve technical; _record; [ "$status" -eq 0 ]
   _verify scope_extension '{"step": 1, "paths": ["src/new.py"]}'; [[ "$output" == *"does not cover this action"* ]]
   _verify scope_extension '{"step": 1, "paths": ["src/second.py", "src/new.py"]}'; [ "$output" = PERMITTED ]
+  _prop '{"kind": "blocked_step", "step": 1, "action": "rename"}'; _ask contract_return_not_done; [ "$status" -eq 3 ]   # its own kind
   _prop '{"kind": "blocked_step", "step": 1, "action": "redispatch", "why": "the agent ran out of context twice"}'
   _ask contract_return_not_done; [ "$status" -eq 4 ]; _claude approve technical; _record; [ "$status" -eq 0 ]
+  # the consumer: the blocked return is set aside, the step goes out again; the permission is used once
+  printf 'current_step: 1\nstate: EXECUTE\n' >> "$EV/fsm-state.yaml"; mkdir -p "$EV/steps/s2"; echo '{"status": "blocked"}' > "$EV/steps/s2/return.json"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" step-redispatch "$EV/fsm-state.yaml" --stand-in "$D/auth.json" --reason "the agent ran out of context twice"
+  echo "$output"; [ "$status" -eq 0 ]; [ ! -f "$EV/steps/s2/return.json" ]; ls "$EV/steps/s2/"return.blocked-*.json
+  grep -q '"checkpoint":"stand_in_used"' "$R/.aid-o/work/evidence/P950/delegated-disputes.jsonl"
+}
+
+@test "docs surface: CHANGELOG, README and docs/ with a documentation extension, and the project's help_paths, are documentation; skills, agents, commands, the plan and docs code are not" {
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-docs-surface.sh'; mkdir -p '$R/.aid-o/config'; printf 'help_paths:\n  - "ui/src/help/**"\n' > '$R/.aid-o/config/execution.yaml'
+    for p in CHANGELOG.md README.md plugins/x/README.md docs/a/b.md docs/x.rst ui/src/help/page.md skills/run.md plugins/x/agents/a.md commands/c.md docs/tool.py .aid-o/plans/P1-zadani.md src/app.py README.sh; do
+      aid_docs_surface \"\$p\" '$R/.aid-o/config/execution.yaml' && echo \"\$p yes\" || echo \"\$p no\"; done"
+  echo "$output"
+  [[ "$output" == *"CHANGELOG.md yes"*"README.md yes"*"plugins/x/README.md yes"*"docs/a/b.md yes"*"docs/x.rst yes"*"ui/src/help/page.md yes"* ]]
+  [[ "$output" == *"skills/run.md no"*"plugins/x/agents/a.md no"*"commands/c.md no"*"docs/tool.py no"*".aid-o/plans/P1-zadani.md no"*"src/app.py no"*"README.sh no"* ]]
 }
 
 @test "stand-in: a verdict classing it protected goes to the PM; a Claude verdict without its bracket, or one that left a file, is refused" {

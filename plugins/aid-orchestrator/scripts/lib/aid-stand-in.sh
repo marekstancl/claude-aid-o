@@ -58,16 +58,24 @@ aid_stand_in_record_ok() {
   jq -e -s --arg i "$(jq -r .id "$auth")" --arg s "$(jq -r .verdict_sha256 "$auth")" \
     'any(.[]; .checkpoint == "stand_in" and .id == $i and .verdict_sha256 == $s)' "$ledger" >/dev/null 2>&1 \
     || { echo "the plan's ledger ${ledger} does not record this permission"; return 1; }
-  # used once: a repeat of the SAME action is idempotent, another action is refused
-  if [[ -f "${d}/consumed.json" ]] && [[ "$(jq -cS . "${d}/consumed.json" | jq -c .action)" != "$(jq -cS . <<< "$expect")" ]]; then
-    echo "the permission was already used for $(jq -c .action "${d}/consumed.json")"; return 1
+  # used once, recorded in the plan's append-only ledger (security review: a file beside the permission could be
+  # deleted): a repeat of the SAME action is idempotent, another action is refused
+  local used; used="$(jq -c -s --arg i "$(jq -r .id "$auth")" --arg s "$(jq -r .verdict_sha256 "$auth")" \
+    '[.[] | select(.checkpoint == "stand_in_used" and .id == $i and .verdict_sha256 == $s) | .action] | first // empty' "$ledger" 2>/dev/null)"
+  if [[ -n "$used" && "$(jq -cS . <<< "$used")" != "$(jq -cS . <<< "$expect")" ]]; then
+    echo "the permission was already used for ${used}"; return 1
   fi
   return 0
 }
 
-# aid_stand_in_consume <auth.json> <expect-json> — mark the permission used for this action (after it applied)
+# aid_stand_in_consume <evidence_dir> <auth.json> <expect-json> — record in the plan's ledger that the permission
+# was used for this action; returns 1 when that cannot be written (the caller refuses — fail closed)
 aid_stand_in_consume() {
-  local d; d="$(dirname "$1")"
-  [[ -f "${d}/consumed.json" ]] && return 0
-  jq -n --argjson a "$(jq -cS . <<< "$2")" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{action: $a, at: $at}' > "${d}/consumed.json.tmp" && mv "${d}/consumed.json.tmp" "${d}/consumed.json"
+  local ev="$1" auth="$2" pp pid sroot ledger
+  pp="$(yq -r '.plan_path // ""' "${ev}/fsm-state.yaml" 2>/dev/null)"; pid="$( [[ -f "$pp" ]] && _aid_fm_get "$pp" id 2>/dev/null)"
+  sroot="$(aid_state_root "$(dirname "$(realpath -m "$ev")")" 2>/dev/null || jq -r .state_root "$auth")"
+  ledger="$(aid_delegate_ledger "$sroot" "$pid")"
+  jq -e -s --arg i "$(jq -r .id "$auth")" 'any(.[]; .checkpoint == "stand_in_used" and .id == $i)' "$ledger" >/dev/null 2>&1 && return 0
+  jq -nc --arg i "$(jq -r .id "$auth")" --arg s "$(jq -r .verdict_sha256 "$auth")" --argjson a "$(jq -cS . <<< "$3")" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{checkpoint: "stand_in_used", id: $i, verdict_sha256: $s, action: $a, at: $at}' >> "$ledger"
 }

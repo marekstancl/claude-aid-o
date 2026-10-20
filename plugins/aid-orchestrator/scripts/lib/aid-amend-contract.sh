@@ -41,6 +41,11 @@ aid_amend_contract_rename() {
   [[ "$old" != /* && "$new" != /* && "$old$new" != *..* ]] || _ac_fail rename_refused "absolute paths and .. are not renamed here" "a path relative to the repository"
   # a path, nothing else: no whitespace, quotes, backslashes or shell characters can ride into a command (security review)
   [[ "$old" =~ ^[A-Za-z0-9._/-]+$ && "$new" =~ ^[A-Za-z0-9._/-]+$ ]] || _ac_fail rename_refused "a path of letters, digits and . _ / - only" "rename to a plain path"
+  # the same rename again after it applied: done, nothing changes (an idempotent retry)
+  if jq -e --arg o "$old" --arg n "$new" 'any(.[]; .rename.old == $o and .rename.new == $n)' "${ev}/steps/"*/contract-amendments.json >/dev/null 2>&1 \
+     && ! grep -qF -- "$old" "$pj"; then
+    echo "already renamed ${old} → ${new}; nothing changed"; return 0
+  fi
   [[ "$(dirname "$old")" == "$(dirname "$new")" ]] || _ac_fail rename_outside_step "the new name moves the file to another directory ($(dirname "$new"))" "rename in place; a move is a scope change (amend-scope)"
   cs="$(yaml_field "$sf" current_step)"; total="$(jq '.steps | length' "$pj")"; (( cs >= total && total > 0 )) && cs=$(( total - 1 ))
   sid="$(jq -r --argjson i "$cs" '.steps[$i].id' "$pj")"
@@ -64,6 +69,8 @@ aid_amend_contract_rename() {
       || _ac_fail rename_refused "--stand-in ${auth}: ${why}" "ask the stand-in for this rename, or the PM"
     decision="$(jq -nc --arg a "$auth" --arg s "$(jq -r .verdict_sha256 "$auth")" '{stand_in: $a, verdict_sha256: $s}')"
     local si_expect; si_expect="$(jq -nc --argjson s "$cs" --arg o "$old" --arg n "$new" '{step: $s, rename: {old: $o, new: $n}}')"
+    # used before anything changes: a rename cannot be taken back safely afterwards (fail closed)
+    aid_stand_in_consume "$ev" "$auth" "$si_expect" || _ac_fail rename_refused "the use of ${auth} could not be recorded in the plan's ledger" "fix the disk, then rename again"
   elif [[ -n "$card" ]]; then
     declare -F aid_pm_card_check >/dev/null || source "${_AID_AC_LIB}/aid-decision-card.sh"
     for f in "$old" "$new"; do why="$(aid_pm_card_check "$card" "$f")" || _ac_fail rename_refused "--pm-card: ${why}" "the PM's answered card quotes both paths"; done
@@ -129,7 +136,6 @@ aid_amend_contract_rename() {
     fi
   done
   rm -f "$sf2"
-  [[ -n "${si_expect:-}" ]] && aid_stand_in_consume "$auth" "$si_expect"
   mkdir -p "$cdir"
   local rec="${cdir}/contract-amendments.json"; [[ -f "$rec" ]] || echo '[]' > "$rec"
   jq --arg o "$old" --arg n "$new" --arg r "$reason" --argjson d "$decision" --arg at "$at" \

@@ -602,7 +602,9 @@ cmd_prepare() {
     local prevdir=""; (( ROUND >= 2 )) && prevdir="$(_round_dir $((ROUND - 1)))"
     local cp7_mode=full
     [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 ]] && prevdir="$(_previous_attempt_round)"
-    if [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 && -z "$prevdir" ]] && jq -e '.docs_only == true' "${EVID}/fix-class.json" >/dev/null 2>&1; then
+    declare -F aid_docs_only >/dev/null || source "${SCRIPT_DIR}/lib/aid-docs-surface.sh"
+    if [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 && -z "$prevdir" ]] \
+       && aid_docs_only "${EVID}/fix-class.json" "$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")/.aid-o/config/execution.yaml"; then
       prevdir="$(_previous_attempt_full_pass)"; [[ -n "$prevdir" ]] && cp7_mode=confirmation
     fi
     if [[ "$CHECKPOINT" == cp7 ]]; then

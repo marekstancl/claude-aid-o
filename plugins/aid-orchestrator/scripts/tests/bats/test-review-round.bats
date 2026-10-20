@@ -1068,7 +1068,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   local first="$E"; echo "- **Fix** — wording" >> "$R/CHANGELOG.md"; git -C "$R" commit -qam "docs: wording"
   E="$(dirname "$first")/R-P901-final-2"; mkdir -p "$E"; cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; : > "$E/timeline.jsonl"
   mkdir -p "$E/cp7"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$first/cp7/brief.json" "$E/cp7/"
-  jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-1" '{previous_run_dir: $d, class: "delivery", docs_only: true, invalidated_feeds: ["claims"]}' > "$E/fix-class.json"
+  jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-1" '{previous_run_dir: $d, class: "delivery", docs_only: true, invalidated_feeds: ["claims"], reason: null, changed_paths: [{path: "CHANGELOG.md", kind: "modified", feeds: ["claims"]}]}' > "$E/fix-class.json"
   _fsc
   run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq -r '.carried_from // {} | length' "$(FD 1)/round.json")" -eq 0 ]
@@ -1081,9 +1081,10 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   _conf() { run bash -c "source '$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh' >/dev/null 2>&1; _pfsm_cp7_confirmation_bad '$E'"; }
   jq --arg h "$(jq -r .head_sha "$first/cp7/round-1/round.json")" '.previous_candidate = $h' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
   _conf; [ "$status" -eq 0 ]
-  jq '.docs_only = false' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
+  # a markdown file that drives behaviour (a skill) is not documentation (security review)
+  jq '.changed_paths += [{path: "plugins/x/skills/run.md", kind: "modified", feeds: ["claims"]}]' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
   _conf; [ "$status" -eq 1 ]; [[ "$output" == *"not documentation only"* ]]
-  jq '.docs_only = true | .previous_candidate = "0000000000000000000000000000000000000000"' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
+  jq '.changed_paths |= map(select(.path == "CHANGELOG.md")) | .previous_candidate = "0000000000000000000000000000000000000000"' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
   _conf; [ "$status" -eq 1 ]; [[ "$output" == *"not the previous candidate"* ]]
 }
 @test "cp7-zadani: a fix that touched only the plan's criteria asks both roles again (final_generalist reads the criteria too), never carries final_criteria" {

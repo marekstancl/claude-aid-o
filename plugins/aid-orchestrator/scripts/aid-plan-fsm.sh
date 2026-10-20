@@ -5052,7 +5052,8 @@ _pfsm_cp7_confirmation_bad() {
   _lr="$(ls -d "${run_dir_abs}"/cp7/round-* 2>/dev/null | grep -E '/round-[0-9]+$' | sort -t- -k2 -n | tail -1)"
   [[ -n "$_lr" && "$(jq -r '.mode // "full"' "${_lr}/round.json" 2>/dev/null)" == confirmation ]] || return 0
   _co="$(jq -r '.confirmation_of // ""' "${_lr}/round.json")"
-  if ! jq -e '.docs_only == true' "$_fc" >/dev/null 2>&1; then echo "the fix since the previous candidate is not documentation only"; return 1; fi
+  declare -F aid_docs_only >/dev/null || source "${SCRIPT_DIR}/lib/aid-docs-surface.sh"
+  if ! aid_docs_only "$_fc" "$(aid_state_root 2>/dev/null || pwd)/.aid-o/config/execution.yaml"; then echo "the fix since the previous candidate is not documentation only"; return 1; fi
   if [[ ! -f "${_co}/measurement.json" || "$(jq -r .verdict "${_co}/measurement.json")" != pass || "$(jq -r '.mode // "full"' "${_co}/round.json")" != full ]]; then
     echo "${_co:-<none>} is no passed full round"; return 1; fi
   if [[ "$(jq -r .head_sha "${_co}/round.json")" != "$(jq -r .previous_candidate "$_fc")" ]]; then
@@ -5063,10 +5064,12 @@ _pfsm_cp7_confirmation_bad() {
 # _pfsm_accepted_risk_stale <run dir> <candidate> <root> — every cp7 accepted-risk.json is for this candidate,
 # its card unchanged, and each finding it names unchanged (P117 (14)); prints why not and returns 1.
 _pfsm_accepted_risk_stale() {
-  local run_dir_abs="$1" candidate="$2" root="$3" _ar _m _fp _fs _rd
-  # every finding a round marks as an accepted risk needs the record of that decision (security review: a deleted
-  # accepted-risk.json must not leave the acceptance standing)
-  for _m in "${run_dir_abs}"/cp7/round-*/merged.json; do
+  local run_dir_abs="$1" candidate="$2" root="$3" _ar _m _fp _fs _rd _last
+  # the decision that counts is the LAST round's of this attempt (an attempt is one candidate; an older round's
+  # acceptance is history, Codex review): its markers need the record, the record its whole set
+  _last="$(ls -d "${run_dir_abs}"/cp7/round-* 2>/dev/null | grep -E '/round-[0-9]+$' | sort -t- -k2 -n | tail -1)"
+  [[ -n "$_last" ]] || return 0
+  for _m in "${_last}/merged.json"; do
     [[ -f "$_m" ]] || continue; _rd="$(dirname "$_m")"
     while IFS= read -r _fp; do
       [[ -n "$_fp" ]] || continue
@@ -5074,8 +5077,10 @@ _pfsm_accepted_risk_stale() {
         || { echo "finding ${_fp:0:23} of ${_rd#"${root}/"} is marked an accepted risk without the PM's record (accepted-risk.json)"; return 1; }
     done < <(jq -r '.findings[] | select(.dispute.pm.accepted_risk == true) | .fingerprint' "$_m")
   done
-  for _ar in "${run_dir_abs}"/cp7/round-*/accepted-risk.json; do
+  for _ar in "${_last}/accepted-risk.json"; do
     [[ -f "$_ar" ]] || continue
+    [[ "$(jq -cS '.findings | sort_by(.fingerprint)' "$_ar" | sha256sum | cut -d' ' -f1)" == "$(jq -r .set_sha256 "$_ar")" ]] \
+      || { echo "the set of ${_ar#"${root}/"} does not match its set_sha256 (edited)"; return 1; }
     if [[ "$(jq -r .candidate_sha "$_ar")" != "$candidate" ]]; then echo "${_ar#"${root}/"} was given for candidate $(jq -r '.candidate_sha[:12]' "$_ar"), not ${candidate:0:12}"; return 1; fi
     if [[ "$(sha256sum "$(jq -r .card "$_ar")" 2>/dev/null | cut -d' ' -f1)" != "$(jq -r .card_sha256 "$_ar")" ]]; then echo "the card of ${_ar#"${root}/"} changed after the PM answered it"; return 1; fi
     _m="$(dirname "$_ar")/merged.json"
