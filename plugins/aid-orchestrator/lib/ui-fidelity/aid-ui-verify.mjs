@@ -1416,14 +1416,30 @@ for (const b of BRS) {
       const flow = app || flows.find(f => String(f.id) === m.page && m.state);
       let run = null, rowUrl = null;
       const sha = APPV ? { model_sha256: APPV.model_sha256 } : undefined;
-      if (app && app.check === 'app_states') {   // the screen (or a task's state) in test mode with ?stav=: its block shows text
+      if (app && app.check === 'app_states' && m.page.startsWith('mode:')) {   // P118: in this mode each gated action is on or off as its modes say, off with its reason
+        rowUrl = new URL(`${app.url.replace(/^\/+/, '')}?aid-test=1&rezim=${m.state}`, base).href;
+        run = async page => {
+          const bad = [];
+          for (const x of app.expect || []) {
+            const el = page.locator(`[data-aid-action="${x.action}"]`).first();
+            const off = await el.evaluate(e => e.disabled === true || e.getAttribute('aria-disabled') === 'true' || (e.tagName === 'A' && !e.hasAttribute('href'))).catch(() => null);
+            const why = await el.evaluate(e => { const r = e.dataset.aidReason && document.getElementById(e.dataset.aidReason); return !!r && !r.hidden && r.textContent.trim().length > 0; }).catch(() => false);
+            if (off === null) bad.push(`${x.action}: na stránce není`);
+            else if (off === x.enabled) bad.push(`${x.action}: v režimu ${m.state} ${x.enabled ? 'má jít, ale je vypnutá' : 'nemá jít, ale jde'}`);
+            else if (off && !why) bad.push(`${x.action}: vypnutá bez viditelného důvodu`);
+          }
+          return { response: null, done: !bad.length, why: bad.join('; ') };
+        };
+      } else if (app && app.check === 'app_states') {   // the screen (or a task's state) in test mode with ?stav=: its block shows text
         const task = m.page.startsWith('task:') ? m.page.slice('task:'.length) : null;
         const scr = task ? app.screen : m.page.slice('screen:'.length);
         rowUrl = new URL(`${app.url.replace(/^\/+/, '')}?aid-test=1&stav=${task ? task + '.' : ''}${m.state}`, base).href;
         run = async page => {
           const loc = page.locator(task ? `[data-aid-task-state="${task}.${m.state}"]` : `[data-aid-screen="${scr}"] [data-aid-state="${m.state}"]`).first();
-          const ok = (await loc.isVisible().catch(() => false)) && (await loc.innerText().catch(() => '')).trim().length > 0;
+          const busy = task || m.state !== 'loading' || await page.locator('main[aria-busy="true"]').count().catch(() => 0) > 0;   // P118: loading says it to a reader
+          const ok = busy && (await loc.isVisible().catch(() => false)) && (await loc.innerText().catch(() => '')).trim().length > 0;
           return { response: null, done: ok, why: ok ? '' : task ? `úloha ${task}: stav ${m.state} nejde v testovacím režimu vyvolat (?stav=${task}.${m.state}, viditelný data-aid-task-state s textem)`
+            : !busy ? `obrazovka ${scr}: stav načítání nemá na obsahu aria-busy="true"`
             : `obrazovka ${scr} v testovacím režimu (?aid-test=1&stav=${m.state}) neukazuje stav ${m.state} (viditelný data-aid-state s textem)` };
         };
       } else if (flow) {

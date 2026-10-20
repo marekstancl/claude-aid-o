@@ -993,3 +993,15 @@ PY
   grep -q "changed during the run" "$T/gate.log" || { cat "$T/gate.log"; return 1; }
   ! grep -q '^exit=0' "$T/gate.log"
 }
+
+@test "app-gate (P118): an action outside its modes is off with its reason in every mode, loading says aria-busy; an action that ignores its mode fails its row" {
+  app_gate '.modes = [{id: "bezi", label: "Běží"}, {id: "pauza", label: "Pauza"}] | .screens[0].actions[0].modes = ["bezi"] | .screens[0].actions[0].disabled_reason = "V pauze nové poznámky nejdou."'
+  python3 "$SC/lib/aid-ui-skeleton.py" build "$PROJ" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ" --quick; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  Q="$PROJ/.aid-ui/quick/result.json"
+  [ "$(jq -r '[.rows[] | select(.check == "app_states" and .page == "mode:seznam") | .state + "=" + .status] | sort | join(",")' "$Q")" = "bezi=pass,pauza=pass" ]
+  jq -e '[.rows[] | select(.check == "app_states" and .page == "screen:seznam" and .state == "loading")][0].status == "pass"' "$Q" >/dev/null
+  sed -i 's/ data-aid-modes="bezi"//' "$PROJ/site/seznam/index.html"   # the button forgets its mode
+  run bash "$SC/aid-ui-verify.sh" "$PROJ" --quick; [ "$status" -eq 3 ]
+  jq -e '[.rows[] | select(.check == "app_states" and .page == "mode:seznam" and .state == "pauza")][0] | .status == "fail" and (.detail | contains("nemá jít, ale jde"))' "$Q" >/dev/null
+}

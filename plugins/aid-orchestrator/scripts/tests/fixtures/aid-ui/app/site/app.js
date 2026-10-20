@@ -7,7 +7,8 @@
   var notes = JSON.parse(localStorage.getItem('poznamky') || 'null') || [{ id: 1, nazev: 'Ukázková poznámka' }];
   var save = function () { localStorage.setItem('poznamky', JSON.stringify(notes)); };
   var main = document.querySelector('[data-aid-screen]'), screen = main.dataset.aidScreen;
-  var show = function (st) { main.querySelectorAll('[data-aid-state]').forEach(function (e) { e.hidden = e.dataset.aidState !== st; }); };
+  var show = function (st) { main.querySelectorAll('[data-aid-state]').forEach(function (e) { e.hidden = e.dataset.aidState !== st; });
+    if (st === 'loading') main.setAttribute('aria-busy', 'true'); else main.removeAttribute('aria-busy'); };   // a reader hears it is loading
   var want = test && q.get('stav');
   var task = want && want.indexOf('.') > 0 ? want : '';   // a task's state (?stav=<task>.<state>), the screen stays filled
   show(task ? 'filled' : (want || (screen === 'seznam' && !notes.length ? 'empty' : 'filled')));

@@ -373,6 +373,16 @@ def matrix(m):
         if s.get("shell"):   # the bar has no page of its own: it is checked on every screen's page
             continue
         rows += [{"page": "screen:" + s["id"], "state": k, "check": "app_states", "url": screen_url(s)} for k in ("empty", "loading", "error", "filled")]
+    # P118: behaviour, not only text - in every mode an action is off exactly where its modes say, with its reason shown
+    modes = [x["id"] for x in m.get("modes") or []]
+    home = next((s for s in m["screens"] if s["nav"] and not s.get("shell")), None)
+    for s in m["screens"]:
+        gated = [a for a in s["actions"] if a.get("modes") and "item" not in a and not a.get("after")]
+        if not gated or not modes:
+            continue
+        where = home if s.get("shell") else s
+        rows += [{"page": "mode:" + s["id"], "state": md, "check": "app_states", "url": screen_url(where),
+                  "expect": [{"action": f"{s['id']}.{a['id']}", "enabled": md in a["modes"]} for a in gated]} for md in modes]
     return rows
 
 
