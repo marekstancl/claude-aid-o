@@ -174,8 +174,9 @@ AC_CMD_TIMEOUT="${AID_PLAN_DIFF_AC_TIMEOUT:-120}"
 # P117: one limit for the step, the gates and produce — a point without its own timeout: gets at least the
 # plan_diff gate's timeout_seconds (WAN P110: AC13 ~290 s against 120 s at the close), never above 1800.
 _PD_GATE_T="$(yq -r '.gates.plan_diff.timeout_seconds // ""' "${STATE_ROOT:-.}/.aid-o/config/execution.yaml" 2>/dev/null || true)"
-# AID_PLAN_DIFF_AC_TIMEOUT replaces the 120 base, never a larger gate limit (Codex, P117 A+C).
-if [[ "$_PD_GATE_T" =~ ^[1-9][0-9]*$ ]] && (( _PD_GATE_T > AC_CMD_TIMEOUT )); then
+# An explicit AID_PLAN_DIFF_AC_TIMEOUT is the operator's own limit and wins (test-plan-diff.sh holds a hanging
+# point to 2 s with it); without it the gate's larger timeout_seconds is the default.
+if [[ -z "${AID_PLAN_DIFF_AC_TIMEOUT:-}" && "$_PD_GATE_T" =~ ^[1-9][0-9]*$ ]] && (( _PD_GATE_T > AC_CMD_TIMEOUT )); then
   AC_CMD_TIMEOUT="$_PD_GATE_T"
 fi
 (( AC_CMD_TIMEOUT > 1800 )) && AC_CMD_TIMEOUT=1800

@@ -259,7 +259,9 @@ retries; `prevent` — the plan check or the run start catches it, inside a
 run its targeted repair (the `next:` line) replaces `--force`;
 `agent_fix_then_stand_in` — the agent fixes it, after a repeated failure the
 stand-in decides; `stand_in` — in `--auto` the independent
-stand-in decides (`aid-review-round.sh delegate`), never the PM; `pm` — a
+stand-in decides, never the PM (a review finding: `aid-review-round.sh delegate`;
+a run decision: `aid-stand-in.sh ask|record`, `commands/aid-run.md` §Run decisions
+by the stand-in); `pm` — a
 Decision card; `incident` — the environment is broken, fix it and continue,
 nobody decides anything; `not_in_run` — cannot occur inside a run. A code the
 registry does not know is `pm`. In `--auto` no refusal has a global `--force`
@@ -347,6 +349,7 @@ gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
 | `stand_in_not_allowed`, `stand_in_missing`, `stand_in_verdict_invalid`, `stand_in_verdict_unbound` | `aid-stand-in.sh`: the code is not a stand-in's, the decision was not asked through `ask`, the verdict is incomplete, or it has no origin (Codex: the runner's event; Claude: the closed bracket `stand-in-<id>`) (P117) | state | follow the refusal's `next:` | |
 | `rename_refused`, `rename_outside_step`, `rename_collision`, `rename_breaks_plan` | `aid-fsm.sh amend-contract --rename old=new`: no permission or reason, a path not of the current step or into another directory, a name already used, or the rename makes a plan that passed its check and readiness fail them — every file is put back (P117) | work | in `--auto`: `aid-stand-in.sh ask` with `{"kind": "rename", "step": N, "rename": {"old": …, "new": …}}`, then `--stand-in <auth.json>`; otherwise the PM's card quoting both paths | |
 | `accepted_risk_stale` | `plan-finalize --stage decide`: the PM's `accept-risk` record was given for another candidate, its card changed, or a finding it names changed (P117) | state | a new Decision card for the current candidate and its open findings; `aid-review-round.sh accept-risk --checkpoint cp7 … --finding-card <card>` | PM |
+| `accept_risk_not_protected` | `aid-review-round.sh accept-risk` in an `--auto` run: a finding of the set was not sent to the PM by the delegate as protected — a technical finding is the delegate's (P117) | state | `aid-review-round.sh delegate … --fingerprint <fp>` for it; what it classes brief/money/data comes back to the card | |
 | `cp7_confirmation_not_enough` | `decide`: the last whole-plan round is a confirmation round, but the previous candidate had no passed FULL round, or the fix was not documentation by the built-in list (`lib/aid-docs-surface.sh`) (P117) | work | prepare the next CP7 round (a full round), close it, decide again | |
 | `delegation_fix_pending` | `aid-review-round.sh delegate`: a commit after the round changed the lines the finding cites — the fix is judged by the next round's confirmation, never by an adjudicator, and never marks itself fixed (P117) | state | freeze the new candidate (cp7) or prepare the next round (cp2) | |
 | `plan_tests_failed` | `decide`: a nightly test the plan names failed at the candidate, no `plan_tests` entry runs it, or `plan-tests.json` is missing, stale or not the close's (P117) | work | fix on the plan branch, `plan-finalize --stage freeze`, then `produce` (it runs the tests) | |

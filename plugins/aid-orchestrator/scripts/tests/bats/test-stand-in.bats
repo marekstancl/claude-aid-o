@@ -146,3 +146,9 @@ _verify() {
   _verify measurement_failed '{"step": 1, "criterion": "AC3"}'; [ "$output" = PERMITTED ]
   _verify measurement_failed '{"step": 1, "criterion": "AC33"}'; [[ "$output" == *"does not cover"* ]]
 }
+
+@test "stand-in: a step the plan says calls an outside service (**External:**) is protected whatever the proposal declares" {
+  jq '.steps[1].external = ["api.openai.com"]' "$EV/plan.json" > "$EV/p" && mv "$EV/p" "$EV/plan.json"
+  _prop '{"kind": "scope_extension", "step": 1, "paths": ["src/new.py"]}'; _ask; [ "$status" -eq 3 ]; [[ "$output" == *"money"*"api.openai.com"* ]]
+  _prop '{"kind": "scope_extension", "step": 0, "paths": ["src/new.py"]}'; _ask; [ "$status" -eq 4 ]
+}

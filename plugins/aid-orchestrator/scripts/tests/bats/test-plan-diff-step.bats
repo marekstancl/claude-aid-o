@@ -353,7 +353,7 @@ _verdicts() { jq -c '[.results[] | .verdict]' "$1"; }
   printf 'gates:\n  plan_diff:\n    timeout_seconds: 600\n' > .aid-o/config/execution.yaml
   AID_PLAN_DIFF_AC_TIMEOUT_FLOOR=900 _run --step 0
   [[ "$(_out 0 | jq -r '.results[] | select(.ac_label == "AC1") | .evidence')" == *"limit 900 s"* ]]
-  AID_PLAN_DIFF_AC_TIMEOUT=50 _run --step 0; [ "$(_out 0 | jq -r .ac_timeout_default_s)" = 600 ]   # the env replaces the 120 base, a larger gate still wins
+  AID_PLAN_DIFF_AC_TIMEOUT=50 _run --step 0; [ "$(_out 0 | jq -r .ac_timeout_default_s)" = 50 ]   # the operator's explicit limit wins
   AID_PLAN_DIFF_AC_TIMEOUT=900 _run --step 0; [ "$(_out 0 | jq -r .ac_timeout_default_s)" = 900 ]
   rm .aid-o/config/execution.yaml
   _run --step 0; [ "$(_out 0 | jq -r .ac_timeout_default_s)" = 120 ]
