@@ -127,7 +127,8 @@
           "at_step": 2,
           "kind": "network",
           "keeps_input": true,
-          "recover": "znovu"
+          "recover": "znovu",
+          "text": "Spojení vypadlo: nic se neztratilo, Zkusit znovu."
         },
         {
           "at_step": 2,
@@ -171,13 +172,15 @@
           "at_step": 2,
           "kind": "network",
           "keeps_input": true,
-          "recover": "smazat"
+          "recover": "smazat",
+          "text": "Spojení vypadlo: nic se neztratilo, Zkusit znovu."
         },
         {
           "at_step": 2,
           "kind": "server",
           "keeps_input": true,
-          "recover": "smazat"
+          "recover": "smazat",
+          "text": "Server akci odmítl: důvod u tlačítka, opakování nepomůže."
         }
       ]
     }

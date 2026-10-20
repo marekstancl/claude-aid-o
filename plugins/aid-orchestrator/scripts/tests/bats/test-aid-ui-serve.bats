@@ -553,7 +553,7 @@ J
 
 @test "app-skeleton: a link whose failure the model names stays on its screen when the way fails, and the recover walks on" {
   P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
-  jq '(.tasks[] | select(.id == "smazat") | .failure_paths) = [{at_step: 1, kind: "network", keeps_input: true, recover: "otevrit"}, {at_step: 2, kind: "server", keeps_input: true, recover: "smazat"}]' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  jq '(.tasks[] | select(.id == "smazat") | .failure_paths) = [{at_step: 1, kind: "network", keeps_input: true, recover: "otevrit"}, {at_step: 2, kind: "network", keeps_input: true, recover: "smazat", text: "Spojení vypadlo."}, {at_step: 2, kind: "server", keeps_input: true, recover: "smazat", text: "Server odmítl."}]' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
   "$SERVE" skeleton "$P" >/dev/null
   grep -q 'data-aid-action="seznam.otevrit" data-aid-checked' "$P/site/seznam/index.html"; ! grep -q 'data-aid-action="seznam.novy" data-aid-checked' "$P/site/seznam/index.html"
   python3 "$BATS_TEST_DIRNAME/../../aid-ui-flows.py" generate "$P" >/dev/null
@@ -576,7 +576,7 @@ J
   "$SERVE" skeleton "$P" >/dev/null
   grep -q 'href="/seznam/?vysledek=smazat&amp;rezim=pauza" data-aid-confirm-yes="detail.smazat"' "$P/site/detail/index.html"
   grep -q 'href="https://example.org/" target="_blank" rel="noopener"' "$P/site/seznam/index.html"
-  FAIL="$(jq -r '.tasks[] | select(.id == "smazat") | .states.failure' "$P/docs/design/screens.json")"
+  FAIL="$(jq -r '.tasks[] | select(.id == "smazat") | .failure_paths[] | select(.kind == "network") | .text' "$P/docs/design/screens.json")"   # a dropped connection shows its own text
   cat > "$BATS_TEST_TMPDIR/n.mjs" <<J
 import { createRequire } from 'module';
 const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
@@ -585,7 +585,7 @@ await pg.goto(B + '/seznam/'); r.push(await pg.locator('[data-aid-action="seznam
 await pg.goto(B + '/seznam/?vysledek=smazat'); r.push(await pg.locator('[data-aid-action="seznam.vratit"]').isVisible());
 await pg.goto(B + '/detail/'); await pg.click('[data-aid-action="detail.smazat"]'); await pg.route('**/seznam/**', x => x.abort());
 await pg.focus('[data-aid-confirm-yes="detail.smazat"]'); await pg.keyboard.press(' '); await pg.waitForTimeout(500);
-r.push(await pg.locator('[data-aid-fail-for="detail.smazat"]').innerText()); await pg.unroute('**/seznam/**');
+r.push(await pg.locator('[data-aid-fail-for="detail.smazat"]:visible').innerText()); await pg.unroute('**/seznam/**');
 await pg.goto(B + '/formular/'); await pg.fill('[name="nazev"]', 'Rozepsáno'); await pg.reload(); r.push(await pg.inputValue('[name="nazev"]'));
 console.log(r.join(' | ')); await b.close();
 J

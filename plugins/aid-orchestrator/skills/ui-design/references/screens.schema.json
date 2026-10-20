@@ -108,6 +108,7 @@
           "title": {"$ref": "#/$defs/text"},
           "roles": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
           "mode": {"$ref": "#/$defs/id", "description": "režim, ve kterém úloha začíná (Pokračovat začíná v pauze)"},
+          "local": {"type": "boolean", "description": "úloha zapisuje jen v prohlížeči (na server nesahá): lint pak nežádá oprávnění ani cesty selhání a stav selhání je „nenastává, protože …“"},
           "then_mode": {"$ref": "#/$defs/id", "description": "režim po dokončení úlohy (STOP → pozastaveno); kostra ho s výsledkem nastaví"},
           "frequency": {"$ref": "#/$defs/text", "description": "jak často úloha nastává (denně, při poruše…): nejčastější patří na hlavní obrazovku"},
           "steps": {

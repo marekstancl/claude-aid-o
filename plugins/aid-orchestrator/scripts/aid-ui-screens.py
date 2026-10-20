@@ -214,40 +214,67 @@ def violations(m, proj):
                 or not 1 <= int(f[1]) <= len(open(full, encoding="utf-8", errors="replace").read().splitlines()):
             out.append(f"{at}/source: {r['source']} není soubor:řádek v projektu")
     # P118 lint: the classes of findings the roles kept raising in the P116 pilot, decided by code before any gate
-    UNIT = re.compile(r"(?<![\w{])[+−-]?\d[\d  ,.]*\s?(?:USDT|USD|R|%|×)(?![\w])")
-    TIMEISH = re.compile(r"\b\d{1,2}:\d{2}\b|\d[\d  ,.]*\s?(?:USDT|USD|R|%|×|min|s|h)(?![\w])")
+    KEY = re.compile(r"\{[a-z][a-z0-9_]*\}")
+    UNIT = re.compile(r"(?<![\w{])[+−-]?[$€]?\d[\d\u00a0 ,.]*\s?(?:USDT|USD|EUR|CZK|Kč|R|%|×|x)(?![\w])|[$€]\s?\d[\d\u00a0 ,.]*")
+    DIGIT = re.compile(r"(?<![A-Za-z\d])\d")   # a digit that is not part of a code like F1 or R12
     def lit(txt, where):   # an amount, R, percent or leverage written out instead of a named value: two places can disagree
-        for x in UNIT.findall(re.sub(r"\{[a-z][a-z0-9_]*\}", "", str(txt or ""))):
+        for x in UNIT.findall(KEY.sub("", str(txt or ""))):
             out.append(f"{where}: číslo s jednotkou „{x.strip()}“ napsané přímo - patří do values a sem jako {{klíč}} (jedno číslo, jedno místo)")
     for i, s in good_s:
-        if TIMEISH.search(s["purpose"]):
-            out.append(f"/screens/{i}/purpose: účel obrazovky nese číslo, čas nebo pravidlo („{TIMEISH.search(s['purpose']).group(0)}“) - to patří do ukázky, stavu nebo values")
+        if DIGIT.search(KEY.sub("", s["purpose"])):
+            out.append(f"/screens/{i}/purpose: účel obrazovky nese číslo („{s['purpose'][max(0, DIGIT.search(KEY.sub('', s['purpose'])).start() - 15):][:40]}…“) - čísla, časy a pravidla patří do ukázky, stavu nebo values")
+        lit(s["title"], f"/screens/{i}/title")
         for j, x in enumerate(s.get("sample") or []):
             lit(x, f"/screens/{i}/sample/{j}")
         for md, rows in (s.get("mode_sample") or {}).items():
             for j, x in enumerate(rows):
                 lit(x, f"/screens/{i}/mode_sample/{md}/{j}")
         for j, tb in enumerate(s.get("tables") or []):
+            lit(tb["caption"], f"/screens/{i}/tables/{j}/caption")
             for r, row in enumerate(tb["rows"]):
                 for c, x in enumerate(row):
                     lit(x, f"/screens/{i}/tables/{j}/rows/{r}/{c}")
         for k, x in s["states"].items():
             lit(x, f"/screens/{i}/states/{k}")
+        for j, f in enumerate(s.get("fields") or []):
+            for k in ("label", "hint", "error"):
+                lit(f.get(k), f"/screens/{i}/fields/{j}/{k}")
+        for j, d in enumerate(s.get("data") or []):
+            for k in ("what", "freshness"):   # source names files and lines: not checked
+                lit(d.get(k), f"/screens/{i}/data/{j}/{k}")
         for j, a in enumerate(s["actions"]):
             for k in ("label", "confirm", "confirm_yes", "confirm_no", "disabled_reason"):
                 lit(a.get(k), f"/screens/{i}/actions/{j}/{k}")
+    for j, g in enumerate(m.get("glossary") or []):
+        lit(g.get("meaning") if isinstance(g, dict) else None, f"/glossary/{j}/meaning")
+    for j, x in enumerate(m.get("out_of_scope") or []):
+        if isinstance(x, dict):
+            lit(x.get("what"), f"/out_of_scope/{j}/what"); lit(x.get("why"), f"/out_of_scope/{j}/why")
     for i, t in good_t:
+        lit(t["title"], f"/tasks/{i}/title")
         for k, x in t["states"].items():
             lit(x, f"/tasks/{i}/states/{k}")
         lit(t["done_when"]["expect"], f"/tasks/{i}/done_when/expect")
-        writes = any((acts.get((st["screen"], st["action"])) or {}).get("kind") in ("submit", "destructive") for st in t["steps"])
-        local = str(t["states"]["failure"]).strip().lower().startswith("nenastává")   # it never reaches a server (writes in the browser only)
-        if writes and not local:   # a task that changes data says who may not and what each failure looks like (P118: roles marked it 6 rounds)
-            if str(t["states"]["permission"]).strip().lower().startswith("nenastává"):
-                out.append(f"/tasks/{i}/states/permission: úloha {t['id']} zapisuje, stav oprávnění (kdo nesmí a co uvidí) nesmí být „nenastává“")
-            kinds = {fp["kind"] for fp in t["failure_paths"]}
-            if "network" not in kinds or not kinds & {"server", "validation"}:
-                out.append(f"/tasks/{i}/failure_paths: úloha {t['id']} zapisuje - potřebuje cestu selhání sítě (network) i odmítnutí serverem (server nebo validation), každou se svým textem")
+        for j, fp in enumerate(t["failure_paths"]):
+            lit(fp.get("text"), f"/tasks/{i}/failure_paths/{j}/text")
+        wsteps = [n for n, st in enumerate(t["steps"], 1) if (acts.get((st["screen"], st["action"])) or {}).get("kind") in ("submit", "destructive")]
+        if t.get("local"):   # writes in the browser only: said by the model's flag, and then no failure can reach a server
+            if not str(t["states"]["failure"]).strip().lower().startswith("nenastává"):
+                out.append(f"/tasks/{i}/local: úloha {t['id']} je označená jako jen v prohlížeči, stav selhání pak musí být „nenastává, protože …“")
+            continue
+        if not wsteps:
+            continue
+        perm = str(t["states"]["permission"]).strip()
+        if perm.lower().startswith(("nenastává", "nenastane")) or len(perm) < 20:
+            out.append(f"/tasks/{i}/states/permission: úloha {t['id']} zapisuje - stav oprávnění říká, kdo nesmí a co uvidí (ne „nenastává“ ani prázdná věta)")
+        for n in wsteps:   # every writing step: a dropped connection and a refusal, each with what the person sees
+            at = [fp for fp in t["failure_paths"] if fp["at_step"] == n]
+            for need, kinds in (("sítě (network)", {"network"}), ("odmítnutí serverem (server nebo validation)", {"server", "validation"})):
+                hit = [fp for fp in at if fp["kind"] in kinds]
+                if not hit:
+                    out.append(f"/tasks/{i}/failure_paths: úloha {t['id']} krok {n} zapisuje - chybí cesta selhání {need}")
+                elif not any(str(fp.get("text") or "").strip() for fp in hit):
+                    out.append(f"/tasks/{i}/failure_paths: úloha {t['id']} krok {n} - cesta selhání {need} nemá text (co člověk uvidí a co udělá)")
     return out
 
 

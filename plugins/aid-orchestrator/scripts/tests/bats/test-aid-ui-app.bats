@@ -74,9 +74,9 @@ mutate() { jq "$1" "$M" > "$T/m.json" && mv "$T/m.json" "$M"; }
   run python3 "$SCR" check "$APP"
   [ "$status" -eq 1 ]
   [[ "$output" == *"úloha zalozit odesílá data, ale nemá cestu selhání"* ]]
-  mutate '.tasks[0].states.failure = "nenastává, protože ukládá jen do prohlížeče"'
+  mutate '.tasks[0].states.failure = "nenastává, protože ukládá jen do prohlížeče" | .tasks[0].local = true'
   run python3 "$SCR" check "$APP"
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
 @test "screens: steps that do not follow, an unknown action, a recover off the failing screen and an unknown replaced task are refused" {
@@ -279,7 +279,7 @@ ans_by() {
   grep -q 'done: !!ok' "$APP/.aid-ui/scenarios/zalozit.mjs"; grep -q 'nemá stav scénáře' "$APP/.aid-ui/scenarios/zalozit.mjs"
   node --check "$APP/.aid-ui/scenarios/zalozit.mjs"
   # no failure path in the model: one generated network failure on the last submit, recovered by that action
-  mutate '.tasks[0].failure_paths = [] | .tasks[0].states.failure = "nenastává, protože ukládá jen do prohlížeče"'
+  mutate '.tasks[0].failure_paths = [] | .tasks[0].states.failure = "nenastává, protože ukládá jen do prohlížeče" | .tasks[0].local = true'
   python3 "$FL" generate "$APP" >/dev/null
   t zalozit | jq -e '.variants["fail-1"] == {at_step: 2, kind: "network", recover: "ulozit", generated: true}' >/dev/null
   # a title with a line break stays inside the generated comment: nothing of the model becomes code
@@ -517,7 +517,7 @@ app_handover() {
       actions: [{id: "stop", label: "STOP", to: "seznam", kind: "submit"}],
       states: {empty: "nenastává, protože lišta je vždy", loading: "Zastavuji…", error: "STOP nedoběhl; Zkusit znovu.", filled: "Lišta."}}]
     | .tasks += [{id: "zastavit", title: "Zastavit", roles: ["uživatel"], steps: [{screen: "seznam", action: "otevrit"}, {screen: "lista", action: "stop"}],
-      done_when: {screen: "seznam", expect: "Pozastaveno"}, states: .tasks[1].states, failure_paths: [{at_step: 2, kind: "network", keeps_input: true, recover: "stop"}, {at_step: 2, kind: "server", keeps_input: true, recover: "stop"}]}]'
+      done_when: {screen: "seznam", expect: "Pozastaveno"}, states: .tasks[1].states, failure_paths: [{at_step: 2, kind: "network", keeps_input: true, recover: "stop", text: "Spojení vypadlo, Zkusit znovu."}, {at_step: 2, kind: "server", keeps_input: true, recover: "stop", text: "STOP odmítnut serverem."}]}]'
   run python3 "$SCR" check "$APP"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   run python3 "$SCR" matrix "$APP"
@@ -603,17 +603,25 @@ app_handover() {
   run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
 
-@test "screens (P118 lint): an amount, R or percent written out instead of a named value, a number in a purpose, a writing task without permission or both failure kinds are refused" {
-  mutate '.screens[0].sample = ["Celkem 120 USDT"]'
-  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"/screens/0/sample/0: číslo s jednotkou „120 USDT“"* ]]
-  mutate '.values = {celkem: {value: "120 USDT", source: "ukázka"}} | .screens[0].sample = ["Celkem {celkem}"]'
+@test "screens (P118 lint): written-out amounts, numbers in a purpose, a writing step without both failures and their texts, an empty permission, a false local flag" {
+  for x in "Celkem 120 USDT" "Páka 10x" "Cena 120 Kč" "Riziko 0,5 %" "Zisk +0,4 R"; do
+    cp "$FIXA/docs/design/screens.json" "$M"; mutate ".screens[0].sample = [\"$x\"]"
+    run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ] && [[ "$output" == *"/screens/0/sample/0: číslo s jednotkou"* ]] || { echo "$x: $output"; return 1; }
+  done
+  cp "$FIXA/docs/design/screens.json" "$M"
+  mutate '.values = {celkem: {value: "120 USDT", source: "ukázka"}} | .screens[0].sample = ["Celkem {celkem} podle pravidla R12, krok F1"] | .screens[0].title = "Poznámky"'
   run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  mutate '.screens[0].purpose = "Seznam poznámek, obnova po 30 s"'
-  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"/screens/0/purpose: účel obrazovky nese číslo"*"30 s"* ]]
-  cp "$FIXA/docs/design/screens.json" "$M"
-  mutate '(.tasks[0].states.permission) = "nenastává, protože je jeden uživatel"'
-  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"úloha zalozit zapisuje, stav oprávnění"* ]]
-  cp "$FIXA/docs/design/screens.json" "$M"
-  mutate '(.tasks[1].failure_paths) = [{at_step: 2, kind: "network", keeps_input: true, recover: "smazat"}]'
-  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"úloha smazat zapisuje - potřebuje cestu selhání sítě"* ]]
+  mutate '.screens[0].purpose = "Seznam poznámek za posledních 7 dní"'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"/screens/0/purpose: účel obrazovky nese číslo"* ]]
+  cp "$FIXA/docs/design/screens.json" "$M"; mutate '.screens[1].fields = [{name: "nazev", label: "Název", hint: "do 80 USDT"}]'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"/screens/1/fields/0/hint: číslo s jednotkou"* ]]
+  cp "$FIXA/docs/design/screens.json" "$M"; mutate '(.tasks[0].states.permission) = "-"'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"úloha zalozit zapisuje - stav oprávnění"* ]]
+  cp "$FIXA/docs/design/screens.json" "$M"   # a network failure on the wrong step does not cover the writing one
+  mutate '(.tasks[1].failure_paths) = [{at_step: 1, kind: "network", keeps_input: true, recover: "otevrit", text: "Spojení vypadlo."}, {at_step: 2, kind: "server", keeps_input: true, recover: "smazat", text: "Odmítnuto."}]'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"úloha smazat krok 2 zapisuje - chybí cesta selhání sítě"* ]]
+  cp "$FIXA/docs/design/screens.json" "$M"; mutate 'del(.tasks[1].failure_paths[1].text)'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"krok 2 - cesta selhání odmítnutí serverem (server nebo validation) nemá text"* ]]
+  cp "$FIXA/docs/design/screens.json" "$M"; mutate '.tasks[1].local = true'   # the flag needs the failure that cannot happen
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"úloha smazat je označená jako jen v prohlížeči"* ]]
 }

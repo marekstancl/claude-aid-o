@@ -867,7 +867,7 @@ detail() { jq -r --arg c "$1" --arg p "$2" --arg s "$3" '[.rows[] | select(.chec
 }
 
 @test "app-gate: a submitting task without a failure path in the model still gets the generated network failure" {
-  app_gate '.tasks[0].failure_paths = [] | .tasks[0].states.failure = "nenastává, protože ukládá jen do prohlížeče"'
+  app_gate '.tasks[0].failure_paths = [] | .tasks[0].states.failure = "nenastává, protože ukládá jen do prohlížeče" | .tasks[0].local = true'
   sed -i 's|/\* aid-break: lost-input \*/|form.reset();|' "$T/appsite/app.js"
   gate_app
   [ "$status" -eq 3 ]
