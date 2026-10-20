@@ -21,7 +21,7 @@ setup() {
   L "aid_plan_tests_named '$T/plan.md'"; [ "$output" = $'tests/test-day.bats\ntests/test-night.bats\nui/e2e/flow.spec.ts' ]
   L "aid_plan_tests_run '$T' '$EX' '$T/plan.md' cafe '$RD'"; [ "$status" -eq 0 ]
   [ "$(jq -r '[.tests[].path] | join(" ")' "$RD/plan-tests.json")" = "tests/test-night.bats ui/e2e/flow.spec.ts" ]
-  [ "$(jq -r '.tests[0] | "\(.command) \(.exit)"' "$RD/plan-tests.json")" = "echo ran tests/test-night.bats 0" ]
+  [ "$(jq -r '.tests[0] | "\(.command) \(.exit)"' "$RD/plan-tests.json")" = "echo ran {path} 0" ]
   grep -q '^ran tests/test-night.bats$' "$RD/$(jq -r '.tests[0].log' "$RD/plan-tests.json")"
   L "aid_plan_tests_bad '$RD' cafe"; [ "$status" -eq 0 ]
   L "aid_plan_tests_bad '$RD' beef"; [ "$status" -eq 1 ]; [[ "$output" == *"not cafe"* || "$output" == *"of candidate cafe"* ]]
@@ -38,6 +38,16 @@ setup() {
   echo "# a comment" >> "$EX"; L "aid_plan_tests_bad '$RD' cafe '$T' '$EX' '$T/plan.md'"; [ "$status" -eq 1 ]; [[ "$output" == *"execution.yaml changed"* ]]
   sed -i '$d' "$EX"
   echo tampered >> "$RD/plan-tests/1.log"; L "aid_plan_tests_bad '$RD' cafe"; [ "$status" -eq 1 ]; [[ "$output" == *"log changed"* ]]
+}
+
+@test "plan tests: the log is redacted (a secret-named variable, a password in a URL) and keeps the last 8 KiB; a path reaches the command as a variable" {
+  printf 'plan_tests:\n  - glob: "**/*.bats"\n    command: "echo t=$TB_TOKEN db=$TB_DATABASE_URL; seq 1 5000; echo t2=$TB_TOKEN; echo p={path}"\n' > "$EX"
+  export TB_TOKEN="tok-canary-42" TB_DATABASE_URL="postgres://u:pw-canary-43@db/x"
+  L "aid_plan_tests_run '$T' '$EX' '$T/plan.md' cafe '$RD'"; [ "$status" -eq 0 ]
+  local log="$RD/$(jq -r '.tests[0].log' "$RD/plan-tests.json")"; cat "$log" | head -3
+  ! grep -q 'tok-canary-42' "$log"; ! grep -q 'pw-canary-43' "$log"; grep -q 'last 8192 shown' "$log"; grep -q '^p=tests/test-night.bats$' "$log"
+  grep -q '^t2=\[redigováno\]$' "$log"
+  [ "$(wc -c < "$log")" -lt 9000 ]
 }
 
 @test "plan tests: a failing test, or one no plan_tests entry runs, fails the close; a hand-written file is not the close's" {

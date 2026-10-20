@@ -226,38 +226,7 @@ fi
 # filter that keeps the raw tail in memory only and writes the last 8 KiB redacted (the verification_env values,
 # the host's secret-named variables, token-shaped strings) (Codex review of P117 A+C: the raw temp files were the leak).
 # shellcheck disable=SC2016
-_PD_FILTER_PY='
-import os, re, signal, sys
-SEC = sorted({s for s in os.environ.get("AID_PD_SECRETS", "").split("\n") if s}, key=len, reverse=True)
-name, lim = sys.argv[1], 8192
-# the raw tail is kept in memory only, with a margin longer than any secret; it is redacted as one piece at the
-# end, so a value split across two reads is still caught, and the margin (where a cut-off fragment of a secret
-# or token could sit) is dropped before anything is written (Codex, P117 A+C round 2)
-margin = max([len(x.encode()) for x in SEC] + [0]) + 128
-raw, total, binary = b"", 0, False
-def red(t):
-    for s in SEC: t = t.replace(s, "[redigováno]")
-    t = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1[redigováno]", t)
-    t = re.sub(r"\b(sk-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{20,}|xox[abp]-[A-Za-z0-9-]{10,})", "[redigováno]", t)
-    return re.sub(r"(://)[^/\s:@]+:[^/\s@]+@", r"\1[redigováno]@", t)   # scheme://user:password@
-def done(*_):
-    head = "--- std%s (%d bytes%s) ---\n" % (name, total, ", last 8192 shown" if total > lim else "")
-    if binary: body = "[binary output, %d bytes]" % total
-    else:
-        t = raw.decode("utf-8", "replace")
-        if total > len(raw):                     # the window was cut: its start may hold a fragment of a
-            t = re.sub(r"^\S*", "", t[margin:], count=1)   # secret, or of a token of any length
-        body = red(t).encode()[-lim:].decode("utf-8", "ignore")
-    sys.stdout.write(head + body + "\n"); sys.stdout.flush(); os._exit(0)
-signal.signal(signal.SIGTERM, done)
-while True:
-    chunk = sys.stdin.buffer.read1(1 << 16)
-    if not chunk: break
-    total += len(chunk)
-    if b"\0" in chunk: binary = True
-    if not binary: raw = (raw + chunk)[-(lim + 2 * margin):]
-done()
-'
+_PD_FILTER="${SCRIPT_DIR}/lib/aid-redact-filter.py"   # the redacting filter, shared with the plan's nightly tests
 # _pd_stream_open — a private dir with the two FIFOs and their filters; sets PD_SD, PD_SP
 _pd_stream_open() {
   local kv v n; local -a sec=()
@@ -267,7 +236,7 @@ _pd_stream_open() {
   while IFS= read -r n; do v="${!n:-}"; [[ "$v" == *://*@* ]] && sec+=("$v"); done < <(compgen -e | grep -Ei '(_URL|_DSN|_URI)$' || true)
   PD_SD="$(mktemp -d)"; mkfifo -m 600 "$PD_SD/o" "$PD_SD/e"; PD_SP=()
   local s; for s in o e; do
-    AID_PD_SECRETS="$(printf '%s\n' "${sec[@]}")" python3 -c "$_PD_FILTER_PY" "$([[ $s == o ]] && echo out || echo err)" \
+    AID_PD_SECRETS="$(printf '%s\n' "${sec[@]}")" python3 "$_PD_FILTER" "$([[ $s == o ]] && echo out || echo err)" \
       > "$PD_SD/$s.txt" < "$PD_SD/$s" & PD_SP+=($!)   # the file first: a reader blocked on the FIFO holds no caller pipe
   done
 }

@@ -84,7 +84,7 @@
 #     - glob: "**/tests/**/test_*.py"
 #       command: "scripts/pytest.sh {path} -q"
 #     - glob: "ui/e2e/**/*.spec.ts"
-#       command: "cd ui && npx playwright test ${path#ui/}"   # a shell expression is fine
+#       command: "cd ui && npx playwright test \"${AID_TEST_PATH#ui/}\""   # {path} is also $AID_TEST_PATH
 #       nightly: true
 #       timeout_s: 900
 # `help_paths:` (optional; P117) — globs of the project's in-app help: a step that

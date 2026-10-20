@@ -48,7 +48,7 @@ aid_plan_tests_expected() {
   while IFS= read -r p; do
     [[ -n "$p" ]] && _aid_pt_nightly "$1" "$2" "$p" || continue
     cmd=""; t=600
-    if line="$(aid_plan_tests_command "$2" "$p")"; then cmd="$(cut -f1 <<< "$line")"; cmd="${cmd//\{path\}/$p}"; t="$(cut -f2 <<< "$line")"; fi
+    if line="$(aid_plan_tests_command "$2" "$p")"; then cmd="$(cut -f1 <<< "$line")"; t="$(cut -f2 <<< "$line")"; fi
     [[ "$t" =~ ^[1-9][0-9]*$ ]] || t=600; (( t > 1800 )) && t=1800
     rows="$(jq -c --arg p "$p" --arg c "$cmd" --argjson t "$t" '. + [{path: $p, command: (if $c == "" then null else $c end), timeout_s: $t}]' <<< "$rows")"
   done < <(aid_plan_tests_named "$3")
@@ -62,6 +62,14 @@ aid_plan_tests_needed() {
   return 1
 }
 
+# _aid_pt_secrets — the values a test log must never hold: secret-named variables, connection strings with
+# credentials (the same rule as the measurement, aid-plan-diff.sh)
+_aid_pt_secrets() {
+  local n v
+  while IFS= read -r n; do v="${!n:-}"; (( ${#v} >= 6 )) && printf '%s\n' "$v"; done < <(compgen -e | grep -Ei 'TOKEN|SECRET|PASSWORD|PASSWD|_KEY$|APIKEY|CREDENTIAL' || true)
+  while IFS= read -r n; do v="${!n:-}"; [[ "$v" == *://*@* ]] && printf '%s\n' "$v"; done < <(compgen -e | grep -Ei '(_URL|_DSN|_URI)$' || true)
+}
+
 aid_plan_tests_run() {
   local tree="$1" ex="$2" plan="$3" cand="$4" rd="$5" p line cmd t rc start dur log rows="[]" i=0
   mkdir -p "${rd}/plan-tests"
@@ -72,12 +80,16 @@ aid_plan_tests_run() {
     if ! line="$(aid_plan_tests_command "$ex" "$p")" || [[ -z "$(cut -f1 <<< "$line")" ]]; then
       rows="$(jq -c --arg p "$p" '. + [{path: $p, command: null, exit: null, reason: "no plan_tests entry in execution.yaml runs it"}]' <<< "$rows")"; continue
     fi
-    cmd="$(cut -f1 <<< "$line")"; cmd="${cmd//\{path\}/$p}"; t="$(cut -f2 <<< "$line")"
+    # the path reaches the command as a variable, never as text spliced into it (a path with shell characters)
+    cmd="$(cut -f1 <<< "$line")"; cmd="${cmd//\{path\}/\"\$AID_TEST_PATH\"}"; t="$(cut -f2 <<< "$line")"
     [[ "$t" =~ ^[1-9][0-9]*$ ]] || t=600; (( t > 1800 )) && t=1800
     start="$(date +%s)"; rc=0
-    ( cd "$tree" && timeout "$t" bash -c "$cmd" ) </dev/null > "$log" 2>&1 || rc=$?
+    # the log is the last 8 KiB, redacted before it reaches the disk (lib/aid-redact-filter.py)
+    ( cd "$tree" && AID_TEST_PATH="$p" timeout "$t" bash -c "$cmd" </dev/null 2>&1 ) \
+      | AID_PD_SECRETS="$(_aid_pt_secrets)" python3 "${_AID_PT_LIB}/aid-redact-filter.py" out > "$log"
+    rc="${PIPESTATUS[0]}"
     dur=$(( $(date +%s) - start ))
-    rows="$(jq -c --arg p "$p" --arg c "$cmd" --argjson e "$rc" --argjson d "$dur" --argjson t "$t" --arg l "plan-tests/${i}.log" \
+    rows="$(jq -c --arg p "$p" --arg c "$(cut -f1 <<< "$line")" --argjson e "$rc" --argjson d "$dur" --argjson t "$t" --arg l "plan-tests/${i}.log" \
       --arg s "$(sha256sum "$log" | cut -d' ' -f1)" '. + [{path: $p, command: $c, exit: $e, duration_s: $d, timeout_s: $t, log: $l, log_sha256: $s}]' <<< "$rows")"
   done < <(aid_plan_tests_named "$plan")
   jq -n --arg c "$cand" --argjson r "$rows" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
