@@ -430,7 +430,22 @@ def round_costs(p, rs):
         for x in rows:
             k = "agent" if x.get("provider") == "agent" else (x.get("purpose") or "?").split(":")[0]
             by[k] = round(by.get(k, 0) + (x.get("usd") or 0), 4)
-        out.append({"usd": round(sum(by.values()), 2), "by": by, "minutes": round((end - a) / 60),
+        # P118: where the time went - the roles' calls, the verifier's runs, the gate's runs; the rest is the producer
+        crit = [costs.ts(x.get("at")) for x in rows if (x.get("purpose") or "").startswith("critic") and costs.ts(x.get("at")) - a < 3600]
+        roles = (max(crit) - a) / 60 if crit else 0
+        ver = sum(max(0, costs.ts(v.get("at")) - costs.ts(v.get("started"))) for v in memory.verify_records_all(p, PLACE)
+                  if v.get("started") and a <= costs.ts(v.get("started")) < end) / 60
+        gate = 0
+        try:
+            for line in open(os.path.join(p, ".aid-ui", "gate-times.jsonl"), encoding="utf-8"):
+                g = json.loads(line)
+                if a <= costs.ts(g["started"]) < end:
+                    gate += (costs.ts(g["ended"]) - costs.ts(g["started"])) / 60
+        except (OSError, ValueError, KeyError):
+            pass
+        total = (end - a) / 60
+        out.append({"usd": round(sum(by.values()), 2), "by": by, "minutes": round(total),
+                    "phases": {"roles": round(roles, 1), "verify": round(ver, 1), "gate": round(gate, 1), "producer": round(max(0, total - roles - ver - gate), 1)},
                     "agent_measured": any(x.get("provider") == "agent" for x in rows)})
     return out
 

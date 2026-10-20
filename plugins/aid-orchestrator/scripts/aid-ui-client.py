@@ -995,6 +995,7 @@ def verify(project, place, web):
     not seen, 1 no valid answer."""
     if place not in memory.PLACES:
         die("--place must be one of " + ", ".join(memory.PLACES), 2)
+    started = now()
     artifact = site_sha(os.path.join(project, "site")) if place == "web" else place_bundle(project, place)[1]
     out = os.path.join(project, ".aid-ui", "verify", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + place)
     os.makedirs(out, exist_ok=True)
@@ -1065,7 +1066,7 @@ def verify(project, place, web):
     wj(os.path.join(out, "turn.json"), {"place": place, "artifact": artifact, "answer": a, "model": mrec, "at": now()})
     if a is None:
         die("VERIFY %s: no valid answer from Codex nor the Opus stand-in (%s)" % (place, mrec.get("stand_in_reason")))
-    rec = memory.verify_append(project, place, {"artifact": artifact, "at": now(), "provider": mrec.get("provider"), "model": mrec.get("model"),
+    rec = memory.verify_append(project, place, {"artifact": artifact, "started": started, "at": now(), "provider": mrec.get("provider"), "model": mrec.get("model"),
                                                 "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(), "capture_sha256": sha_file(os.path.join(out, "capture.json")),
                                                 "round": rs[-1]["n"] if rs else 0, "fixes": {i: a["fixes"][i] for i in ids}, "open": a["open"], "turn": rel(out)})
     notseen = [i for i in ids if rec["fixes"][i]["verdict"] != "overeno"]

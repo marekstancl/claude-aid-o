@@ -59,7 +59,7 @@ if (( $# == 2 )) && [[ "$2" == --precheck || "$2" == --quick ]]; then   # P116: 
   [[ "$(jq -r '.variant.type // ""' "$STATE" 2>/dev/null)" == webapp ]] || die "--$MODE is for a web application (variant.type webapp)"
   site="$PROJECT/site"; [[ -f "$site/index.html" ]] || die "no skeleton in $site (aid-ui-serve.sh skeleton <project>)"
   python3 "$HERE/aid-ui-flows.py" generate "$PROJECT" >/dev/null || die "the task scenarios could not be generated from docs/design/screens.json (see above)"
-  OUT="$PROJECT/.aid-ui/$MODE"; rm -rf "$OUT"; mkdir -p "$OUT"
+  OUT="$PROJECT/.aid-ui/$MODE"; rm -rf "$OUT"; mkdir -p "$OUT"; STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   jq --argjson b "$(bash "$HERE/aid-ui-state.sh" build-json "$site")" --arg d "$site" '.build = ($b + {dir: $d})' "$STATE" > "$OUT/state.json"
   yq -o=json . "$(dirname "$COVERAGE_MAP")/checks.yaml" | jq '.checks |= with_entries(select(.key | IN("app_flows", "app_states", "keyboard_flows", "task_recovery", "axe", "keyboard")))
     | .viewports = (.app_rows.viewports // .viewports) | .browsers = (.app_rows.browsers // .browsers)
@@ -70,6 +70,8 @@ if (( $# == 2 )) && [[ "$2" == --precheck || "$2" == --quick ]]; then   # P116: 
   bash "$TOOL" verify --state "$OUT/state.json" --checks "$OUT/checks.json" --site "$site" --base "$(sed -n 's/^URL: //p' <<<"$srv")" \
     --out "$OUT" --project "$PROJECT" --seo "$HERE/aid-ui-seo-check.py" || die "the $MODE run failed; no result"
   open="$(jq '[.rows[] | select(.status != "pass")] | length' "$OUT/result.json")"
+  # P118: the gate's time per run, for the phases of a round (aid-ui-quality.py status)
+  jq -cn --arg m "$MODE" --arg s "$STARTED" --arg e "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson o "$open" '{mode: $m, started: $s, ended: $e, open: $o}' >> "$PROJECT/.aid-ui/gate-times.jsonl"
   echo "${MODE^^}: $OUT/result.json ($open open rows)"
   jq -r '.rows[] | select(.status != "pass") | "  \(.status) \(.check) \(.page) \(.state) \(.viewport): \((.detail // "")[0:160])"' "$OUT/result.json" | head -20
   (( open == 0 )) || exit 3

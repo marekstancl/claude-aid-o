@@ -241,3 +241,21 @@ def verify_records(p, place, artifact):
         if isinstance(r, dict) and r.get("artifact") == artifact and r.get("place") == place and hmac.compare_digest(str(r.get("sig") or ""), _verify_sig(r)):
             out.append(r)
     return out
+
+
+def verify_records_all(p, place):
+    """Every signed record of the place, any artifact (the phases of a round: how long the verifier ran)."""
+    import hmac
+    out = []
+    try:
+        lines = open(os.path.join(verify_home(p), place + ".jsonl"), encoding="utf-8").read().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(r, dict) and r.get("place") == place and hmac.compare_digest(str(r.get("sig") or ""), _verify_sig(r)):
+            out.append(r)
+    return out
