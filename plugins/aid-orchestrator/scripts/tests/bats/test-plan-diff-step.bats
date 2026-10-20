@@ -372,6 +372,12 @@ _verdicts() { jq -c '[.results[] | .verdict]' "$1"; }
   grep -q 'tail=\[redigováno\]' "$f"   # the value after 20 KB of output, in the kept tail, is redacted too
   grep -q 'x=\[redigováno\]' "$f"      # and so is one written in two pieces (two reads of the filter)
   ! grep -q 'QQQQ' "$f"; grep -q '^end' "$f"   # a token longer than the kept tail: its prefix-less end is dropped
+  # a connection string: the value of a *_URL variable with a password, and userinfo in any URL (security review)
+  export APP_DATABASE_URL="postgres://app:pw-canary-77@db:5432/app"
+  { printf -- '---\nid: P950\n---\n# Plan\n\n## Implementation Steps\n\n### Step 1: one\n\n**Zavírá:** AC1\n\n## Acceptance Criteria\n\n- [ ] AC1: urls\n'; _blk 'echo db=$APP_DATABASE_URL; echo other=redis://bob:pw-canary-88@cache:6379; exit 3'; } > "$PLAN"
+  _run --step 0; ev="$(_out 0 | jq -r '.results[0].evidence')"; f="$EV/cp2/step-0/${ev##*output: }"
+  ! grep -q 'pw-canary-77' "$f"; ! grep -q 'pw-canary-88' "$f"; grep -q 'redis://\[redigováno\]@cache' "$f"
+  unset APP_DATABASE_URL
   # while the point runs, no file anywhere it could land (temp dir, evidence) holds the raw value (Codex, P117 A+C)
   mkdir -p "$ROOT/tmp"; export TMPDIR="$ROOT/tmp" SCAN="$ROOT"
   { printf -- '---\nid: P950\n---\n# Plan\n\n## Implementation Steps\n\n### Step 1: one\n\n**Zavírá:** AC1\n\n## Acceptance Criteria\n\n- [ ] AC1: scans\n'; _blk 'echo pw=$DB_PASSWORD; echo e=$DB_PASSWORD >&2; sleep 0.3; c=hunter2-; grep -rla --exclude-dir=.aid-o --exclude=execution.yaml "${c}canary" "$SCAN" "$TMPDIR" >&2 && exit 7; exit 2'; } > "$PLAN"

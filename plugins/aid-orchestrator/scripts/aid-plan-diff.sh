@@ -238,7 +238,8 @@ raw, total, binary = b"", 0, False
 def red(t):
     for s in SEC: t = t.replace(s, "[redigováno]")
     t = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1[redigováno]", t)
-    return re.sub(r"\b(sk-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{20,}|xox[abp]-[A-Za-z0-9-]{10,})", "[redigováno]", t)
+    t = re.sub(r"\b(sk-[A-Za-z0-9_-]{8,}|ghp_[A-Za-z0-9]{20,}|xox[abp]-[A-Za-z0-9-]{10,})", "[redigováno]", t)
+    return re.sub(r"(://)[^/\s:@]+:[^/\s@]+@", r"\1[redigováno]@", t)   # scheme://user:password@
 def done(*_):
     head = "--- std%s (%d bytes%s) ---\n" % (name, total, ", last 8192 shown" if total > lim else "")
     if binary: body = "[binary output, %d bytes]" % total
@@ -262,6 +263,8 @@ _pd_stream_open() {
   local kv v n; local -a sec=()
   for kv in "${PD_ENV[@]}"; do v="${kv#*=}"; (( ${#v} >= 4 )) && sec+=("$v"); done
   while IFS= read -r n; do v="${!n:-}"; (( ${#v} >= 6 )) && sec+=("$v"); done < <(compgen -e | grep -Ei 'TOKEN|SECRET|PASSWORD|PASSWD|_KEY$|APIKEY|CREDENTIAL' || true)
+  # a connection string carries its password in the URL (security review of P117): *_URL / *_DSN values with userinfo
+  while IFS= read -r n; do v="${!n:-}"; [[ "$v" == *://*@* ]] && sec+=("$v"); done < <(compgen -e | grep -Ei '(_URL|_DSN|_URI)$' || true)
   PD_SD="$(mktemp -d)"; mkfifo -m 600 "$PD_SD/o" "$PD_SD/e"; PD_SP=()
   local s; for s in o e; do
     AID_PD_SECRETS="$(printf '%s\n' "${sec[@]}")" python3 -c "$_PD_FILTER_PY" "$([[ $s == o ]] && echo out || echo err)" \
