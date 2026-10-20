@@ -974,9 +974,10 @@ PY
 
 @test "app-gate (P118): --quick runs the precheck's rows at the widest width only, into its own folder; the precheck's result is untouched" {
   app_gate; python3 "$SC/lib/aid-ui-skeleton.py" build "$PROJ" >/dev/null
+  mkdir -p "$PROJ/.aid-ui/precheck"; echo '{"sentinel": 1}' > "$PROJ/.aid-ui/precheck/result.json"
   run bash "$SC/aid-ui-verify.sh" "$PROJ" --quick; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [[ "$output" == *"QUICK: "*"(0 open rows)"* ]]
   [ "$(jq -c '[.rows[].viewport] | unique' "$PROJ/.aid-ui/quick/result.json")" = '["1440"]' ]
-  [ ! -e "$PROJ/.aid-ui/precheck/result.json" ]
+  [ "$(cat "$PROJ/.aid-ui/precheck/result.json")" = '{"sentinel": 1}' ]   # the precheck's result untouched
   jq -e '[.rows[] | select(.check == "app_flows" and .page == "zalozit" and .state == "normal")] | length == 1' "$PROJ/.aid-ui/quick/result.json" >/dev/null
 }

@@ -389,7 +389,8 @@ def status(p):
             return dict(out, decision="close", why="%s (best: round %d, owner %.1f, tech %.1f); set %s superseded with the reason, then audit"
                         % ("both roles reached the goal" if last["score"]["accepted"] else "%d repair rounds done" % ROUND_CAP,
                            target["n"], target["score"]["owner"], target["score"]["tech"], ", ".join(todo)))
-        if PLACE != "web" and site_sha(p) != rs[-1]["site_sha"] and any(f.get("evidence") for f in rs[-1]["findings"]):
+        if PLACE != "web" and not rs[-1].get("delta") and site_sha(p) != rs[-1]["site_sha"] \
+                and any(f.get("state") == "accepted" and f.get("evidence") for f in rs[-1]["findings"]):   # once per accepted round, after real fixes
             # P118: the version was fixed after the accepted round - one delta round over it (the roles keep their
             # memory), never a reopen that forgets; the verdict then stands on what is handed over
             return dict(out, decision="delta", why="place %s: the version changed after the accepted round %d (its fixes); rate it once (round), then the verdict"
@@ -590,7 +591,7 @@ def do_round(p, web):
         finds += [mark_client(dict(f, id="r%d-%s-%s" % (n, role, bare(f["id"], [x["id"] for x in ans["findings"]])), role=role, state=None)) for f in ans["findings"]]
     score = merge(runs)
     shas = {role: hashlib.sha256(open(os.path.join(out, "answer.json"), "rb").read()).hexdigest() for role, (_, out) in res.items()}
-    rec = {"n": n, "at": at, "place": PLACE, "answers": shas, "web": web, "site_sha": runs["owner"]["site_sha"], "frozen_sha": runs["owner"]["frozen_sha"],
+    rec = {"n": n, "at": at, "place": PLACE, "delta": st["decision"] == "delta", "answers": shas, "web": web, "site_sha": runs["owner"]["site_sha"], "frozen_sha": runs["owner"]["frozen_sha"],
            "provider": {r: runs[r].get("provider") for r in ROLES}, "score": score, "findings": finds, "readiness": score["readiness"],
            "task_test": task_row(p), "usd_equiv": usd_since(p, at)}
     save_round(p, rec)

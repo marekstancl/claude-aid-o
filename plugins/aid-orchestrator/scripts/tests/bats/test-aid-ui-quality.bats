@@ -606,4 +606,24 @@ SH
   run qround "$P" --place sdeleni; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.round == 2' <<<"${lines[-1]}" >/dev/null
   jq -e '[.findings[].id] | index("r1-owner-f1") != null' "$P/.aid-ui/critic/rounds/sdeleni/2/history-owner.json" >/dev/null
+  jq -e '.delta == true' "$P/.aid-ui/critic/rounds/sdeleni/2/round.json" >/dev/null
+  # after the delta round no second one: fixed again and changed again, the place goes to its verdict
+  pcycle sdeleni; echo "Ještě jedna věta." >> "$P/$f"
+  [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = verdict ]
+  run qround "$P" --place sdeleni; [ "$status" -eq 1 ]
+}
+
+@test "delta (P118): a changed version without accepted and fixed findings gives no delta round" {
+  python3 "$SC/aid-ui-critic.py" freeze "$P" --type web-local --place sdeleni >/dev/null
+  cat > "$T/bin/codex" <<SH
+#!/usr/bin/env bash
+[[ "\$1" == --version ]] && exit 0
+p="\$(cat)"; role=owner; grep -q "### $(yq -r '.criteria[0].id' "$K/web-local.tech.sdeleni.yaml") " <<<"\$p" && role=tech
+python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
+SH
+  chmod +x "$T/bin/codex"
+  pans sdeleni 9; qround "$P" --place sdeleni >/dev/null
+  for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f1" rejected_with_reason --reason "věta je přesná" --place sdeleni >/dev/null; done
+  f="$(python3 "$SC/aid-ui-critic.py" bundle-files "$P" --place sdeleni | head -1)"; echo "Nesouvisející úprava." >> "$P/$f"
+  [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = verdict ]
 }
