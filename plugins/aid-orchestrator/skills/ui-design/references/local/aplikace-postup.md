@@ -103,7 +103,7 @@ Co platí jen v jednom režimu (stav na Režimu a burze, čekající vstup, kter
 Úloha, která mění režim (STOP, Panika, Vypnout), nese `then_mode` - kostra s výsledkem přepne i režim. Akce, která má smysl
 až po jiné úloze (Vrátit po Zahodit), nese `after`. Odkaz ven (appka burzy) je `external`. Pole s rozepsaným textem,
 který má přežít zavření karty, má `draft`. Selhání akce kostra ukáže textem `states.failure` její úlohy, ne chybou
-načtení obrazovky. Chování modelu (co appka dělá sama, třeba při odmítnutém SL) se kontroluje i proti plánu a roadmapě
+načtení obrazovky (u výpadku sítě a odmítnutí serverem každým svým `failure_paths[].text`, je-li). Chování modelu (co appka dělá sama, třeba při odmítnutém SL) se kontroluje i proti plánu a roadmapě
 projektu, ne jen proti zadání obrazovek (P116 kolo 5).
 
 ## 5. Brána

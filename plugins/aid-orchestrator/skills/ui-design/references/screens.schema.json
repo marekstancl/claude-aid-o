@@ -154,7 +154,8 @@
                 "at_step": {"type": "integer", "minimum": 1, "description": "pořadí kroku (od 1), jehož akce selže"},
                 "kind": {"enum": ["validation", "network", "server"]},
                 "keeps_input": {"const": true},
-                "recover": {"$ref": "#/$defs/id", "description": "akce obrazovky selhaného kroku, která vede dál (Zkusit znovu)"}
+                "recover": {"$ref": "#/$defs/id", "description": "akce obrazovky selhaného kroku, která vede dál (Zkusit znovu)"},
+                "text": {"$ref": "#/$defs/text", "description": "co uživatel uvidí právě při tomto druhu selhání (síť: vyřešíš sám, Zkusit znovu; server: proč, opakování nepomůže); jinak states.failure"}
               }
             }
           },

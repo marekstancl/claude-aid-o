@@ -244,7 +244,9 @@ def write_pages(p, site, entries):
 
 # --- P116: the skeleton of a web application, from docs/design/screens.json -------------------------------------
 STATES = (("empty", "Prázdno"), ("loading", "Načítání"), ("error", "Chyba"), ("filled", "Naplněno"))   # the model's order
-APP_JS = """(function(){var q=new URLSearchParams(location.search),st=q.get('stav')||'filled',ok=false,done=(q.get('vysledek')||'').split(',');
+APP_JS = """(function(){function failFor(k,e){if(!k)return null;var kind=(e&&/^[0-9]+$/.test(e.message))?'server':'network';   // an HTTP status vs a dropped connection
+return document.querySelector('[data-aid-fail-for="'+k+'"][data-aid-fail-kind="'+kind+'"]')||document.querySelector('[data-aid-fail-for="'+k+'"]:not([data-aid-fail-kind])');}
+var q=new URLSearchParams(location.search),st=q.get('stav')||'filled',ok=false,done=(q.get('vysledek')||'').split(',');
 document.querySelectorAll('main [data-aid-state]').forEach(function(e){if(e.dataset.aidState===st)ok=true;});
 if(!ok)st='filled';document.querySelectorAll('main [data-aid-state]').forEach(function(e){e.hidden=e.dataset.aidState!==st;});
 document.querySelectorAll('[data-aid-stav-link]').forEach(function(a){if(a.dataset.aidStavLink===st)a.setAttribute('aria-current','true');});
@@ -267,18 +269,18 @@ document.querySelectorAll('[data-aid-result]').forEach(function(e){e.hidden=done
 document.querySelectorAll('dialog[data-aid-confirm]').forEach(function(d){d.close();var b=document.querySelector('[data-aid-action="'+d.dataset.aidConfirm+'"]');
 if(b)b.addEventListener('click',function(){d.showModal();d.querySelector('[data-aid-confirm-no]').focus();});
 d.querySelector('[data-aid-confirm-no]').addEventListener('click',function(){d.close();if(b)b.focus();});
-var y=d.querySelector('[data-aid-confirm-yes]'),ge=document.querySelector('[data-aid-fail-for="'+d.dataset.aidConfirm+'"]')||document.querySelector('[data-aid-error-global]');
+var y=d.querySelector('[data-aid-confirm-yes]'),ge=document.querySelector('[data-aid-error-global]');
 y.setAttribute('role','button');y.addEventListener('keydown',function(ev){if(ev.key===' '){ev.preventDefault();y.click();}});y.addEventListener('click',function(ev){ev.preventDefault();
-fetch(y.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=y.href;}).catch(function(){d.close();ge.hidden=false;ge.focus();});});});
+fetch(y.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=y.href;}).catch(function(e){d.close();var fe=failFor(d.dataset.aidConfirm,e)||ge;fe.hidden=false;fe.focus();});});});
 document.querySelectorAll('a[data-aid-checked]').forEach(function(a){a.addEventListener('click',function(ev){if(!a.href)return;ev.preventDefault();var ge=document.querySelector('[data-aid-error-global]');
-fetch(a.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=a.href;}).catch(function(){if(ge){ge.hidden=false;ge.focus();}});});});
+fetch(a.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=a.href;}).catch(function(e){var fe=failFor(a.dataset.aidAction,e)||ge;if(fe){fe.hidden=false;fe.focus();}});});});
 document.querySelectorAll('form[data-aid-form]').forEach(function(f){var err=f.querySelector('[data-aid-error]');
 f.addEventListener('submit',function(ev){ev.preventDefault();var bad=null;f.querySelectorAll('input,select').forEach(function(i){var e=document.getElementById(i.id+'-chyba');
 if(e)e.hidden=i.checkValidity();if(!i.checkValidity()){i.setAttribute('aria-invalid','true');bad=bad||i;}else i.removeAttribute('aria-invalid');});
 if(bad){bad.focus();return;}var b=ev.submitter,to=(b&&b.getAttribute('formaction'))||f.getAttribute('action'),d=new URLSearchParams(new FormData(f));
 if(b&&b.name)d.set(b.name,b.value);var x=new URL(to,location.href);d.forEach(function(v,k){x.searchParams.set(k,v);});var u=x.pathname+x.search;f.setAttribute('aria-busy','true');if(b)b.disabled=true;
-fetch(u).then(function(r){if(!r.ok)throw new Error(r.status);f.querySelectorAll('[data-aid-draft]').forEach(function(i){try{localStorage.removeItem('aid-draft:'+location.pathname+':'+i.id);}catch(e){}});location.href=u;}).catch(function(){f.removeAttribute('aria-busy');if(b)b.disabled=false;
-var fe=(b&&b.dataset.aidAction&&document.querySelector('[data-aid-fail-for="'+b.dataset.aidAction+'"]'))||err;fe.hidden=false;fe.focus();});});});})();"""
+fetch(u).then(function(r){if(!r.ok)throw new Error(r.status);f.querySelectorAll('[data-aid-draft]').forEach(function(i){try{localStorage.removeItem('aid-draft:'+location.pathname+':'+i.id);}catch(e){}});location.href=u;}).catch(function(e){f.removeAttribute('aria-busy');if(b)b.disabled=false;
+var fe=(b&&failFor(b.dataset.aidAction,e))||err;fe.hidden=false;fe.focus();});});});})();"""
 
 
 def app_kind(p):
@@ -339,9 +341,12 @@ def actions_html(m, scr, url, fields, ends, item=None):
     acts, btns = [], []
     for a in mine:
         da = f'data-aid-action="{esc(sid)}.{esc(a["id"])}"' + (f' data-aid-after="{esc(a["after"])}" hidden' if a.get("after") else "")
-        fail = next((t["states"]["failure"] for t in m["tasks"] for x in t["steps"] if x["screen"] == sid and x["action"] == a["id"]), None)
-        if fail and a["kind"] != "navigate":   # the task's own failure text, shown when this action fails (not the screen's load error)
-            acts.append(f'<p class="chyba" role="alert" tabindex="-1" data-aid-fail-for="{esc(sid)}.{esc(a["id"])}" hidden>{esc(fail)}</p>')
+        owner = next((t for t in m["tasks"] for x in t["steps"] if x["screen"] == sid and x["action"] == a["id"]), None)
+        if owner and (a["kind"] != "navigate" or a["id"] in risky):   # the task's own failure text (not the screen's load error), per kind when the model says
+            k = f'{esc(sid)}.{esc(a["id"])}'
+            acts.append(f'<p class="chyba" role="alert" tabindex="-1" data-aid-fail-for="{k}" hidden>{esc(owner["states"]["failure"])}</p>'
+                        + "".join(f'<p class="chyba" role="alert" tabindex="-1" data-aid-fail-for="{k}" data-aid-fail-kind="{"network" if fp["kind"] == "network" else "server"}" hidden>{esc(fp["text"])}</p>'
+                                  for fp in owner["failure_paths"] if fp.get("text")))
         if a["kind"] == "navigate":
             back = " data-aid-back" if a.get("back") else ""
             ga, why = gate_attrs(sid, a)
@@ -438,7 +443,7 @@ def app_page(m, scr, approved, fields, results, ends, shell):
     banner = "" if approved else '<p class="navrh" role="status" data-aid-draft>Návrh: model čeká na schválení vlastníkem.</p>'
     return (f'<!doctype html>\n<html lang="cs" {MARK} data-aid-app>\n<head><meta charset="utf-8">'
             f'<meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(scr["title"])} · {esc(m.get("app") or "aplikace")}</title>'
-            '<style>[hidden]{display:none!important}body{font:16px/1.5 system-ui,sans-serif;margin:0}header,main,footer{padding:16px;max-width:1100px;margin:auto}'
+            '<style>[hidden]{display:none!important}table{display:block;max-width:100%;overflow-x:auto}body{font:16px/1.5 system-ui,sans-serif;margin:0}header,main,footer{padding:16px;max-width:1100px;margin:auto}'
             'nav ul{display:flex;flex-wrap:wrap;gap:12px;list-style:none;padding:0}.stav{border:1px solid #888;padding:12px;margin:12px 0}'
             '.navrh{background:#fe9;padding:8px 16px;margin:0}.chyba{border:2px solid #b00;padding:8px}.lista{border-bottom:2px solid #333;padding:8px 0}'
             'a,button,summary,input{min-height:44px}a,button{display:inline-block;margin:4px 8px 4px 0}'

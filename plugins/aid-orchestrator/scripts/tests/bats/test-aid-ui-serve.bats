@@ -592,3 +592,22 @@ J
   out="$(node "$BATS_TEST_TMPDIR/n.mjs")"; [ "$out" = "false | true | $FAIL | Rozepsáno" ] || { echo "$out"; return 1; }
   "$SERVE" stop skeleton
 }
+
+@test "app-skeleton: a dropped connection and a server refusal each show the text the model gives that kind of failure" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '(.tasks[] | select(.id == "smazat") | .failure_paths) = [{at_step: 2, kind: "network", keeps_input: true, recover: "smazat", text: "Spojení vypadlo, zkus znovu."},
+      {at_step: 2, kind: "server", keeps_input: true, recover: "smazat", text: "Server smazání odmítl."}]' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/k.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const r = [];
+for (const how of ['abort', '500']) { const pg = await b.newPage(); await pg.goto('http://127.0.0.1:39918/detail/');
+  await pg.route('**/seznam/**', x => how === 'abort' ? x.abort() : x.fulfill({ status: 500, body: 'x' }));
+  await pg.click('[data-aid-action="detail.smazat"]'); await pg.click('[data-aid-confirm-yes="detail.smazat"]'); await pg.waitForTimeout(400);
+  r.push(await pg.locator('[data-aid-fail-for="detail.smazat"]:visible').innerText()); await pg.close(); }
+console.log(r.join(' | ')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/k.mjs")"; [ "$out" = "Spojení vypadlo, zkus znovu. | Server smazání odmítl." ] || { echo "$out"; return 1; }
+  "$SERVE" stop skeleton
+}
