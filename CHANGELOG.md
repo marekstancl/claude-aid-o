@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [3.8.0] — 2026-10-21
 
 Plán dojede v `--auto` bez PM a uzávěr se netočí (P117, vstup WAN P109–P112: osm zastavení na PM za dva dny, uzávěr P111 čtyři pokusy a tři hodiny). Každé odmítnutí má třídu, která říká, kdo jedná; technická rozhodnutí v běhu dělá nezávislý zástupce, chráněné dopady pozná kód a jdou na PM; čemu jde předejít, zastaví kontrola plánu nebo start běhu; uzávěr opakuje jen to, co oprava zasáhla.
 
