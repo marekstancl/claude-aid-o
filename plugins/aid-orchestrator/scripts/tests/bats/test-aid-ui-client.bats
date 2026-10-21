@@ -75,7 +75,7 @@ EOF
 serve_site() {
   WPORT=$(( 38000 + RANDOM % 900 )); while ss -ltnH "sport = :$WPORT" | grep -q .; do WPORT=$(( 38000 + RANDOM % 900 )); done   # a port another process holds answers 404
   python3 -m http.server "$WPORT" --bind 127.0.0.1 --directory "$P/site" >/dev/null 2>&1 & WEBSRV=$!
-  W="http://127.0.0.1:$WPORT/"; for _ in $(seq 50); do curl -s "$W" >/dev/null && return 0; sleep 0.1; done; return 1
+  W="http://127.0.0.1:$WPORT/"; for _ in $(seq 200); do curl -s "$W" >/dev/null && return 0; sleep 0.1; done; return 1
 }
 
 teardown() { [[ -z "${SRV:-}" ]] || kill "$SRV" 2>/dev/null || true; [[ -z "${WEBSRV:-}" ]] || kill "$WEBSRV" 2>/dev/null || true; }

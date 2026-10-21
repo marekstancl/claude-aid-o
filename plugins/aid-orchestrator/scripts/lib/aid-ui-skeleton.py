@@ -358,7 +358,7 @@ def actions_html(m, scr, url, fields, ends, item=None):
         ks = (["empty", "error"] if record else []) + (["loading"] if record or a["kind"] in ("submit", "destructive") else [])
         return f' data-aid-hide-in="{" ".join(ks)}"' if ks else ""
     typed = {st["action"] for t in m["tasks"] for st in t["steps"] if st["screen"] == sid and st.get("input")}   # actions a task types into before
-    acts, btns = [], []
+    acts, btns, navs = [], [], {}
     for a in mine:
         if (sid, a["id"]) in rec:   # whose failure it recovers: the failed actions, their tasks, this screen
             fps = [(t["id"], f'{sid}.{t["steps"][fp["at_step"] - 1]["action"]}') for t in m["tasks"] for fp in t.get("failure_paths") or []
@@ -375,7 +375,7 @@ def actions_html(m, scr, url, fields, ends, item=None):
                                   for fp in owner["failure_paths"] if fp.get("text")))
         if a["kind"] == "navigate" and a["id"] in typed and not a.get("external"):   # a filter or search: its fields go with it (H5 run 3)
             ga, why = gate_attrs(sid, a)
-            btns.append(f'<button type="submit" formaction="{esc(url[a["to"]])}{tail(a)}" {da}{ga}>{esc(a["label"])}</button>{why}')
+            navs[a["id"]] = (a, f'<button type="submit" {da}{ga}>{esc(a["label"])}</button>{why}')
         elif a["kind"] == "navigate":
             back = " data-aid-back" if a.get("back") else ""
             ga, why = gate_attrs(sid, a)
@@ -398,8 +398,8 @@ def actions_html(m, scr, url, fields, ends, item=None):
                         f'<a href="{esc(url[a["to"]])}{tail(a)}" data-aid-confirm-yes="{k}">{esc(a.get("confirm_yes") or "Potvrdit")}</a> '
                         f'<button type="button" data-aid-confirm-no>{esc(a.get("confirm_no") or "Zrušit")}</button></dialog>')
     form = ""
-    if btns:
-        spec = {f["name"]: f for f in scr.get("fields") or []}
+    spec = {f["name"]: f for f in scr.get("fields") or []}
+    if btns or navs:
         def field(n):
             f = spec.get(n) or {"name": n, "label": n}
             hid, fid = f"h-{esc(sid)}-{esc(n)}", f"f-{esc(sid)}-{esc(n)}"
@@ -413,10 +413,16 @@ def actions_html(m, scr, url, fields, ends, item=None):
                 opts = "".join(f'<option value="{esc(c["value"])}">{esc(c["label"])}</option>' for c in f["choices"])
                 return f'<p><label for="f-{esc(sid)}-{esc(n)}">{esc(f["label"])}</label> <select id="f-{esc(sid)}-{esc(n)}" name="{esc(n)}"{hint}>{opts}</select> {note}</p>'
             return f'<p><label for="{fid}">{esc(f["label"])}</label> <input id="{fid}" name="{esc(n)}"{hint}{lim}> {note}</p>'
-        inputs = "".join(field(n) for n in fields)
-        first = next(a for a in mine if a["kind"] == "submit" or (a["kind"] == "navigate" and a["id"] in typed and not a.get("external")))
-        form = (f'<form method="get" action="{esc(url[first["to"]])}" data-aid-form novalidate>{inputs}'
-                f'<p class="chyba" role="alert" tabindex="-1" data-aid-error hidden>{esc(scr["states"]["error"])}</p>{"".join(btns)}</form>')
+        # a filter has its own form with its own fields (the inputs its steps type), the sends keep the rest (H5 run 3 review)
+        own_of = lambda aid: list(dict.fromkeys(n for t in m["tasks"] for st in t["steps"] if st["screen"] == sid and st["action"] == aid for n in st.get("input") or {}))
+        nav_only = {n for aid in navs for n in own_of(aid)} - {n for t in m["tasks"] for st in t["steps"] if st["screen"] == sid and st["action"] not in navs for n in st.get("input") or {}}
+        if btns:
+            first = next(a for a in mine if a["kind"] == "submit")
+            form = (f'<form method="get" action="{esc(url[first["to"]])}" data-aid-form novalidate>{"".join(field(n) for n in fields if n not in nav_only)}'
+                    f'<p class="chyba" role="alert" tabindex="-1" data-aid-error hidden>{esc(scr["states"]["error"])}</p>{"".join(btns)}</form>')
+        for aid, (a, b) in navs.items():
+            form += (f'<form method="get" action="{esc(url[a["to"]])}{tail(a)}" data-aid-form novalidate>{"".join(field(n) for n in own_of(aid) if n in nav_only)}'
+                     f'<p class="chyba" role="alert" tabindex="-1" data-aid-error hidden>{esc(scr["states"]["error"])}</p>{b}</form>')
     return form + (f'<div class="akce">{"".join(acts)}</div>' if acts else "")
 
 

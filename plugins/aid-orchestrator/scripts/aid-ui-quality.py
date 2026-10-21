@@ -919,13 +919,17 @@ def main(a):
         if PLACE not in PLACES:
             die("--place must be one of " + ", ".join(PLACES), 2)
     elif cmd in ("triage", "fixed") and len(a) > 2:   # H5 run 3: 40 refusals without --place - the place whose rounds hold the finding
-        fid = a[2]
-        for pl in PLACES:
+        fid, hit = a[2], []
+        for pl in PLACES:   # only a place that is the one holding it: r1-owner-f1 is at every place (Codex review)
             try:
                 if any(f.get("id") == fid for r in memory.rounds(p, pl) for f in r.get("findings") or []):
-                    PLACE = pl; break
+                    hit.append(pl)
             except (OSError, ValueError):
                 continue
+        if len(hit) == 1:
+            PLACE = hit[0]
+        elif len(hit) > 1:
+            die(f"{fid} is at several places ({', '.join(hit)}); say which with --place", 2)
     opts, rest, i = {}, [], 2
     while i < len(a):
         if a[i].startswith("--") and i + 1 < len(a):   # a broken character (a cut in the shell) never breaks the write
