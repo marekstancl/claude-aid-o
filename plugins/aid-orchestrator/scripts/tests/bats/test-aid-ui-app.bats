@@ -577,7 +577,7 @@ app_handover() {
   grep -q '>Smazat poznámku</a> <button type="button" data-aid-confirm-no>Nechat poznámku</button>' "$d"   # buttons name the action
   grep -q 'href="/detail/?id=nakup-1" data-aid-action="seznam.otevrit"' "$s"                # a deep link
   grep -q 'data-aid-modes="bezi" data-aid-reason="proc-seznam-novy"' "$s"; grep -q 'V pauze nové poznámky nejdou.' "$s"; grep -q 'data-aid-modes-list="bezi pauza"' "$s"
-  grep -q 'data-aid-task-state="zalozit.validation" hidden' "$s"                              # a task's states on its first screen
+  grep -q 'data-aid-task-state="zalozit.validation" hidden' "$f"; grep -q 'data-aid-task-state="zalozit.empty" hidden' "$s"   # a task's states where they happen: the field's error on the form, empty on the list
   grep -q 'name="nazev" aria-describedby="f-formular-nazev-chyba" required maxlength="80"' "$f"; grep -q 'Název je povinný, nejvýš 80 znaků.' "$f"
   # the task-state rows are in the matrix; the generated scenario starts in the task's mode
   [ "$(python3 "$SCR" matrix "$APP" | jq '[.rows[] | select(.page == "task:zalozit")] | length')" -eq 6 ]

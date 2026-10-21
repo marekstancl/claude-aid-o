@@ -246,7 +246,7 @@ def violations(m, proj):
                     out.append(f"/app-facts/{x.get('id')}: zdroj zestárl ({e}) - vytěž fakta znovu")
     # P118 lint: the classes of findings the roles kept raising in the P116 pilot, decided by code before any gate
     KEY = re.compile(r"\{[a-z][a-z0-9_]*\}")
-    UNIT = re.compile(r"(?<![\w{])[+−-]?[$€]?\d[\d\u00a0 ,.]*\s?(?:USDT|USD|EUR|CZK|Kč|R|%|×|x|znaků|znaky|znak|minut[ay]?|min|sekund[ay]?|hodin[ay]?|h|dní|dny|dnů|den|ks|kB|MB|GB)(?![\w])|[$€]\s?\d[\d\u00a0 ,.]*")
+    UNIT = re.compile(r"(?<![\w{])[+−-]?[$€]?\d[\d\u00a0 ,.]*\s?(?:USDT|USD|EUR|CZK|Kč|R|%|×|x|znaků|znaky|znak|minut[ay]?|min|sekund[ay]?|hodin[ay]?|h|dní|dny|dnů|den|ks|kusů|položek|položky|položka|pokusů|pokusy|pokus|souborů|soubory|soubor|zpráv|zprávy|kB|MB|GB)(?![\w])|[$€]\s?\d[\d\u00a0 ,.]*")
     DIGIT = re.compile(r"(?<![A-Za-z\d])\d")   # a digit that is not part of a code like F1 or R12
     def lit(txt, where):   # an amount, R, percent, leverage or a limit (characters, time, count) written out instead of a named value: two places can disagree
         for x in UNIT.findall(KEY.sub("", str(txt or ""))):
@@ -270,7 +270,9 @@ def violations(m, proj):
         for j, f in enumerate(s.get("fields") or []):
             for k in ("label", "hint", "error"):
                 lit(f.get(k), f"/screens/{i}/fields/{j}/{k}")
-            if KEY.search(str(f.get("hint") or "") + str(f.get("error") or "")) and not any(f.get(k) is not None for k in ("maxlength", "min", "max")):
+            promise = str(f.get("hint") or "") + " " + str(f.get("error") or "")
+            if KEY.search(promise) and re.search(r"(?i)\b(nejvýš|nejvýše|nejméně|aspoň|alespoň|maximálně|minimálně|max|min|limit|mez|až|do)\b", promise) \
+                    and not any(f.get(k) is not None for k in ("maxlength", "min", "max")):
                 out.append(f"/screens/{i}/fields/{j}: pole {f.get('name')} slibuje v nápovědě nebo hlášce mez ({{klíč}}), ale nemá maxlength, min ani max - kostra i appka ji nevynutí")
         for j, d in enumerate(s.get("data") or []):
             for k in ("what", "freshness"):   # source names files and lines: not checked
@@ -290,6 +292,9 @@ def violations(m, proj):
         lit(t["done_when"]["expect"], f"/tasks/{i}/done_when/expect")
         for j, fp in enumerate(t["failure_paths"]):
             lit(fp.get("text"), f"/tasks/{i}/failure_paths/{j}/text")
+        reqs = {r.get("id") for r in m.get("requirements") or [] if isinstance(r, dict)}
+        if t.get("new") is not None and t["new"] not in reqs:   # checked for every task, also one that writes nothing
+            out.append(f"/tasks/{i}/new: {t['new']} není id požadavku v requirements - nové chování se opírá o bod zadání")
         wsteps = [n for n, st in enumerate(t["steps"], 1) if (acts.get((st["screen"], st["action"])) or {}).get("kind") in ("submit", "destructive")]
         if t.get("local"):   # writes in the browser only: said by the model's flag, and then no failure can reach a server
             if not str(t["states"]["failure"]).strip().lower().startswith("nenastává"):
@@ -297,10 +302,7 @@ def violations(m, proj):
             continue
         if not wsteps:
             continue
-        reqs = {r.get("id") for r in m.get("requirements") or [] if isinstance(r, dict)}
-        if t.get("new") is not None and t["new"] not in reqs:
-            out.append(f"/tasks/{i}/new: {t['new']} není id požadavku v requirements - nové chování se opírá o bod zadání")
-        elif facts_ids is not None and t.get("new") is None:   # an existing app: the task's behaviour rests on agreed facts of what the app does (or is new: a requirement)
+        if facts_ids is not None and t.get("new") is None:   # an existing app: the task's behaviour rests on agreed facts of what the app does (or is new: a requirement)
             miss = [x for x in t.get("facts") or [] if x not in facts_ids]
             if not t.get("facts"):
                 out.append(f"/tasks/{i}/facts: úloha {t['id']} zapisuje, ale neodkazuje na fakta appky (app-facts.json), o která se její chování opírá, ani na požadavek nového chování (new)")
@@ -337,13 +339,30 @@ def resolved(m):
     return walk(m)
 
 
-def task_state_url(m, t):
-    """Where a task's states show: the screen of its first step (the home screen when that is the bar)."""
+WRITE_STATES = ("validation", "loading", "failure", "permission", "recovery")
+
+
+def task_state_url(m, t, state=None):
+    """Where a task's state shows: where it happens (H5/H2, P118) - validation, loading, failure, permission and recovery
+    on the screen of the task's first writing step (a field's error beside the field, not on the list before it), empty
+    and a task that writes nothing on the screen of its first step; the home screen when that screen is the bar."""
     scr = {s["id"]: s for s in m["screens"]}
-    first = scr[t["steps"][0]["screen"]]
+    acts = {(s["id"], a["id"]): a for s in m["screens"] for a in s["actions"]}
+    st = t["steps"][0]
+    if state in WRITE_STATES:
+        st = next((x for x in t["steps"] if (acts.get((x["screen"], x["action"])) or {}).get("kind") in ("submit", "destructive")), st)
+    first = scr[st["screen"]]
     if first.get("shell"):
         first = next(s for s in m["screens"] if s["nav"] and not s.get("shell"))
     return screen_url(first), first["id"]
+
+
+def recover_only(m):
+    """{(screen, action)}: an action that only recovers from a failure (a failure path's recover, no step of a normal
+    path) - it shows after the failure, not before (a Zkusit znovu on an empty form promises a failure that never was)."""
+    used = {(x["screen"], x["action"]) for t in m["tasks"] for x in t["steps"]}
+    return {(t["steps"][fp["at_step"] - 1]["screen"], fp["recover"]) for t in m["tasks"] for fp in t.get("failure_paths") or []
+            if fp.get("recover") and fp["at_step"] <= len(t["steps"])} - used
 
 
 def screen_url(s):
@@ -370,10 +389,10 @@ def matrix(m):
     for t in m["tasks"]:
         rows += [{"page": t["id"], "state": "normal", "check": "app_flows"}, {"page": t["id"], "state": "keyboard", "check": "keyboard_flows"}]
         rows += [{"page": t["id"], "state": v["state"], "check": "task_recovery"} for v in failure_variants(m, t)]
-    for t in m["tasks"]:   # every task's six non-path states can be shown (?stav=<task>.<state>) and are checked
-        u, sid = task_state_url(m, t)
-        rows += [{"page": "task:" + t["id"], "state": k, "check": "app_states", "url": u, "screen": sid}
-                 for k in ("validation", "empty", "loading", "failure", "permission", "recovery")]
+    for t in m["tasks"]:   # every task's six non-path states can be shown (?stav=<task>.<state>) where they happen, and are checked
+        for k in ("validation", "empty", "loading", "failure", "permission", "recovery"):
+            u, sid = task_state_url(m, t, k)
+            rows.append({"page": "task:" + t["id"], "state": k, "check": "app_states", "url": u, "screen": sid})
     for s in m["screens"]:
         if s.get("shell"):   # the bar has no page of its own: it is checked on every screen's page
             continue
@@ -382,7 +401,7 @@ def matrix(m):
     modes = [x["id"] for x in m.get("modes") or []]
     home = next((s for s in m["screens"] if s["nav"] and not s.get("shell")), None)
     for s in m["screens"]:
-        gated = [a for a in s["actions"] if a.get("modes") and "item" not in a and not a.get("after")]
+        gated = [a for a in s["actions"] if a.get("modes") and "item" not in a and not a.get("after") and (s["id"], a["id"]) not in recover_only(m)]
         if not gated or not modes:
             continue
         where = home if s.get("shell") else s

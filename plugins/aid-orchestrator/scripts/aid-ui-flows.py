@@ -89,7 +89,9 @@ export default async function ({ page, base, state }) {
       const cur = await page.locator(`${S(st.screen)} [name="${k}"]`).first().inputValue().catch(() => null);
       if (cur !== val) return { response, done: false, why: `krok ${n}: po selhání (${v.kind}) se ztratil vstup ${k}` };
     }
-    if (!(await page.locator(A(st.screen, v.recover)).first().isVisible().catch(() => false)))
+    // the app shows its way on after it handled the failure: under load a moment after the request (H2 run 1 and 2: a pass
+    // read as "no way on" twice) - wait for it, a short while, instead of reading it at once
+    if (!(await page.locator(A(st.screen, v.recover)).first().waitFor({ state: 'visible', timeout: 3000 }).then(() => true, () => false)))
       return { response, done: false, why: `krok ${n}: po selhání chybí cesta dál (${st.screen}.${v.recover})` };
     await press(page, st.screen, v.recover, false);
   }

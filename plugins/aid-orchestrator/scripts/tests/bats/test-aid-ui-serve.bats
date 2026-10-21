@@ -382,7 +382,7 @@ J
 @test "app-skeleton: a destructive action stands behind its confirm question; the draft banner goes once the PM approved this model" {
   P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
   "$SERVE" skeleton "$P" >/dev/null
-  grep -q '<button type="button" data-aid-action="detail.smazat" aria-haspopup="dialog">Smazat</button><dialog open class="potvrzeni" data-aid-confirm="detail.smazat"' "$P/site/detail/index.html"
+  grep -q '<button type="button" data-aid-action="detail.smazat" data-aid-hide-in="empty error loading" aria-haspopup="dialog">Smazat</button><dialog open class="potvrzeni" data-aid-confirm="detail.smazat"' "$P/site/detail/index.html"
   grep -q '<a href="/seznam/?vysledek=smazat" data-aid-confirm-yes="detail.smazat">Smazat poznámku</a>' "$P/site/detail/index.html"
   ! grep -q 'data-aid-action="detail.smazat" href' "$P/site/detail/index.html"   # never a plain link
   # in a browser: the action opens the dialog (closed before), Potvrdit leads to the target screen
@@ -466,7 +466,7 @@ r.push(await a.getAttribute('aria-disabled')); r.push(await pg.locator('#proc-se
 await pg.goto('http://127.0.0.1:39918/seznam/?rezim=bezi'); r.push(await pg.locator('[data-aid-action="seznam.novy"]').getAttribute('aria-disabled'));
 await pg.goto('http://127.0.0.1:39918/formular/'); await pg.click('[data-aid-action="formular.ulozit"]');
 r.push(new URL(pg.url()).pathname); r.push(await pg.locator('#f-formular-nazev-chyba').isVisible());
-await pg.goto('http://127.0.0.1:39918/seznam/?stav=zalozit.validation'); r.push(await pg.locator('[data-aid-task-state="zalozit.validation"]').isVisible());
+await pg.goto('http://127.0.0.1:39918/formular/?stav=zalozit.validation'); r.push(await pg.locator('[data-aid-task-state="zalozit.validation"]').isVisible());
 console.log(r.join(' ')); await b.close();
 J
   [ "$(node "$BATS_TEST_TMPDIR/modes.mjs")" = "true true false /formular/ true true" ]
@@ -555,7 +555,7 @@ J
   P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
   jq '(.tasks[] | select(.id == "smazat") | .failure_paths) = [{at_step: 1, kind: "network", keeps_input: true, recover: "otevrit"}, {at_step: 2, kind: "network", keeps_input: true, recover: "smazat", text: "Spojení vypadlo."}, {at_step: 2, kind: "server", keeps_input: true, recover: "smazat", text: "Server odmítl."}]' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
   "$SERVE" skeleton "$P" >/dev/null
-  grep -q 'data-aid-action="seznam.otevrit" data-aid-checked' "$P/site/seznam/index.html"; ! grep -q 'data-aid-action="seznam.novy" data-aid-checked' "$P/site/seznam/index.html"
+  grep -q 'data-aid-action="seznam.otevrit" data-aid-hide-in="empty error loading" data-aid-checked' "$P/site/seznam/index.html"; ! grep -q 'data-aid-action="seznam.novy" data-aid-checked' "$P/site/seznam/index.html"
   python3 "$BATS_TEST_DIRNAME/../../aid-ui-flows.py" generate "$P" >/dev/null
   cat > "$BATS_TEST_TMPDIR/nf.mjs" <<J
 import { createRequire } from 'module';
@@ -619,5 +619,29 @@ for (const h of ['abort', '500']) { how = h; await pg.click('[data-aid-action="d
 console.log((await pg.locator('[data-aid-fail-for="detail.smazat"]:visible').allInnerTexts()).join(' + ')); await b.close();
 J
   out="$(node "$BATS_TEST_TMPDIR/k2.mjs")"; [ "$out" = "Server smazání odmítl." ] || { echo "$out"; return 1; }
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton (P118 H2): an action that needs a record is not offered without one or while loading; a recover-only action shows after the failure; a task's field error is on the form with its message; what was typed stays in the error and loading states; a form's error has no reload link" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  "$SERVE" skeleton "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/h.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); const r = []; const U = 'http://127.0.0.1:39918';
+const vis = async s => (await pg.locator(s).isVisible()) ? 'v' : '-';
+await pg.goto(U + '/seznam/?stav=empty'); r.push(await vis('[data-aid-action="seznam.otevrit"]'), await vis('[data-aid-action="seznam.novy"]'));
+await pg.goto(U + '/seznam/'); r.push(await vis('[data-aid-action="seznam.otevrit"]'));
+await pg.goto(U + '/detail/?stav=error'); r.push(await vis('[data-aid-action="detail.smazat"]'));
+await pg.goto(U + '/formular/?stav=loading'); r.push(await vis('[data-aid-action="formular.ulozit"]'));
+await pg.goto(U + '/formular/'); r.push(await vis('[data-aid-action="formular.znovu"]'));
+await pg.route('**/detail/**', x => x.abort()); await pg.fill('[name="nazev"]', 'Nákup'); await pg.click('[data-aid-action="formular.ulozit"]'); await pg.waitForTimeout(400);
+r.push(await vis('[data-aid-action="formular.znovu"]'));
+await pg.unroute('**/detail/**'); await pg.goto(U + '/formular/?stav=zalozit.validation'); r.push(await vis('[data-aid-task-state="zalozit.validation"]'), await vis('#f-formular-nazev-chyba'));
+await pg.goto(U + '/formular/?stav=error'); r.push(await pg.inputValue('[name="nazev"]'), await vis('[data-aid-retry]'));
+await pg.goto(U + '/formular/?stav=zalozit.loading'); r.push(String(await pg.locator('[data-aid-action="formular.ulozit"]').isDisabled()));
+console.log(r.join(' ')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/h.mjs")"; [ "$out" = "- v v - - - v v v Nákup na sobotu - true" ] || { echo "$out"; return 1; }
   "$SERVE" stop skeleton
 }

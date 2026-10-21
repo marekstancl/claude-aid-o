@@ -44,7 +44,8 @@ grep -q "^Jsi soudce" <<<"\$p" && role=judge
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":100000,"cached_input_tokens":0,"output_tokens":1000}}))' "$T/ans-\$role.json"
 SH
   chmod +x "$T/bin/"*
-  WPORT=$(( 38000 + RANDOM % 900 )); python3 -m http.server "$WPORT" --bind 127.0.0.1 --directory "$P/site" >/dev/null 2>&1 & WEBSRV=$!
+  WPORT=$(( 38000 + RANDOM % 900 )); while ss -ltnH "sport = :$WPORT" | grep -q .; do WPORT=$(( 38000 + RANDOM % 900 )); done   # a port another process holds answers 404
+  python3 -m http.server "$WPORT" --bind 127.0.0.1 --directory "$P/site" >/dev/null 2>&1 & WEBSRV=$!
   W="http://127.0.0.1:$WPORT/"; for _ in $(seq 50); do curl -s "$W" >/dev/null && break; sleep 0.1; done
 }
 
@@ -573,10 +574,31 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   echo '{"same": [{"a": 0, "b": 0}]}' > "$T/ans-judge.json"   # the same claim under other ids and other lines
   run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '(.facts | map(.id)) == ["sl-odmitnut"] and .facts[0].agreed_by == ["codex", "opus"] and (.unconfirmed | map(.fact.id)) == ["jen-codex"]' "$P/docs/design/app-facts.json" >/dev/null || { jq -c '[.facts[].id, [.unconfirmed[].fact.id]]' "$P/docs/design/app-facts.json"; return 1; }
-  # a pair of different kinds is no agreement even when the judge says so; a contradiction is open; the agreed fact stays
-  echo '{"same": [{"a": 1, "b": 0}], "conflict": [{"a": 1, "b": 0, "why": "alert vs pauza"}]}' > "$T/ans-judge.json"
+  # a pair the judge calls both the same and a contradiction is no valid answer: nothing written
+  echo '{"same": [{"a": 1, "b": 0}], "conflict": [{"a": 1, "b": 0, "why": "x"}]}' > "$T/ans-judge.json"
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 1 ]
+  # a pair of different kinds is no agreement even when the judge says so; the fact agreed before stays (it is in O)
+  echo '{"same": [{"a": 1, "b": 0}]}' > "$T/ans-judge.json"
   run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  jq -e '(.facts | map(.id)) == ["sl-odmitnut"] and (.open | map(.fact.id)) == ["spor-jen-codex"]' "$P/docs/design/app-facts.json" >/dev/null || { jq -c '[.facts[].id, [.open[].fact.id]]' "$P/docs/design/app-facts.json"; return 1; }
+  jq -e '(.facts | map(.id)) == ["sl-odmitnut"] and (.open | length) == 0' "$P/docs/design/app-facts.json" >/dev/null
+  # restated by a fact agreed now: replaced, not kept twice
+  echo '{"same": [{"a": 0, "b": 0}], "restated": [{"o": 0, "a": 0}]}' > "$T/ans-judge.json"
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ]; jq -e '(.facts | map(.id)) == ["sl-odmitnut"]' "$P/docs/design/app-facts.json" >/dev/null
+  # a contradiction is open; a fact agreed before that a reader now contradicts leaves the facts and is open too
+  echo '{"same": [], "conflict": [{"a": 1, "b": 0, "why": "alert vs pauza"}], "disputed": [{"o": 0, "b": 0, "why": "jiný výsledek"}]}' > "$T/ans-judge.json"
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '(.facts | length) == 0 and ([.open[].fact.id] | sort) == ["spor-jen-codex", "spor-sl-odmitnut"]' "$P/docs/design/app-facts.json" >/dev/null || { jq -c '[.facts[].id, [.open[].fact.id]]' "$P/docs/design/app-facts.json"; return 1; }
+  echo '{"same": [{"a": 0, "b": 0}]}' > "$T/ans-judge.json"   # agreed again; the open contradictions stay until dropped
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ]
+  jq -e '(.facts | map(.id)) == ["sl-odmitnut"] and ([.open[].fact.id] | sort) == ["spor-jen-codex", "spor-sl-odmitnut"]' "$P/docs/design/app-facts.json" >/dev/null
+  python3 "$SC/aid-ui-client.py" facts "$P" --drop spor-sl-odmitnut --reason "kód zavírá trhem" >/dev/null
+  # an open question of the format before (one reader) is not lost by a rerun: it stays unconfirmed until dropped
+  jq '.open += [{"from": "codex", "fact": {"id": "stara", "kind": "assumption", "statement": "Stará otázka.", "sources": []}}]' "$P/docs/design/app-facts.json" > "$T/f.json" && mv "$T/f.json" "$P/docs/design/app-facts.json"
+  echo '{"same": [{"a": 0, "b": 0}]}' > "$T/ans-judge.json"
+  for _ in 1 2; do python3 "$SC/aid-ui-client.py" facts "$P" >/dev/null; done
+  jq -e '[.unconfirmed[] | select(.fact.id == "stara") | .from] == ["before P118 H5: codex"]' "$P/docs/design/app-facts.json" >/dev/null
+  python3 "$SC/aid-ui-client.py" facts "$P" --drop stara --reason "nahrazeno" >/dev/null
+  jq -e '[.unconfirmed[] | select(.fact.id == "stara")] == []' "$P/docs/design/app-facts.json" >/dev/null
   echo '{"same": [], "conflict": [], "x": "' > "$T/ans-judge.json"   # no valid judge: nothing written
   run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 1 ]; jq -e '(.open | map(.fact.id)) == ["spor-jen-codex"]' "$P/docs/design/app-facts.json" >/dev/null
   # the model of an existing app: an open question and a writing task without facts are refused

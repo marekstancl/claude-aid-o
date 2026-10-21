@@ -3,6 +3,11 @@
 <title>Poznámka · Poznámky</title><link rel="stylesheet" href="/app.css"></head>
 <body><header><a class="skip" href="#obsah">Přeskočit na obsah</a><nav aria-label="Aplikace"><a href="/seznam/">Poznámky</a></nav></header>
 <main id="obsah" data-aid-screen="detail"><h1>Poznámka</h1>
+<section data-aid-task-state="smazat.validation" hidden><h2>Smazat poznámku: chyba validace</h2><p>nenastává, protože smazání nemá vstup</p></section>
+<section data-aid-task-state="smazat.loading" hidden><h2>Smazat poznámku: načítání</h2><p>Mažu…</p></section>
+<section data-aid-task-state="smazat.failure" hidden><h2>Smazat poznámku: selhání</h2><p>Smazání selže: poznámka zůstane, hláška a Zkusit znovu.</p></section>
+<section data-aid-task-state="smazat.permission" hidden><h2>Smazat poznámku: oprávnění</h2><p>nenastává, protože aplikace má jednoho uživatele</p></section>
+<section data-aid-task-state="smazat.recovery" hidden><h2>Smazat poznámku: obnova</h2><p>Přerušené smazání: poznámka buď je, nebo není; nic napůl.</p></section>
 <section data-aid-state="empty"><p>Poznámka neexistuje (nenastává: detail se otevírá z existující poznámky).</p></section>
 <section data-aid-state="loading" aria-busy="true"><p>Načítám poznámku…</p></section>
 <section data-aid-state="error" role="alert"><p>Poznámku se nepodařilo načíst. <a href="/seznam/">Zpět na seznam</a></p></section>

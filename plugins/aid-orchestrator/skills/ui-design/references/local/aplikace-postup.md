@@ -52,16 +52,20 @@ aplikaci nekopíruje: tytéž nástroje, větev podle druhu.
 3. **Výsledek každé úlohy** (`done_when`): obrazovka, na které úloha skončí, a text, který tam musí být. Úloha, která
    odesílá data, má cestu selhání (`failure_paths`: krok, druh selhání, vstup zůstane, akce obnovy), nebo
    „nenastává, protože …" ve stavu selhání. U existující aplikace úloha, která nahrazuje dnešní, nese `replaces`.
-3b. **Fakta appky jako první (existující aplikace, P118):** `aid-ui-client.py facts <projekt>` - Codex a Claude Opus
-   nezávisle vytěží z kódu, plánů, rozhodnutí a runbooků, co appka opravdu dělá; do `docs/design/app-facts.json` jde
-   jen to, co oba podloží týmž místem zdroje (citace ověřená v souboru), zbytek jsou otevřené otázky. Dokud nějaká
-   zůstává, lint model nepustí: `facts --focus "<otázka>"` je nechá dočíst, `--drop <id> --reason` uzavře vědomě.
-   Každá zapisující úloha modelu odkazuje na fakta, o která se opírá (`facts: [id]`); fakt, jehož citace ze zdroje
+3b. **Fakta appky jako první (aplikace s kódem, P118):** `aid-ui-client.py facts <projekt>` - Codex a Claude Opus
+   souběžně a nezávisle vytěží z kódu, plánů, rozhodnutí a runbooků, co appka opravdu dělá (asi 7 minut); soudce
+   (Codex) vidí oba seznamy naráz a spáruje fakta, která tvrdí totéž, i když mají jiné id nebo jiný rozsah řádků.
+   Do `docs/design/app-facts.json` jde jako dohodnuté jen to, co řekli oba (citace ověřená v souboru); dohodnutá fakta
+   přežijí další běh. Fakt, který našel jen jeden čtenář, je `unconfirmed` - informuje, nic neblokuje; potřebuje-li
+   ho úloha, `facts --focus "<otázka se soubor:řádek>"` ho nechá dočíst. Dva fakty, které si odporují, jsou otevřená
+   otázka (`spor-<id>`): lint model nepustí, dokud ji `--drop <id> --reason "<jak to podle zdroje je>"` vědomě
+   neuzavře. Každá zapisující úloha modelu odkazuje na fakta, o která se opírá (`facts: [id]`), nebo - je-li to
+   chování, které appka dnes nemá - na požadavek ze soupisu (`new: <id požadavku>`); fakt, jehož citace ze zdroje
    zmizí, lint hlásí jako zastaralý.
 4. Model zapiš nástrojem Write do `docs/design/screens.json` (tvar `references/screens.schema.json`) a zkontroluj:
    `aid-ui-screens.py check <projekt>` (exit 0).
-   Kontrola obsahuje lint z tříd nálezů pilotu P116 (P118): částka, R, procento či páka napsaná přímo místo pojmenované
-   hodnoty (`values`), číslo nebo čas v účelu obrazovky, zapisující úloha bez stavu oprávnění nebo bez cesty selhání
+   Kontrola obsahuje lint z tříd nálezů pilotu P116 (P118): částka, R, procento, páka či mez (znaky, čas, počet)
+   napsaná přímo místo pojmenované hodnoty (`values`), pole, jehož nápověda slibuje mez, kterou nemá, číslo nebo čas v účelu obrazovky, zapisující úloha bez stavu oprávnění nebo bez cesty selhání
    sítě i serveru (kromě úlohy, která na server nesahá: selhání „nenastává“). Lint běží v sekundách; co projde, se
    nemusí honit v bráně ani v kole rolí.
 5. Kostra: `aid-ui-serve.sh skeleton <projekt>` postaví z modelu proklikávací aplikaci na stálé adrese: navigace,
@@ -100,8 +104,12 @@ vzory podle oboru aplikace, tři směry vzhledu jako skutečné stránky kostry.
 Postavená aplikace drží dvě věci, na kterých stojí testy úloh a předání:
 - každá akce modelu nese `data-aid-action="<obrazovka>.<akce>"` a kořen obrazovky `data-aid-screen="<obrazovka>"`;
 - v testovacím režimu (`?aid-test=1`) obrazovka poslechne `?stav=` a ukáže ten stav;
-- stav úlohy (`?stav=<úloha>.<stav>`: chyba validace, prázdno, načítání, selhání, oprávnění, obnova) se ukáže na obrazovce
-  prvního kroku úlohy v bloku `data-aid-task-state="<úloha>.<stav>"`;
+- stav úlohy (`?stav=<úloha>.<stav>`: chyba validace, prázdno, načítání, selhání, oprávnění, obnova) se ukáže tam, kde
+  nastává, v bloku `data-aid-task-state="<úloha>.<stav>"`: prázdno na obrazovce prvního kroku, ostatní na obrazovce prvního
+  zapisujícího kroku (chyba pole u pole, ne na seznamu před ním);
+- akce, která potřebuje záznam (odkaz na záznam, mazání, akce položky, cesta na obrazovku, jejíž prázdno nenastává), se
+  v prázdnu, při chybě načtení a při načítání nenabízí; zapisující akce ne při načítání; akce jen pro obnovu (cíl
+  `recover`, žádný běžný krok) se ukáže až po selhání;
 - akce, která jde jen v některých režimech (`modes` v modelu), je v ostatních neaktivní s větou proč; režim pro test
   nastaví `?rezim=<režim>`.
 
