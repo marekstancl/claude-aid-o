@@ -77,7 +77,8 @@ aplikaci nekopíruje: tytéž nástroje, větev podle druhu.
 5a2. **Po každé úpravě modelu nebo kostry** `aid-ui-verify.sh <projekt> --quick` (stejné řádky jako předběžná brána,
    jen na nejširší šířce, asi 3 minuty); zelená nad modelem teď pouští kolo rolí, předání rozhoduje plná brána. Kostra je
    statická: po úpravě modelu ji nejdřív znovu postav (`aid-ui-serve.sh skeleton`).
-5b. **Před kolem rolí** (SKILL.md „Verze 1 je kompletní“): lint bez nálezu, `aid-ui-verify.sh <projekt> --quick`
+5b. **Před kolem rolí** (SKILL.md „Verze 1 je kompletní“): poprvé zmraz měřítka místa (`aid-ui-critic.py freeze <projekt>
+   --type webapp --place struktura`), lint bez nálezu, `aid-ui-verify.sh <projekt> --quick`
    zelené nad modelem teď (po přestavění kostry `aid-ui-serve.sh skeleton`) a `aid-ui-quality.py self <projekt> --place
    struktura --file <kontrola.json>` (soupis požadavků). Ověřovatele nepouštěj dopředu: `round` ho pustí s rolemi a jeho
    rozpory přidá k nálezům kola (PM 21. 10. 2026, 1A).

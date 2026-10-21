@@ -643,3 +643,21 @@ app_handover() {
   mutate '.screens[1].fields = [{name: "nazev", label: "Název", hint: "Nejvýš {max}."}] | .values = {max: {value: "80 znaků", source: "zadání"}}'
   run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"slibuje v nápovědě nebo hlášce mez"* ]]
 }
+
+@test "skeleton (P118 H5 run 3): a filter - a navigate action a task types into - gets its fields in a form; the bar shows its own sample" {
+  SK="$BATS_TEST_DIRNAME/../../lib/aid-ui-skeleton.py"
+  mkdir -p "$APP/.aid-ui"; echo '{"type": "webapp", "brand": "none", "local": false}' > "$APP/.aid-ui/variant.json"
+  mutate '.screens[0].fields = [{name: "hledat", label: "Hledat"}] | .screens[0].actions += [{id: "filtr", label: "Filtrovat", kind: "navigate", to: "seznam"}]
+    | .tasks[0].steps = [{screen: "seznam", action: "filtr", input: {hledat: "Nákup"}}] + .tasks[0].steps | .tasks[0].failure_paths[].at_step += 1
+    | .screens += [{id: "lista", title: "Lišta", purpose: "Nahoře.", nav: false, shell: true, actions: [], sample: ["Režim: demo"], states: {empty: "nenastává, protože vždy", loading: "nenastává, protože vždy", error: "nenastává, protože vždy", filled: "3 poznámky"}}]'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  python3 "$SK" build "$APP" >/dev/null
+  s="$APP/site/seznam/index.html"
+  python3 - "$s" <<'PY'
+import re, sys
+h = open(sys.argv[1], encoding="utf-8").read()
+form = re.search(r'<form[^>]*data-aid-form.*?</form>', h, re.S).group(0)
+assert 'name="hledat"' in form and 'data-aid-action="seznam.filtr"' in form, form[:300]
+assert '<ul class="lista-ukazka"><li>Režim: demo</li></ul>' in h
+PY
+}

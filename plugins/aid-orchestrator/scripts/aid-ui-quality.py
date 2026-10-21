@@ -918,6 +918,14 @@ def main(a):
         a = a[:i] + a[i + 2:]
         if PLACE not in PLACES:
             die("--place must be one of " + ", ".join(PLACES), 2)
+    elif cmd in ("triage", "fixed") and len(a) > 2:   # H5 run 3: 40 refusals without --place - the place whose rounds hold the finding
+        fid = a[2]
+        for pl in PLACES:
+            try:
+                if any(f.get("id") == fid for r in memory.rounds(p, pl) for f in r.get("findings") or []):
+                    PLACE = pl; break
+            except (OSError, ValueError):
+                continue
     opts, rest, i = {}, [], 2
     while i < len(a):
         if a[i].startswith("--") and i + 1 < len(a):   # a broken character (a cut in the shell) never breaks the write

@@ -248,7 +248,7 @@ def violations(m, proj):
     KEY = re.compile(r"\{[a-z][a-z0-9_]*\}")
     UNIT = re.compile(r"(?<![\w{])[+−-]?[$€]?\d[\d\u00a0 ,.]*\s?(?:USDT|USD|EUR|CZK|Kč|R|%|×|x|znaků|znaky|znak|minut[ay]?|min|sekund[ay]?|hodin[ay]?|h|dní|dny|dnů|den|ks|kusů|položek|položky|položka|pokusů|pokusy|pokus|souborů|soubory|soubor|zpráv|zprávy|kB|MB|GB)(?![\w])|[$€]\s?\d[\d\u00a0 ,.]*")
     DIGIT = re.compile(r"(?<![A-Za-z\d])\d")   # a digit that is not part of a code like F1 or R12
-    LIMIT = re.compile(r"(?i)\b(?:nejvýš|nejvýše|nejméně|aspoň|alespoň|maximálně|minimálně|max\.?|min\.?|až|do|limit|mez)\s+(?!\d{1,2}\.\s?\d{1,2}\.)\d[\d\u00a0 ,.]*(?:\s?\w+)?")   # not a date (do 18. 10.)
+    LIMIT = re.compile(r"(?i)\b(?:nejvýš|nejvýše|nejméně|aspoň|alespoň|maximálně|minimálně|max\.?|min\.?|až|do)\s+(?!\d{1,2}\.\s?\d{1,2}\.|\d{1,2}:\d{2})\d[\d\u00a0 ,.]*(?:\s?\w+)?")   # not a date or a time (do 18. 10., do 23:00); "limit" is also an order type (H5 run 3)
     def lit(txt, where):   # an amount, R, percent, leverage or a limit (characters, time, count) written out instead of a named value: two places can disagree
         t = KEY.sub("", str(txt or ""))
         found = [x.strip() for x in UNIT.findall(t)]

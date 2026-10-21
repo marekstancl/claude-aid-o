@@ -1195,7 +1195,9 @@ const LOOP_SAYS = {
   audit: "Majitel i technik dali aspoň 8,5; následují tři slepá hodnocení od každého.",
   done: "Slepá hodnocení majitele i technika potvrdila známku.", "stop:conflict": "Zastaveno: připomínky si odporují, rozhoduje PM.",
   "stop:stagnation": "Zastaveno: žádná připomínka nešla přijmout k opravě.", "stop:round_cap": "Zastaveno: tři kola oprav bez 8,5 u obou.",
-  verdict: "Klient a odborník místo prošli; AI zapisuje rozhodnutí místa (P113)."
+  verdict: "Klient a odborník místo prošli; AI zapisuje rozhodnutí místa (P113).",
+  delta: "Místo prošlo a AI opravila přijaté připomínky; ještě jedno kolo jen nad opravenou verzí (P118).",
+  supply: "Klient (agent za PM) dodává, co hodnotitelé nechali na něm; pak další kolo (P116)."
 };
 function qualityBlock() {
   const qy = S.quality && typeof S.quality === "object" ? S.quality : null;

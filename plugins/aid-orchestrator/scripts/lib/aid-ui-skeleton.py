@@ -357,6 +357,7 @@ def actions_html(m, scr, url, fields, ends, item=None):
             a["kind"] == "navigate" and not a.get("back") and not a.get("external") and str(scrs.get(a.get("to"), {}).get("states", {}).get("empty", "")).strip().lower().startswith("nenastává"))
         ks = (["empty", "error"] if record else []) + (["loading"] if record or a["kind"] in ("submit", "destructive") else [])
         return f' data-aid-hide-in="{" ".join(ks)}"' if ks else ""
+    typed = {st["action"] for t in m["tasks"] for st in t["steps"] if st["screen"] == sid and st.get("input")}   # actions a task types into before
     acts, btns = [], []
     for a in mine:
         if (sid, a["id"]) in rec:   # whose failure it recovers: the failed actions, their tasks, this screen
@@ -372,7 +373,10 @@ def actions_html(m, scr, url, fields, ends, item=None):
             acts.append(f'<p class="chyba" role="alert" tabindex="-1" data-aid-fail-for="{k}" hidden>{esc(owner["states"]["failure"])}</p>'
                         + "".join(f'<p class="chyba" role="alert" tabindex="-1" data-aid-fail-for="{k}" data-aid-fail-kind="{"network" if fp["kind"] == "network" else "server"}" hidden>{esc(fp["text"])}</p>'
                                   for fp in owner["failure_paths"] if fp.get("text")))
-        if a["kind"] == "navigate":
+        if a["kind"] == "navigate" and a["id"] in typed and not a.get("external"):   # a filter or search: its fields go with it (H5 run 3)
+            ga, why = gate_attrs(sid, a)
+            btns.append(f'<button type="submit" formaction="{esc(url[a["to"]])}{tail(a)}" {da}{ga}>{esc(a["label"])}</button>{why}')
+        elif a["kind"] == "navigate":
             back = " data-aid-back" if a.get("back") else ""
             ga, why = gate_attrs(sid, a)
             chk = " data-aid-checked" if a["id"] in risky and not a.get("back") else ""
@@ -410,7 +414,7 @@ def actions_html(m, scr, url, fields, ends, item=None):
                 return f'<p><label for="f-{esc(sid)}-{esc(n)}">{esc(f["label"])}</label> <select id="f-{esc(sid)}-{esc(n)}" name="{esc(n)}"{hint}>{opts}</select> {note}</p>'
             return f'<p><label for="{fid}">{esc(f["label"])}</label> <input id="{fid}" name="{esc(n)}"{hint}{lim}> {note}</p>'
         inputs = "".join(field(n) for n in fields)
-        first = next(a for a in mine if a["kind"] == "submit")
+        first = next(a for a in mine if a["kind"] == "submit" or (a["kind"] == "navigate" and a["id"] in typed and not a.get("external")))
         form = (f'<form method="get" action="{esc(url[first["to"]])}" data-aid-form novalidate>{inputs}'
                 f'<p class="chyba" role="alert" tabindex="-1" data-aid-error hidden>{esc(scr["states"]["error"])}</p>{"".join(btns)}</form>')
     return form + (f'<div class="akce">{"".join(acts)}</div>' if acts else "")
@@ -433,8 +437,9 @@ def app_page(m, scr, approved, fields, results, ends, shell):
                   + ("" if not mo else '<p class="lista-rezim" role="status">' + "".join(   # the mode now, with what it means (P116 pilot: the bar said Demo běží in every mode)
                       f'<span data-aid-mode-is="{esc(md["id"])}"{"" if i == 0 else " hidden"}>{esc(md["label"])}' + (f': {esc(md["text"])}' if md.get("text") else "") + '</span>'
                       for i, md in enumerate(mo)) + "</p>")
-                  + f'<p class="lista-stav" role="status">{esc(x["states"]["filled"])}</p>'   # what the bar shows, not only its buttons
-                  f'{actions_html(m, x, url, shell[x["id"]][0], shell[x["id"]][1])}</div>' for x in m["screens"] if x.get("shell"))
+                  + f'<p class="lista-stav" role="status">{esc(x["states"]["filled"])}</p>'
+                  + ("" if not x.get("sample") else '<ul class="lista-ukazka">' + "".join(f"<li>{esc(v)}</li>" for v in x["sample"]) + "</ul>")   # what the bar shows, not only its buttons; its own sample (H5 run 3)
+                  + f'{actions_html(m, x, url, shell[x["id"]][0], shell[x["id"]][1])}</div>' for x in m["screens"] if x.get("shell"))
     switch = "".join(f'<a href="?stav={k}" data-aid-stav-link="{k}">{t}</a> ' for k, t in STATES)
     res = "".join(f'<p class="vysledek" role="status" data-aid-result="{esc(t)}">{esc(e)}</p>' for t, e in results)
     retry = f'<p><a class="akce" href="{esc(url[sid])}" data-aid-retry>Zkusit znovu</a></p>'

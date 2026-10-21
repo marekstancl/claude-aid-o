@@ -683,7 +683,7 @@ def client_role(project):
         rub = json.load(open(fz, encoding="utf-8"))["rubric"]
     else:
         rub = yaml.safe_load(open(os.path.join(SKILL, "critic", os.environ.get("AID_UI_CLIENT_TYPE", "web-local") + ".owner.yaml"), encoding="utf-8"))
-    lang = "sk"
+    lang = "cs"   # H5 run 3: "sk" by default made the Czech client answer in Slovak
     try:
         m = re.search(r'<html[^>]*\blang="([a-z]{2})', open(os.path.join(project, "site", "index.html"), encoding="utf-8").read(4000))
         lang = m.group(1) if m else lang
@@ -1130,19 +1130,23 @@ def facts(project, focus, drop=None, reason=None):
         a = parse_json(text)
         if not isinstance(a, dict) or not isinstance(a.get("facts"), list) or not a["facts"]:
             return None, "need {facts: [...]} with at least one fact"
-        errs, seen = [], set()
-        for x in a["facts"]:
+        errs, seen, good = [], set(), []
+        for x in a["facts"]:   # H5 run 3: one fact with a quote not in its file dropped the whole reading - now the fact is dropped
             if not isinstance(x, dict) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", str(x.get("id") or "")) or x.get("kind") not in FACT_KINDS \
                     or not str(x.get("statement") or "").strip() or not isinstance(x.get("sources"), list) or not x["sources"]:
                 errs.append(f"{x.get('id') if isinstance(x, dict) else x}: id, kind, statement and sources are required"); continue
             if x["id"] in seen:
                 errs.append(f"{x['id']}: the id twice"); continue
             seen.add(x["id"])
-            for so in x["sources"]:
-                e = memory.source_ok(project, (so or {}).get("source"), (so or {}).get("quote")) if isinstance(so, dict) else "not an object"
-                if e or (so.get("source_kind") not in FACT_SOURCES):
-                    errs.append(f"{x['id']}: {e or 'source_kind must be one of ' + ', '.join(FACT_SOURCES)}")
-        return (None, "; ".join(errs[:10])) if errs else (a, None)
+            bad = [e or 'source_kind must be one of ' + ', '.join(FACT_SOURCES) for so in x["sources"]
+                   for e in [memory.source_ok(project, (so or {}).get("source"), (so or {}).get("quote")) if isinstance(so, dict) else "not an object"]
+                   if e or so.get("source_kind") not in FACT_SOURCES]
+            if bad:
+                errs.append(f"{x['id']}: {bad[0]}"); continue
+            good.append(x)
+        if not good:   # nothing citable at all is no reading
+            return None, "; ".join(errs[:10]) or "no fact"
+        return dict(a, facts=good, dropped=errs), None
 
     got = {}
     saved = {k: os.environ.get(k) for k in ("AID_UI_STANDIN", "AID_UI_ROLE_FIRST")}

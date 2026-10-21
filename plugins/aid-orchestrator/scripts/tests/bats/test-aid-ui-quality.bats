@@ -660,7 +660,7 @@ python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"
 SH
   chmod +x "$T/bin/codex"
   pans sdeleni 9; qround "$P" --place sdeleni >/dev/null
-  for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f1" rejected_with_reason --reason "věta je přesná" --place sdeleni >/dev/null; done
+  for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f1" rejected_with_reason --reason "věta je přesná" >/dev/null; done   # no --place: the finding's place (H5 run 3)
   f="$(python3 "$SC/aid-ui-critic.py" bundle-files "$P" --place sdeleni | head -1)"; echo "Nesouvisející úprava." >> "$P/$f"
   [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = verdict ]
 }

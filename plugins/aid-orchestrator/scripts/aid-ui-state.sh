@@ -945,7 +945,8 @@ app_owner_guard() {   # <answer json>
 }
 
 # P116: before a webapp leaves step 1 every part its options skip (vize, hledani, logo) has a skip record
-# (decide --title přeskočeno --outcome "<part> přeskočena" --why <reason>) in the studio history
+# (decide --title přeskočeno --outcome "<part> přeskočena" --why <reason>; H5 run 3: the human name counts too -
+# "Logo přeskočeno", "Hledání přeskočeno") in the studio history
 app_skips_missing() {
   local hist="$PROJECT/.aid-ui/studio/history.jsonl" part opt miss=()
   for part in vize:vision hledani:seo logo:identity; do
@@ -953,7 +954,7 @@ app_skips_missing() {
     jq -e --arg o "$opt" '(.options[$o] // false) | . == false' "$STATE" >/dev/null || continue
     # the logo is skipped only for a brand that exists or is not wanted (LAN tool); a new brand keeps its logo place
     if [[ "$part" == logo && "$(jq -r '.variant.brand // ""' "$STATE")" == new ]]; then miss+=("logo(brand:new)"); continue; fi
-    [[ -f "$hist" ]] && jq -e --arg x "$part přeskočena" 'select(.by == "agent" and .event.title == "přeskočeno" and .event.outcome == $x and ((.event.why // "") | length > 0))' "$hist" >/dev/null 2>&1 && continue
+    [[ -f "$hist" ]] && jq -e --arg x "${part:0:4}" 'select(.by == "agent" and (.event.title | ascii_downcase | startswith("přeskočen")) and (.event.outcome | ascii_downcase | startswith($x)) and ((.event.why // "") | length > 0))' "$hist" >/dev/null 2>&1 && continue
     miss+=("$part")
   done
   echo "${miss[*]}"
