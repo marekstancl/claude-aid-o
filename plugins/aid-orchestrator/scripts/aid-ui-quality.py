@@ -624,6 +624,10 @@ def do_round(p, web):
     for role, (_, out) in res.items():
         ans = json.load(open(os.path.join(out, "answer.json"), encoding="utf-8"))
         finds += [mark_client(dict(f, id="r%d-%s-%s" % (n, role, bare(f["id"], [x["id"] for x in ans["findings"]])), role=role, state=None)) for f in ans["findings"]]
+    vrecs = memory.verify_records(p, PLACE, art) if web and not LAUNCH else []
+    if runs["owner"]["site_sha"] != art or (web and not LAUNCH and not vrecs):   # roles, verifier and the round over one version
+        os.rename(d, d + "-failed-" + at.replace(":", ""))
+        die(f"the version changed during the round or the verifier left no record over it ({art[:12]} -> roles {runs['owner']['site_sha'][:12]}); nothing recorded")
     finds += verify_findings(p, n, art)
     score = merge(runs)
     shas = {role: hashlib.sha256(open(os.path.join(out, "answer.json"), "rb").read()).hexdigest() for role, (_, out) in res.items()}
@@ -635,7 +639,8 @@ def do_round(p, web):
         die(f"the plugin changed during the round ({PLUGIN_AT_START} -> {plug}); nothing recorded - run the round again on one version")
     rec = {"n": n, "at": at, "place": PLACE, "delta": st["decision"] == "delta", "plugin": plug, "answers": shas, "web": web, "site_sha": runs["owner"]["site_sha"], "frozen_sha": runs["owner"]["frozen_sha"],
            "provider": {r: runs[r].get("provider") for r in ROLES}, "score": score, "findings": finds, "readiness": score["readiness"],
-           "task_test": task_row(p), "usd_equiv": usd_since(p, at)}
+           "task_test": task_row(p), "usd_equiv": usd_since(p, at),
+           "verify": [{"at": r.get("at"), "started": r.get("started"), "provider": r.get("provider"), "sig": r.get("sig")} for r in vrecs]}   # which signed records the verify findings come from
     save_round(p, rec)
     st = write_loop(p)
     top = {role: [f["text"] for f in finds if f["role"] == role and f["owner"] == "agent"][:3] for role in ROLES}   # the critics rank by impact

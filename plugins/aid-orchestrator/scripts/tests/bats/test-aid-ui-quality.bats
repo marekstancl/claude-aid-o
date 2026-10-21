@@ -526,6 +526,7 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
     "open": [{"where": "site/index.html:1", "what": "cena 10 na úvodu, 12 v ceníku", "why": "dvě čísla"}]}' > "$T/ans-verify.json"
   ans 7 7; run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ -f "$P/.aid-ui/critic/rounds/2/verify.log" ]; supply_missing web
+  jq -e '(.verify | length) >= 1 and (.verify[0].sig | length) > 10' "$P/.aid-ui/critic/rounds/2/round.json" >/dev/null   # the signed records the verify findings come from
   H="$(python3 "$Q" status "$P")"
   jq -e '[.history[-1].findings[] | select(.role == "verify") | .text] | (index("cena 10 na úvodu, 12 v ceníku") != null) and (map(test("^oprava r1-owner-f1 ve verzi nepravda")) | any) and (map(test("r1-tech-f1")) | any | not)' <<<"$H" >/dev/null || { jq -c '[.history[-1].findings[] | select(.role == "verify")]' <<<"$H"; return 1; }
   # a verifier that gives no valid answer: no round

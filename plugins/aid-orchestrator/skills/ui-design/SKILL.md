@@ -128,7 +128,9 @@ Claude Opus) to porovná s modelem, fakty a podklady projektu: ověří opravy m
 Výsledek je podepsaný záznam mimo projekt, který píše jen nástroj (podpis brání omylu a ruční úpravě, ne úmyslu toho,
 kdo zná klíč); u každého výroku stojí, kde ho ověřovatel viděl, a nástroj odmítne adresu, která neslouží právě tuhle
 verzi, i neúplné nafocení. **Jeho rozpory a opravy, které neviděl, jsou nálezy kola** (role `verify`): výrobce je
-převezme a opraví spolu s nálezy rolí, jedním průchodem. Ověřovatel bez platné odpovědi = kolo neproběhlo.
+převezme a opraví spolu s nálezy rolí, jedním průchodem. Ověřovatel bez platné odpovědi, nebo verze změněná během
+kola = kolo neproběhlo; záznam kola nese podpisy záznamů ověřovatele, ze kterých nálezy vzešly. Hodnocení nasazení
+(`launch`) ověřovatele nepouští - hodnotí ostrou adresu, ne verzi souborů.
 
 ## Smyčka bez čekání, výrobce v čerstvém kontextu (P118, PM 20. 10. 2026)
 
