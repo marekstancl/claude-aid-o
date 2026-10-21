@@ -354,6 +354,8 @@ def actions_html(m, scr, url, fields, ends, item=None):
     scrs = {x["id"]: x for x in m["screens"]}
     rec = screens_module().recover_only(m)
     def hide_in(a):   # the screen states in which the action is not offered (H2/H5, P118: Smazat on a note that is not there)
+        if scr.get("shell"):   # the bar (STOP, PANIC) stays whatever the screen under it shows (H5 run 5)
+            return ""
         record = a.get("item") is not None or a.get("query") or a["kind"] == "destructive" or (
             a["kind"] == "navigate" and not a.get("back") and not a.get("external") and str(scrs.get(a.get("to"), {}).get("states", {}).get("empty", "")).strip().lower().startswith("nenastává"))
         ks = (["empty", "error"] if record else []) + (["loading"] if record or a["kind"] in ("submit", "destructive") else [])

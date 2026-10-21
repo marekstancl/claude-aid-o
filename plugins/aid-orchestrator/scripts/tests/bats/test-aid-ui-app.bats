@@ -649,7 +649,7 @@ app_handover() {
   mkdir -p "$APP/.aid-ui"; echo '{"type": "webapp", "brand": "none", "local": false}' > "$APP/.aid-ui/variant.json"
   mutate '.screens[0].fields = [{name: "hledat", label: "Hledat"}] | .screens[0].actions += [{id: "filtr", label: "Filtrovat", kind: "navigate", to: "seznam"}]
     | .modes = [{id: "bezi", label: "Běží"}, {id: "pauza", label: "Pauza"}] | .tasks[0].steps = [{screen: "seznam", action: "filtr", input: {hledat: "Nákup"}}] + .tasks[0].steps | .tasks[0].failure_paths[].at_step += 1
-    | .screens += [{id: "lista", title: "Lišta", purpose: "Nahoře.", nav: false, shell: true, actions: [], sample: ["Režim: demo"], mode_sample: {bezi: ["Čtečka čte"]}, states: {empty: "nenastává, protože vždy", loading: "nenastává, protože vždy", error: "nenastává, protože vždy", filled: "3 poznámky"}}]'
+    | .screens += [{id: "lista", title: "Lišta", purpose: "Nahoře.", nav: false, shell: true, actions: [{id: "detail", label: "Poslední poznámka", kind: "navigate", to: "detail", query: "id=1"}], sample: ["Režim: demo"], mode_sample: {bezi: ["Čtečka čte"]}, states: {empty: "nenastává, protože vždy", loading: "nenastává, protože vždy", error: "nenastává, protože vždy", filled: "3 poznámky"}}]'
   run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   python3 "$SK" build "$APP" >/dev/null
   s="$APP/site/seznam/index.html"
@@ -658,6 +658,8 @@ import re, sys
 h = open(sys.argv[1], encoding="utf-8").read()
 form = re.search(r'<form[^>]*data-aid-form.*?</form>', h, re.S).group(0)
 assert 'name="hledat"' in form and 'data-aid-action="seznam.filtr"' in form, form[:300]
+bar = re.search(r'<div class="lista".*?</div>', h, re.S).group(0)
+assert 'data-aid-action="lista.detail"' in bar and "data-aid-hide-in" not in bar, bar[:400]   # the bar never hides by the screen's state
 assert '<ul class="lista-ukazka"><li>Režim: demo</li><li data-aid-mode-is="bezi">Čtečka čte</li></ul>' in h, h[h.find("lista-ukazka")-20:h.find("lista-ukazka")+200]
 PY
 }
