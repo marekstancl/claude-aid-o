@@ -246,8 +246,8 @@ def write_pages(p, site, entries):
 STATES = (("empty", "Prázdno"), ("loading", "Načítání"), ("error", "Chyba"), ("filled", "Naplněno"))   # the model's order
 APP_JS = """(function(){function failFor(k,e){if(!k)return null;var kind=(e&&/^[0-9]+$/.test(e.message))?'server':'network';   // an HTTP status vs a dropped connection
 return document.querySelector('[data-aid-fail-for="'+k+'"][data-aid-fail-kind="'+kind+'"]')||document.querySelector('[data-aid-fail-for="'+k+'"]:not([data-aid-fail-kind])');}
-function showRecover(){document.querySelectorAll('[data-aid-recover]').forEach(function(x){x.hidden=false;});}   // a recover-only action shows once something failed
-function clearFail(){document.querySelectorAll('[data-aid-fail-for],[data-aid-error],[data-aid-error-global]').forEach(function(x){x.hidden=true;});}   // a new try shows only its own outcome
+function showRecover(how,v){document.querySelectorAll('[data-aid-recover]').forEach(function(x){if((x.dataset[how]||'').split(' ').indexOf(v)>=0)x.hidden=false;});}   // a recover-only action shows once its own step failed (by the failed action, the task, or the form's screen)
+function clearFail(){document.querySelectorAll('[data-aid-fail-for],[data-aid-error],[data-aid-error-global],[data-aid-recover]').forEach(function(x){x.hidden=true;});}   // a new try shows only its own outcome
 var q=new URLSearchParams(location.search),st=q.get('stav')||'filled',ok=false,done=(q.get('vysledek')||'').split(',');
 if(/\.empty$/.test(st))st='empty';   // a task's empty state is the screen with nothing on it
 document.querySelectorAll('main [data-aid-state]').forEach(function(e){if(e.dataset.aidState===st)ok=true;});
@@ -267,11 +267,13 @@ var r=document.getElementById(b.dataset.aidReason);if(r)r.hidden=!off;});}
 var an=document.querySelector('[data-aid-stav-oznameni]');if(an&&q.get('stav'))setTimeout(function(){an.textContent='Zobrazen stav: '+(document.querySelector('[data-aid-stav-link="'+st+'"]')||{}).textContent;},400);   // after load: a reader announces it
 document.querySelectorAll('[data-aid-after]').forEach(function(e){e.hidden=done.indexOf(e.dataset.aidAfter)<0;});
 document.querySelectorAll('[data-aid-hide-in]').forEach(function(e){if(e.dataset.aidHideIn.split(' ').indexOf(st)>=0)e.hidden=true;});   // no record, still loading: its actions are not offered
-if(/\.failure$/.test(ts)||st==='error')showRecover();   // the screen's error says what to try: its recover action is there
+var rt=/^([a-z0-9-]+)\.(failure|recovery)$/.exec(ts);if(rt)showRecover('aidRecoverTask',rt[1]);
+if(st==='error'&&main.hasAttribute('data-aid-form'))showRecover('aidRecoverScreen',main.dataset.aidScreen);   // a form's error is its send failing: its own recover action is there
 if(/\.(loading|permission)$/.test(ts))document.querySelectorAll('[data-aid-hide-in~="loading"]').forEach(function(b){b.setAttribute('aria-disabled','true');if(b.tagName==='A')b.removeAttribute('href');else b.disabled=true;});   // the task's state: its sending is off
 var inp=document.querySelector('[data-aid-inputs]'),fill=null;try{inp=inp?JSON.parse(inp.textContent):{};}catch(e){inp={};}
 var tm=/^([a-z0-9-]+)\.(failure|recovery|loading|permission)$/.exec(ts);if(tm)fill=inp[tm[1]];else if(['filled','error','loading'].indexOf(q.get('stav'))>=0){for(var k in inp){fill=inp[k];break;}}   // what the person typed stays: show it
-if(/\.validation$/.test(ts))document.querySelectorAll('main [id$="-chyba"]').forEach(function(e){e.hidden=false;var i=document.getElementById(e.id.replace(/-chyba$/,''));if(i)i.setAttribute('aria-invalid','true');});   // the field's own message, where it is
+var vt=/^([a-z0-9-]+)\.validation$/.exec(ts);if(vt)document.querySelectorAll('main [id$="-chyba"]').forEach(function(e){var i=document.getElementById(e.id.replace(/-chyba$/,''));
+if(!i||(inp[vt[1]]&&!(i.name in inp[vt[1]])))return;e.hidden=false;i.setAttribute('aria-invalid','true');});   // the message of the task's own fields, where they are
 if(fill)Object.keys(fill).forEach(function(n){var i=document.querySelector('main [name="'+n+'"]');if(i&&!i.value)i.value=fill[n];});
 document.querySelectorAll('[data-aid-draft]').forEach(function(i){var k='aid-draft:'+location.pathname+':'+i.id;try{var v=localStorage.getItem(k);if(v!==null&&!i.value)i.value=v;}catch(e){}
 i.addEventListener('input',function(){try{localStorage.setItem(k,i.value);}catch(e){}});});
@@ -281,16 +283,16 @@ if(b)b.addEventListener('click',function(){d.showModal();d.querySelector('[data-
 d.querySelector('[data-aid-confirm-no]').addEventListener('click',function(){d.close();if(b)b.focus();});
 var y=d.querySelector('[data-aid-confirm-yes]'),ge=document.querySelector('[data-aid-error-global]');
 y.setAttribute('role','button');y.addEventListener('keydown',function(ev){if(ev.key===' '){ev.preventDefault();y.click();}});y.addEventListener('click',function(ev){ev.preventDefault();clearFail();
-fetch(y.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=y.href;}).catch(function(e){d.close();var fe=failFor(d.dataset.aidConfirm,e)||ge;fe.hidden=false;showRecover();fe.focus();});});});
+fetch(y.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=y.href;}).catch(function(e){d.close();var fe=failFor(d.dataset.aidConfirm,e)||ge;fe.hidden=false;showRecover('aidRecoverFor',d.dataset.aidConfirm);fe.focus();});});});
 document.querySelectorAll('a[data-aid-checked]').forEach(function(a){a.addEventListener('click',function(ev){if(!a.href)return;ev.preventDefault();clearFail();var ge=document.querySelector('[data-aid-error-global]');
-fetch(a.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=a.href;}).catch(function(e){var fe=failFor(a.dataset.aidAction,e)||ge;if(fe){fe.hidden=false;showRecover();fe.focus();}});});});
+fetch(a.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=a.href;}).catch(function(e){var fe=failFor(a.dataset.aidAction,e)||ge;if(fe){fe.hidden=false;showRecover('aidRecoverFor',a.dataset.aidAction);fe.focus();}});});});
 document.querySelectorAll('form[data-aid-form]').forEach(function(f){var err=f.querySelector('[data-aid-error]');
 f.addEventListener('submit',function(ev){ev.preventDefault();clearFail();var bad=null;f.querySelectorAll('input,select').forEach(function(i){var e=document.getElementById(i.id+'-chyba');
 if(e)e.hidden=i.checkValidity();if(!i.checkValidity()){i.setAttribute('aria-invalid','true');bad=bad||i;}else i.removeAttribute('aria-invalid');});
 if(bad){bad.focus();return;}var b=ev.submitter,to=(b&&b.getAttribute('formaction'))||f.getAttribute('action'),d=new URLSearchParams(new FormData(f));
 if(b&&b.name)d.set(b.name,b.value);var x=new URL(to,location.href);d.forEach(function(v,k){x.searchParams.set(k,v);});var u=x.pathname+x.search;f.setAttribute('aria-busy','true');if(b)b.disabled=true;
 fetch(u).then(function(r){if(!r.ok)throw new Error(r.status);f.querySelectorAll('[data-aid-draft]').forEach(function(i){try{localStorage.removeItem('aid-draft:'+location.pathname+':'+i.id);}catch(e){}});location.href=u;}).catch(function(e){f.removeAttribute('aria-busy');if(b)b.disabled=false;
-var fe=(b&&failFor(b.dataset.aidAction,e))||err;fe.hidden=false;showRecover();fe.focus();});});});})();"""
+var fe=(b&&failFor(b.dataset.aidAction,e))||err;fe.hidden=false;if(b)showRecover('aidRecoverFor',b.dataset.aidAction);fe.focus();});});});})();"""
 
 
 def app_kind(p):
@@ -357,8 +359,13 @@ def actions_html(m, scr, url, fields, ends, item=None):
         return f' data-aid-hide-in="{" ".join(ks)}"' if ks else ""
     acts, btns = [], []
     for a in mine:
+        if (sid, a["id"]) in rec:   # whose failure it recovers: the failed actions, their tasks, this screen
+            fps = [(t["id"], f'{sid}.{t["steps"][fp["at_step"] - 1]["action"]}') for t in m["tasks"] for fp in t.get("failure_paths") or []
+                   if fp.get("recover") == a["id"] and fp["at_step"] <= len(t["steps"]) and t["steps"][fp["at_step"] - 1]["screen"] == sid]
+            recv = (f' data-aid-recover data-aid-recover-for="{esc(" ".join(sorted({x for _, x in fps})))}"'
+                    f' data-aid-recover-task="{esc(" ".join(sorted({x for x, _ in fps})))}" data-aid-recover-screen="{esc(sid)}" hidden')
         da = f'data-aid-action="{esc(sid)}.{esc(a["id"])}"' + hide_in(a) + (f' data-aid-after="{esc(a["after"])}" hidden' if a.get("after")
-                                                                       else ' data-aid-recover hidden' if (sid, a["id"]) in rec else "")
+                                                                       else recv if (sid, a["id"]) in rec else "")
         owner = next((t for t in m["tasks"] for x in t["steps"] if x["screen"] == sid and x["action"] == a["id"]), None)
         if owner and (a["kind"] != "navigate" or a["id"] in risky):   # the task's own failure text (not the screen's load error), per kind when the model says
             k = f'{esc(sid)}.{esc(a["id"])}'
@@ -471,7 +478,7 @@ def app_page(m, scr, approved, fields, results, ends, shell):
             'a,button,summary,input{min-height:44px}a,button{display:inline-block;margin:4px 8px 4px 0}'
             ':focus-visible{outline:3px solid #06c;outline-offset:2px}</style></head>\n<body>\n'
             f'{banner}<header><p class="znacka">{esc(m.get("app") or "")}</p>{bar}<nav aria-label="Aplikace"><ul>{nav}</ul></nav></header>\n'
-            f'<main data-aid-screen="{esc(sid)}"><h1>{esc(scr["title"])}</h1><p class="ucel">{esc(scr["purpose"])}</p>'
+            f'<main data-aid-screen="{esc(sid)}"{" data-aid-form" if form_screen else ""}><h1>{esc(scr["title"])}</h1><p class="ucel">{esc(scr["purpose"])}</p>'
             f'<nav class="stavy" aria-label="Stav obrazovky">{switch}</nav><p class="oznameni" role="status" aria-live="polite" data-aid-stav-oznameni></p>{res}{tstates}{states}<p class="chyba" role="alert" tabindex="-1" data-aid-error-global hidden>{esc(scr["states"]["error"])}</p>{actions_html(m, scr, url, fields, ends)}{data}{tasks}{inputs_js}</main>\n'
             + (f'<footer>{foot}</footer>\n' if foot else "") + f'<script>{APP_JS}</script>\n</body>\n</html>\n')
 

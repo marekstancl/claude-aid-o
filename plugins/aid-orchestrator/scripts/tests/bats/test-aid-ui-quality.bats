@@ -588,6 +588,7 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   echo '{"same": [], "conflict": [{"a": 1, "b": 0, "why": "alert vs pauza"}], "disputed": [{"o": 0, "b": 0, "why": "jiný výsledek"}]}' > "$T/ans-judge.json"
   run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '(.facts | length) == 0 and ([.open[].fact.id] | sort) == ["spor-jen-codex", "spor-sl-odmitnut"]' "$P/docs/design/app-facts.json" >/dev/null || { jq -c '[.facts[].id, [.open[].fact.id]]' "$P/docs/design/app-facts.json"; return 1; }
+  jq -e '[.unconfirmed[].fact.id] == ["sl-odmitnut"]' "$P/docs/design/app-facts.json" >/dev/null   # the disputed facts are open, not "one reader only"
   echo '{"same": [{"a": 0, "b": 0}]}' > "$T/ans-judge.json"   # agreed again; the open contradictions stay until dropped
   run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ]
   jq -e '(.facts | map(.id)) == ["sl-odmitnut"] and ([.open[].fact.id] | sort) == ["spor-jen-codex", "spor-sl-odmitnut"]' "$P/docs/design/app-facts.json" >/dev/null

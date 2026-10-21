@@ -248,9 +248,13 @@ def violations(m, proj):
     KEY = re.compile(r"\{[a-z][a-z0-9_]*\}")
     UNIT = re.compile(r"(?<![\w{])[+−-]?[$€]?\d[\d\u00a0 ,.]*\s?(?:USDT|USD|EUR|CZK|Kč|R|%|×|x|znaků|znaky|znak|minut[ay]?|min|sekund[ay]?|hodin[ay]?|h|dní|dny|dnů|den|ks|kusů|položek|položky|položka|pokusů|pokusy|pokus|souborů|soubory|soubor|zpráv|zprávy|kB|MB|GB)(?![\w])|[$€]\s?\d[\d\u00a0 ,.]*")
     DIGIT = re.compile(r"(?<![A-Za-z\d])\d")   # a digit that is not part of a code like F1 or R12
+    LIMIT = re.compile(r"(?i)\b(?:nejvýš|nejvýše|nejméně|aspoň|alespoň|maximálně|minimálně|max\.?|min\.?|až|do|limit|mez)\s+(?!\d{1,2}\.\s?\d{1,2}\.)\d[\d\u00a0 ,.]*(?:\s?\w+)?")   # not a date (do 18. 10.)
     def lit(txt, where):   # an amount, R, percent, leverage or a limit (characters, time, count) written out instead of a named value: two places can disagree
-        for x in UNIT.findall(KEY.sub("", str(txt or ""))):
-            out.append(f"{where}: číslo s jednotkou „{x.strip()}“ napsané přímo - patří do values a sem jako {{klíč}} (jedno číslo, jedno místo)")
+        t = KEY.sub("", str(txt or ""))
+        found = [x.strip() for x in UNIT.findall(t)]
+        found += [x.strip() for x in LIMIT.findall(t) if not any(x.strip() in f or f in x for f in found)]   # „nejvýš 10 uživatelů“: any limit word + a number
+        for x in found:
+            out.append(f"{where}: číslo s jednotkou „{x}“ napsané přímo - patří do values a sem jako {{klíč}} (jedno číslo, jedno místo)")
     for i, s in good_s:
         if DIGIT.search(KEY.sub("", s["purpose"])):
             out.append(f"/screens/{i}/purpose: účel obrazovky nese číslo („{s['purpose'][max(0, DIGIT.search(KEY.sub('', s['purpose'])).start() - 15):][:40]}…“) - čísla, časy a pravidla patří do ukázky, stavu nebo values")

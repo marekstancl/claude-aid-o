@@ -634,3 +634,12 @@ app_handover() {
   cp "$FIXA/docs/design/screens.json" "$M"; mutate '.tasks[1].local = true'   # the flag needs the failure that cannot happen
   run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"úloha smazat je označená jako jen v prohlížeči"* ]]
 }
+
+@test "lint (P118 H2): a limit written out is refused in any unit - characters, a count of anything after a limit word; a date is not a limit" {
+  mutate '.screens[1].fields = [{name: "nazev", label: "Název", hint: "Nejvýše 10 uživatelů na poznámku."}]'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"„Nejvýše 10 uživatelů“"* ]]
+  mutate '.screens[1].fields = [{name: "nazev", label: "Název", hint: "Platí do 18. 10."}]'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  mutate '.screens[1].fields = [{name: "nazev", label: "Název", hint: "Nejvýš {max}."}] | .values = {max: {value: "80 znaků", source: "zadání"}}'
+  run python3 "$SCR" check "$APP"; [ "$status" -eq 1 ]; [[ "$output" == *"slibuje v nápovědě nebo hlášce mez"* ]]
+}

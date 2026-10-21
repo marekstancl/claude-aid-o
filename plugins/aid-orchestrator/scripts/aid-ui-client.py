@@ -1220,7 +1220,7 @@ def facts(project, focus, drop=None, reason=None):
         h = fact_hash(o["fact"])
         if h not in dropped:
             uniq.setdefault(h, o)
-    unconfirmed = [{"from": "codex", "fact": x} for i, x in enumerate(A) if i not in used_a] + [{"from": "opus", "fact": y} for k, y in enumerate(B) if k not in used_b]
+    unconfirmed = [{"from": "codex", "fact": x} for i, x in enumerate(A) if i not in used_a | ca] + [{"from": "opus", "fact": y} for k, y in enumerate(B) if k not in used_b | cb]   # a disputed fact is open, not unconfirmed
     # an open question of the earlier format (one reader, or agreed before) is not lost: it stays as unconfirmed
     unconfirmed += [dict(o, **{"from": "before P118 H5: " + str(o.get("from"))}) for o in cur["open"]
                     if o.get("from") != "conflict" and isinstance(o.get("fact"), dict) and fact_hash(o["fact"]) not in dropped]

@@ -638,10 +638,12 @@ await pg.goto(U + '/formular/'); r.push(await vis('[data-aid-action="formular.zn
 await pg.route('**/detail/**', x => x.abort()); await pg.fill('[name="nazev"]', 'Nákup'); await pg.click('[data-aid-action="formular.ulozit"]'); await pg.waitForTimeout(400);
 r.push(await vis('[data-aid-action="formular.znovu"]'));
 await pg.unroute('**/detail/**'); await pg.goto(U + '/formular/?stav=zalozit.validation'); r.push(await vis('[data-aid-task-state="zalozit.validation"]'), await vis('#f-formular-nazev-chyba'));
-await pg.goto(U + '/formular/?stav=error'); r.push(await pg.inputValue('[name="nazev"]'), await vis('[data-aid-retry]'));
+await pg.goto(U + '/formular/?stav=error'); r.push(await pg.inputValue('[name="nazev"]'), await vis('[data-aid-retry]'), await vis('[data-aid-action="formular.znovu"]'));
+await pg.goto(U + '/formular/?stav=zalozit.recovery'); r.push(await vis('[data-aid-action="formular.znovu"]'));
+await pg.goto(U + '/formular/?stav=smazat.failure'); r.push(await vis('[data-aid-action="formular.znovu"]'));   // another task's failure is not this one's
 await pg.goto(U + '/formular/?stav=zalozit.loading'); r.push(String(await pg.locator('[data-aid-action="formular.ulozit"]').isDisabled()));
 console.log(r.join(' ')); await b.close();
 J
-  out="$(node "$BATS_TEST_TMPDIR/h.mjs")"; [ "$out" = "- v v - - - v v v Nákup na sobotu - true" ] || { echo "$out"; return 1; }
+  out="$(node "$BATS_TEST_TMPDIR/h.mjs")"; [ "$out" = "- v v - - - v v v Nákup na sobotu - v v - true" ] || { echo "$out"; return 1; }
   "$SERVE" stop skeleton
 }
