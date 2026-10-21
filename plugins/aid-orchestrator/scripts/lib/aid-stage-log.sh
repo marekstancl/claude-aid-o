@@ -155,7 +155,7 @@ fi
 aid_stage_writes_inputs() {
   ( cd "$1" && find . -type f \( -path './cp7/*' -o -path './gates_rows/*' -o -name gates_report.json \
       -o -name semantic-review-final.json -o -name acceptance-evidence.json -o -name review-profile.json \
-      -o -name plan-diff.json \) \
+      -o -name plan-diff.json -o -name plan-tests.json -o -path './plan-tests/*' \) \
       ! -name '*.md' ! -name 'vars-*.json' ! -path '*/packet/*' ! -path '*/repro/*' | sed 's|^\./||' | sort )
 }
 # aid_stage_writes_record <run_dir> <stage> <file>... — append {path, sha256, stage, at}.

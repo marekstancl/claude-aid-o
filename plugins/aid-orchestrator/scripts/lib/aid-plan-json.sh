@@ -150,7 +150,7 @@ aid_plan_json_steps_from_plan() {
   bounds="$(_aid_plan_step_bounds "$plan")"
   for sn in "${nums[@]}"; do
     step_counter=$(( step_counter + 1 ))
-    local content objective role ac_raw artifacts top raw_dep deps="" pg="---" s="" e="" closes_json="[]"
+    local content objective role ac_raw artifacts top raw_dep deps="" pg="---" s="" e="" closes_json="[]" ext_json="[]"
     content="$(aid_plan_step_content "$plan" "$sn")"
 
     # Objective — **Objective:** field, else the header text, else the first line.
@@ -253,9 +253,14 @@ ${dropped}Every top-level Files bullet must read \`- <Create|Modify|Test|Rewrite
     if [[ -n "$s" ]]; then
       pg="$(_aid_plan_step_field "$plan" "$s" "$e" "Parallel group")" || pg="---"
       pg="${pg%%[[:space:]]*}"
-      local closes
+      local closes ext
       if closes="$(_aid_plan_step_field "$plan" "$s" "$e" "Zavírá")"; then
         closes_json="$( { grep -oE '\bAC[0-9]+\b' <<< "$closes" || true; } | jq -R . | jq -sc .)"
+      fi
+      # P117: the outside services the step calls (a paid API, a new foreign one) — **External:** a, b
+      ext_json="[]"
+      if ext="$(_aid_plan_step_field "$plan" "$s" "$e" "External")"; then
+        ext_json="$(tr ',' '\n' <<< "$ext" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g; s/^`|`$//g' | grep -vxE '|—|-|none|žádné' | jq -R . | jq -sc .)"
       fi
     fi
 
@@ -264,7 +269,7 @@ ${dropped}Every top-level Files bullet must read \`- <Create|Modify|Test|Rewrite
     # into arrays inside the one jq below — no jq per list.
     out="$(jq -c \
       --argjson number "$sn" --arg role "$role" --arg objective "$objective" \
-      --arg depends_on "$deps" --arg parallel_group "$pg" --argjson zavira "$closes_json" \
+      --arg depends_on "$deps" --arg parallel_group "$pg" --argjson zavira "$closes_json" --argjson external "${ext_json:-[]}" \
       --arg s "${s:-0}" --arg e "${e:-0}" \
       --arg top "$top" --arg artifacts_raw "$artifacts" --arg ac_raw "$ac_raw" --arg step_files "$step_files" \
       --arg ui_mode "$ui_mode" \
@@ -281,7 +286,8 @@ ${dropped}Every top-level Files bullet must read \`- <Create|Modify|Test|Rewrite
              files: $files, artifacts: $artifacts, outputs: $files,
              acceptance_criteria: $ac, allowed_paths: $allowed,
              ui_change_mode: $ui_mode, ui_change_path: $ui_path,
-             ui_change_sha256: $ui_sha, ui_change_schema_version: $ui_sv}]' <<< "$out")"
+             ui_change_sha256: $ui_sha, ui_change_schema_version: $ui_sv}
+             + (if ($external | length) > 0 then {external: $external} else {} end)]' <<< "$out")"
   done
   printf '%s\n' "$out"
 }
@@ -621,7 +627,7 @@ aid_plan_json_build() {
         ui_change_contract: ($st.ui_change_contract // (if ($st.ui_change_path // "") == "" then null else {path: $st.ui_change_path, sha256: ($st.ui_change_sha256 // ""), schema_version: ($st.ui_change_schema_version // "")} end)),
         zavira: ($st.zavira // []),
         plan_step: ($st.plan_step // null)
-      }' --args "${inputs[@]}")"
+      } + (if (($st.external // []) | length) > 0 then {external: $st.external} else {} end)' --args "${inputs[@]}")"
     step_objs+=("$step_obj")
   done
   steps_json="$(printf '%s\n' "${step_objs[@]}" | jq -s .)"

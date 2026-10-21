@@ -264,3 +264,39 @@ teardown() {
   run bash "$SCRIPT" cancel --focus cp7-final-claims --evidence-dir "$EVID" --reason "nothing is open any more for this focus"
   [ "$status" -eq 2 ]; [[ "$output" == *"nothing to cancel"* ]]
 }
+
+@test "repair: a damaged line that was a start is named and withdrawn on the record, never dropped silently; other damage is moved aside with its digest" {
+  local ev="$BATS_TEST_TMPDIR/rep"; mkdir -p "$ev"; : > "$ev/timeline.jsonl"
+  printf '%s\n' '{"ts":"2026-10-20T10:00:00Z","event":"complete","focus":"cp2-step-0-a"}' '{"ts":"2026-10-20T10:01:00Z","event":"start","focus":"cp2-step-1-generalist","agent_id":"x"' > "$ev/pending-dispatches.jsonl"
+  run bash "$SCRIPT" repair --evidence-dir "$ev" --reason "a killed emit left half a line"
+  [ "$status" -ne 0 ]; [[ "$output" == *"looks like the start of cp2-step-1-generalist"* ]]
+  run bash "$SCRIPT" repair --evidence-dir "$ev" --focus cp2-step-1-generalist --reason "a killed emit left half a line"
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"withdrawn on the record"* ]]
+  jq -e -s 'any(.[]; .event == "cancel" and .focus == "cp2-step-1-generalist")' "$ev/pending-dispatches.jsonl"
+  grep -q '"focus":"cp2-step-1-generalist"' "$ev/pending-dispatches.jsonl.bad"
+  grep -q 'verifier_dispatch_repair' "$ev/timeline.jsonl"; grep -qE '"lines":"[0-9a-f]{64}"' "$ev/timeline.jsonl"
+}
+
+@test "repair: a damaged start whose focus cannot be read is refused, even with --focus '?' — nothing is guessed" {
+  local ev="$BATS_TEST_TMPDIR/rep2"; mkdir -p "$ev"; : > "$ev/timeline.jsonl"
+  printf '%s\n' '{"ts":"2026-10-20T10:01:00Z","event":"start","foc' > "$ev/pending-dispatches.jsonl"
+  run bash "$SCRIPT" repair --evidence-dir "$ev" --focus '?' --reason "a killed emit left half a line"
+  [ "$status" -ne 0 ]; [[ "$output" == *"focus cannot be read"* ]]
+  grep -q '"event":"start"' "$ev/pending-dispatches.jsonl"
+  # cut before the event's name: it may have been a start, so it is not dropped either
+  printf '%s\n' '{"ts":"2026-10-20T10:01:00Z","event":"sta' > "$ev/pending-dispatches.jsonl"
+  run bash "$SCRIPT" repair --evidence-dir "$ev" --reason "a killed emit left half a line"
+  [ "$status" -ne 0 ]; [[ "$output" == *"focus cannot be read"* ]]
+  # two records glued on one line, the second a cut start: not dropped either
+  printf '%s\n' '{"ts":"2026-10-20T10:00:00Z","event":"complete","focus":"x"}{"ts":"2026-10-20T10:01:00Z","event":"sta' > "$ev/pending-dispatches.jsonl"
+  run bash "$SCRIPT" repair --evidence-dir "$ev" --reason "a killed emit left half a line"
+  [ "$status" -ne 0 ]; [[ "$output" == *"focus cannot be read"* ]]
+  # one brace, a readable other event and a cut start after it: still a person's call
+  printf '%s\n' '{"event":"complete"}"event":"sta' > "$ev/pending-dispatches.jsonl"
+  run bash "$SCRIPT" repair --evidence-dir "$ev" --reason "a killed emit left half a line"
+  [ "$status" -ne 0 ]; [[ "$output" == *"focus cannot be read"* ]]
+  # damage without a brace holds no start: moved aside without a focus
+  printf '%s\n' 'Z:00","event":"complete","focus":"x"' > "$ev/pending-dispatches.jsonl"
+  run bash "$SCRIPT" repair --evidence-dir "$ev" --reason "a killed emit left half a line"
+  [ "$status" -eq 0 ]
+}

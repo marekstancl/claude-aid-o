@@ -33,7 +33,16 @@ ui:
   dev_cmd: ["npx", "vite", "--port", "{port}", "--host", "127.0.0.1", "--strictPort"]
   ready_path: /
   api_prefix: /api/                      # only these requests are answered from mocks.json
+  copy_extra: [tsconfig.base.json]       # optional: repository files outside ui.dir the app reads by ../ (never .env, keys)
+  first_shot_timeout_s: 15               # optional, 1..120: the first shot's waits (a dev server compiles on it; a page load never under 30 s)
 ```
+
+**Vite whose config imports files outside `ui.dir`** (a `vite.config.ts` that reads `../shared/…`, or a
+TypeScript config the bundled loader cannot resolve from the copy): do not rewrite the app's sources and do
+not edit the copy's config. Run the config through Vite's runner instead and copy what it reads:
+`dev_cmd: ["npx", "vite", "--configLoader", "runner", "--port", "{port}", "--host", "127.0.0.1", "--strictPort"]`
+(Vite 6.1 or newer) plus `copy_extra` for the files outside `ui.dir`. Still failing: write it to
+`aid-plugin-issues.md` with the dev server's log (`<P>/proto.log`).
 
 ## The procedure (`P` = the brainstorm's plan id, `$K = $AID_PLUGIN_PATH/scripts/aid-companion.sh`)
 
@@ -92,7 +101,8 @@ ui:
 
 Steps: `goto`, `click`, `fill` (+`value`), `select` (+`value`), `hover`, `press`, `wait` (ms,
 `"network"` or `{"for": <selector>}`). Selectors: `{role, name}`, `{testid}`, `{text}`, `{css}` —
-each must find exactly one element. `capture`: `"viewport"`, `"full"` or `{"element": <selector>}`;
+each must find exactly one element. `capture`: `"viewport"`, `"full"`, `{"element": <selector>}` or
+`{"scroll": <selector>}` (a container that scrolls on its own, captured at its full content height);
 `"only": ["desktop"]` limits a shot.
 
 `navrh.json` — the content of the page:

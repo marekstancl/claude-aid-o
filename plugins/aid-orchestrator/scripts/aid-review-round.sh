@@ -86,6 +86,10 @@ source "${SCRIPT_DIR}/lib/aid-obligations.sh"
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"
 # shellcheck source=lib/aid-decision-card.sh
 source "${SCRIPT_DIR}/lib/aid-decision-card.sh"   # aid_pm_card_check (dispute --pm accepted; P110)
+# shellcheck source=lib/aid-lifecycle.sh
+source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"       # _aid_lc_frontmatter_depends, aid_target_branch (P117 (3))
+# shellcheck source=lib/aid-plan-dependency.sh
+source "${SCRIPT_DIR}/lib/aid-plan-dependency.sh"
 # shellcheck source=lib/aid-delegate.sh
 source "${SCRIPT_DIR}/lib/aid-delegate.sh"        # escalations settled by an independent agent (P112)
 
@@ -258,8 +262,19 @@ _expected_roles() {
     local verdict i
     verdict="$(jq -r '.verdict' "$STEPCHECK")"
     roles=""
+    local docs=0 f
+    declare -F aid_docs_surface >/dev/null || source "${SCRIPT_DIR}/lib/aid-docs-surface.sh"
+    while IFS= read -r f; do
+      [[ -n "$f" ]] && aid_docs_surface "$f" "$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")/.aid-o/config/execution.yaml" && { docs=1; break; }
+    done < <(jq -r '.files.in_scope[]? // empty' "$STEPCHECK")
     for i in "${!RC_ROLE[@]}"; do
-      [[ -z "${RC_WHEN[$i]}" || "${RC_WHEN[$i]}" == "$verdict" ]] && roles+="${RC_ROLE[$i]} "
+      if [[ "${RC_WHEN[$i]}" == docs_surface ]]; then
+        # P117 (18): the claims a step makes in CHANGELOG, README, docs or the project's help are checked in its
+        # own review (CP2), not first at the close (WAN P111: CP7 found them, a whole attempt per claim)
+        (( docs )) && roles+="${RC_ROLE[$i]} "
+      else
+        [[ -z "${RC_WHEN[$i]}" || "${RC_WHEN[$i]}" == "$verdict" ]] && roles+="${RC_ROLE[$i]} "
+      fi
     done
     if (( n >= 2 )); then
       # The confirmation round asks the reporters of what is still open.
@@ -275,7 +290,7 @@ _expected_roles() {
     [[ " ${roles//$'\n'/ } " == *" ${ONLY} "* ]] || _die "role ${ONLY} is not expected in this round"
     roles="$ONLY"
   fi
-  printf '%s\n' $roles
+  printf '%s\n' $roles | awk 'NF && !seen[$0]++'   # one role once (final_claims may be listed under two conditions)
 }
 
 # _index_add <round> <sha> — the round index: a JSON array for CP1 (its gate
@@ -342,6 +357,17 @@ _previous_attempt_round() {
   done
 }
 _is_carried() { jq -e --arg r "$2" '(.carried_from // {}) | has($r)' "$1/round.json" >/dev/null 2>&1; }
+# _previous_attempt_full_pass — cp7 (P117 (15)(16)): the previous attempt's last closed round, when it was a FULL
+# round and passed. Only after such a round, and only for a fix that touched documentation alone
+# (fix-class.json docs_only), is the next attempt's round a confirmation round; anything else is full again.
+_previous_attempt_full_pass() {
+  local d
+  for d in $(_prev_attempt_rounds); do
+    [[ -f "$d/measurement.json" ]] || continue
+    [[ "$(jq -r '.verdict // ""' "$d/measurement.json")" == pass && "$(jq -r '.mode // "full"' "$d/round.json" 2>/dev/null)" == full ]] && echo "$d"
+    return 0
+  done
+}
 
 # _restart_attempt — prepare --round 1 --restart (P109): the only sanctioned way
 # to restart a plan review. Allowed when the live attempt's last fix-check
@@ -416,6 +442,13 @@ _measure_step() {
   echo "prepare: step ${STEP} measured → ${EVID}/cp2/step-${STEP}/plan-diff.json" >&2
 }
 
+_dep_refuse() {
+  echo "${CMD}: REFUSED (${DEP_CODE}): ${DEP_WHY}" >&2
+  echo "next: ${DEP_NEXT}" >&2
+  echo "(pipeline.md §When AID refuses: ${DEP_CODE})" >&2
+  exit 1
+}
+
 cmd_prepare() {
   _need_round
   # The PM's switch (review_checkpoints.enabled / the checkpoint's own key) is
@@ -431,17 +464,50 @@ cmd_prepare() {
     # The round reviews a plan that is READY: the check passed (its sha is checked below), and readiness (what
     # plan-run refuses) holds — reviewers paid for twice over a plan that could not start (AID 10. and 11. 10.)
     # (a check of another text is refused below with its own message, aid-plan-review-packet.sh)
+    # P117 (3): a plan standing on one unmerged plan is checked against that plan's worktree; round 1 records
+    # the binding in the state root's evidence, every later round (and plan-run) holds the review to it
+    local _sroot _bf; _sroot="$(aid_state_root "$ROOT" 2>/dev/null || echo "$ROOT")"; _bf="$(aid_plan_dep_binding_file "$_sroot" "$PLAN_ID")"
+    DEP_ROOT="$ROOT"
+    if [[ "${ROUND:-1}" == 1 ]]; then
+      aid_plan_dep_resolve "$_sroot" "$PLAN" || _dep_refuse
+      if [[ "$DEP_JSON" == '{}' ]]; then rm -f "$_bf"; DEP_ROOT="$ROOT"
+      else mkdir -p "${_bf%/*}"; jq --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {recorded_at: $at}' <<< "$DEP_JSON" > "$_bf"
+           echo "prepare: ${PLAN_ID} stands on unmerged $(jq -r .plan "$_bf") — its paths are checked in $(jq -r .worktree "$_bf") at $(jq -r '.head[:12]' "$_bf")" >&2
+           # the plan check the author ran against the main checkout cannot see the dependency's files:
+           # it is taken again in the dependency's worktree, into the state root's record (Codex, P117 B)
+           bash "${SCRIPT_DIR}/aid-plan-check.sh" "$PLAN" --project-root "$DEP_ROOT" --json "$check" --quiet || true
+      fi
+    else
+      aid_plan_dep_verify "$_sroot" "$PLAN_ID" review || _dep_refuse
+      [[ -f "$_bf" ]] && DEP_ROOT="$(jq -r .worktree "$_bf")"
+    fi
     if (( ! MANUAL )) && [[ "$(jq -r '.plan_sha256 // ""' "$check")" == "$(sha256sum "$PLAN" | cut -d' ' -f1)" ]]; then
       local _pr_why="" _pr_out=""
       [[ "$(jq -r '.pass // false' "$check")" == true ]] || _pr_why="plan-check.json says the plan does not pass"
       # double-gated test stub (the aid-release-policy.sh pattern): fixtures of the packet tests are minimal plans
       if [[ "${AID_TEST_MODE:-}" == 1 && "${AID_REVIEW_READINESS_STUB:-}" == pass ]]; then :
-      elif [[ -z "$_pr_why" ]] && ! _pr_out="$(bash "${SCRIPT_DIR}/aid-generation-readiness.sh" "$PLAN" --total 1 --project-root "$ROOT" 2>&1)"; then
+      elif [[ -z "$_pr_why" ]] && ! _pr_out="$(bash "${SCRIPT_DIR}/aid-generation-readiness.sh" "$PLAN" --total 1 --project-root "$DEP_ROOT" 2>&1)"; then
         _pr_why="readiness fails: $(tail -3 <<< "$_pr_out" | tr '\n' ' ')"
+      fi
+      # P117 (2), AC4: every cmd point runs in the close's own measurement (isolation, verification_env, limit) —
+      # in a throwaway copy at HEAD, so what a point writes stays there. A point that fails because the work is
+      # not built yet is expected; one whose program is missing (127), that runs out of time or cannot be
+      # measured at all would stop the run, so the round is not prepared over it.
+      if [[ -z "$_pr_why" && "${AID_REVIEW_READINESS_STUB:-}" != pass ]] && grep -qE '^[[:space:]]*type:[[:space:]]*cmd' "$PLAN"; then
+        local _mt _me _mrc=0 _bad; _mt="$(mktemp -d)"; _me="$(mktemp -d)"
+        if git -C "$DEP_ROOT" worktree add -q --detach "$_mt/tree" HEAD >/dev/null 2>&1; then
+          ( cd "$DEP_ROOT" && bash "${SCRIPT_DIR}/aid-plan-diff.sh" --plan "$PLAN" --evidence-dir "$_me" --base-commit HEAD --isolated --cwd "$_mt/tree" ) >/dev/null 2>&1 || _mrc=$?
+          git -C "$DEP_ROOT" worktree remove --force "$_mt/tree" >/dev/null 2>&1 || true
+          if [[ -s "$_me/plan-diff.json" ]]; then
+            _bad="$(jq -r '[.results[] | select((.evidence // "") | test("^exit=127 |reason=(timeout|no_isolation|no_verification_env|verification_env_unset|env_stripped)")) | "\(.ac_label): \(.evidence | split(";")[0] | .[0:90])"] | join("; ")' "$_me/plan-diff.json")"
+            [[ -z "$_bad" ]] || _pr_why="points the measurement cannot run (in a copy at HEAD, the close's isolation and limits): ${_bad}"
+          fi
+        fi
+        rm -rf "$_mt" "$_me"
       fi
       if [[ -n "$_pr_why" ]]; then
         echo "${CMD}: REFUSED (plan_not_ready): ${_pr_why}" >&2
-        echo "next: fix the plan, then bash ${SCRIPT_DIR}/aid-plan-check.sh ${PLAN} --json ${check} && bash ${SCRIPT_DIR}/aid-generation-readiness.sh ${PLAN} --total 1; prepare again" >&2
+        echo "next: fix the plan, then bash ${SCRIPT_DIR}/aid-plan-check.sh ${PLAN} --json ${check} && bash ${SCRIPT_DIR}/aid-generation-readiness.sh ${PLAN} --total 1$([[ "$DEP_ROOT" != "$ROOT" ]] && echo " --project-root ${DEP_ROOT}"); prepare again" >&2
         echo "(pipeline.md §When AID refuses: plan_not_ready)" >&2
         exit 1
       fi
@@ -561,7 +627,13 @@ cmd_prepare() {
     for role in "${roles[@]}"; do aid_plan_review_prompt_render "$role" "$ROUND" "$dir" || exit 1; done
   else
     local prevdir=""; (( ROUND >= 2 )) && prevdir="$(_round_dir $((ROUND - 1)))"
+    local cp7_mode=full
     [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 ]] && prevdir="$(_previous_attempt_round)"
+    declare -F aid_docs_only >/dev/null || source "${SCRIPT_DIR}/lib/aid-docs-surface.sh"
+    if [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 && -z "$prevdir" ]] \
+       && aid_docs_only "${EVID}/fix-class.json"; then
+      prevdir="$(_previous_attempt_full_pass)"; [[ -n "$prevdir" ]] && cp7_mode=confirmation
+    fi
     if [[ "$CHECKPOINT" == cp7 ]]; then
       # P110: the round argues from the isolated close measurement and the brief
       # the plan is bound to — never from a pre-2.116.0 measurement or another brief.
@@ -588,9 +660,11 @@ cmd_prepare() {
       --argjson degraded "$([[ "$RC_DEGRADED" == 1 ]] && echo true || echo false)" \
       --argjson stub "$([[ "$STUB" == 1 ]] && echo true || echo false)" \
       --arg conf "$([[ -z "$prevdir" ]] || { (( ROUND >= 2 )) && echo "round-$((ROUND - 1))" || echo "$prevdir"; })" --argjson carried "$carried" \
+      --arg mode "${cp7_mode:-full}" \
       '{checkpoint: $cp, step: $step, round: $round, head_sha: $h, step_check_sha256: $scs,
         reviewers_expected: $ARGS.positional, min_answers_effective: $min, degraded: $degraded, stub: $stub,
         confirmation_of: (if $conf == "" then null else $conf end), started_at: $at}
+       + (if $cp == "cp7" then {mode: $mode} else {} end)
        + (if ($carried | length) > 0 then {carried_from: $carried} else {} end)
        + (if $standing then {standing: true} else {} end)' --argjson standing "${standing:-false}" \
       --args "${roles[@]}" > "${dir}/round.json"
@@ -1003,7 +1077,7 @@ _semantic_final_write() {
          merge_meta: {merged_from: $from, conflicts: []},
          findings: ($f | map({fingerprint, severity: (.severity | sev), lens: (.reported_by[0] // "step_check"),
                               check_id: (.fingerprint[7:23]), target_path: (.evidence | file), finding_class: (.reported_by[0] // "step_check"),
-                              status: (.status | st), detail: "\(.claim) (\(.severity), \(if .dispute.pm.answer == "accepted" then "dismissed by the PM (dispute accepted)" else "reported \(.status)" end); evidence \(.evidence); fix: \(.fix))"}))}}' \
+                              status: (if .resolution == "accepted_risk" then "deferred" else (.status | st) end), detail: "\(.claim) (\(.severity), \(if .resolution == "accepted_risk" then "open, accepted as a risk by the PM" elif .dispute.pm.answer == "accepted" then "dismissed by the PM (dispute accepted)" else "reported \(.status)" end); evidence \(.evidence); fix: \(.fix))"}))}}' \
     "${rounds[@]}" > "$tmp" || { rm -f "$tmp"; return 1; }
   local err
   # A lens is a reviewer of this round, or step_check for a finding of the
@@ -1480,6 +1554,48 @@ _dlg_refuse() {   # <code> <message> <next>
   echo "(pipeline.md §When AID refuses: $1)" >&2
   exit 1
 }
+# _dlg_evidence_sha <finding-json> — what a verdict was given on: the finding's claim and evidence, the
+# author's dispute (without what answered it) and HEAD. A new value is new evidence (P117 (12)).
+_dlg_evidence_sha() {
+  { jq -cS '{claim, evidence, command, fix, dispute: ((.dispute // {}) | del(.delegated, .pm))}' <<< "$1"
+    git -C "$ROOT" rev-parse HEAD 2>/dev/null; } | sha256sum | cut -d' ' -f1
+}
+# _dlg_supersede <round dir> <fingerprint> <vfile> — the verdict given on old evidence steps aside: its file is
+# kept as .superseded-<n>, the finding forgets the answer (history keeps it), the ledger says so.
+_dlg_supersede() {
+  local dir="$1" fp="$2" vf="$3" n=1 old
+  while [[ -e "${vf%.json}.superseded-${n}.json" ]]; do n=$((n + 1)); done
+  [[ -f "$vf" ]] && { old="$(sha256sum "$vf" | cut -d' ' -f1)"; mv "$vf" "${vf%.json}.superseded-${n}.json"; }
+  jq --arg f "$fp" --arg at "$(_now)" '.findings |= map(if .fingerprint == $f then
+      (.delegated_history = ((.delegated_history // []) + [((.delegated // .dispute.delegated) + {superseded_at: $at})])
+       | del(.delegated) | del(.dispute.delegated)
+       | if .status == "fixed" and (.dispute // null) != null then .status = "disputed" else . end) else . end)' \
+    "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
+  _SUPERSEDED_SHA="${old:-}"
+  _log delegate_superseded fingerprint="$fp" old_verdict_sha256="${old:-null}"
+}
+# _dlg_fix_touched <round dir> <finding-json> — 0 when a commit after the round changed the lines the finding
+# cites (its first evidence path:line, or the file when no line is given): the fix is judged by the next round's
+# confirmation, never by an adjudicator, and never marks itself fixed (P117 (19))
+_dlg_fix_touched() {
+  local dir="$1" ev c file line rh
+  rh="$(jq -r '.head_sha // ""' "${dir}/round.json" 2>/dev/null)"; [[ -n "$rh" && "$rh" != null ]] || return 1
+  [[ "$(git -C "$ROOT" rev-parse HEAD 2>/dev/null)" != "$rh" ]] || return 1
+  ev="$(jq -r '.evidence // ""' <<< "$2")"
+  # every citation (`a.c:10; b.c:20`): a fix that changed any of them is the next round's (Codex review of P117 E)
+  while IFS= read -r c; do
+    c="$(sed -E 's/^[[:space:]]+//; s/^[0-9a-f]{7,40}://' <<< "$c")"
+    file="${c%%:*}"; line=""; [[ "$c" == *:* ]] && { line="${c#*:}"; line="${line%%[!0-9]*}"; }
+    [[ -n "$file" ]] || continue
+    git -C "$ROOT" diff --quiet "$rh" HEAD -- "$file" 2>/dev/null && continue
+    [[ -n "$line" ]] || return 0
+    git -C "$ROOT" diff -U0 "$rh" HEAD -- "$file" 2>/dev/null | awk -v l="$line" '
+      /^@@/ { split($2, o, ","); s = substr(o[1], 2) + 0; n = (o[2] == "" ? 1 : o[2] + 0)
+              if (n == 0) { if (l == s || l == s + 1) hit = 1 } else if (l >= s && l < s + n) hit = 1 }
+      END { exit !hit }' && return 0
+  done < <(tr ';' '\n' <<< "$ev")
+  return 1
+}
 # _dlg_kind <finding-json> — dispute | open_after_rounds
 _dlg_kind() { [[ "$(jq -r .status <<< "$1")" == disputed ]] && echo dispute || echo open_after_rounds; }
 # _dlg_pending <round dir> <last 0|1> — fingerprints that await a verdict: every
@@ -1551,11 +1667,27 @@ cmd_delegate() {
   local finding kind fp16 vfile
   finding="$(jq -c --arg f "$FINGERPRINT" 'first(.findings[] | select(.fingerprint == $f)) // empty' "${dir}/merged.json")"
   [[ -n "$finding" ]] || _die "no finding ${FINGERPRINT} in round ${ROUND}"
+  local ev_sha; ev_sha="$(_dlg_evidence_sha "$finding")"; _SUPERSEDED_SHA=""
   if [[ -z "$VERDICT" ]] && jq -e '.delegated != null or .dispute.delegated != null' <<< "$finding" >/dev/null; then
-    echo "finding ${FINGERPRINT}: already settled in round ${ROUND}; nothing dispatched"; return 0
+    if [[ "$(jq -r '(.delegated // .dispute.delegated).evidence_sha256 // ""' <<< "$finding")" == "$ev_sha" ]]; then
+      echo "finding ${FINGERPRINT}: already settled in round ${ROUND} on this evidence; nothing dispatched"; return 0
+    fi
+    # P117 (12): new evidence since the verdict — one new verdict, the old one superseded; ONCE per finding and
+    # round: a second disagreement after a superseded verdict is the PM's (no verdict shopping, security review)
+    if jq -e '(.delegated_history // []) | length >= 1' <<< "$finding" >/dev/null; then
+      _dlg_refuse delegation_out_of_scope "finding ${FINGERPRINT} already had one verdict superseded by new evidence in round ${ROUND}; a third opinion is not asked" \
+        "the finding goes to the PM's card (close routes it); the PM answers with dispute --pm … --finding-card <card>"
+    fi
+    _dlg_supersede "$dir" "$FINGERPRINT" "${dir}/adjudicator-delegated-$(aid_delegate_fp16 "$FINGERPRINT").json"
+    finding="$(jq -c --arg f "$FINGERPRINT" 'first(.findings[] | select(.fingerprint == $f))' "${dir}/merged.json")"
+    echo "finding ${FINGERPRINT}: new evidence since its verdict — the old verdict is superseded, a new one is asked"
   fi
   [[ "$(jq -r .status <<< "$finding")" == fixed && -z "$VERDICT" ]] && _die "finding ${FINGERPRINT} is fixed — nothing to settle"
   kind="$(_dlg_kind "$finding")"
+  if [[ -z "$VERDICT" ]] && _dlg_fix_touched "$dir" "$finding"; then
+    _dlg_refuse delegation_fix_pending "a commit after round ${ROUND} changed the lines finding ${FINGERPRINT} cites ($(jq -r '.evidence' <<< "$finding" | cut -d';' -f1)) — a fix is judged by the next round, not by an adjudicator" \
+      "freeze the new candidate (cp7) or prepare the next round (cp2): its confirmation lists the finding and the fix"
+  fi
   [[ "$kind" == dispute ]] || (( last )) \
     || _die "finding ${FINGERPRINT} is open but round ${ROUND} is not the last one the plan allows — the fix loop goes on; nothing is escalated yet"
   fp16="$(aid_delegate_fp16 "$FINGERPRINT")"
@@ -1563,10 +1695,9 @@ cmd_delegate() {
   local ledger; ledger="$(aid_delegate_ledger "$root" "$pid")"
 
   if [[ -z "$VERDICT" ]]; then
-    if jq -e '.delegated != null or .dispute.delegated != null' <<< "$finding" >/dev/null; then
-      echo "finding ${FINGERPRINT}: already settled in round ${ROUND}; nothing dispatched"; return 0
-    fi
-    if [[ -s "$ledger" ]] && jq -e -s --arg f "$FINGERPRINT" --arg rd "$dir" 'any(.[]; .fingerprint == $f and .round_dir == $rd)' "$ledger" >/dev/null 2>&1; then
+    # a settlement on THIS evidence (or an older entry without its fingerprint, when nothing was superseded now)
+    if [[ -s "$ledger" ]] && jq -e -s --arg f "$FINGERPRINT" --arg rd "$dir" --arg e "$ev_sha" --arg sup "${_SUPERSEDED_SHA:-}" \
+         'any(.[]; .fingerprint == $f and .round_dir == $rd and (.evidence_sha256 == $e or (.evidence_sha256 == null and $sup == "")))' "$ledger" >/dev/null 2>&1; then
       echo "finding ${FINGERPRINT}: the ledger already records a settlement in this round; nothing dispatched"; return 0
     fi
     if [[ -s "$vfile" ]]; then
@@ -1639,7 +1770,8 @@ cmd_delegate() {
     _die "finding ${FINGERPRINT} already had its delegated fix round and is still open: the second verdict is dismiss, or class brief for the PM"
   fi
   entry="$(jq -nc --arg p "$provider" --arg a "$answer" --arg c "$class" --arg r "$reason" --arg v "$VERDICT" --arg at "$at" --argjson rd "$ROUND" \
-    '{provider: $p, answer: $a, class: $c, reason: $r, verdict_file: $v, at: $at, round: $rd}')"
+    --arg e "$(_dlg_evidence_sha "$finding")" --arg vs "$(sha256sum "$VERDICT" | cut -d' ' -f1)" \
+    '{provider: $p, answer: $a, class: $c, reason: $r, verdict_file: $v, verdict_sha256: $vs, evidence_sha256: $e, at: $at, round: $rd}')"
   local filter
   if [[ "$class" != technical ]]; then
     filter='.delegated = ($e + {to_pm: true})'
@@ -1668,13 +1800,60 @@ cmd_delegate() {
   _dlg_resync "$dir" "$answer"
   mkdir -p "$(dirname "$ledger")"
   jq -nc --arg cp "$CHECKPOINT" --arg rd "$dir" --arg f "$FINGERPRINT" --arg k "$kind" --argjson e "$entry" \
-    '{checkpoint: $cp, round_dir: $rd, fingerprint: $f, kind: $k} + ($e | {provider, answer, class, reason, verdict_file, at})' >> "$ledger"
+    --arg sup "${_SUPERSEDED_SHA:-}" \
+    '{checkpoint: $cp, round_dir: $rd, fingerprint: $f, kind: $k} + ($e | {provider, answer, class, reason, verdict_file, verdict_sha256, evidence_sha256, at})
+     + (if $sup == "" then {} else {supersedes: $sup} end)' >> "$ledger"
   _log delegate_recorded fingerprint="$FINGERPRINT" kind="$kind" answer="$answer" class="$class" provider="$provider"
   if [[ "$class" != technical ]]; then
     _dlg_refuse delegation_out_of_scope "the delegate classed ${FINGERPRINT} as ${class} (${reason}) — the brief, money and live data are the PM's" \
       "the finding goes to the PM's card as before (close routes it); the PM answers with dispute --pm … --finding-card <card>"
   fi
   echo "finding ${FINGERPRINT}: ${kind} settled by ${provider} — ${answer} (${reason})"
+}
+
+# accept-risk --checkpoint cp7 --evidence-dir <run> --round N --finding-card <card> --reason "<the PM's words>"
+# P117 (14): the PM's ONE decision to close with the round's open blocker/major findings — bound to the
+# candidate (HEAD), the card and the whole set (each finding's content digest). The card quotes the candidate
+# (12 hex) and every finding (16 hex of its fingerprint); decide refuses the record once the candidate or the
+# set changed. In an --auto run the technical findings were settled by the delegate; what is left is protected.
+_ar_finding_sha() { jq -cS '{fingerprint, severity, claim, evidence, command, rule}' <<< "$1" | sha256sum | cut -d' ' -f1; }
+cmd_accept_risk() {
+  [[ "$MODE" == step && "$CHECKPOINT" == cp7 ]] || _die "accept-risk is the PM's decision at the close (cp7)" 2
+  local dir; dir="$(_existing_round)" || exit 1
+  [[ -f "${dir}/merged.json" ]] || _die "round ${ROUND} not collected"
+  (( ${#REASON} >= 20 )) || _die "--reason must quote the PM's words (at least 20 characters)" 2
+  local head set f fp16 why; head="$(_head)"
+  set="$(jq -c '[.findings[] | select((.status | IN("open", "disputed", "form_invalid")) and (.severity | IN("blocker", "major")))]' "${dir}/merged.json")"
+  [[ "$(jq 'length' <<< "$set")" -gt 0 ]] || _die "round ${ROUND} has no open blocker or major finding; nothing to accept"
+  # in an --auto run the PM's card carries only what the delegate sent to the PM as protected: a technical
+  # finding is the delegate's (Codex whole review of P117)
+  local _pid; _pid="$(_dlg_plan_id 2>/dev/null || true)"
+  if [[ -n "$_pid" ]] && aid_delegate_in_force "$(_dlg_root)" "$_pid"; then
+    local _tech; _tech="$(jq -r '[.[] | select(((.delegated.to_pm // .dispute.delegated.to_pm) // false) != true) | .fingerprint[0:23]] | join(", ")' <<< "$set")"
+    [[ -z "$_tech" ]] || _dlg_refuse accept_risk_not_protected "in an --auto run the PM accepts only protected impacts; ${_tech} was not sent to the PM by the delegate" \
+      "aid-review-round.sh delegate --checkpoint cp7 … --fingerprint <fp> for each; what it classes brief/money/data comes back here"
+  fi
+  why="$(aid_pm_card_check "$CARD" "${head:0:12}")" || _die "accept-risk: the card must name the candidate ${head:0:12}: ${why}"
+  local rows="[]" row
+  while IFS= read -r f; do
+    fp16="$(aid_delegate_fp16 "$(jq -r .fingerprint <<< "$f")")"
+    why="$(aid_pm_card_check "$CARD" "$fp16")" || _die "accept-risk: ${why}"
+    row="$(jq -nc --arg fp "$(jq -r .fingerprint <<< "$f")" --arg sev "$(jq -r .severity <<< "$f")" --arg s "$(_ar_finding_sha "$f")" '{fingerprint: $fp, severity: $sev, finding_sha256: $s}')"
+    rows="$(jq -c --argjson r "$row" '. + [$r]' <<< "$rows")"
+  done < <(jq -c '.[]' <<< "$set")
+  local rec="${dir}/accepted-risk.json"
+  jq -n --arg h "$head" --arg c "$CARD" --arg cs "$(sha256sum "$CARD" | cut -d' ' -f1)" --argjson rows "$rows" \
+     --arg ss "$(jq -cS 'sort_by(.fingerprint)' <<< "$rows" | sha256sum | cut -d' ' -f1)" --arg w "$REASON" --arg at "$(_now)" \
+    '{artifact_type: "accepted_risk", choice: "close_with_open_findings", by: "pm", candidate_sha: $h, card: $c, card_sha256: $cs,
+      findings: $rows, set_sha256: $ss, words: $w, at: $at}' > "$rec"
+  jq --argjson rows "$rows" --arg why "$REASON" --arg at "$(_now)" --arg card "$CARD" '
+    ($rows | map(.fingerprint)) as $fps
+    | .findings |= map(if (.fingerprint | IN($fps[])) then .status = "fixed" | .resolution = "accepted_risk" | .dispute.pm = {answer: "accepted", words: $why, at: $at, card: $card, accepted_risk: true} else . end)' \
+    "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
+  _dlg_resync "$dir" accepted-risk
+  aid_stage_writes_record "$EVID" "cp7-accepted-risk" "cp7/round-${ROUND}/accepted-risk.json" >/dev/null 2>&1 || true
+  _log accepted_risk round="$ROUND" candidate="$head" findings="$(jq 'length' <<< "$rows")"
+  echo "the PM accepted the risk of $(jq 'length' <<< "$rows") finding(s) for candidate ${head:0:12} (${rec}); a new candidate or another set of findings voids it"
 }
 
 cmd_override() {
@@ -1705,6 +1884,7 @@ case "$CMD" in
   fix-check) cmd_fix_check ;;
   finalize)  cmd_finalize ;;
   dispute)   cmd_dispute ;;
+  accept-risk) cmd_accept_risk ;;
   override)  cmd_override ;;
   standing)  cmd_standing ;;
   delegate)  cmd_delegate ;;

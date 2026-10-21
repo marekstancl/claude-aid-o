@@ -70,6 +70,8 @@ review_checkpoints:
     reviewers:
       - {role: step_generalist, provider: claude, model: opus, effort: low}
       - {role: step_security,   provider: claude, model: opus, effort: low, full_when: review+security}
+      # P117 (18): a step that changes documentation (CHANGELOG, README, docs/, help_paths) has its claims checked here
+      - {role: final_claims,    provider: claude, model: opus, effort: low, when: docs_surface}
   # Whole-plan review (CP7): one round over plan_base_commit..candidate before
   # plan-finalize --stage decide. A fix moves the candidate, so its confirmation
   # is round 1 of the next attempt (carrying what stayed open and the fix diff).

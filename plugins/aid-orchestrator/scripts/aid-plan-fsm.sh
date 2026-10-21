@@ -149,6 +149,8 @@ source "${SCRIPT_DIR}/lib/aid-plan-state.sh"      # also sources lib/aid-lock.sh
 source "${SCRIPT_DIR}/lib/aid-plan-manifest.sh"   # also sources lib/aid-lock.sh + lib/aid-gate-profile-select.sh
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"
+# shellcheck source=lib/aid-plan-dependency.sh
+source "${SCRIPT_DIR}/lib/aid-plan-dependency.sh"   # P117 (3): the CP1 binding to an unmerged dependency
 # shellcheck disable=SC1091
 source "${SCRIPT_DIR}/lib/aid-gate-row.sh"     # P097 Step 2 — the ONE gate-row reader (gate_row_normalize)
 source "${SCRIPT_DIR}/lib/aid-plugin-issues.sh"   # the project's record of AID's own defects
@@ -5042,6 +5044,59 @@ _pfsm_validate_plan_final_close_receipt_json() {
   ' <<< "$json" >/dev/null 2>&1
 }
 
+# _pfsm_cp7_confirmation_bad <run dir> — 0 when the last cp7 round is full, or a confirmation round whose
+# predecessor is a passed full round over the previous candidate and whose fix was documentation only (P117 (15));
+# else prints why and returns 1.
+_pfsm_cp7_confirmation_bad() {
+  local run_dir_abs="$1" _lr _co _fc="${1}/fix-class.json"
+  _lr="$(ls -d "${run_dir_abs}"/cp7/round-* 2>/dev/null | grep -E '/round-[0-9]+$' | sort -t- -k2 -n | tail -1)"
+  [[ -n "$_lr" && "$(jq -r '.mode // "full"' "${_lr}/round.json" 2>/dev/null)" == confirmation ]] || return 0
+  _co="$(jq -r '.confirmation_of // ""' "${_lr}/round.json")"
+  declare -F aid_docs_only >/dev/null || source "${SCRIPT_DIR}/lib/aid-docs-surface.sh"
+  if ! aid_docs_only "$_fc"; then echo "the fix since the previous candidate is not documentation only"; return 1; fi
+  if [[ ! -f "${_co}/measurement.json" || "$(jq -r .verdict "${_co}/measurement.json")" != pass || "$(jq -r '.mode // "full"' "${_co}/round.json")" != full ]]; then
+    echo "${_co:-<none>} is no passed full round"; return 1; fi
+  if [[ "$(jq -r .head_sha "${_co}/round.json")" != "$(jq -r .previous_candidate "$_fc")" ]]; then
+    echo "${_co} reviewed $(jq -r '.head_sha[:12]' "${_co}/round.json"), not the previous candidate"; return 1; fi
+  return 0
+}
+
+# _pfsm_accepted_risk_stale <run dir> <candidate> <root> — every cp7 accepted-risk.json is for this candidate,
+# its card unchanged, and each finding it names unchanged (P117 (14)); prints why not and returns 1.
+_pfsm_accepted_risk_stale() {
+  local run_dir_abs="$1" candidate="$2" root="$3" _ar _m _fp _fs _rd _last
+  # the decision that counts is the LAST round's of this attempt (an attempt is one candidate; an older round's
+  # acceptance is history, Codex review): its markers need the record, the record its whole set
+  _last="$(ls -d "${run_dir_abs}"/cp7/round-* 2>/dev/null | grep -E '/round-[0-9]+$' | sort -t- -k2 -n | tail -1)"
+  [[ -n "$_last" ]] || return 0
+  for _m in "${_last}/merged.json"; do
+    [[ -f "$_m" ]] || continue; _rd="$(dirname "$_m")"
+    while IFS= read -r _fp; do
+      [[ -n "$_fp" ]] || continue
+      jq -e --arg f "$_fp" 'any(.findings[]; .fingerprint == $f)' "${_rd}/accepted-risk.json" >/dev/null 2>&1 \
+        || { echo "finding ${_fp:0:23} of ${_rd#"${root}/"} is marked an accepted risk without the PM's record (accepted-risk.json)"; return 1; }
+    done < <(jq -r '.findings[] | select(.dispute.pm.accepted_risk == true) | .fingerprint' "$_m")
+  done
+  for _ar in "${_last}/accepted-risk.json"; do
+    [[ -f "$_ar" ]] || continue
+    [[ "$(jq -cS '.findings | sort_by(.fingerprint)' "$_ar" | sha256sum | cut -d' ' -f1)" == "$(jq -r .set_sha256 "$_ar")" ]] \
+      || { echo "the set of ${_ar#"${root}/"} does not match its set_sha256 (edited)"; return 1; }
+    if [[ "$(jq -r .candidate_sha "$_ar")" != "$candidate" ]]; then echo "${_ar#"${root}/"} was given for candidate $(jq -r '.candidate_sha[:12]' "$_ar"), not ${candidate:0:12}"; return 1; fi
+    if [[ "$(sha256sum "$(jq -r .card "$_ar")" 2>/dev/null | cut -d' ' -f1)" != "$(jq -r .card_sha256 "$_ar")" ]]; then echo "the card of ${_ar#"${root}/"} changed after the PM answered it"; return 1; fi
+    _m="$(dirname "$_ar")/merged.json"
+    # the whole set: every blocker/major the round holds open or accepted is exactly the set the PM accepted
+    if [[ "$(jq -c '[.findings[] | select((.severity | IN("blocker", "major")) and ((.status | IN("open", "disputed", "form_invalid")) or (.dispute.pm.accepted_risk == true))) | .fingerprint] | unique' "$_m")" \
+          != "$(jq -c '[.findings[].fingerprint] | unique' "$_ar")" ]]; then
+      echo "the open findings of $(dirname "${_ar#"${root}/"}") are not the set the PM accepted"; return 1
+    fi
+    while IFS=$'\t' read -r _fp _fs; do
+      [[ "$(jq -cS --arg f "$_fp" 'first(.findings[] | select(.fingerprint == $f)) | {fingerprint, severity, claim, evidence, command, rule}' "$_m" | sha256sum | cut -d' ' -f1)" == "$_fs" ]] \
+        || { echo "finding ${_fp:0:23} of ${_ar#"${root}/"} is not the one the PM accepted"; return 1; }
+    done < <(jq -r '.findings[] | "\(.fingerprint)\t\(.finding_sha256)"' "$_ar")
+  done
+  return 0
+}
+
 # _pfsm_seal_plan_final_close_evidence <root> <plan> <candidate> <run> <target>
 #   <target_head_before> <merge_commit> <merged_tree> <tag> <gates_report>
 #   <release_decision.json> <pm_decision_file> [<merged_head> <review_equivalence>]
@@ -5209,6 +5264,34 @@ _pfsm_finalize_decide() {
   if [[ "$round_rc" -ne 0 && "$round_msg" != *"reason=review_round_failed"* ]]; then
     echo "${round_msg%reason=*}" >&2
     return 1
+  fi
+
+  # P117 (15): the last whole-plan round is FULL over this candidate, or a confirmation round that follows a passed
+  # full round of the previous candidate after a documentation-only fix
+  local _c7bad=""
+  if ! _c7bad="$(_pfsm_cp7_confirmation_bad "$run_dir_abs")"; then
+    echo "REFUSED (cp7_confirmation_not_enough): plan-finalize --stage decide: the last whole-plan round is a confirmation round, and ${_c7bad} — a full round over ${candidate:0:12} is needed" >&2
+    echo "next: aid-review-round.sh prepare --checkpoint cp7 --evidence-dir ${run_dir_rel} --round <next> (a full round), then close it and decide again" >&2
+    echo "(pipeline.md §When AID refuses: cp7_confirmation_not_enough)" >&2; return 1
+  fi
+
+  # P117 (17): the plan's nightly tests ran at this candidate and passed (a hand-attached proof is never accepted)
+  declare -F aid_plan_tests_bad >/dev/null || source "${SCRIPT_DIR}/lib/aid-plan-tests.sh"
+  local _pt_bad="" _pt_plan; _pt_plan="$(aid_lifecycle_plan_file "$plan_id" "$root" 2>/dev/null || true)"
+  if [[ -f "${run_dir_abs}/plan-tests.json" ]] || { [[ -n "$_pt_plan" ]] && aid_plan_tests_needed "$troot" "${root}/.aid-o/config/execution.yaml" "$_pt_plan"; }; then
+    if ! _pt_bad="$(aid_plan_tests_bad "$run_dir_abs" "$candidate" "$troot" "${root}/.aid-o/config/execution.yaml" "${_pt_plan:-/dev/null}")"; then
+      echo "REFUSED (plan_tests_failed): plan-finalize --stage decide: ${_pt_bad}" >&2
+      echo "next: fix what the log shows on the plan branch, then plan-finalize ${plan_id} --stage freeze and produce again (the close runs the tests itself)" >&2
+      echo "(pipeline.md §When AID refuses: plan_tests_failed)" >&2; return 1
+    fi
+  fi
+
+  # P117 (14): the PM's acceptance of open findings holds only for its candidate and its set of findings
+  local _ar_bad=""
+  if ! _ar_bad="$(_pfsm_accepted_risk_stale "$run_dir_abs" "$candidate" "$root")"; then
+    echo "REFUSED (accepted_risk_stale): plan-finalize --stage decide: ${_ar_bad} — the PM's decision does not carry over" >&2
+    echo "next: render a new Decision card for the current candidate and its open findings; the PM answers with aid-review-round.sh accept-risk" >&2
+    echo "(pipeline.md §When AID refuses: accepted_risk_stale)" >&2; return 1
   fi
 
   local tampered=""
@@ -8505,6 +8588,13 @@ _pfsm_finalize_produce() {
     return 1
   fi
   [[ -s "$pd" ]] && echo "plan-diff: isolation $(jq -c '.isolation // {}' "$pd" 2>/dev/null)$(jq -r '.next // "" | if . == "" then "" else " — " + . end' "$pd" 2>/dev/null)"
+  # P117 (17): the plan's own nightly tests, run here at the candidate and bound to it (plan-tests.json)
+  declare -F aid_plan_tests_run >/dev/null || source "${SCRIPT_DIR}/lib/aid-plan-tests.sh"
+  aid_plan_tests_run "$pd_cwd" "${root}/.aid-o/config/execution.yaml" "$plan_file" "$candidate" "$run_dir_abs"
+  aid_stage_writes_record "$run_dir_abs" produce plan-tests.json $(cd "$run_dir_abs" && compgen -G 'plan-tests/*.log') >/dev/null 2>&1 \
+    || { echo "PRECONDITION FAIL: plan-finalize --stage produce: the record of plan-tests.json could not be written (stage-writes.jsonl)" >&2; return 1; }
+  [[ "$(jq '.tests | length' "${run_dir_abs}/plan-tests.json")" == 0 ]] \
+    || echo "plan-tests: $(jq -r '[.tests[] | "\(.path) \(if .exit == 0 then "pass" elif .exit == null then "not run: \(.reason)" else "exit \(.exit)" end)"] | join("; ")' "${run_dir_abs}/plan-tests.json")"
   local pd_verdict=""
   if [[ "$pdrc" -eq 0 || "$pdrc" -eq 1 || "$pdrc" -eq 2 ]] && [[ -s "$pd" ]]; then
     pd_verdict="$(jq -r --arg b "$base_commit" --arg h "$candidate" \
@@ -9428,6 +9518,18 @@ _pr_refuse() {
 }
 
 _pr_tx() { aid_gen_transaction_path "$PR_PLAN_ID"; }
+# _pr_isolation_preflight <plan> — P117 (2): the close measures every cmd point of the plan and its brief the
+# way lib/aid-measure-env.sh says; a host that cannot is refused before the first step, not at the close
+# (WAN P110: a whole run, then every point unmeasured for no_isolation).
+_pr_isolation_preflight() {
+  local z line; local -a files=("$1"); z="$(_aid_fm_get "$1" zadani 2>/dev/null)"
+  [[ -n "$z" ]] && files+=("${PR_ROOT}/${z}")
+  grep -qsE '^[[:space:]]*type:[[:space:]]*cmd([[:space:]]|$)' "${files[@]}" || return 0
+  line="$(STATE_ROOT="$PR_ROOT" bash -c 'source "$1"; aid_measure_isolation_check' _ "${SCRIPT_DIR}/lib/aid-measure-env.sh" 2>/dev/null)" && return 0
+  local next="${line#*$'\t'}"; next="${next#next: }"
+  _pr_refuse no_isolation "this host cannot measure the plan's cmd points the way the close does (${line%%$'\t'*}) — each would end unmeasured at the close" \
+    "${next:-install util-linux >= 2.38 and allow user namespaces} — then plan-run ${PR_PLAN_ID} again" 1
+}
 _pr_stage_done() { jq -e --arg n "$1" 'any(.stages[]?; .name == $n)' "$(_pr_tx)" >/dev/null 2>&1; }
 _pr_stage_record() {   # <name> [sha]
   aid_gen_tx_update "$PR_PLAN_ID" '.stages = ((.stages // []) | map(select(.name != $n)) + [{name: $n, done_at: $t} + (if $s == "" then {} else {sha: $s} end)])' \
@@ -9527,6 +9629,8 @@ _pr_main() {
     "$(realpath "$PR_ROOT")/.aid-worktrees/"*)
       _pr_refuse plan_in_scratch_tree "the plan ${plan_abs} lives only in a scratch tree" "put it in ${PR_ROOT}/.aid-o/plans/ and run again" 1 ;;
   esac
+  _pr_isolation_preflight "$plan_abs"
+  aid_plan_dep_verify "$PR_ROOT" "$plan_id" run || _pr_refuse "$DEP_CODE" "$DEP_WHY" "$DEP_NEXT" 1
   plan_rel="${plan_abs#"$(realpath "$PR_ROOT")/"}"
   cd "$PR_ROOT" || exit 3   # plan.json's source_plan is relative to the state root
   ev_rel=".aid-o/work/evidence/${PR_EPIC}/${PR_RUN}"; ev_dir="${PR_ROOT}/${ev_rel}"; pj="${ev_dir}/plan.json"

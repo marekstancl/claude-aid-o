@@ -55,7 +55,9 @@ aid_delegate_prompt() {
     echo "Brief (the PM's points of done): ${brief:-none recorded}"
     echo
     echo '```json'
-    jq '{fingerprint, severity, status, claim, evidence, command, fix, rule, reported_by, dispute}' <<< "$finding"
+    jq '{fingerprint, severity, status, claim, evidence, command, fix, rule, reported_by, dispute, delegated_history}' <<< "$finding"
+    jq -e '(.delegated_history // []) | length > 0' <<< "$finding" >/dev/null 2>&1 \
+      && echo "An earlier verdict on this finding was superseded by new evidence (delegated_history above): weigh what changed since."
     echo '```'
     echo
     if [[ "$kind" == dispute ]]; then

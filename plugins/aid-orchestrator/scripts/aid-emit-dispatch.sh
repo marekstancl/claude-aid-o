@@ -31,7 +31,7 @@ EOF
 }
 
 # The one focus allowlist (the start check and its error text read this).
-AID_DISPATCH_FOCUS_RE='^(copy-review-standin|cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp6-[a-z][a-z0-9-]*|cp7-[a-z][a-z0-9-]*|critic-(brainstorm|plan)|adjudicator-delegated-[0-9a-f]{16})$'
+AID_DISPATCH_FOCUS_RE='^(copy-review-standin|cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp6-[a-z][a-z0-9-]*|cp7-[a-z][a-z0-9-]*|critic-(brainstorm|plan)|adjudicator-delegated-[0-9a-f]{16}|stand-in-[0-9a-f]{16})$'
 
 # Focus default duration table (resolved when --expected-duration-max not given).
 default_duration_for_focus() {
@@ -251,9 +251,11 @@ cmd_complete() {
   local late_flag=""
   [[ "$duration_sec" -gt 1800 ]] && late_flag=" (LATE: >1800s ceiling)"
 
+  # the output's digest at completion (P117): a file swapped after the bracket closed is not the bracketed answer
+  local out_sha="null"; [[ -f "$output_file" ]] && out_sha="$(sha256sum "$output_file" | cut -d' ' -f1)"
   log_event "${evidence_dir}/timeline.jsonl" "verifier_dispatch_complete" \
     focus="$focus" agent_id="$agent_id" step_n="$step_n" \
-    evidence_dir="$evidence_dir" output_file="$output_file" \
+    evidence_dir="$evidence_dir" output_file="$output_file" output_sha256="$out_sha" \
     duration_sec="$duration_sec"
 
   if [[ -n "$late_flag" ]]; then
@@ -312,7 +314,68 @@ cmd_cancel() {
   echo "cancelled start ${focus} (started ${start_ts}): ${reason}"
 }
 
+# cmd_repair --evidence-dir <dir> --reason <text> — a pending-dispatches.jsonl that does not parse: the lines
+# that parse stay, the others move to pending-dispatches.jsonl.bad, the timeline records it (P117: the only
+# way past a malformed ledger was a PM-authorised increment-step --force).
+cmd_repair() {
+  local evidence_dir="" reason="" focus=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --evidence-dir) evidence_dir="$2"; shift 2 ;;
+      --reason)       reason="$2"; shift 2 ;;
+      --focus)        focus="$2"; shift 2 ;;   # the start a damaged line was (it is withdrawn on the record)
+      *) echo "ERROR: unknown arg $1" >&2; exit 1 ;;
+    esac
+  done
+  [[ -n "$evidence_dir" ]] || usage
+  [[ ${#reason} -ge 20 ]] || { echo "ERROR: repair needs --reason of at least 20 characters (it goes to the timeline)" >&2; exit 1; }
+  local pending="${evidence_dir}/pending-dispatches.jsonl" lockfile tmp line
+  [[ -f "$pending" ]] || { echo "nothing to repair: no ${pending}"; return 0; }
+  # a damaged line that was a START must not vanish silently (it would hide an open dispatch from the orphan
+  # check): it is named by --focus and withdrawn with an explicit cancel record (Codex whole review of P117)
+  local starts
+  starts="$(while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -n "$line" ]] || continue
+      jq -e 'type == "object" and (.event | type == "string") and (.ts | type == "string")' <<< "$line" >/dev/null 2>&1 && continue
+      # every start record holds a brace: a damaged line without one is no start and is moved aside; a line that
+      # is one whole-looking start with a readable focus is withdrawn by that name; anything else that holds a
+      # brace may hide a cut or glued start and goes to a person — nothing is guessed (Codex review rounds 2-5)
+      [[ "$line" == *"{"* ]] || continue
+      _braces="${line//[^\{]/}"
+      if (( ${#_braces} == 1 )) && [[ "$line" =~ ^[[:space:]]*\{ ]] && grep -qE '"event"[[:space:]]*:[[:space:]]*"start"' <<< "$line" \
+         && (( $(grep -oE '"(event|focus)"[[:space:]]*:' <<< "$line" | wc -l) == 2 )); then
+        f="$(grep -oE '"focus"[[:space:]]*:[[:space:]]*"[^"]+"' <<< "$line" | sed -E 's/.*"([^"]+)"$/\1/')"; echo "${f:-?}"
+      else echo '?'; fi
+    done < "$pending" | sort -u)"
+  # a start whose focus cannot be read cannot be withdrawn by name — a person looks at it (Codex review round 2)
+  [[ $'\n'"$starts"$'\n' == *$'\n''?'$'\n'* ]] \
+    && { echo "ERROR: a damaged line looks like a start whose focus cannot be read — repair refuses to guess; inspect ${pending} by hand" >&2; exit 1; }
+  if [[ -n "$starts" ]]; then
+    [[ -n "$focus" && "$starts" == "$focus" ]] \
+      || { echo "ERROR: a damaged line looks like the start of ${starts//$'\n'/, } — name it: repair --focus <that focus> --reason …; it is withdrawn on the record, never dropped silently" >&2; exit 1; }
+  fi
+  lockfile="${pending}.lock"; touch "$lockfile"
+  local rec; rec="$(mktemp)"
+  (
+    flock -x -w 5 200 || { echo "ERROR: flock timeout on $lockfile" >&2; exit 2; }
+    tmp="$(mktemp "${pending}.XXXXXX")"
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      [[ -n "$line" ]] || continue
+      if jq -e 'type == "object" and (.event | type == "string") and (.ts | type == "string")' <<< "$line" >/dev/null 2>&1; then
+        printf '%s\n' "$line" >> "$tmp"
+      else printf '%s\n' "$line" >> "${pending}.bad"; printf '%s\n' "$(printf '%s' "$line" | sha256sum | cut -d' ' -f1)" >> "$rec"; fi
+    done < "$pending"
+    [[ -n "$focus" ]] && jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg f "$focus" --arg r "$reason" \
+      '{ts: $ts, event: "cancel", focus: $f, start_nonce: "repaired", reason: ("repaired: " + $r)}' >> "$tmp"
+    mv -f "$tmp" "$pending"
+  ) 200>"$lockfile"
+  local shas; shas="$(paste -sd, "$rec")"; rm -f "$rec"
+  log_event "${evidence_dir}/timeline.jsonl" "verifier_dispatch_repair" lines="${shas:-none}" focus="${focus:-none}" reason="$reason" || true
+  echo "repaired ${pending}: $( [[ -n "$shas" ]] && echo "$(tr ',' '\n' <<< "$shas" | grep -c .) unreadable line(s) moved to ${pending}.bad" || echo "nothing unreadable")$( [[ -n "$focus" ]] && echo "; the start ${focus} withdrawn on the record")"
+}
+
 case "${1:-}" in
+  repair)   shift; cmd_repair "$@" ;;
   start)    shift; cmd_start "$@" ;;
   complete) shift; cmd_complete "$@" ;;
   cancel)   shift; cmd_cancel "$@" ;;

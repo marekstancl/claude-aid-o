@@ -1,0 +1,138 @@
+# refusal-classes.yaml — every refusal code the plugin prints, with who acts on it in an --auto run (P117).
+# Read by aid-fsm.sh _fsm_refusal_next (prints "class:") and by the delegation (lib/aid-delegate.sh): an
+# --auto run never stops on a PM question for a code whose class is not pm. Classes:
+#   agent_fix                 the agent fixes the cause and goes on — never a question
+#   agent_fix_then_stand_in   the agent fixes; after a repeated failure the stand-in decides
+#   prevent                   caught earlier (plan check, run start) or a targeted repair instead of --force
+#   stand_in                  the independent stand-in decides (Codex, Claude when Codex is out)
+#   pm                        a protected impact: the brief, money, live data, security, production,
+#                             a new foreign API or repository, lowering a required gate
+#   incident                  a broken environment: the run stops with the cause, nothing to decide
+#   not_in_run                plan writing, the plan review (CP1), or the EPIC path removed in 3.0.0
+# test-refusal-classes.bats refuses a printed code missing here. Source: .aid-o/plans/P117-registr.md.
+codes:
+  DISPATCH_ORPHANED: {class: agent_fix, how: "osiřelý start: aid-emit-dispatch.sh cancel/repair, bez --force"}
+  GATE_TIMEOUT: {class: incident, how: "brána nedoběhla v limitu: žebřík obnovy ji pustí znovu; trvá-li, prostředí se opraví"}
+  JOB_LOST: {class: incident, how: "úloha na pozadí zmizela: žebřík obnovy ji pustí znovu"}
+  REVIEW_EXHAUSTED: {class: stand_in, how: "delegate (P112), opakování po novém důkazu (12)"}
+  TRANSIENT_INFRA: {class: incident, how: "přechodná chyba prostředí: počkat a pustit znovu"}
+  UNCLASSIFIED: {class: pm, how: "žebřík obnovy nezařadil příčinu: rozhoduje PM"}
+  abandon_needs_reason: {class: pm, how: "opuštění běhu je rozhodnutí PM"}
+  accept_risk_not_protected: {class: agent_fix, how: "v --auto technický nález nejdřív k delegátovi; na kartu PM jen to, co poslal jako chráněné"}
+  accepted_risk_stale: {class: pm, how: "přijetí rizika PM platí jen pro svého kandidáta a svou sadu nálezů: nová karta"}
+  active_runs_unreadable: {class: incident, how: "poškozený soubor stavu"}
+  active_runs_write_failed: {class: incident, how: "zápis stavu selhal"}
+  amend_scope_no_brief_point: {class: stand_in, how: "rozšíření uvnitř repozitáře a cíle; chráněná cesta → PM"}
+  amend_scope_reason_names_no_point: {class: agent_fix, how: "doplní bod zadání do --reason"}
+  binding_plan_step_hash_mismatch: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  binding_step_id_mismatch: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  binding_step_index_mismatch: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  binding_wrong_commit: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  brief_changed_after_round: {class: pm, how: "zadání se změnilo během kontroly – mění zadání"}
+  clean_worktree: {class: prevent, how: "forceable – oprava: commit / odložení, ne --force"}
+  close_check_complete: {class: prevent, how: "forceable – oprava: doplnit uzávěr"}
+  committed_source_plan: {class: prevent, how: "forceable – plan-start commitne sám"}
+  contract_return_missing: {class: agent_fix_then_stand_in, how: "obnoví/znovu spustí krok; po opakovaném zablokování → zástupce (rozdělení, kontext); nutná změna zadání → PM"}
+  contract_return_not_done: {class: agent_fix_then_stand_in, how: "jako contract_return_missing"}
+  contract_return_rejected: {class: agent_fix_then_stand_in, how: "oprava/nové spuštění kroku; nejde opravit bez změny kontraktu (přejmenování) → zástupce s amend-contract (13)"}
+  cp3_stale_review: {class: not_in_run, how: "CP3 odstraněna v 3.0.0"}
+  cp7_brief_sha_mismatch: {class: pm, how: "zadání změněno – PM"}
+  cp7_confirmation_not_enough: {class: agent_fix, how: "potvrzovací kolo nestačí: připravit plné kolo CP7 nad kandidátem"}
+  cp7_measurement_stale: {class: prevent, how: "nové měření (oprava)"}
+  critic_required: {class: not_in_run, how: "psaní plánu"}
+  cwd_not_worktree: {class: prevent, how: "běh v kopii plánu"}
+  defer_refused: {class: pm, how: "vypuštění bodu zadání"}
+  delegation_fix_pending: {class: agent_fix, how: "oprava se posoudí v dalším kole (potvrzení), ne u rozhodčího: zmrazit nového kandidáta / připravit další kolo"}
+  delegation_left_files: {class: agent_fix, how: "odstraní soubory náhradníka a zapíše verdikt znovu"}
+  delegation_missing: {class: pm, how: "delegace není v platnosti (běh ručně / zastaven PM); v --auto nenastane"}
+  delegation_out_of_scope: {class: pm, how: "chráněný dopad"}
+  dependency_grammar: {class: not_in_run, how: "psaní plánu"}
+  dependency_moved: {class: agent_fix, how: "závislost se pohnula pod revizí – agent spustí revizi znovu (prepare --restart) proti novému stavu"}
+  dependency_roots_many: {class: not_in_run, how: "jen v CP1: plán stojí na víc nesloučených plánech; rozdělit ho, nebo počkat na sloučení"}
+  dependency_worktree_missing: {class: agent_fix, how: "agent obnoví pracovní kopii závislosti (plan-state --recreate-worktree) a připraví kolo znovu"}
+  detached_head: {class: prevent, how: "forceable – oprava: checkout větve"}
+  direct_run_needs_plan_branch: {class: prevent, how: "start běhu"}
+  direct_run_no_epic_merge: {class: not_in_run, how: "EPIC cesta"}
+  dispatch_orphan_complete: {class: prevent, how: "cílený opravný příkaz (9) místo --force"}
+  done_advance_needs_direct: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  done_advance_preconditions: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  epic_path_removed: {class: not_in_run, how: "EPIC cesta odstraněna v 3.0.0"}
+  fix_check_brief_point_changed: {class: pm, how: "oprava změnila bod zadání"}
+  fix_check_brief_version_not_raised: {class: agent_fix, how: "zvýší verzi zadání po změně schválené PM"}
+  foreign_branch_unverified: {class: agent_fix, how: "commit na zaznamenanou větev cizího repa a nový freeze"}
+  foreign_repo_undeclared: {class: prevent, how: "kontrola plánu"}
+  frontend_missing_visual_anchoring: {class: agent_fix_then_stand_in, how: "doplní snímek/ukotvení; nejde-li → zástupce"}
+  frontend_visual_fidelity_block: {class: stand_in, how: "zástupce posoudí rozdíl proti návrhu; vědomá změna vzhledu mimo plán → PM"}
+  gates_no_generated_by: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  gates_runner_exit_<n>: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  generation_lock_held: {class: incident, how: "zámek drží jiný proces"}
+  incomplete_step_binding: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  lifecycle_epics_mismatch: {class: not_in_run, how: "EPIC cesta"}
+  lifecycle_manifest_present: {class: prevent, how: "forceable – oprava"}
+  lifecycle_paths_clean: {class: incident, how: "tvrdá podmínka"}
+  lifecycle_receipt_committed: {class: prevent, how: "forceable – oprava"}
+  measurement_unreadable: {class: incident, how: "měření nečitelné – oprava (6/7), jinak incident"}
+  missing_cp3_code_review: {class: not_in_run, how: "CP3 odstraněna v 3.0.0"}
+  missing_lenses: {class: not_in_run, how: "CP1"}
+  missing_step_binding: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  missing_step_verify: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  missing_verifier_output: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  no_change_without_outputs: {class: stand_in, how: "uzná krok bez změny jen s naměřeným důkazem bodů"}
+  no_isolation: {class: incident, how: "prostředí bez izolace – předejít při startu běhu; jinak incident"}
+  no_passed_critic_check: {class: not_in_run, how: "psaní plánu"}
+  parallel_group_collision: {class: not_in_run, how: "psaní plánu"}
+  pending_file_malformed: {class: prevent, how: "cílený opravný příkaz (9) místo --force"}
+  plan_branch_mismatch: {class: prevent, how: "start běhu"}
+  plan_changed_since_seal: {class: prevent, how: "plán se nemění za běhu; změna = amend-contract (13)"}
+  plan_check: {class: not_in_run, how: "CP1"}
+  plan_close_bookkeeping: {class: pm, how: "uzavřít plán přes chybějící účetnictví uzávěru je rozhodnutí PM (--force)"}
+  plan_close_worktree_dirty: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  plan_gate_profile_excluded: {class: pm, how: "přijetí mezery v profilu = snížení brány (předejít: kontrola plánu 2)"}
+  plan_in_scratch_tree: {class: prevent, how: "start běhu"}
+  plan_json_unverified: {class: prevent, how: "start běhu"}
+  plan_manifest_missing: {class: prevent, how: "start běhu"}
+  plan_names_no_brief: {class: not_in_run, how: "psaní plánu"}
+  plan_not_found: {class: prevent, how: "start běhu"}
+  plan_not_ready: {class: not_in_run, how: "CP1 (oprava 3)"}
+  plan_page_missing: {class: agent_fix, how: "plan-run: vykreslí stránku plánu a pokračuje"}
+  plan_run_already_started: {class: prevent, how: "start běhu"}
+  plan_tests_failed: {class: agent_fix, how: "noční test plánu u kandidáta selhal nebo chybí: opravit na větvi plánu, freeze + produce znovu"}
+  profile_skips_project_tests: {class: pm, how: "waiver testů = snížení brány (předejít 2)"}
+  project_tests_evidence_missing: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  project_tests_not_selected: {class: pm, how: "waiver testů (předejít 2)"}
+  project_tests_undeclared: {class: agent_fix, how: "jen rada (advisory), běh nezastaví"}
+  rename_breaks_plan: {class: agent_fix, how: "zvolí jiné jméno; nic se nezměnilo"}
+  rename_collision: {class: agent_fix, how: "zvolí jméno, které nic nejmenuje"}
+  rename_outside_step: {class: agent_fix, how: "přejmenuje jen cestu aktuálního kroku na místě; přesun jinam je rozšíření rozsahu (amend-scope)"}
+  rename_refused: {class: agent_fix, how: "doplní oprávnění (zástupce v --auto, karta PM jinak), důvod nebo tvar <old>=<new>"}
+  repo_root_invalid: {class: incident, how: "neplatný repo_roots – psaní plánu"}
+  restart_after_step: {class: prevent, how: "restart"}
+  restart_controller_live: {class: prevent, how: "restart"}
+  restart_foreign_dirty: {class: prevent, how: "restart"}
+  restart_needs_brief_change: {class: pm, how: "restart kontroly bez změny zadání chce slovo PM"}
+  restart_plan_dirty: {class: prevent, how: "restart"}
+  review_round_failed: {class: stand_in, how: "spor → delegate (P112)"}
+  review_round_missing: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  review_round_stale: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  round_not_closed: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  run_abandoned: {class: pm, how: "běh opuštěn PM"}
+  second_round_needs_open_blocker: {class: not_in_run, how: "jen v CP1 (revize plánu): kolo navíc za blocker s opravou, jinak override PM"}
+  semantic_wiring_blocked: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  stand_in_missing: {class: agent_fix, how: "zeptá se přes aid-stand-in.sh ask, verdikt zapíše na jeho místo"}
+  stand_in_not_allowed: {class: agent_fix, how: "kód není pro zástupce; jde se podle next: odmítnutí"}
+  stand_in_protected: {class: pm, how: "chráněný dopad: rozhoduje PM na kartě, ať verdikt říká cokoli"}
+  stand_in_verdict_invalid: {class: agent_fix, how: "zástupce odpoví úplným JSON verdiktem"}
+  stand_in_verdict_unbound: {class: agent_fix, how: "verdikt Codexu přes ask, Claude jen v závorce stand-in-<id>"}
+  stand_in_write_failed: {class: incident, how: "zápis povolení nebo ledgeru selhal: opravit disk, zapsat znovu"}
+  step_criteria_failed: {class: agent_fix_then_stand_in, how: "bod nesplněn: agent opraví krok; spor o měření nebo opakované selhání → zástupce; vypuštění bodu → PM"}
+  step_verify_not_pass: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  steps_incomplete: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  streamlined_abandoned: {class: agent_fix, how: "běh se projde přes FSM od kroku, kde se zastavil; dodávku bez běhu nepřijme ani zástupce"}
+  streamlined_cp3_off: {class: not_in_run, how: "EPIC review (CP3) odstraněna v 3.0.0"}
+  streamlined_integration_review: {class: agent_fix, how: "agent pustí brány (advance-to-gates) a done-advance zopakuje"}
+  verify_no_ac_checklist: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  verify_no_commit_ref: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  verify_no_memory_used: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  verify_no_memory_written: {class: agent_fix, how: "agent opraví příčinu podle next: a pokračuje (bez rozhodnutí)"}
+  zadani_file_missing: {class: not_in_run, how: "psaní plánu"}
+  zadani_path_escapes: {class: not_in_run, how: "psaní plánu"}

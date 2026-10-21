@@ -167,7 +167,7 @@ aid_hook_rule_turn_step_open() {
     fi
   fi
 
-  echo "step ${idx} (${sid}) of ${epic}/${run} was dispatched under a contract and the run has not advanced past it. Finish it before the turn ends: extract and validate the agent's aid-return (lib/aid-dispatch-contract.sh), commit the accepted return, write step-${idx}-verify.md and run aid-fsm.sh increment-step — or hand over explicitly with a Decision card or a Blocked card." >&2
+  echo "step ${idx} (${sid}) of ${epic}/${run} was dispatched under a contract and the run has not advanced past it. Finish it before the turn ends: extract and validate the agent's aid-return (lib/aid-dispatch-contract.sh), commit the accepted return, write step-${idx}-verify.md and run aid-fsm.sh increment-step — or hand over explicitly with a Decision card or a Blocked card, rendered by aid_decision_card_render (scripts/lib/aid-decision-card.sh), never written by hand." >&2
   return 2
 }
 

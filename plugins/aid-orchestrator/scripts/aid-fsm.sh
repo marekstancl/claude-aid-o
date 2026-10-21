@@ -1194,13 +1194,13 @@ _fsm_refusal_next() {
     plan_manifest_missing|plan_branch_mismatch)
       next="start the plan's run again through plan-run, which writes the manifest entry and runs init: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}" --restart --reason "<why>")" ;;
     contract_return_missing|contract_return_not_done)
-      next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent or hand over with a Blocked card), then: $inc" ;;
+      next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent; blocked again in an --auto run: the stand-in decides — $(_fsm_cmd bash "${SCRIPT_DIR}/aid-stand-in.sh" ask --evidence-dir "$(dirname "$sf")" --code contract_return_not_done --proposal "<{\"kind\": \"blocked_step\", \"step\": N, \"action\": \"redispatch\", \"return_sha256\": \"<sha256 of the step's return.json, or none>\", \"why\": …}>"), then $(_fsm_cmd bash "$fsm" step-redispatch "$sf" --stand-in "<auth.json>" --reason "<why>") and dispatch again (a rename or a widening is asked as its own kind); otherwise a Blocked card), then: $inc" ;;
     missing_step_verify|verify_no_ac_checklist|verify_no_memory_used|verify_no_memory_written|step_verify_not_pass|verify_no_commit_ref)
       next="write $(_fsm_cmd "$vf") (pipeline.md §Output verification), then: $inc" ;;
     binding_wrong_commit|binding_plan_step_hash_mismatch|incomplete_step_binding)
       next="rewrite the binding of $(_fsm_cmd "$vf") after the step commit (reviewed_commit = HEAD, plan_step_hash from the live plan.json — pipeline.md §Output verification), then: $inc" ;;
     amend_scope_no_brief_point)
-      next="the widening serves no point this step closes: bring it to the PM as a scope change (skills/pipeline.md escalations, rule 11) — a Decision card quoting each path; after the PM's answer: $(_fsm_cmd bash "$fsm" amend-scope "$sf" --add "<path>" --reason "<the PM's decision>" --pm-card "<card>") — or, at GATES, name the point of any step" ;;
+      next="in an --auto run the stand-in decides: write a proposal {\"kind\": \"scope_extension\", \"step\": <current step index>, \"paths\": [\"<path>\"], \"why\": \"…\"} and $(_fsm_cmd bash "${SCRIPT_DIR}/aid-stand-in.sh" ask --evidence-dir "$(dirname "$sf")" --code amend_scope_no_brief_point --proposal "<proposal.json>"), then $(_fsm_cmd bash "$fsm" amend-scope "$sf" --add "<path>" --reason "<why>" --stand-in "<its auth.json>") (a protected path goes to the PM); otherwise bring it to the PM as a scope change (rule 11) — a Decision card quoting each path, then: $(_fsm_cmd bash "$fsm" amend-scope "$sf" --add "<path>" --reason "<the PM's decision>" --pm-card "<card>") — or, at GATES, name the point of any step" ;;
     amend_scope_reason_names_no_point)
       next="$(_fsm_cmd bash "$fsm" amend-scope "$sf" --add "<path>" --reason "<AC<n> of ${_ZP_SET:-the step points}> needs <path> because …")" ;;
     step_criteria_failed)
@@ -1219,6 +1219,21 @@ _fsm_refusal_next() {
     *) return 1 ;;
   esac
   printf 'next: %s\n(pipeline.md §When AID refuses: %s)\n' "$next" "$reason" >&2
+  aid_refusal_class_line "$reason" >&2 || true
+}
+
+# aid_refusal_class / aid_refusal_class_how: lib/aid-refusal-class.sh (the one reader, P117)
+# shellcheck source=lib/aid-refusal-class.sh
+source "${SCRIPT_DIR}/lib/aid-refusal-class.sh"
+aid_refusal_class_line() {
+  local c; c="$(aid_refusal_class "$1")"
+  case "$c" in
+    agent_fix|prevent) echo "class: ${c} — the agent fixes it and goes on; no question" ;;
+    agent_fix_then_stand_in) echo "class: ${c} — the agent fixes it; after a repeated failure the stand-in decides (a review finding: aid-review-round.sh delegate; anything else: aid-stand-in.sh ask)" ;;
+    stand_in) echo "class: ${c} — in an --auto run the stand-in decides, not the PM (a review finding: aid-review-round.sh delegate; anything else: aid-stand-in.sh ask)" ;;
+    incident) echo "class: ${c} — a broken environment: fix it as named, then run again; nothing to decide" ;;
+    *) echo "class: ${c} — a protected impact: the PM decides" ;;
+  esac
 }
 
 # ─── P032 Step 3: Grandfather + Repeated-Fail Helpers ────────────────────
@@ -1373,7 +1388,9 @@ fsm_check_review_round() {
           [[ -n "$o" ]] || continue; n_out=$((n_out + 1))
           [[ -e "${tree_root}/${o}" ]] || missing_out="$o"
         done <<< "$outs"
-        if (( n_out == 0 )) || [[ -n "$missing_out" ]]; then
+        if { (( n_out == 0 )) || [[ -n "$missing_out" ]]; } && _fsm_stand_in_permits "$evidence_dir" no_change_step "$step"; then
+          echo "step ${step}: no change, accepted by the stand-in's permission ${_FSM_STAND_IN}" >&2
+        elif (( n_out == 0 )) || [[ -n "$missing_out" ]]; then
           _PRECONDITION_FAIL_REASON="no_change_without_outputs"
           echo "PRECONDITION FAIL: step ${step} committed nothing and $([[ $n_out -eq 0 ]] && echo "declares no outputs" || echo "its declared output ${missing_out} does not exist") (no_change_without_outputs): an empty step is not a reviewed step." >&2
           _fsm_refusal_next no_change_without_outputs
@@ -1509,9 +1526,8 @@ fsm_check_orphan_dispatches() {
     echo "ERROR: pending-dispatches.jsonl is malformed; refusing to advance step." >&2
     echo "  File: $pending_file" >&2
     echo "  jq error: $jq_stderr" >&2
-    echo "  Fix: inspect file, repair JSONL syntax, OR override:" >&2
-    echo "    aid-fsm.sh increment-step <state_file> --force --reason '<≥20 chars>' \\" >&2
-    echo "        --blocked-checks 'dispatch_orphan_complete'" >&2
+    echo "  Fix (no --force needed): bash ${SCRIPT_DIR}/aid-emit-dispatch.sh repair --evidence-dir $evidence_dir --reason '<what broke the ledger>'" >&2
+    echo "  then run the same increment-step again. (pipeline.md §When AID refuses: pending_file_malformed)" >&2
     fsm_emit_audit_log "fsm_orphan_dispatch_fail" \
       --evidence-dir "$evidence_dir" --reason "pending_file_malformed"
     die "pending_file_malformed: $pending_file"
@@ -1538,9 +1554,9 @@ fsm_check_orphan_dispatches() {
   done <<< "$orphan_focuses"
 
   echo "" >&2
-  echo "OR (PM-authorized override, audited):" >&2
-  echo "  aid-fsm.sh increment-step <state_file> --force --reason '<≥20 chars why this is acceptable>' \\" >&2
-  echo "      --blocked-checks 'dispatch_orphan_complete'" >&2
+  echo "OR, when the agent's run is lost (no output will come), withdraw the start — no --force needed:" >&2
+  echo "  bash ${SCRIPT_DIR}/aid-emit-dispatch.sh cancel --focus <focus> --evidence-dir $evidence_dir --reason '<why the run is lost>'" >&2
+  echo "  then dispatch the role again. (pipeline.md §When AID refuses: dispatch_orphan_complete)" >&2
 
   # P076 Step 13 — DISPATCH_ORPHANED is `ladder_entry: instruction`: no code here
   # writes the ladder record, the MESSAGE names the command that does — by RESOLVED
@@ -4555,12 +4571,25 @@ _fsm_step_unmeasured() {
   done < <(jq -c --arg re "$AID_PD_UNMEASURED_RE" '.results[] | select(.verdict == "absent" and .deferred == null and .deferred_to_step == null and ((.reason // "") | test($re)))' "$pd")
 }
 
+# _fsm_stand_in_permits <evidence_dir> <kind> <step> — the --stand-in permission of this increment-step covers
+# <kind> for <step> (lib/aid-stand-in.sh: record, ledger, protected-impact detector). Prints why not.
+_fsm_stand_in_permits() {
+  [[ -n "${_FSM_STAND_IN:-}" ]] || return 1
+  declare -F aid_stand_in_verify >/dev/null || source "${SCRIPT_DIR}/lib/aid-stand-in.sh"
+  local why
+  why="$(aid_stand_in_verify "$1" "$_FSM_STAND_IN" "$2" "$(jq -nc --argjson s "$3" '{step: $s}')" "$(aid_invoke_root 2>/dev/null || pwd)")" \
+    || { echo "--stand-in ${_FSM_STAND_IN} does not permit ${2} of step ${3}: ${why}" >&2; return 1; }
+  aid_stand_in_consume "$1" "$_FSM_STAND_IN" "$(jq -nc --argjson s "$3" '{step: $s}')" || { echo "the use of ${_FSM_STAND_IN} could not be recorded in the plan's ledger" >&2; return 1; }
+  local tl; tl="${1}/timeline.jsonl"; log_event "$tl" stand_in_applied kind="$2" step="$3" auth="$_FSM_STAND_IN" || true
+  return 0
+}
+
 # _fsm_defer_criterion <evidence_dir> <step> <label> <reason> <card> — the one
 # way out of step_criteria_failed: the PM's answer on a Decision card that
 # quotes the point (aid_pm_card_check, the same check dispute --pm accepted
 # makes). Writes cp2/step-N/deferred.json and the timeline event.
 _fsm_defer_criterion() {
-  local ev="$1" n="$2" label="$3" reason="$4" card="$5" pd df why
+  local ev="$1" n="$2" label="$3" reason="$4" card="$5" stand_in="${6:-}" pd df why
   pd="${ev}/cp2/step-${n}/plan-diff.json"; df="${ev}/cp2/step-${n}/deferred.json"
   _sc_label="$label"
   declare -F aid_pm_card_check >/dev/null || source "${SCRIPT_DIR}/lib/aid-decision-card.sh"
@@ -4569,18 +4598,29 @@ _fsm_defer_criterion() {
   (( ${#reason} >= 20 )) || _defer_fail "--reason must carry the PM's words, at least 20 characters (got ${#reason})"
   jq -e --arg l "$label" '[.results[] | select(.ac_label == $l)] | length > 0' "$pd" >/dev/null 2>&1 \
     || _defer_fail "the step does not close ${label} (not among the points measured in ${pd})"
-  why="$(aid_pm_card_check "$card" "$label")" || _defer_fail "$why"
+  local by=pm
+  if [[ -n "$stand_in" ]]; then
+    # P117 (11): only a TECHNICALLY failed measurement, on the stand-in's permission for this step and point;
+    # the point stays in the brief and the close measures it again (dropping a point stays the PM's)
+    declare -F aid_stand_in_verify >/dev/null || source "${SCRIPT_DIR}/lib/aid-stand-in.sh"
+    why="$(aid_stand_in_verify "$ev" "$stand_in" measurement_failed "$(jq -nc --argjson s "$n" --arg c "$label" '{step: $s, criterion: $c}')" "$(aid_invoke_root 2>/dev/null || pwd)")" \
+      || _defer_fail "--stand-in ${stand_in}: ${why}"
+    by=stand_in card=""
+    aid_stand_in_consume "$ev" "$stand_in" "$(jq -nc --argjson s "$n" --arg c "$label" '{step: $s, criterion: $c}')" || _defer_fail "the use of the permission could not be recorded in the plan's ledger"
+  else
+    why="$(aid_pm_card_check "$card" "$label")" || _defer_fail "$why"
+  fi
   if jq -e --arg l "$label" 'has($l)' "$df" >/dev/null 2>&1; then
     echo "--defer-criterion ${label}: already deferred (${df}); nothing changed"; return 0
   fi
   [[ -f "$df" ]] || echo '{}' > "$df"
-  jq --arg l "$label" --arg r "$reason" --arg c "$card" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '. + {($l): {by: "pm", reason: $r, card: $c, at: $at}}' "$df" > "${df}.tmp" && mv "${df}.tmp" "$df"
+  jq --arg l "$label" --arg r "$reason" --arg c "$card" --arg by "$by" --arg a "$stand_in" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '. + {($l): ({by: $by, reason: $r, at: $at} + (if $by == "stand_in" then {stand_in: $a, to_close: true} else {card: $c} end))}' "$df" > "${df}.tmp" && mv "${df}.tmp" "$df"
   local tl; tl=$(derive_timeline "$state_file") || true
-  [[ -n "$tl" ]] && log_event "$tl" "step_criterion_deferred" step="$n" criterion="$label" card="$card"
-  # the measurement merges it (and re-checks the card) on its next run
+  [[ -n "$tl" ]] && log_event "$tl" "step_criterion_deferred" step="$n" criterion="$label" card="$card" by="$by" stand_in="${stand_in:-null}"
+  # the measurement merges it (and re-checks the card or the permission) on its next run
   rm -f "$pd"
-  echo "--defer-criterion ${label}: deferred by the PM (${df}); measured again at the close"
+  echo "--defer-criterion ${label}: deferred by the $([[ $by == pm ]] && echo PM || echo "stand-in (a technical failure of the step's measurement)") (${df}); measured again at the close"
 }
 
 cmd_increment_step() {
@@ -4591,6 +4631,10 @@ cmd_increment_step() {
   fi
   local force="false"
   [[ "${2:-}" == "--force" ]] && force="true"
+  # P117 (11): the stand-in's permission (aid-stand-in.sh) for a step without a change, the visual check or a
+  # technically failed measurement; each check verifies it for ITS kind and this step
+  _FSM_STAND_IN=""
+  local _fa; local -a _fargs=("$@"); for (( _fa=1; _fa<${#_fargs[@]}; _fa++ )); do [[ "${_fargs[$_fa]}" == --stand-in ]] && _FSM_STAND_IN="${_fargs[$((_fa+1))]:-}"; done
 
   [[ -f "$state_file" ]] || { echo "ERROR: state_file not found" >&2; exit 1; }
   # Same shape as transition: the review-round check compares HEAD with the
@@ -4735,11 +4779,12 @@ cmd_increment_step() {
   # P110: the step's brief points and own labelled criteria run after the step;
   # one absent and not deferred on a card the PM answered stops the step.
   # --force does not waive it: the way out is --defer-criterion.
-  local _sc_label="" _sc_reason="" _sc_card="" _sc_a=("${@:2}") _sc_i
+  local _sc_label="" _sc_reason="" _sc_card="" _sc_stand_in="" _sc_a=("${@:2}") _sc_i
   for (( _sc_i=0; _sc_i<${#_sc_a[@]}; _sc_i++ )); do
     case "${_sc_a[$_sc_i]}" in
       --defer-criterion) _sc_label="${_sc_a[$((_sc_i+1))]:-}" ;;
       --finding-card)    _sc_card="${_sc_a[$((_sc_i+1))]:-}" ;;
+      --stand-in)        _sc_stand_in="${_sc_a[$((_sc_i+1))]:-}" ;;
       --reason)          _sc_reason="${_sc_a[$((_sc_i+1))]:-}" ;;
     esac
   done
@@ -4754,7 +4799,7 @@ cmd_increment_step() {
     exit 1
   else
     if [[ -n "$_sc_label" ]]; then
-      _fsm_defer_criterion "$evidence_dir" "$step" "$_sc_label" "$_sc_reason" "$_sc_card"
+      _fsm_defer_criterion "$evidence_dir" "$step" "$_sc_label" "$_sc_reason" "$_sc_card" "$_sc_stand_in"
       _fsm_step_measure "$evidence_dir" "$step" "$state_file" || exit 1
     fi
     local _sc_absent _sc_um; _sc_absent="$(_fsm_step_absent "$evidence_dir" "$step")"; _sc_um="$(_fsm_step_unmeasured "$evidence_dir" "$step")"
@@ -4794,7 +4839,8 @@ cmd_increment_step() {
       ) || true
       if [[ "$_srole" == "frontend" && "${_svisrefs:-0}" -gt 0 ]]; then
         local _fe_output="${evidence_dir}/steps/${_sid}/output.md"
-        if [[ -z "$_sid" ]] || [[ ! -f "$_fe_output" ]] || ! grep -qE '^## Visual Anchoring' "$_fe_output" 2>/dev/null; then
+        if { [[ -z "$_sid" ]] || [[ ! -f "$_fe_output" ]] || ! grep -qE '^## Visual Anchoring' "$_fe_output" 2>/dev/null; } \
+           && ! _fsm_stand_in_permits "$evidence_dir" visual_check "$step"; then
           _increment_fail frontend_missing_visual_anchoring \
             "PRECONDITION FAIL: frontend step has visual_refs but its output lacks a '## Visual Anchoring' section." \
             "Expected '## Visual Anchoring' in: ${_fe_output}" \
@@ -4849,7 +4895,7 @@ cmd_increment_step() {
         if [[ -f "$_verdict_file" ]]; then
           _verdict_result="$(jq -r '.ui_fidelity.result // "unverifiable"' "$_verdict_file" 2>/dev/null || echo "unverifiable")"
         fi
-        if [[ "$_verdict_result" != "pass" ]]; then
+        if [[ "$_verdict_result" != "pass" ]] && ! _fsm_stand_in_permits "$evidence_dir" visual_check "$step"; then
           _increment_fail frontend_visual_fidelity_block \
             "PRECONDITION FAIL: existing_ui step requires ui/verdict.json with result=pass." \
             "Expected: ${_verdict_file}" \
@@ -5470,13 +5516,65 @@ _FSM_ALWAYS_ALLOWED=(".aid-o/work/backlog.md" ".aid-o/work/aid-plugin-issues.md"
 # last one, whose scope the GATES/DONE union holds), never removes a path, and
 # refuses a path outside the tree unless it is an absolute path some step of
 # this plan already declared (P100 Step 4).
+# step-redispatch <state_file> --stand-in <auth.json> --reason "<why>" — P117 (11): a step whose agent returned
+# blocked (or no return) again, re-dispatched on the stand-in's permission (kind blocked_step, action redispatch):
+# the blocked return is set aside (never deleted), the decision is in the timeline and the ledger, and the next
+# return of the same contract is judged afresh.
+cmd_step_redispatch() {
+  local sf="" auth="" reason=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --stand-in) auth="${2:-}"; shift 2 ;;
+      --reason)   reason="${2:-}"; shift 2 ;;
+      *) [[ -z "$sf" ]] || die "step-redispatch: unexpected argument '$1'"; sf="$1"; shift ;;
+    esac
+  done
+  [[ -n "$sf" && -f "$sf" && -n "$auth" && ${#reason} -ge 20 ]] || die "step-redispatch: usage: aid-fsm.sh step-redispatch <state_file> --stand-in <auth.json> --reason \"<why, 20+ chars>\""
+  local ev cs sid why exp at; ev="$(cd "$(dirname "$sf")" && pwd)"; cs="$(yaml_field "$sf" current_step)"
+  [[ "$(yaml_field "$sf" state)" == EXECUTE ]] || die "step-redispatch: the run is in $(yaml_field "$sf" state), not EXECUTE — only a step being worked is dispatched again"
+  sid="$(jq -r --argjson i "$cs" '.steps[$i].id // ""' "${ev}/plan.json")"; [[ -n "$sid" ]] || die "step-redispatch: no step ${cs} in ${ev}/plan.json"
+  # only a step whose return is missing or not done (a done return advances with increment-step, Codex review)
+  if [[ -f "${ev}/steps/${sid}/return.json" ]] && jq -e '.step_status == "done" and all(.gates[]?; .result != "fail")' "${ev}/steps/${sid}/return.json" >/dev/null 2>&1; then
+    die "step-redispatch: step $((cs + 1)) has a done return — run increment-step; nothing to dispatch again"
+  fi
+  # the permission names THIS blocked return (its digest, or "none"): each new blocked return needs a new decision
+  local rsha=none; [[ -f "${ev}/steps/${sid}/return.json" ]] && rsha="$(sha256sum "${ev}/steps/${sid}/return.json" | cut -d' ' -f1)"
+  exp="$(jq -nc --argjson s "$cs" --arg r "$rsha" '{step: $s, action: "redispatch", return_sha256: $r}')"
+  declare -F aid_stand_in_verify >/dev/null || source "${SCRIPT_DIR}/lib/aid-stand-in.sh"
+  why="$(aid_stand_in_verify "$ev" "$auth" blocked_step "$exp" "$(aid_invoke_root 2>/dev/null || pwd)")" || die "step-redispatch: --stand-in ${auth}: ${why}"
+  aid_stand_in_consume "$ev" "$auth" "$exp" || die "step-redispatch: the use of ${auth} could not be recorded in the plan's ledger"
+  at="$(date -u +%Y%m%dT%H%M%SZ)"
+  [[ -f "${ev}/steps/${sid}/return.json" ]] && mv "${ev}/steps/${sid}/return.json" "${ev}/steps/${sid}/return.blocked-${at}.json"
+  log_event "${ev}/timeline.jsonl" step_redispatch step="$cs" step_id="$sid" auth="$auth" reason="$reason" || true
+  echo "step $((cs + 1)) (${sid}): re-dispatch it with its packet ${ev}/steps/${sid}/contract.json; the blocked return is kept as return.blocked-${at}.json"
+}
+
+# amend-contract <state_file> --rename <old>=<new> --reason "<why>" (--stand-in <auth.json> | --pm-card <card>)
+# P117 (13): a pure rename of a path of the current step in the frozen plan (lib/aid-amend-contract.sh).
+cmd_amend_contract() {
+  local sf="" pair="" reason="" auth="" card=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --rename)   pair="${2:-}"; shift 2 ;;
+      --reason)   reason="${2:-}"; shift 2 ;;
+      --stand-in) auth="${2:-}"; shift 2 ;;
+      --pm-card)  card="${2:-}"; shift 2 ;;
+      *) [[ -z "$sf" ]] || die "amend-contract: unexpected argument '$1'"; sf="$1"; shift ;;
+    esac
+  done
+  [[ -n "$sf" && -f "$sf" && "$pair" == *=* ]] || die "amend-contract: usage: aid-fsm.sh amend-contract <state_file> --rename <old>=<new> --reason \"<why>\" (--stand-in <auth.json> | --pm-card <card>)"
+  declare -F aid_amend_contract_rename >/dev/null || source "${SCRIPT_DIR}/lib/aid-amend-contract.sh"
+  aid_amend_contract_rename "$sf" "${pair%%=*}" "${pair#*=}" "$reason" "$auth" "$card"
+}
+
 cmd_amend_scope() {
-  local state_file="" reason="" pm_card=""; local -a add=()
+  local state_file="" reason="" pm_card="" stand_in=""; local -a add=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --add)    [[ -n "${2:-}" ]] || die "amend-scope: --add needs a path"; add+=("$2"); shift 2 ;;
       --reason) reason="${2:-}"; shift 2 ;;
       --pm-card) pm_card="${2:-}"; shift 2 ;;   # the PM's decision card quoting every added path (aidlab-apps 15. 10. 2026)
+      --stand-in) stand_in="${2:-}"; shift 2 ;;   # P117: the stand-in's permission (aid-stand-in.sh) in an --auto run
       *)        [[ -z "$state_file" ]] || die "amend-scope: unexpected argument '$1'"; state_file="$1"; shift ;;
     esac
   done
@@ -5520,6 +5618,16 @@ cmd_amend_scope() {
         _pc_why="$(aid_pm_card_check "$pm_card" "$_pc_p")" || die "amend-scope: --pm-card ${pm_card} does not carry the PM's decision on ${_pc_p}: ${_pc_why}"
       done
       _pm_decision="$(jq -nc --arg c "$pm_card" --arg s "$(sha256sum "$pm_card" | cut -d' ' -f1)" '{card: $c, card_sha256: $s}')"
+    elif [[ -n "$stand_in" ]]; then
+      # P117 (11): in an --auto run the independent stand-in decided this widening — the permission must
+      # cover THIS step and EVERY added path, and the protected-impact detector must still find nothing
+      declare -F aid_stand_in_verify >/dev/null || source "${SCRIPT_DIR}/lib/aid-stand-in.sh"
+      local _si_why _si_exp
+      _si_exp="$(jq -nc --argjson s "$_zp_cs" '$ARGS.positional as $p | {step: $s, paths: $p}' --args "${add[@]}")"
+      _si_why="$(aid_stand_in_verify "$(dirname "$state_file")" "$stand_in" scope_extension "$_si_exp" "$(aid_invoke_root 2>/dev/null || pwd)")" \
+        || die "amend-scope: --stand-in ${stand_in} does not permit this widening: ${_si_why}"
+      _pm_decision="$(jq -nc --arg a "$stand_in" --arg s "$(jq -r .verdict_sha256 "$stand_in")" '{stand_in: $a, verdict_sha256: $s}')"
+      _SI_CONSUME="$stand_in"; _SI_EXPECT="$_si_exp"
     elif [[ -z "$_zp_set" ]]; then
       echo "amend-scope: step $(( _zp_cs + 1 )) closes no point of the brief — a widening here is a scope change for the PM (rule 11)" >&2
       _fsm_refusal_next amend_scope_no_brief_point || true
@@ -5652,6 +5760,7 @@ cmd_amend_scope() {
   # Known limit: the generation-time D5 gate (gates/aid-contract-validate.sh)
   # compares plan.json against the EPIC's scope blocks; it runs at generation,
   # not mid-EPIC, and a REGENERATION resets the amendment by design.
+  [[ -z "${_SI_CONSUME:-}" ]] || aid_stand_in_consume "$evidence_dir" "$_SI_CONSUME" "$_SI_EXPECT" || die "amend-scope: the use of ${_SI_CONSUME} could not be recorded in the plan's ledger — nothing is claimed as permitted"
   log_event "${evidence_dir}/timeline.jsonl" "scope_amended" step="$cs" step_id="$step_id" paths="$(jq -r 'join(",")' <<<"$add_json")" reason="$reason" zadani_point="${_zp_point:-null}" pm_card="$(jq -r '.card // "null"' <<< "${_pm_decision:-null}")"
   fsm_emit_audit_log "scope_amended" --evidence-dir "$evidence_dir" --step "$cs" --paths "$(jq -r 'join(",")' <<<"$add_json")" --reason "$reason" 2>/dev/null || true
   echo "amend-scope: step ${cs} (${step_id}) may now also change: $(jq -r 'join(", ")' <<<"$add_json") — recorded in ${amend#${evidence_dir}/} and the timeline; plan_json_hash re-stamped. Continue the step; the agent's return must list these files like any other."
@@ -6948,6 +7057,8 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     set-field)         shift; cmd_set_field "$@" ;;
     auto-mode)         shift; cmd_auto_mode "$@" ;;
     amend-scope)       shift; cmd_amend_scope "$@" ;;
+    amend-contract)    shift; cmd_amend_contract "$@" ;;
+    step-redispatch)   shift; cmd_step_redispatch "$@" ;;
     rebase-plan)       shift; cmd_rebase_plan "$@" ;;
     done-advance)               shift; cmd_done_advance "$@" ;;
     abandon)                    shift; cmd_abandon "$@" ;;
