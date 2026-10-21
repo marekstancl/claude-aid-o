@@ -397,6 +397,32 @@ def place_bundle(project, place):
     return [x for x in r.stdout.splitlines() if x.strip()], s.stdout.strip()
 
 
+def skeleton_tests_md(project):
+    """The machine check of the skeleton over the model now (the quick check, else the precheck), as a page for the
+    roles: counts per check and what did not pass. None without a model or a check over this model."""
+    model = os.path.join(project, "docs", "design", "screens.json")
+    if not os.path.isfile(model):
+        return None
+    msha = sha_file(model)
+    for kind in ("quick", "precheck"):
+        try:
+            q = json.load(open(os.path.join(project, ".aid-ui", kind, "result.json"), encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if q.get("model_sha256") != msha:
+            continue
+        rows = [r for r in q.get("rows") or [] if isinstance(r, dict)]
+        by = {}
+        for r in rows:
+            by.setdefault(r.get("check"), [0, 0])[0 if r.get("status") == "pass" else 1] += 1
+        red = [r for r in rows if r.get("status") != "pass"]
+        return (f"# Automatické testy úloh na kostře ({'rychlá kontrola, nejširší šířka' if kind == 'quick' else 'předběžná brána, všechny šířky'})\n\n"
+                f"Nad tímto modelem (otisk {msha[:12]}): {len(rows) - len(red)} řádků prošlo, {len(red)} ne.\n\n"
+                + "".join(f"- {c}: {ok} prošlo, {bad} ne\n" for c, (ok, bad) in sorted(by.items(), key=lambda kv: str(kv[0])))
+                + ("" if not red else "\nNeprošlo:\n" + "".join(f"- {r.get('check')} {r.get('page')} {r.get('state') or ''}: {str(r.get('detail') or '')[:160]}\n" for r in red[:40])))
+    return None
+
+
 def critic_place(project, web, audit, out, role, history, place, role_text, frozen):
     """One rating of a decision place other than the finished web (P113): the role gets the place's bundle under
     podklady/ (and the skeleton address at the structure), the png files of it as images."""
@@ -408,6 +434,11 @@ def critic_place(project, web, audit, out, role, history, place, role_text, froz
         dst = os.path.join(bundle, "podklady", rel.replace(".aid-ui/", "").replace("docs/", ""))
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copyfile(os.path.join(project, rel), dst)
+    md = skeleton_tests_md(project)
+    if md:   # H5 runs 3-4: both roles asked for the task tests of the skeleton every round - they ran, show them
+        os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
+        with open(os.path.join(bundle, "podklady", "testy-kostry.md"), "w", encoding="utf-8") as fh:
+            fh.write(md)
     facts = os.path.join(project, "docs", "content", "facts.yaml")
     if os.path.isfile(facts):
         os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
@@ -1256,6 +1287,8 @@ def answer(project, url, once, dry, watch):
 
 
 def main(a):
+    if any(x in ("-h", "--help") for x in a):   # H5 run 4: "facts --help" ran the facts
+        a = []
     if len(a) >= 2 and a[0] == "costs":
         print(json.dumps(costs.summary(os.path.abspath(a[1])), ensure_ascii=False))
         return

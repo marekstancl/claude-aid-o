@@ -642,8 +642,10 @@ await pg.goto(U + '/formular/?stav=error'); r.push(await pg.inputValue('[name="n
 await pg.goto(U + '/formular/?stav=zalozit.recovery'); r.push(await vis('[data-aid-action="formular.znovu"]'));
 await pg.goto(U + '/formular/?stav=smazat.failure'); r.push(await vis('[data-aid-action="formular.znovu"]'));   // another task's failure is not this one's
 await pg.goto(U + '/formular/?stav=zalozit.loading'); r.push(String(await pg.locator('[data-aid-action="formular.ulozit"]').isDisabled()));
+await pg.goto(U + '/detail/'); await pg.click('[data-aid-action="detail.smazat"]'); await pg.keyboard.press('Escape'); await pg.waitForTimeout(100);
+r.push(await pg.evaluate(() => document.activeElement && document.activeElement.dataset.aidAction));   // Esc: the focus is back on its button
 console.log(r.join(' ')); await b.close();
 J
-  out="$(node "$BATS_TEST_TMPDIR/h.mjs")"; [ "$out" = "- v v - - - v v v Nákup na sobotu - v v - true" ] || { echo "$out"; return 1; }
+  out="$(node "$BATS_TEST_TMPDIR/h.mjs")"; [ "$out" = "- v v - - - v v v Nákup na sobotu - v v - true detail.smazat" ] || { echo "$out"; return 1; }
   "$SERVE" stop skeleton
 }

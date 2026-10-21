@@ -131,6 +131,8 @@ verzi, i neúplné nafocení. **Jeho rozpory a opravy, které neviděl, jsou ná
 převezme a opraví spolu s nálezy rolí, jedním průchodem. Ověřovatel bez platné odpovědi, nebo verze změněná během
 kola = kolo neproběhlo; záznam kola nese podpisy záznamů ověřovatele, ze kterých nálezy vzešly. Hodnocení nasazení
 (`launch`) ověřovatele nepouští - hodnotí ostrou adresu, ne verzi souborů.
+Role u aplikace dostanou v podkladech i výsledek rychlé kontroly (nebo předběžné brány) nad modelem teď
+(`testy-kostry.md`: řádky po kontrolách a co neprošlo) - v bězích 3 a 4 ho jinak v každém kole chtěly jako chybějící.
 
 ## Smyčka bez čekání, výrobce v čerstvém kontextu (P118, PM 20. 10. 2026)
 

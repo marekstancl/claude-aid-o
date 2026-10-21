@@ -281,6 +281,7 @@ document.querySelectorAll('[data-aid-result]').forEach(function(e){e.hidden=done
 document.querySelectorAll('dialog[data-aid-confirm]').forEach(function(d){d.close();var b=document.querySelector('[data-aid-action="'+d.dataset.aidConfirm+'"]');
 if(b)b.addEventListener('click',function(){d.showModal();d.querySelector('[data-aid-confirm-no]').focus();});
 d.querySelector('[data-aid-confirm-no]').addEventListener('click',function(){d.close();if(b)b.focus();});
+d.addEventListener('cancel',function(){setTimeout(function(){if(b)b.focus();},0);});   // Esc closes it: the focus goes back to its button
 var y=d.querySelector('[data-aid-confirm-yes]'),ge=document.querySelector('[data-aid-error-global]');
 y.setAttribute('role','button');y.addEventListener('keydown',function(ev){if(ev.key===' '){ev.preventDefault();y.click();}});y.addEventListener('click',function(ev){ev.preventDefault();clearFail();
 fetch(y.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=y.href;}).catch(function(e){d.close();var fe=failFor(d.dataset.aidConfirm,e)||ge;fe.hidden=false;showRecover('aidRecoverFor',d.dataset.aidConfirm);fe.focus();});});});
@@ -444,7 +445,8 @@ def app_page(m, scr, approved, fields, results, ends, shell):
                       f'<span data-aid-mode-is="{esc(md["id"])}"{"" if i == 0 else " hidden"}>{esc(md["label"])}' + (f': {esc(md["text"])}' if md.get("text") else "") + '</span>'
                       for i, md in enumerate(mo)) + "</p>")
                   + f'<p class="lista-stav" role="status">{esc(x["states"]["filled"])}</p>'
-                  + ("" if not x.get("sample") else '<ul class="lista-ukazka">' + "".join(f"<li>{esc(v)}</li>" for v in x["sample"]) + "</ul>")   # what the bar shows, not only its buttons; its own sample (H5 run 3)
+                  + ("" if not (x.get("sample") or x.get("mode_sample")) else '<ul class="lista-ukazka">' + "".join(f"<li>{esc(v)}</li>" for v in x.get("sample") or [])
+                     + "".join(f'<li data-aid-mode-is="{esc(md)}"{"" if md == (mo or [{}])[0].get("id") else " hidden"}>{esc(v)}</li>' for md, rows in (x.get("mode_sample") or {}).items() for v in rows) + "</ul>")   # what the bar shows, not only its buttons; its own sample (H5 run 3)
                   + f'{actions_html(m, x, url, shell[x["id"]][0], shell[x["id"]][1])}</div>' for x in m["screens"] if x.get("shell"))
     switch = "".join(f'<a href="?stav={k}" data-aid-stav-link="{k}">{t}</a> ' for k, t in STATES)
     res = "".join(f'<p class="vysledek" role="status" data-aid-result="{esc(t)}">{esc(e)}</p>' for t, e in results)

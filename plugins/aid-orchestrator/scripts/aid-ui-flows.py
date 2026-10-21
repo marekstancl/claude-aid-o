@@ -96,7 +96,7 @@ export default async function ({ page, base, state }) {
     await press(page, st.screen, v.recover, false);
   }
   const scr = page.locator(S(T.done.screen)).first();   // the last action may navigate after its request: wait for it
-  const ok = await scr.waitFor({ state: 'visible', timeout: 8000 }).then(() => scr.getByText(T.done.expect).first().waitFor({ state: 'visible', timeout: 5000 }))
+  const ok = await scr.waitFor({ state: 'visible', timeout: 8000 }).then(() => scr.getByText(T.done.expect).locator('visible=true').first().waitFor({ state: 'visible', timeout: 5000 }))   // two tasks may end in the same words: the shown one (H5 run 4)
     .then(() => true, () => false);
   return { response, done: !!ok, why: ok ? '' : `výsledek nenastal: obrazovka ${T.done.screen} neukazuje „${T.done.expect}“` };
 }

@@ -648,8 +648,8 @@ app_handover() {
   SK="$BATS_TEST_DIRNAME/../../lib/aid-ui-skeleton.py"
   mkdir -p "$APP/.aid-ui"; echo '{"type": "webapp", "brand": "none", "local": false}' > "$APP/.aid-ui/variant.json"
   mutate '.screens[0].fields = [{name: "hledat", label: "Hledat"}] | .screens[0].actions += [{id: "filtr", label: "Filtrovat", kind: "navigate", to: "seznam"}]
-    | .tasks[0].steps = [{screen: "seznam", action: "filtr", input: {hledat: "Nákup"}}] + .tasks[0].steps | .tasks[0].failure_paths[].at_step += 1
-    | .screens += [{id: "lista", title: "Lišta", purpose: "Nahoře.", nav: false, shell: true, actions: [], sample: ["Režim: demo"], states: {empty: "nenastává, protože vždy", loading: "nenastává, protože vždy", error: "nenastává, protože vždy", filled: "3 poznámky"}}]'
+    | .modes = [{id: "bezi", label: "Běží"}, {id: "pauza", label: "Pauza"}] | .tasks[0].steps = [{screen: "seznam", action: "filtr", input: {hledat: "Nákup"}}] + .tasks[0].steps | .tasks[0].failure_paths[].at_step += 1
+    | .screens += [{id: "lista", title: "Lišta", purpose: "Nahoře.", nav: false, shell: true, actions: [], sample: ["Režim: demo"], mode_sample: {bezi: ["Čtečka čte"]}, states: {empty: "nenastává, protože vždy", loading: "nenastává, protože vždy", error: "nenastává, protože vždy", filled: "3 poznámky"}}]'
   run python3 "$SCR" check "$APP"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   python3 "$SK" build "$APP" >/dev/null
   s="$APP/site/seznam/index.html"
@@ -658,6 +658,16 @@ import re, sys
 h = open(sys.argv[1], encoding="utf-8").read()
 form = re.search(r'<form[^>]*data-aid-form.*?</form>', h, re.S).group(0)
 assert 'name="hledat"' in form and 'data-aid-action="seznam.filtr"' in form, form[:300]
-assert '<ul class="lista-ukazka"><li>Režim: demo</li></ul>' in h
+assert '<ul class="lista-ukazka"><li>Režim: demo</li><li data-aid-mode-is="bezi">Čtečka čte</li></ul>' in h, h[h.find("lista-ukazka")-20:h.find("lista-ukazka")+200]
 PY
+}
+
+@test "roles (P118 H5 run 4): the roles get the skeleton's task tests over the model now as a page; another model's check is not shown" {
+  mkdir -p "$APP/.aid-ui/quick"; sha="$(sha256sum "$M" | cut -d' ' -f1)"
+  echo "{\"model_sha256\": \"$sha\", \"rows\": [{\"check\": \"app_flows\", \"page\": \"zalozit\", \"status\": \"pass\"}, {\"check\": \"app_states\", \"page\": \"screen:seznam\", \"state\": \"empty\", \"status\": \"fail\", \"detail\": \"prázdno chybí\"}]}" > "$APP/.aid-ui/quick/result.json"
+  out="$(python3 -c 'import importlib.util,sys; s=importlib.util.spec_from_file_location("c", sys.argv[1]); c=importlib.util.module_from_spec(s); s.loader.exec_module(c); print(c.skeleton_tests_md(sys.argv[2]))' "$BATS_TEST_DIRNAME/../../aid-ui-client.py" "$APP")"
+  [[ "$out" == *"1 řádků prošlo, 1 ne"* ]]; [[ "$out" == *"app_states screen:seznam empty: prázdno chybí"* ]]
+  jq '.app = "jinak"' "$M" > "$T/m.json" && mv "$T/m.json" "$M"   # another model now
+  out="$(python3 -c 'import importlib.util,sys; s=importlib.util.spec_from_file_location("c", sys.argv[1]); c=importlib.util.module_from_spec(s); s.loader.exec_module(c); print(c.skeleton_tests_md(sys.argv[2]))' "$BATS_TEST_DIRNAME/../../aid-ui-client.py" "$APP")"
+  [ "$out" = None ]
 }
