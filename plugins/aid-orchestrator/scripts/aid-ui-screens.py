@@ -236,7 +236,7 @@ def violations(m, proj):
         fd = {k: [x for x in fd.get(k) or [] if isinstance(x, dict)] for k in ("facts", "open")}
         facts_ids = {x.get("id") for x in fd["facts"]}
         firm = {x.get("id") for x in fd["facts"] if x.get("kind") not in ("assumption", "unknown")}
-        if fd.get("open"):
+        if fd.get("open") and existing:   # an app without a UI today: a dispute matters only where a task cites it (below)
             out.append(f"/app-facts: {len(fd['open'])} otevřených otázek (vytěžovače si odporují): " + ", ".join(str(o.get("fact", {}).get("id")) for o in fd["open"][:6])
                        + " - rozhodni podle zdroje a aid-ui-client.py facts --drop <id> --reason")
         for x in fd.get("facts") or []:
@@ -306,7 +306,7 @@ def violations(m, proj):
             continue
         if not wsteps:
             continue
-        if facts_ids is not None and t.get("new") is None:   # an existing app: the task's behaviour rests on agreed facts of what the app does (or is new: a requirement)
+        if facts_ids is not None and (existing or t.get("facts")) and t.get("new") is None:   # an existing app: the task's behaviour rests on agreed facts of what the app does (or is new: a requirement)
             miss = [x for x in t.get("facts") or [] if x not in facts_ids]
             if not t.get("facts"):
                 out.append(f"/tasks/{i}/facts: úloha {t['id']} zapisuje, ale neodkazuje na fakta appky (app-facts.json), o která se její chování opírá, ani na požadavek nového chování (new)")

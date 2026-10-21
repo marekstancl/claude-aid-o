@@ -152,8 +152,8 @@ sc = {r: {c["id"]: {"score": 9, "evidence": "model a kostra"} for e in rec["role
 print(json.dumps({"requirements": [{"id": "z1", "source": "zadani.md:2", "text": "poznámky", "covered_by": ["task:zalozit", "screen:seznam"]}], "scores": sc, "whole_check": {"by": "claude", "seen": "kostra bez rozporů", "open": []}}))
 PY
   run python3 "$Q" self "$P" --place struktura --file "$P/self.json"
-  [ "$status" -eq 1 ]; [[ "$output" == *"předběžná brána kostry neproběhla"* ]]
-  sha="$(sha256sum "$P/docs/design/screens.json" | cut -d' ' -f1)"; mkdir -p "$P/.aid-ui/precheck"
+  [ "$status" -eq 1 ]; [[ "$output" == *"rychlá kontrola kostry neproběhla"* ]]
+  sha="$(sha256sum "$P/docs/design/screens.json" | cut -d' ' -f1)"; mkdir -p "$P/.aid-ui/precheck"   # the precheck counts too (the quick check is enough)
   echo "{\"model_sha256\": \"$sha\", \"rows\": [{\"check\": \"task_recovery\", \"page\": \"zalozit\", \"state\": \"fail-1\", \"status\": \"fail\"}]}" > "$P/.aid-ui/precheck/result.json"
   run python3 "$Q" self "$P" --place struktura --file "$P/self.json"
   [ "$status" -eq 1 ]; [[ "$output" == *"není zelená: task_recovery zalozit fail-1"* ]]
@@ -164,11 +164,10 @@ PY
   jq '.requirements[0].covered_by += ["task:nikdy"]' "$P/self.json" > "$P/s2.json"
   run python3 "$Q" self "$P" --place struktura --file "$P/s2.json"
   [ "$status" -eq 1 ]; [[ "$output" == *"task:nikdy není úloha ani obrazovka modelu"* ]]
-  run python3 "$Q" self "$P" --place struktura --file "$P/self.json"
-  [ "$status" -eq 1 ]; [[ "$output" == *"neproběhl nezávislý ověřovatel"* ]]   # P118: the verifier's signed record over this version
-  python3 -c 'import sys,subprocess; sys.path.insert(0, sys.argv[2] + "/lib"); import aid_ui_memory as m
-art = subprocess.run([sys.executable, sys.argv[2] + "/aid-ui-critic.py", "bundle-sha", sys.argv[1], "--place", "struktura"], capture_output=True, text=True).stdout.strip()
-m.verify_append(sys.argv[1], "struktura", {"artifact": art, "at": "t", "fixes": {}, "open": []})' "$P" "$SC"
+  # P118 1A: no verifier record needed before the round - it runs with the roles
   run python3 "$Q" self "$P" --place struktura --file "$P/self.json"
   [ "$status" -eq 0 ] || { echo "$output"; return 1; }; [[ "$output" == *"SELF struktura: 1 požadavků"* ]]
+  rm "$P/.aid-ui/precheck/result.json"; mkdir -p "$P/.aid-ui/quick"   # the quick check over this model is enough
+  python3 "$SC/aid-ui-screens.py" matrix "$P" | jq --arg s "$sha" '{model_sha256: $s, rows: [.rows[] | {check, page, state, status: "pass"}]}' > "$P/.aid-ui/quick/result.json"
+  run python3 "$Q" self "$P" --place struktura --file "$P/self.json"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }

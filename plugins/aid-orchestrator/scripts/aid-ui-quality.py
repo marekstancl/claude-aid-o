@@ -13,12 +13,13 @@ rounds/<n>/{owner,tech}/ (the ratings), rounds/<n>/history-<role>.json (the memo
       The check before the roles (P118): kontrola.json {requirements: [{id, source "<file>:<line>" in the project, text,
       covered_by: [where] | out_of_scope: <why>}]} - every requirement of the brief with its source, covered or out of
       scope (a webapp's structure: covered_by names task:<id> | screen:<id>); a webapp's struktura and vzhled also a
-      green precheck of the skeleton on the model now (aid-ui-verify.sh --precheck); and the independent verifier's
-      signed records over this very version (aid-ui-client.py verify): no open point in any run over it, every fix of
-      the last round seen. No marks of the producer (they never matched the roles). Refused naming each gap; recorded
+      green quick check (or precheck) of the skeleton on the model now (aid-ui-verify.sh --quick) and a clean lint.
+      No marks of the producer (they never matched the roles), no verifier run first (PM 21. 10. 2026, 1A: the round
+      runs it with the roles). Refused naming each gap; recorded
       in .aid-ui/critic/self/<place>.json bound to the place's bundle and frozen critic.
   round <project> --web <url>
-      One round on the current site. Refused without a self record over the bundle and the critic now (not in the
+      One round on the current site; the independent verifier (aid-ui-client.py verify) runs alongside the roles when
+      no record of it is over this version, its open points and the fixes it did not see are findings (role verify). Refused without a self record over the bundle and the critic now (not in the
       launch loop: it rates the deployment of a handed-over web). Refused while the previous round has a finding without a state, an accepted
       finding without --evidence, or the site fails `aid-ui-state.sh gate-check` (also for round 1), or when status
       says stop/audit. Books the agent's own work since the last round first (aid_ui_costs.book_agent: the Claude
@@ -220,19 +221,22 @@ def self_problems(p, doc):
             miss = [x for x in cov if x not in refs]
             if miss:
                 bad.append(f"{r['id']}: {', '.join(miss)} není úloha ani obrazovka modelu (task:<id> | screen:<id>)")
-    # P118: no marks of the producer - they never matched the roles (always 9, roles 4.9-8.8); what the independent
-    # verifier recorded over this version decides, below
+    # P118: no marks of the producer - they never matched the roles (always 9, roles 4.9-8.8); the machine checks decide
     if model is not None and PLACE in ("struktura", "vzhled"):   # an app's skeleton passed its own gate on this model first
-        pre = os.path.join(p, ".aid-ui", "precheck", "result.json")
-        try:
-            res = json.load(open(pre, encoding="utf-8"))
-        except (OSError, ValueError):
-            res = None
         msha = hashlib.sha256(open(os.path.join(p, "docs", "design", "screens.json"), "rb").read()).hexdigest() if model else ""
+        res = None
+        for pre in ("quick", "precheck"):   # the quick check (widest width, ~3 min) is enough before the roles; the full gate decides the handover
+            try:
+                r_ = json.load(open(os.path.join(p, ".aid-ui", pre, "result.json"), encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if r_.get("model_sha256") == msha:
+                res = r_; break
+            res = res or r_
         if not res:
-            bad.append("předběžná brána kostry neproběhla (aid-ui-verify.sh <projekt> --precheck)")
+            bad.append("rychlá kontrola kostry neproběhla (aid-ui-verify.sh <projekt> --quick)")
         elif res.get("model_sha256") != msha:
-            bad.append("předběžná brána běžela nad jiným modelem; pusť ji znovu")
+            bad.append("rychlá kontrola běžela nad jiným modelem; pusť ji znovu (aid-ui-verify.sh <projekt> --quick)")
         else:   # every row of the model's matrix present and passing, nothing else red
             import importlib.util
             spec = importlib.util.spec_from_file_location("aid_ui_screens", os.path.join(HERE, "aid-ui-screens.py"))
@@ -242,9 +246,9 @@ def self_problems(p, doc):
             miss = [f"{x['check']} {x['page']} {x['state']}" for x in mod.matrix(model) if (x["check"], x["page"], x["state"]) not in have]
             red = [f"{r.get('check')} {r.get('page')} {r.get('state')}" for r in rows if r.get("status") != "pass"]
             if miss:
-                bad.append("předběžná brána kostry je neúplná, chybí řádky: " + "; ".join(miss[:5]))
+                bad.append("rychlá kontrola kostry je neúplná, chybí řádky: " + "; ".join(miss[:5]))
             if red:
-                bad.append("předběžná brána kostry není zelená: " + "; ".join(red[:5]))
+                bad.append("rychlá kontrola kostry není zelená: " + "; ".join(red[:5]))
     if model is not None and os.path.isfile(os.path.join(p, "docs", "design", "screens.json")):   # the lint of the model (P118)
         import importlib.util
         spec = importlib.util.spec_from_file_location("aid_ui_screens", os.path.join(HERE, "aid-ui-screens.py"))
@@ -252,35 +256,30 @@ def self_problems(p, doc):
         lint = smod.violations(json.load(open(os.path.join(p, "docs", "design", "screens.json"), encoding="utf-8")), p)
         if lint:
             bad.append("lint modelu: " + "; ".join(lint[:5]) + (f" (+{len(lint) - 5})" if len(lint) > 5 else ""))
-    bad += verify_problems(p)
-    return bad
+    return bad   # P118 1A (PM 21. 10. 2026): the verifier runs with the roles in the round, its points are findings
 
 
-def verify_problems(p):
-    """P118: the independent verifier (aid-ui-client.py verify) went over this very version: its signed records outside
-    the project (aid_ui_memory.verify_records) over the place's artifact now. Every open point of every run over it
-    stays until the version changes; every fix of the last round was seen (verdict overeno) by the latest run that
-    names it. The producer writes nothing of this."""
-    art = site_sha(p)
+def verify_findings(p, n, art):
+    """P118 1A: the verifier's open points over this version and the fixes it did not see become findings of the round,
+    triaged and fixed with the roles' findings (role verify, by the agent). Its signed records, never the producer's."""
+    out, seen = [], set()
     recs = memory.verify_records(p, PLACE, art)
-    if not recs:
-        return [f"verify: nad touto verzí ({art[:12]}) neproběhl nezávislý ověřovatel - aid-ui-client.py verify {p} --place {PLACE} --web <adresa verze>"]
-    out = []
-    opn = {}
     for r in recs:
         for o in r.get("open") if isinstance(r.get("open"), list) else []:
-            if isinstance(o, dict):
-                opn.setdefault((str(o.get("where")), str(o.get("what"))), o)
-    if opn:
-        out.append("verify: ve verzi zůstávají rozpory: " + "; ".join(f"{k[0]}: {k[1][:80]}" for k in list(opn)[:5]) + (f" (+{len(opn) - 5})" if len(opn) > 5 else ""))
+            k = (str(o.get("where")), str(o.get("what"))) if isinstance(o, dict) else None
+            if k and k not in seen:
+                seen.add(k)
+                out.append({"id": f"r{n}-verify-f{len(out) + 1}", "role": "verify", "criterion": "verify", "severity": "major", "owner": "agent",
+                            "kind": "rozpor", "blocking": False, "text": k[1], "where": k[0], "fix": str(o.get("why") or "odstranit rozpor"), "state": None})
     rs = rounds(p)
-    now_n = rs[-1]["n"] if rs else 0
-    mine = [r for r in recs if r.get("round") == now_n and isinstance(r.get("fixes"), dict)]   # fixes of this round, not an older one's
+    mine = [r for r in recs if r.get("round") == (rs[-1]["n"] if rs else 0) and isinstance(r.get("fixes"), dict)]
     for f in (rs[-1]["findings"] if rs else []):
         if f.get("state") == "accepted" and f.get("evidence"):
             v = next((r["fixes"][f["id"]] for r in reversed(mine) if isinstance(r["fixes"].get(f["id"]), dict)), None)
             if not v or v.get("verdict") != "overeno":
-                out.append(f"verify {f['id']}: ověřovatel opravu {'neověřoval' if not v else 'neviděl (' + str(v.get('verdict')) + ': ' + str(v.get('seen'))[:80] + ')'}")
+                out.append({"id": f"r{n}-verify-f{len(out) + 1}", "role": "verify", "criterion": "verify", "severity": "major", "owner": "agent", "kind": "oprava",
+                            "blocking": False, "where": str((v or {}).get("where") or f.get("where") or ""), "fix": "dokončit opravu " + f["id"], "state": None,
+                            "text": f"oprava {f['id']} ve verzi {'není vidět' if not v else str(v.get('verdict')) + ': ' + str(v.get('seen'))[:120]}"})
     return out
 
 
@@ -297,7 +296,7 @@ def self_record(p, f):
            "at": now()}
     os.makedirs(os.path.dirname(self_path(p)), exist_ok=True)
     wj(self_path(p), rec)
-    print(f"SELF {PLACE}: {len(rec['requirements'])} požadavků, ověřovatel bez otevřených bodů; kolo smí běžet nad {rec['bundle_sha'][:12]}")
+    print(f"SELF {PLACE}: {len(rec['requirements'])} požadavků, lint a rychlá kontrola bez nálezu; kolo smí běžet nad {rec['bundle_sha'][:12]} (ověřovatel poběží s rolemi)")
 
 
 def self_ok(p):
@@ -603,8 +602,16 @@ def do_round(p, web):
     os.makedirs(d, exist_ok=True)
     costs.book_agent(p, "agent:before-round-%d" % n)   # the agent's own work since the last round (fixes, rebuilds)
     at = now()
+    art = site_sha(p)
+    vproc = None
+    if web and not LAUNCH and not memory.verify_records(p, PLACE, art):   # (the launch rates a deployment, not a version of the files)   # P118 1A: the independent verifier alongside the roles, not a loop before them
+        vlog = open(os.path.join(d, "verify.log"), "w")
+        vproc = subprocess.Popen([sys.executable, CLIENT, "verify", p, "--place", PLACE, "--web", web], stdout=vlog, stderr=subprocess.STDOUT, text=True)
     res = rate(p, web, d, hist={role: history(p, role) for role in ROLES})
+    if vproc is not None and vproc.wait() not in (0, 3):
+        res["verify"] = (1, d)
     bad = [role for role, (rc, _) in res.items() if rc]
+    res.pop("verify", None)
     if bad:
         os.rename(d, d + "-failed-" + at.replace(":", ""))   # a failed rating is kept for the record but is no round
         die("no rating from %s (record in %s-failed-*/<role>/run.json)" % (", ".join(bad), d))
@@ -617,6 +624,7 @@ def do_round(p, web):
     for role, (_, out) in res.items():
         ans = json.load(open(os.path.join(out, "answer.json"), encoding="utf-8"))
         finds += [mark_client(dict(f, id="r%d-%s-%s" % (n, role, bare(f["id"], [x["id"] for x in ans["findings"]])), role=role, state=None)) for f in ans["findings"]]
+    finds += verify_findings(p, n, art)
     score = merge(runs)
     shas = {role: hashlib.sha256(open(os.path.join(out, "answer.json"), "rb").read()).hexdigest() for role, (_, out) in res.items()}
     try:   # P118: the plugin does not change during a run - its version is part of the round's record

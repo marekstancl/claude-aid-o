@@ -113,18 +113,22 @@ detaily. Před každým kolem místa (`aid-ui-quality.py round`, všechna místa
    opravdu dělá** (kód, roadmapa, runbook), ne proti zadání obrazovek (P116 kolo 5: tři ukázky popisovaly chování,
    které appka nemá). Fakta vytěží dva nezávislí čtenáři: `aid-ui-client.py facts <projekt>` (postup aplikace 3b).
 3. **Lint modelu** (`aid-ui-screens.py check`, sekundy) bez nálezu.
-4. **Nezávislý ověřovatel jako nástroj:** `aid-ui-client.py verify <projekt> --place <místo> --web <adresa verze>`.
-   Nástroj sám nafotí, co člověk na každé adrese verze vidí, a Codex (záskok Claude Opus) to porovná s modelem,
-   fakty a podklady projektu: ověří opravy minulého kola a hledá rozpory v celé verzi. Výsledek je podepsaný záznam
-   mimo projekt, který píše jen nástroj (podpis brání omylu a ruční úpravě, ne úmyslu toho, kdo zná klíč); u každého
-   výroku stojí, kde ho ověřovatel viděl (klíč výpisu nebo soubor:řádek), a záznam nese číslo kola. Nástroj odmítne
-   adresu, která neslouží právě tuhle verzi, a neúplné nafocení. Stavy vzniklé až akcí (dialog, výsledek, selhání)
-   ověřují scénáře brány, ne výpis. Rozpor platí, dokud se verze nezmění; opakovaný běh ho nesmaže.
-5. **Strojové kontroly zelené:** u aplikace `aid-ui-verify.sh <projekt> --precheck` nad kostrou (úlohy, stavy,
-   klávesnice, obnova, axe; minuty, P118), u hotového webu brána a `gate-check`.
+4. **Strojové kontroly zelené:** u aplikace `aid-ui-verify.sh <projekt> --quick` nad kostrou a modelem teď (úlohy,
+   stavy, klávesnice, obnova na nejširší šířce, asi 3 minuty; stačí i `--precheck`), u hotového webu brána a
+   `gate-check`. Plná předběžná brána rozhoduje až předání.
 Zápis `aid-ui-quality.py self <projekt> --place <místo> --file <kontrola.json>` (jen soupis požadavků) to ověří a váže
 na otisk podkladů místa; `round` bez platné kontroly nad touto verzí nespustí. **Vlastní známky výrobce se nepíšou**
 (P118: v pilotu vždy „9“, role 4,9-8,8 - nic nerozhodovaly).
+
+**Nezávislý ověřovatel běží s rolemi, ne před nimi** (PM 21. 10. 2026, 1A; H5 běh 2: smyčka „ověřovatel dočista, pak
+role“ stála hodinu bez jediného kola). `round` ho pustí sám souběžně s rolemi, pokud nad touto verzí ještě neběžel
+(`aid-ui-client.py verify <projekt> --place <místo> --web <adresa verze>` jde pustit i ručně, třeba po opravě). Nástroj
+nafotí, co člověk na každé adrese verze vidí (i vypnuté akce, obsah polí a potvrzení řečené slovy), a Codex (záskok
+Claude Opus) to porovná s modelem, fakty a podklady projektu: ověří opravy minulého kola a hledá rozpory v celé verzi.
+Výsledek je podepsaný záznam mimo projekt, který píše jen nástroj (podpis brání omylu a ruční úpravě, ne úmyslu toho,
+kdo zná klíč); u každého výroku stojí, kde ho ověřovatel viděl, a nástroj odmítne adresu, která neslouží právě tuhle
+verzi, i neúplné nafocení. **Jeho rozpory a opravy, které neviděl, jsou nálezy kola** (role `verify`): výrobce je
+převezme a opraví spolu s nálezy rolí, jedním průchodem. Ověřovatel bez platné odpovědi = kolo neproběhlo.
 
 ## Smyčka bez čekání, výrobce v čerstvém kontextu (P118, PM 20. 10. 2026)
 

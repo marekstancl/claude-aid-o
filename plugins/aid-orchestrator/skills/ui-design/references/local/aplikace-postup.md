@@ -52,8 +52,9 @@ aplikaci nekopíruje: tytéž nástroje, větev podle druhu.
 3. **Výsledek každé úlohy** (`done_when`): obrazovka, na které úloha skončí, a text, který tam musí být. Úloha, která
    odesílá data, má cestu selhání (`failure_paths`: krok, druh selhání, vstup zůstane, akce obnovy), nebo
    „nenastává, protože …" ve stavu selhání. U existující aplikace úloha, která nahrazuje dnešní, nese `replaces`.
-3b. **Fakta appky jako první (aplikace s kódem, P118):** `aid-ui-client.py facts <projekt>` - Codex a Claude Opus
-   souběžně a nezávisle vytěží z kódu, plánů, rozhodnutí a runbooků, co appka opravdu dělá (asi 7 minut); soudce
+3b. **Fakta appky (povinná u `existing: true`, jinak volitelná; P118):** `aid-ui-client.py facts <projekt>` - pusť je
+   na pozadí hned na začátku a mezitím piš soupis a model; Codex a Claude Opus souběžně a nezávisle vytěží z kódu,
+   plánů, rozhodnutí a runbooků, co appka opravdu dělá (Trading 13 minut); soudce
    (Codex) vidí oba seznamy naráz a spáruje fakta, která tvrdí totéž, i když mají jiné id nebo jiný rozsah řádků.
    Do `docs/design/app-facts.json` jde jako dohodnuté jen to, co řekli oba (citace ověřená v souboru); dohodnutá fakta
    přežijí další běh. Fakt, který našel jen jeden čtenář, je `unconfirmed` - informuje, nic neblokuje; potřebuje-li
@@ -74,11 +75,12 @@ aplikaci nekopíruje: tytéž nástroje, větev podle druhu.
 5a. **Lišta aplikace** (STOP, Panika, režim - co je na každé obrazovce) je obrazovka s `shell: true`: její akce kostra
    vykreslí na každé stránce, krok úlohy na ní smí stát odkudkoli.
 5a2. **Po každé úpravě modelu nebo kostry** `aid-ui-verify.sh <projekt> --quick` (stejné řádky jako předběžná brána,
-   jen na nejširší šířce, asi minuta); o kole ani předání nerozhoduje.
-5b. **Před kolem rolí** (SKILL.md „Verze 1 je kompletní“): lint bez nálezu, `aid-ui-client.py verify <projekt> --place
-   struktura --web <adresa kostry>` bez otevřeného rozporu a se všemi opravami minulého kola viděnými, `aid-ui-verify.sh
-   <projekt> --precheck` zelené nad modelem teď a `aid-ui-quality.py self <projekt> --place struktura --file
-   <kontrola.json>` (soupis požadavků).
+   jen na nejširší šířce, asi 3 minuty); zelená nad modelem teď pouští kolo rolí, předání rozhoduje plná brána. Kostra je
+   statická: po úpravě modelu ji nejdřív znovu postav (`aid-ui-serve.sh skeleton`).
+5b. **Před kolem rolí** (SKILL.md „Verze 1 je kompletní“): lint bez nálezu, `aid-ui-verify.sh <projekt> --quick`
+   zelené nad modelem teď (po přestavění kostry `aid-ui-serve.sh skeleton`) a `aid-ui-quality.py self <projekt> --place
+   struktura --file <kontrola.json>` (soupis požadavků). Ověřovatele nepouštěj dopředu: `round` ho pustí s rolemi a jeho
+   rozpory přidá k nálezům kola (PM 21. 10. 2026, 1A).
 6. Kolo místa `struktura` (`aid-ui-quality.py round <projekt> --place struktura --web <adresa kostry>`): role
    proklikávají kostru a čtou model. Klient-role je vlastník produktu a klíčový uživatel, postavená z kódu a zadání
    projektu.

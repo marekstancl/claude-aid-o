@@ -518,21 +518,21 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   jq -e '.decision == "stop:stagnation" and (.why | contains("waits on what the client has not supplied (r1-owner-f2, r1-tech-f2)"))' <<<"$output" >/dev/null || { echo "$output"; return 1; }
 }
 
-@test "self (P118): the round needs the independent verifier's signed record over this version - none, an open point, a fix not seen, a forged line or an older version refuse it" {
+@test "round (P118 1A): the verifier runs with the roles when no record is over this version; its open points and the fixes it did not see are findings of the round" {
   ans 6 7; qround "$P" --web "$W" >/dev/null; cycle
-  selfdoc 9 web
-  run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"verify r1-owner-f1: ověřovatel opravu neověřoval"* ]]   # the run before the round named no fix
-  FIXCHECK=nepravda verified web; run python3 "$Q" self "$P" --place web --file "$T/self.json"
-  [ "$status" -eq 1 ]; [[ "$output" == *"verify r1-owner-f1: ověřovatel opravu neviděl (nepravda"* ]]
-  rm -r "$T/verify-home"; WHOLE_OPEN="cena 10 na úvodu, 12 v ceníku" verified web; verified web   # a later clean run does not erase it
-  run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"zůstávají rozpory"*"cena 10"* ]]
-  rm -r "$T/verify-home"; verified web
-  f="$(ls "$T"/verify-home/*/web.jsonl)"; jq -c '.open = [] | .fixes = {}' "$f" > "$T/forged" && cp "$T/forged" "$f"   # edited by hand: the signature no longer holds
-  run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"neproběhl nezávislý ověřovatel"* ]]
-  rm -r "$T/verify-home"; verified web
-  run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  echo '<html lang="cs"><body>chleba, jinak</body></html>' > "$P/site/index.html"   # another version: the record is not over it
-  run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"neproběhl nezávislý ověřovatel"* ]]
+  echo '<p>opraveno</p>' >> "$P/site/index.html"   # the fixed version: no verifier record over it yet
+  selfdoc 9 web; python3 "$Q" self "$P" --place web --file "$T/self.json" >/dev/null   # no verifier record is needed before the round
+  echo '{"fixes": {"r1-owner-f1": {"verdict": "nepravda", "seen": "věta je pořád obecná", "where": "site/index.html:1"}, "r1-tech-f1": {"verdict": "overeno", "seen": "opraveno", "where": "site/index.html:1"}},
+    "open": [{"where": "site/index.html:1", "what": "cena 10 na úvodu, 12 v ceníku", "why": "dvě čísla"}]}' > "$T/ans-verify.json"
+  ans 7 7; run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ -f "$P/.aid-ui/critic/rounds/2/verify.log" ]; supply_missing web
+  H="$(python3 "$Q" status "$P")"
+  jq -e '[.history[-1].findings[] | select(.role == "verify") | .text] | (index("cena 10 na úvodu, 12 v ceníku") != null) and (map(test("^oprava r1-owner-f1 ve verzi nepravda")) | any) and (map(test("r1-tech-f1")) | any | not)' <<<"$H" >/dev/null || { jq -c '[.history[-1].findings[] | select(.role == "verify")]' <<<"$H"; return 1; }
+  # a verifier that gives no valid answer: no round
+  cycle; for f in $(jq -r '.history[-1].findings[] | select(.role == "verify") | .id' <<<"$H"); do python3 "$Q" triage "$P" "$f" rejected_with_reason --reason "test" >/dev/null; done
+  echo 'nic' > "$T/ans-verify.json"; printf 'x' >> "$P/site/index.html"
+  selfdoc 9 web; python3 "$Q" self "$P" --place web --file "$T/self.json" >/dev/null
+  run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 1 ] || { echo "$output" | tail -3; return 1; }; [[ "$output" == *"no rating from verify"* ]] || { echo "$output" | tail -3; return 1; }
 }
 
 @test "verify (P118): the command captures the version, asks the verifier, signs the record; open points and unseen fixes exit 3" {
@@ -546,7 +546,7 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   selfdoc 9 web; run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq '.open = [{where: "page /", what: "cena 10 tady, 12 jinde"}]' "$T/ans-verify.json" > "$T/a2" && mv "$T/a2" "$T/ans-verify.json"
   run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 3 ]
-  run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"cena 10 tady"* ]]
+  run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 0 ]   # P118 1A: an open point does not stop the round, it is its finding
   jq '.open = [] | .fixes[] .where = "nikde"' "$T/ans-verify.json" > "$T/a2" && mv "$T/a2" "$T/ans-verify.json"   # a place that is neither a capture key nor file:line
   run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 1 ]
   mkdir -p "$T/old"; echo '<html lang="cs"><body>stará verze</body></html>' > "$T/old/index.html"   # an address serving another version than the files
@@ -604,6 +604,8 @@ json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka"
   run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 1 ]; jq -e '(.open | map(.fact.id)) == ["spor-jen-codex"]' "$P/docs/design/app-facts.json" >/dev/null
   # the model of an existing app: an open question and a writing task without facts are refused
   mkdir -p "$P/docs/design"; cp "$SC/tests/fixtures/aid-ui/app/docs/design/screens.json" "$P/docs/design/screens.json"
+  run python3 "$SC/aid-ui-screens.py" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }   # an app without a UI today: facts are not required
+  echo '{"type": "webapp", "brand": "none", "local": false, "existing": true}' > "$P/.aid-ui/variant.json"
   run python3 "$SC/aid-ui-screens.py" check "$P"; [ "$status" -eq 1 ]
   [[ "$output" == *"1 otevřených otázek"*"spor-jen-codex"* ]]; [[ "$output" == *"úloha zalozit zapisuje, ale neodkazuje na fakta appky"* ]]
   jq '.tasks[0].new = "R9"' "$P/docs/design/screens.json" > "$T/m.json" && mv "$T/m.json" "$P/docs/design/screens.json"   # new behaviour needs a real requirement
