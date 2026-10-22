@@ -762,6 +762,9 @@ bpy() { AID_UI_SCREENS_PY="$HERE/aid-ui-screens.py" python3 -c "$BUILD_PY" "$@";
 checks_json() {   # checks.yaml next to the coverage map, as JSON in a temp file
   local f; f="$(tmpfile checks.json)"
   yq -o=json . "$(dirname "$COVERAGE_MAP")/checks.yaml" > "$f" || die "cannot read $(dirname "$COVERAGE_MAP")/checks.yaml"
+  if [[ -f "${STATE:-}" && "$(jq -r '.variant.type // ""' "$STATE")" == webapp ]]; then   # the gate dropped the web_only checks for an app: so does its record
+    jq '. as $r | .checks |= with_entries(select(.key as $k | ($k | IN(($r.web_only // [])[])) | not))' "$f" > "$f.t" && mv "$f.t" "$f"
+  fi
   echo "$f"
 }
 

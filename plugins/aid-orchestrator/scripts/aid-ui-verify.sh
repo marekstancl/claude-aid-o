@@ -104,6 +104,10 @@ OUT="$PROJECT/.aid-ui/verify"
 if [[ -n "$subject" ]]; then OUT="$(mktemp -d)"; trap 'rm -rf "$OUT"' EXIT   # subject only: the gate result stays
 else rm -rf "$OUT"; mkdir -p "$OUT"; fi
 yq -o=json . "$(dirname "$COVERAGE_MAP")/checks.yaml" > "$OUT/checks.json" || die "cannot read checks.yaml"
+if [[ "$(jq -r '.variant.type // ""' "$STATE")" == webapp ]]; then   # an app is not a company's public web (Trading 22. 10.: 5586 rows asked
+  # for an IČO, a brand font, a favicon and a search snippet): the web_only checks of checks.yaml are out, the app's quality rows stay
+  jq '. as $r | .checks |= with_entries(select(.key as $k | ($k | IN(($r.web_only // [])[])) | not))' "$OUT/checks.json" > "$OUT/checks.json.t" && mv "$OUT/checks.json.t" "$OUT/checks.json"
+fi
 facts=()
 if [[ -f "$PROJECT/docs/content/facts.yaml" ]]; then
   yq -o=json . "$PROJECT/docs/content/facts.yaml" > "$OUT/facts.json" || die "cannot read docs/content/facts.yaml"

@@ -1005,3 +1005,11 @@ PY
   run bash "$SC/aid-ui-verify.sh" "$PROJ" --quick; [ "$status" -eq 3 ]
   jq -e '[.rows[] | select(.check == "app_states" and .page == "mode:seznam" and .state == "pauza")][0] | .status == "fail" and (.detail | contains("nemá jít, ale jde"))' "$Q" >/dev/null
 }
+
+@test "app-gate (P118, Trading 22. 10.): an app runs no web_only check of checks.yaml (IČO, brand fonts, favicon...) and its record does not ask for them" {
+  app_gate
+  NARROW_VP=1440 narrow app_flows app_states keyboard_flows task_recovery business_minimum required_files
+  gate_app; [ "$status" -eq 0 ] || { echo "$output"; jq -c '.rows[] | select(.status != "pass") | [.check, .page, .detail]' "$RES" | head; return 1; }
+  [ "$(jq '[.rows[] | select(.check == "business_minimum" or .check == "required_files")] | length' "$RES")" -eq 0 ]
+  [ "$(jq -r '.gate.run_at // ""' "$PROJ/docs/design/brand-state.json")" = "$(jq -r .run_at "$RES")" ]   # recorded
+}

@@ -10,6 +10,11 @@ warn_only: [lighthouse_mobile, coverage]   # measured and reported, never blocks
 # P116: the rows of a web application's model (task x normal|keyboard|fail-<n>, screen x four states) run at these
 # widths and browsers only - a task is walked on a desktop and a phone; its pages keep the full matrix above
 app_rows: {viewports: [1440, 390], browsers: [chromium]}
+# web_only: checks of a company's public web that an app (variant.type webapp) does not run - the gate and gate-record
+# both drop them (Trading 22. 10. 2026: 5586 rows asked an internal tool for an IČO, a brand font and a favicon)
+web_only: [business_minimum, brand_consistency, brand_assets, brand_package, required_files, facts_match, glyph_coverage,
+  form_delivery, content_without_js, design_standard_doc, copy_review, customer_page, seo, ai_search, vision_doc, photo_slots,
+  motion_fidelity, privacy_before_consent, lighthouse_mobile, all_pages]
 # where a check applies (default: every page, viewport, browser and flow state); a
 # combination outside it needs no row. Keys: browsers and viewports (subsets), flows: false,
 # scope: project (one row: the home page, the last viewport, the first browser).
