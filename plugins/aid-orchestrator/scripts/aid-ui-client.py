@@ -404,7 +404,7 @@ def skeleton_tests_md(project):
     if not os.path.isfile(model):
         return None
     msha = sha_file(model)
-    for kind in ("quick", "precheck"):
+    for kind in ("verify", "quick", "precheck"):   # the full gate first: every width and every check (Trading 22. 10.: the roles asked for it)
         try:
             q = json.load(open(os.path.join(project, ".aid-ui", kind, "result.json"), encoding="utf-8"))
         except (OSError, ValueError):
@@ -420,7 +420,8 @@ def skeleton_tests_md(project):
         for r in rows:
             by.setdefault(r.get("check"), [0, 0])[0 if r.get("status") == "pass" else 1] += 1
         red = [r for r in rows if r.get("status") != "pass"]
-        return (f"# Automatické testy úloh na kostře ({'rychlá kontrola, nejširší šířka' if kind == 'quick' else 'předběžná brána, všechny šířky'})\n\n"
+        name = {"verify": "plná brána, všechny šířky a kontroly", "quick": "rychlá kontrola, nejširší šířka", "precheck": "předběžná brána, všechny šířky"}[kind]
+        return (f"# Automatické testy úloh na kostře ({name})\n\n"
                 f"Nad tímto modelem (otisk {msha[:12]}): {len(rows) - len(red)} řádků prošlo, {len(red)} ne.\n\n"
                 + "".join(f"- {c}: {ok} prošlo, {bad} ne\n" for c, (ok, bad) in sorted(by.items(), key=lambda kv: str(kv[0])))
                 + ("" if not red else "\nNeprošlo:\n" + "".join(f"- {r.get('check')} {r.get('page')} {r.get('state') or ''}: {str(r.get('detail') or '')[:160]}\n" for r in red[:40])))
