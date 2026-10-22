@@ -512,7 +512,11 @@ def critic(project, web, audit, out, role, history=None, place="web"):
     kind = "audit" if audit else "critic"
     out = out or os.path.join(memory.critic_dir(project), "runs", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + kind + "-" + role)
     man, comp = comp_shots(project) if role == "owner" else (None, [])
-    if role == "owner":
+    try:   # an app without a brand (an internal tool for one person) has no competitors to compare with (Trading 22. 10. 2026)
+        _v = json.load(open(os.path.join(project, "docs", "design", "brand-state.json"), encoding="utf-8")).get("variant") or {}
+    except (OSError, ValueError):
+        _v = {}
+    if role == "owner" and not (_v.get("type") == "webapp" and _v.get("brand") == "none"):
         lp = os.path.join(project, ".aid-ui", "critic", "competitors.json")
         have = [c for c in (man or {}).get("competitors", []) if {"1440", "390"} <= {re.sub(r"^.*-(\d+)\.png$", r"\1", x) for x in c["shots"]}]
         if not man or not os.path.isfile(lp) or man.get("list_sha256") != sha_file(lp) or len(have) < 3:   # shot from this very list

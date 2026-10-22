@@ -400,6 +400,8 @@ def check(rec, ans):
             if c.get("studio_score") is not None and not c["to_ten"]["client"]:   # what holds it down is named as the client's part
                 return f"{c['id']}: studio_score without what the client supplies (to_ten.client)"
     for f in ans["findings"]:
+        if rec.get("role_id") == "tech" and "blocking" not in f and f.get("severity") in ("blocking", "major", "minor"):
+            f["blocking"] = f["severity"] == "blocking"   # the expert's own severity says it (Trading 22. 10.: two answers lost on a missing flag)
         if rec.get("role_id") == "tech" and not isinstance(f.get("blocking"), bool):   # D5: the expert says it, never implied
             return f"finding {f['id']}: the expert's finding needs blocking true|false"
         if f["criterion"] not in want:
