@@ -411,6 +411,10 @@ def skeleton_tests_md(project):
             continue
         if q.get("model_sha256") != msha:
             continue
+        site = os.path.join(project, "site")
+        newest = max((os.path.getmtime(os.path.join(d, f)) for d, _, fs in os.walk(site) for f in fs), default=0)
+        if newest > os.path.getmtime(os.path.join(project, ".aid-ui", kind, "result.json")):   # the site changed after this check: not its result
+            continue
         rows = [r for r in q.get("rows") or [] if isinstance(r, dict)]
         by = {}
         for r in rows:
@@ -526,6 +530,11 @@ def critic(project, web, audit, out, role, history=None, place="web"):
     bundle = os.path.join(out, "bundle")
     shutil.copytree(site, os.path.join(bundle, "site"), dirs_exist_ok=True)   # the critic's whole world: the web
     rated_sha = site_sha(os.path.join(bundle, "site"))   # the web the critic read, not the live folder after the rating
+    md = skeleton_tests_md(project)   # an app's task tests over the model now (Trading 22. 10.: the gate ran green, the roles never saw it)
+    if md:
+        os.makedirs(os.path.join(bundle, "podklady"), exist_ok=True)
+        with open(os.path.join(bundle, "podklady", "testy-aplikace.md"), "w", encoding="utf-8") as fh:
+            fh.write(md.replace("na kostře", "nad touto verzí aplikace"))
     # and the facts the client confirmed (the frozen context may predate a confirmation: Coufal round 1 flagged two
     # facts the client had confirmed the day before as unconfirmed)
     facts_src = os.path.join(project, "docs", "content", "facts.yaml")
