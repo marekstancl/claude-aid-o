@@ -150,6 +150,12 @@ Když místo prošlo a výrobce verzi ještě opraví (nálezy přijatého kola)
 opravenou verzí, role mají celou paměť nálezů. Teprve pak verdikt místa, aby stál na tom, co se předává. Znovuotevření
 (`reopen`) je jen na přání PM; ani ono rolím paměť nemaže (P116 kolo 5: role bez paměti hodnotily místo jako nové).
 
+**Věcná chyba (fakt, zákon) vrací místo, dokud oprava není viděná** (D5; Trading 22. 10. 2026: každé kolo našlo novou
+drobnost v ukázkových číslech a místo se nezavřelo). Najde-li ji delta kolo a výrobce ji přijme a opraví, smyčka dá
+ještě jedno delta kolo (nejvýš dvě). Rozhodnutí místa (`place-verdict --fixed-in <kolo>`, a stejně `place-record`)
+pak věcnou chybu toho kola nepočítá, jen když je přijatá, opravená s doložením **a nezávislý ověřovatel opravu viděl**
+nad verzí teď (`verify`, verdikt `overeno`) - ruční zápis to nenahradí.
+
 ## Co role nechají na klientovi, dodá klient-agent (P116, PM 19. 10. 2026, všechna místa)
 
 Nález s `owner: client` a položky readiness („musí dodat klient“) nečekají na PM. Hned po kole (po triage) je

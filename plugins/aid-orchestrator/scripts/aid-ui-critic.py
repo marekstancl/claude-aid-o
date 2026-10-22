@@ -33,6 +33,8 @@ so `web` has six scores. Without --place every command means `web`.
       Three blind ratings of one place by one role (the closing audit): the `audit` block of the place's gate file
       (median_min, any_min, criterion_median_min). Exit 0 accepted, 3 not accepted, 1 invalid answer.
   place-verdict <project> --place <p> --score <score.json>... [--pm-choice <direction> --reason <t>] [--pm-veto <t>] [--supplied]
+                [--fixed-in <round>]  (a fact or law finding of that round no longer returns the place once it was accepted,
+                fixed and the independent verifier saw the fix over the version now)
       The place's decision from every score of the place (one per role): facts and law > the expert's craft defect >
       the client's choice (D5). A `fakt`/`zakon` finding returns the place (on one direction: that direction is out); a
       direction is out when any of its scores failed or the expert has a blocking `remeslo` finding on it; among the
@@ -594,7 +596,22 @@ def place_state(proj):
 
 # ---------------------------------------------------------------- the place verdict
 
-def decide(proj, place, scores, pm_choice=None, reason=None, pm_veto=None, supplied=False):
+def fixed_and_seen(proj, place, n):
+    """{finding id}: the findings of round n of the place that were accepted and fixed (evidence) and whose fix the
+    independent verifier saw (verdict overeno) over the place's version now - a fact a role found stops returning the
+    place only then (run 5, 22. 10. 2026: every round found a new sample-number nit and the place never closed)."""
+    import aid_ui_memory as memory
+    try:
+        rnd = json.load(open(os.path.join(critic_dir(proj), "rounds", place, str(n), "round.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    fixed = {f["id"] for f in rnd.get("findings") or [] if f.get("state") == "accepted" and f.get("evidence")}
+    seen = {k for r in memory.verify_records(proj, place, bundle_sha(proj, place)) if r.get("round") == n
+            for k, v in (r.get("fixes") or {}).items() if isinstance(v, dict) and v.get("verdict") == "overeno"}
+    return fixed & seen
+
+
+def decide(proj, place, scores, pm_choice=None, reason=None, pm_veto=None, supplied=False, resolved=None, rnd=None):
     expect = {(r, k) for r in ROLES for k in (place,) + EXTRA.get(place, ())}
     have = {(s["role"], x["rubric"]) for s in scores for x in s["directions"]}
     sets = {(s["role"], x["rubric"]): None for s in scores for x in s["directions"]}
@@ -616,6 +633,8 @@ def decide(proj, place, scores, pm_choice=None, reason=None, pm_veto=None, suppl
     seen = set()
     for s in scores:   # facts and law first (D5); both roles reporting one fact count once
         for f in s["findings"]:
+            if f.get("kind") in ("fakt", "zakon") and ({f"r{rnd}-{s['role']}-{f['id']}", f["id"]} & (resolved or set())):
+                continue   # fixed, and the verifier saw the fix in the version now
             if f.get("kind") in ("fakt", "zakon"):
                 key = (f["kind"], f.get("direction"), re.sub(r"\W+", " ", (f.get("text") or "").lower()).strip())   # the roles' criteria differ
                 if key in seen:
@@ -701,7 +720,8 @@ def place_check(proj, place, vfile):
             die(f"place_verdict_handmade: {r}'s answer of round {rnd.get('n')} is not the one the round recorded")
         scores.append(scored(proj, place, r, a))
     o = v.get("options") or {}
-    again = decide(proj, place, scores, o.get("pm_choice"), o.get("reason"), o.get("pm_veto"), o.get("supplied"))
+    n = rnd.get("n")   # the last round's facts that were fixed and that the verifier saw no longer return it (as place-verdict --fixed-in)
+    again = decide(proj, place, scores, o.get("pm_choice"), o.get("reason"), o.get("pm_veto"), o.get("supplied"), fixed_and_seen(proj, place, n), n)
     for k in ("status", "chosen", "chosen_by", "answers", "scores", "target"):
         if again[k] != v.get(k):
             die(f"place_verdict_handmade: {k} of the verdict ({v.get(k)}) is not what the place's last round gives ({again[k]})"
@@ -765,7 +785,7 @@ def main(a):
     pos = []
     i = 1
     while i < len(a):
-        if a[i] in ("--role", "--place", "--type", "--phase", "--metrics-dir", "--score", "--pm-choice", "--reason", "--pm-veto"):
+        if a[i] in ("--role", "--place", "--type", "--phase", "--metrics-dir", "--score", "--pm-choice", "--reason", "--pm-veto", "--fixed-in"):
             i += 2
         elif a[i] in ("--force", "--supplied"):
             i += 1
@@ -810,7 +830,10 @@ def main(a):
                 scores.append(json.load(open(f, encoding="utf-8")))
             except (OSError, ValueError) as e:
                 die(f"{f}: not readable JSON ({e})")
-        print(json.dumps(decide(os.path.abspath(pos[0]), place, scores, opt("--pm-choice"), opt("--reason"), opt("--pm-veto"), "--supplied" in a), ensure_ascii=False))
+        rn = opt("--fixed-in")   # the round whose fixed and verified facts no longer return the place
+        res = fixed_and_seen(os.path.abspath(pos[0]), place, int(rn)) if rn and rn.isdigit() else set()
+        print(json.dumps(decide(os.path.abspath(pos[0]), place, scores, opt("--pm-choice"), opt("--reason"), opt("--pm-veto"), "--supplied" in a,
+                                res, int(rn) if rn and rn.isdigit() else None), ensure_ascii=False))
         return
     if cmd == "place-check" and len(pos) == 2 and "--place" in a:
         return place_check(os.path.abspath(pos[0]), place, pos[1])

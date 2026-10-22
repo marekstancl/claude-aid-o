@@ -650,6 +650,35 @@ SH
   run qround "$P" --place sdeleni; [ "$status" -eq 1 ]
 }
 
+@test "delta (P118, run 5): a fact the delta round found and that was fixed gets one more delta round to be confirmed; a third never" {
+  python3 "$SC/aid-ui-critic.py" freeze "$P" --type web-local --place sdeleni >/dev/null
+  cat > "$T/bin/codex" <<SH
+#!/usr/bin/env bash
+[[ "\$1" == --version ]] && exit 0
+p="\$(cat)"; role=owner; grep -q "### $(yq -r '.criteria[0].id' "$K/web-local.tech.sdeleni.yaml") " <<<"\$p" && role=tech
+python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
+SH
+  chmod +x "$T/bin/codex"
+  pans sdeleni 9
+  run qround "$P" --place sdeleni; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  pcycle sdeleni
+  [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = verdict ]   # accepted, the version unchanged
+  f="$(python3 "$SC/aid-ui-critic.py" bundle-files "$P" --place sdeleni | head -1)"; echo "Doplněno podle nálezu." >> "$P/$f"
+  run python3 "$Q" status "$P" --place sdeleni; jq -e '.decision == "delta" and (.why | contains("rate it once"))' <<<"$output" >/dev/null || { echo "$output"; return 1; }
+  for r in owner tech; do jq '.findings[0].kind = "fakt"' "$T/ans-$r.json" > "$T/a" && mv "$T/a" "$T/ans-$r.json"; done   # the delta round finds a fact
+  run qround "$P" --place sdeleni; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.round == 2' <<<"${lines[-1]}" >/dev/null
+  jq -e '[.findings[].id] | index("r1-owner-f1") != null' "$P/.aid-ui/critic/rounds/sdeleni/2/history-owner.json" >/dev/null
+  jq -e '.delta == true' "$P/.aid-ui/critic/rounds/sdeleni/2/round.json" >/dev/null
+  # a fact fixed after the delta round: one more delta round confirms it; after it, fixed again, the verdict
+  pcycle sdeleni; echo "Ještě jedna věta." >> "$P/$f"
+  [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = delta ]
+  run qround "$P" --place sdeleni; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  pcycle sdeleni; echo "A ještě jedna." >> "$P/$f"
+  [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = verdict ]
+}
+
+
 @test "delta (P118): a changed version without accepted and fixed findings gives no delta round" {
   python3 "$SC/aid-ui-critic.py" freeze "$P" --type web-local --place sdeleni >/dev/null
   cat > "$T/bin/codex" <<SH

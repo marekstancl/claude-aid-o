@@ -171,3 +171,19 @@ PY
   python3 "$SC/aid-ui-screens.py" matrix "$P" | jq --arg s "$sha" '{model_sha256: $s, rows: [.rows[] | {check, page, state, status: "pass"}]}' > "$P/.aid-ui/quick/result.json"
   run python3 "$Q" self "$P" --place struktura --file "$P/self.json"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
 }
+
+@test "places (P118, run 5): a fact a role found stops returning the place only when it was accepted, fixed and the verifier saw the fix over the version now" {
+  app_places_project
+  python3 "$C" freeze "$P" --type webapp --place struktura >/dev/null
+  mkdir -p "$P/.aid-ui/critic/rounds/struktura/1"
+  echo '{"n": 1, "findings": [{"id": "r1-owner-f1", "kind": "fakt", "state": "accepted", "evidence": "řádek opraven"}, {"id": "r1-owner-f2", "kind": "fakt", "state": "accepted"}]}' > "$P/.aid-ui/critic/rounds/struktura/1/round.json"
+  export AID_UI_VERIFY_HOME="$BATS_TEST_TMPDIR/vh" AID_UI_VERIFY_KEY="$BATS_TEST_TMPDIR/vk"; echo k > "$AID_UI_VERIFY_KEY"
+  seen() { python3 -c 'import importlib.util,sys; s=importlib.util.spec_from_file_location("c", sys.argv[1]); c=importlib.util.module_from_spec(s); s.loader.exec_module(c); print(sorted(c.fixed_and_seen(sys.argv[2], "struktura", 1)))' "$C" "$P"; }
+  [ "$(seen)" = "[]" ]   # fixed, but nobody saw it
+  python3 -c 'import sys,subprocess; sys.path.insert(0, sys.argv[2] + "/lib"); import aid_ui_memory as m
+art = subprocess.run([sys.executable, sys.argv[2] + "/aid-ui-critic.py", "bundle-sha", sys.argv[1], "--place", "struktura"], capture_output=True, text=True).stdout.strip()
+m.verify_append(sys.argv[1], "struktura", {"artifact": art, "at": "t", "round": 1, "fixes": {"r1-owner-f1": {"verdict": "overeno"}, "r1-owner-f2": {"verdict": "overeno"}}, "open": []})' "$P" "$SC"
+  [ "$(seen)" = "['r1-owner-f1']" ]   # f2 has no evidence of a fix: still a fact
+  echo "změna" >> "$P/docs/design/screens.json"   # another version: the record is not over it
+  [ "$(seen)" = "[]" ]
+}

@@ -393,8 +393,11 @@ def status(p):
             return dict(out, decision="close", why="%s (best: round %d, owner %.1f, tech %.1f); set %s superseded with the reason, then audit"
                         % ("both roles reached the goal" if last["score"]["accepted"] else "%d repair rounds done" % ROUND_CAP,
                            target["n"], target["score"]["owner"], target["score"]["tech"], ", ".join(todo)))
-        if PLACE != "web" and not rs[-1].get("delta") and site_sha(p) != rs[-1]["site_sha"] \
-                and any(f.get("state") == "accepted" and f.get("evidence") for f in rs[-1]["findings"]):   # once per accepted round, after real fixes
+        fact_fix = any(f.get("state") == "accepted" and f.get("evidence") and f.get("kind") in ("fakt", "zakon") for f in rs[-1]["findings"])
+        deltas = sum(1 for r in rs if r.get("delta"))
+        if PLACE != "web" and (not rs[-1].get("delta") or (fact_fix and deltas < 2)) and site_sha(p) != rs[-1]["site_sha"] \
+                and any(f.get("state") == "accepted" and f.get("evidence") for f in rs[-1]["findings"]):   # once per accepted round, after real fixes;
+            # a fact or law finding a delta round found and that was fixed returns the place by D5 until a role confirms it - one more (run 5, 22. 10.)
             # P118: the version was fixed after the accepted round - one delta round over it (the roles keep their
             # memory), never a reopen that forgets; the verdict then stands on what is handed over
             return dict(out, decision="delta", why="place %s: the version changed after the accepted round %d (its fixes); rate it once (round), then the verdict"
