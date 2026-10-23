@@ -70,9 +70,12 @@ const urlOf = p => new URL(p === 'index.html' ? '' : p.endsWith('/index.html') ?
 const sha = f => createHash('sha256').update(fs.readFileSync(f)).digest('hex');
 // P118: one artifact per run - the site (and an app's model and scenarios) as they were when the run began; a run
 // whose version changed under it writes no result (a gate over half the old and half the new version proves nothing)
-const treeSha = d => { const h = createHash('sha256'); const walk = x => { if (!fs.existsSync(x)) return; for (const e of fs.readdirSync(x, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-  const f = path.join(x, e.name); const st_ = fs.statSync(f, { throwIfNoEntry: false }); if (!st_) continue;   // a link counts as its target
-  if (st_.isDirectory()) walk(f); else if (st_.isFile()) h.update(path.relative(d, f) + '\0' + sha(f) + '\n'); } }; walk(d); return h.digest('hex'); };
+const treeSha = d => { const h = createHash('sha256'); const root = fs.existsSync(d) ? fs.realpathSync(d) : d; const seen = new Set();
+  const walk = x => { if (!fs.existsSync(x)) return; const rx = fs.realpathSync(x); if (seen.has(rx)) return; seen.add(rx);   // no loop
+  for (const e of fs.readdirSync(x, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const f = path.join(x, e.name); const st_ = fs.statSync(f, { throwIfNoEntry: false }); if (!st_) continue;   // a link counts as its target,
+    const rf = fs.realpathSync(f); if (rf !== root && !rf.startsWith(root + path.sep)) { h.update(path.relative(d, f) + '\0outside\n'); continue; }   // never one out of the tree
+    if (st_.isDirectory()) walk(f); else if (st_.isFile()) h.update(path.relative(d, f) + '\0' + sha(f) + '\n'); } }; walk(d); return h.digest('hex'); };
 const artifactNow = () => [treeSha(site), project ? treeSha(path.join(project, '.aid-ui', 'scenarios')) : '', project && fs.existsSync(path.join(project, 'docs/design/screens.json')) ? sha(path.join(project, 'docs/design/screens.json')) : ''].join('|');
 const ARTIFACT = artifactNow();
 fs.rmSync(path.join(out, 'result.json'), { force: true });   // a run that stops leaves no older result behind

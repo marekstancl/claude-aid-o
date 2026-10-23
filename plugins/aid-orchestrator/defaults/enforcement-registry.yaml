@@ -4711,9 +4711,9 @@ enforcements:
     tier: t1
     enforcement_degree: 2
     not_guaranteed: "That the person on the PM's studio page is the PM - the studio knows the PM only by the page's session; a delegate uses that page by the PM's decision."
-    description: "P116 - for a webapp the answer to its structure or task_map question is recorded only by pm and with target docs/design/screens.json@<sha of the model now> (app_tasks_need_owner); an exception for the baseline list or a baseline task's removal only by pm and only for the list now or a task of it (app_owner_only); before a variant is recorded the guard fails closed; model-approved fails on a model changed since; a webapp leaves step 1 only with a skip record for every part its options skip, and a new brand keeps its logo place."
+    description: "P116 - for a webapp the answer to its structure or task_map question is recorded only by pm or the client role that plays the owner (PM 19. 10. 2026; never the studio's agent) and with target docs/design/screens.json@<sha of the model now> (app_tasks_need_owner); an exception for the baseline list or a baseline task's removal only by pm and only for the list now or a task of it (app_owner_only); before a variant is recorded the guard fails closed; model-approved fails on a model changed since; a webapp leaves step 1 only with a skip record for every part its options skip, and a new brand keeps its logo place."
     recovery: "Put the question to the PM on the studio page; after a model change ask again; record the skip reasons with aid-ui-state.sh decide."
-    test_covers: "test-aid-ui-app.bats app-path: cases (client and agent answers refused, model change, baseline and task exceptions, skips, the web unchanged, parts by kind)."
+    test_covers: "test-aid-ui-app.bats app-path: cases (an agent answer refused, the client role's and the PM's recorded, model change, baseline and task exceptions, skips, the web unchanged, parts by kind)."
     test: "scripts/tests/bats/test-aid-ui-app.bats"
   - id: aid_ui_app_gate
     type: 1

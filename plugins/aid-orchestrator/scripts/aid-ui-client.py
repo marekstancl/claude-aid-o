@@ -1094,7 +1094,10 @@ def verify(project, place, web):
             if w in keys:
                 return True
             mm = re.fullmatch(r"(\S+?):([1-9][0-9]*)(?:-[1-9][0-9]*)?", w)
-            return bool(mm) and os.path.isfile(os.path.join(project, mm.group(1))) and ".." not in mm.group(1).split("/")
+            if not mm:
+                return False
+            f = os.path.realpath(os.path.join(project, mm.group(1)))   # a file of the project: no absolute path, no link out of it
+            return f.startswith(os.path.realpath(project) + os.sep) and os.path.isfile(f)
         fx = a.get("fixes") or {}
         miss = [i for i in ids if not isinstance(fx.get(i), dict) or fx[i].get("verdict") not in ("overeno", "nepravda", "castecne")
                 or not str(fx[i].get("seen") or "").strip() or not place_ok(fx[i].get("where"))]
@@ -1116,6 +1119,9 @@ def verify(project, place, web):
     wj(os.path.join(out, "turn.json"), {"place": place, "artifact": artifact, "answer": a, "model": mrec, "at": now()})
     if a is None:
         die("VERIFY %s: no valid answer from Codex nor the Opus stand-in (%s)" % (place, mrec.get("stand_in_reason")))
+    now_art = site_sha(os.path.join(project, "site")) if place == "web" else place_bundle(project, place)[1]
+    if now_art != artifact:   # the version changed while it was read: a record would vouch for a mix of two versions
+        die(f"VERIFY: the version changed during the verification ({artifact[:12]} -> {now_art[:12]}); nothing signed - verify again")
     rec = memory.verify_append(project, place, {"artifact": artifact, "started": started, "at": now(), "provider": mrec.get("provider"), "model": mrec.get("model"),
                                                 "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(), "capture_sha256": sha_file(os.path.join(out, "capture.json")),
                                                 "round": rs[-1]["n"] if rs else 0, "fixes": {i: a["fixes"][i] for i in ids}, "open": a["open"], "turn": rel(out)})

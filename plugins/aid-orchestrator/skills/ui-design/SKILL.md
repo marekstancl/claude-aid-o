@@ -179,9 +179,10 @@ z něhož se staví kostra, testy úloh brány a předávací balík.
 - **Co aplikace vynechá, má důvod:** slogan, hledání a logo (u `brand: existing|none`) se vynechávají volbami kroku 0
   a každá vynechaná část má záznam `decide --title přeskočeno --outcome "<část> přeskočena" --why …`; bez něj
   `aid-ui-state.sh step` aplikaci za krok 1 nepustí.
-- **Úlohy schvaluje jen vlastník produktu (PM):** odpověď na otázku `structure` (i `task_map`) aplikace se zapíše jen
-  od PM a s cílem `docs/design/screens.json@<sha modelu teď>` (`app_tasks_need_owner`); totéž výjimky
-  `baseline@…` a `task@…` (`app_owner_only`). Hodnocení klient-role je podklad, ne rozhodnutí.
+- **Úlohy schvaluje vlastník produktu:** PM, nebo klient-agent, který ho hraje (PM 19. 10. 2026; odpověď PM přebije).
+  Odpověď na otázku `structure` (i `task_map`) aplikace se zapíše jen od PM nebo klient-role a s cílem
+  `docs/design/screens.json@<sha modelu teď>` (`app_tasks_need_owner`), nikdy od agenta studia. Výjimky `baseline@…`
+  a `task@…` (výchozí stav existující aplikace a zrušení její dnešní úlohy) schvaluje jen PM (`app_owner_only`).
 - **Předání aplikace:** balík verze 2 nese schválený model a výsledky úloh (`verified_on: skeleton`); `aid-ui-package.py zadani`
   z něj napíše zadání změn kódu (bod za úlohu a za cestu selhání) a brána běhu `check_ui_handover` pustí scénáře úloh
   proti běžící aplikaci projektu (`docs/ui/nasazeni.json`).

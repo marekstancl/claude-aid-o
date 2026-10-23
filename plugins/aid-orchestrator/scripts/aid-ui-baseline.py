@@ -153,7 +153,8 @@ def cmd_capture(p, url, login):
         die("capture refused: every task of tasks.json needs an id and result.expect")
     for t in tasks:   # a task's login is a file under .aid-ui/baseline/storage/, never a path out of it
         lg = t.get("login")
-        if lg and (os.path.isabs(lg) or ".." in lg.split("/") or not os.path.isfile(os.path.join(bdir(p), lg))):
+        if lg and (os.path.isabs(lg) or ".." in lg.split("/") or not os.path.isfile(os.path.join(bdir(p), lg))
+                   or not os.path.realpath(os.path.join(bdir(p), lg)).startswith(os.path.realpath(bdir(p)) + os.sep)):   # nor a link out of it
             die(f"capture refused: task {t['id']}: login {lg!r} is not a file under .aid-ui/baseline/")
     out = os.path.join(bdir(p), "capture.part")
     import shutil
