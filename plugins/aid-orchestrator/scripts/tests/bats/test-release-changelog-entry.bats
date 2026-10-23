@@ -460,3 +460,13 @@ PY
   run bash "$RELEASE" prepare-plan P900 --bump none --plan-branch plan/P900 --project-root "$TEST_PROJECT_ROOT"
   [ "$status" -ne 0 ]; [[ "$output" == *"not above the last tag"* ]]
 }
+
+@test "prepare-plan --bump none: an example header inside a fenced block above the real sections is not the version (WAN P112, P113, 3.8.1)" {
+  _seed "2.0.1" "$(_changelog_complete_target)"
+  cd "$TEST_PROJECT_ROOT"; git tag v2.0.0; git checkout -q -b plan/P900
+  { printf '# Changelog\n\n## Jak psát záznam\n\n```\n## [0.15.0] — 2026-08-10\n```\n\n~~~\n## [0.1.0]\n~~~\n\n'; sed '1{/^# /d}' CHANGELOG.md; } > CHANGELOG.new && mv CHANGELOG.new CHANGELOG.md
+  git commit -qam "an example block in the changelog"
+  run bash "$RELEASE" prepare-plan P900 --bump none --plan-branch plan/P900 --project-root "$TEST_PROJECT_ROOT"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .version "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P900/release-prep.json")" = 2.0.1 ]
+}
