@@ -62,11 +62,13 @@ _aid_split_path_entry() {
   local entry="$1"
   local rest="$entry"
   local candidate found_backtick_path=0 first_span=1
-  # A second path after "; " (in the description or a bullet without backticks) used to vanish: the step's
-  # allowed_paths held only the first one (agents P012 krok 4, 3.8.1). Two paths are `a` + `b` or two bullets.
-  local _second_re=';[[:space:]]*(`[^`[:space:]]+`|/[^[:space:]`]+\.[A-Za-z0-9]+)'
+  # A second path after "; " in the DESCRIPTION, or in a bullet without backticks, used to vanish: the step's
+  # allowed_paths held only the first one (agents P012 krok 4, 3.9.1). Paths are `a` + `b` or `a`; `b` right
+  # after each other (the loop below), or two bullets; after a description they are refused, never dropped.
+  local _second_re='(—|--|\)|[^`;+[:space:]])[^`]*;[[:space:]]*(`[^`[:space:]]+`|/[^[:space:]`]+\.[A-Za-z0-9]+)'
+  [[ "$entry" == '`'* ]] || _second_re=';[[:space:]]*(`[^`[:space:]]+`|/[^[:space:]`]+\.[A-Za-z0-9]+)'
   if [[ "$entry" =~ $_second_re ]]; then
-    echo "aid-scoping: a second path after ';' in one Files entry (${BASH_REMATCH[1]}): write \`a\` + \`b\` or one bullet per path: ${entry}" >&2
+    echo "aid-scoping: a second path after ';' in one Files entry (${BASH_REMATCH[${#BASH_REMATCH[@]}-1]}): write \`a\` + \`b\` or one bullet per path: ${entry}" >&2
     return 1
   fi
 
@@ -74,8 +76,9 @@ _aid_split_path_entry() {
     if [[ "$first_span" -eq 1 ]]; then
       [[ "$rest" == '`'* ]] || break
     else
-      [[ "$rest" == ' + `'* ]] || break
-      rest="${rest# + }"
+      if [[ "$rest" == ' + `'* ]]; then rest="${rest# + }"
+      elif [[ "$rest" == '; `'* ]]; then rest="${rest#; }"
+      else break; fi
     fi
     rest="${rest#\`}"           # drop the opening backtick
     candidate="${rest%%\`*}"    # everything up to the next backtick

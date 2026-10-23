@@ -6730,10 +6730,17 @@ cmd_plan_close() {
     [[ -n "$_adm_pb" && "$_adm_pb" != null && "$_adm_pb" != not_found ]] || _adm_pb="plan/${plan_id}"
     # the plan branch deleted after a hand merge (post-merge cleanup): the recorded candidate is the commit whose
     # ancestry proves it — never the missing ref, never "no branch" alone (WAN P082/P084/P094, 3.8.1)
-    if ! git -C "$root" rev-parse --verify -q "${_adm_pb}^{commit}" >/dev/null 2>&1 \
-       && [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] && git -C "$root" cat-file -e "${candidate}^{commit}" 2>/dev/null; then
-      echo "ADMINISTRATIVE CLOSE: ${_adm_pb} no longer exists; its recorded candidate ${candidate:0:12} stands for it." >&2
-      _adm_pb="$candidate"
+    local _adm_unprovable=0
+    if ! git -C "$root" rev-parse --verify -q "${_adm_pb}^{commit}" >/dev/null 2>&1; then
+      if [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] && git -C "$root" cat-file -e "${candidate}^{commit}" 2>/dev/null; then
+        echo "ADMINISTRATIVE CLOSE: ${_adm_pb} no longer exists; its recorded candidate ${candidate:0:12} stands for it." >&2
+        _adm_pb="$candidate"
+      else
+        # neither the branch nor a commit that stands for it: nothing can prove or disprove a merge. The PM's
+        # close goes through as closed_administrative WITHOUT a merge claim (no lifecycle receipt, nothing a
+        # dependent plan may count on), the partial evidence listed (WAN P091 shape, 3.9.1)
+        _adm_unprovable=1
+      fi
     fi
     if git -C "$root" merge-base --is-ancestor "$_adm_pb" "${target_branch:-main}" 2>/dev/null; then
       # the git fact the lifecycle receipt of an administrative close rests on
@@ -6743,6 +6750,11 @@ cmd_plan_close() {
         printf '%s' "$_adm_bad" >&2
         _adm_bad=""
       fi
+    fi
+    if [[ -n "$_adm_bad" && "$_adm_unprovable" -eq 1 ]]; then
+      echo "ADMINISTRATIVE CLOSE: ${_adm_pb} is gone and no recorded candidate stands for it — closed without any merge claim; its partial plan-final evidence is recorded:" >&2
+      printf '%s' "$_adm_bad" >&2
+      _adm_bad=""
     fi
     if [[ -n "$_adm_bad" ]]; then
       _pfsm_close_release

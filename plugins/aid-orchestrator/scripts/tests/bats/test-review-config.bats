@@ -109,6 +109,13 @@ _load_step() { aid_review_config_load "$ROOT" step_review "$STEP_SKILL" && aid_r
   [ "$RC_EXTRA_SKIP_THRESHOLD_FILES" = 3 ]; [ "$RC_EXTRA_SKIP_THRESHOLD_LINES" = 120 ]   # P110 threshold
   aid_review_config_validate
 }
+@test "step_review: a project policy that lists final_claims itself keeps it as written — one claims role, never a second added (3.9.1)" {
+  _project '.review_checkpoints.step_review.reviewers = [{"role":"step_generalist","provider":"claude","model":"opus"},{"role":"final_claims","provider":"claude","model":"sonnet","when":"review+security"}]'
+  run _load_step; echo "$output"; [ "$status" -eq 0 ]
+  aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
+  [ "$(printf '%s\n' "${RC_ROLE[@]}" | grep -c '^final_claims$')" -eq 1 ]
+  local i; for i in "${!RC_ROLE[@]}"; do [[ "${RC_ROLE[$i]}" == final_claims ]] && [ "${RC_WHEN[$i]}" = "review+security" ] && [ "${RC_MODEL[$i]}" = sonnet ]; done
+}
 @test "step_review: a single-role block passes" {
   _project '.review_checkpoints.step_review.reviewers = [{"role":"step_generalist","provider":"claude","model":"opus"}]'
   run _load_step; [ "$status" -eq 0 ]

@@ -331,9 +331,15 @@ _plan_role() { # <file> <role>
   [ "$status" -ne 0 ]; [[ "$output" == *"ERROR unparsed text after a path"*"y.md"* ]]
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-json.sh' && aid_plan_json_steps_from_plan p.md"
   [ "$status" -ne 0 ] || [[ "$output" != *'"src/a.ts"'* ]]
-  # the + form and a plain description with a ';' still pass
-  _plan r.md strict '- Modify: `src/a.ts` + `src/b.ts` — both; then run the tests'
-  run "$LINT" r.md; [[ "$output" != *"unparsed text after a path"* ]]
+  # `a` + `b` and `a`; `b` declare both paths for every reader; a plain description with a ';' still passes
+  local form; for form in '`src/a.ts` + `src/b.ts`' '`src/a.ts`; `src/b.ts`'; do
+    _plan r.md strict "- Modify: ${form} — both; then run the tests"
+    run "$LINT" r.md; [[ "$output" != *"unparsed text after a path"* ]] || { echo "$form: $output"; return 1; }
+    run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-json.sh' && aid_plan_json_steps_from_plan r.md"
+    [ "$status" -eq 0 ]; [[ "$output" == *'"src/a.ts"'* && "$output" == *'"src/b.ts"'* ]] || { echo "$form: $output"; return 1; }
+    run bash "$AID_PLUGIN_PATH/scripts/aid-plan-parallel-check.sh" r.md
+    [[ "$output" != *"unparsed"* && "$output" != *"second path"* ]]
+  done
 }
 
 @test "lint advisory: another step's declaration does not cover a step's prose mention" {
