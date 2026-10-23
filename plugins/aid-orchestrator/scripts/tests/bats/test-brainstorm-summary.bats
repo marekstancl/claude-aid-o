@@ -135,6 +135,19 @@ opponent_ran() { dispute '{"opponent":"answered","plan_id":"P900","agree":[],"di
   ! grep -q "Nedokončeno" "$OUT"
 }
 
+@test "approve: a vision proposed straight into .aid-o/plans/<id>-vision.md is already promoted, not refused (WAN P113, 3.9.1)" {
+  start_run
+  mkdir -p "$AID_PROJECT_ROOT/.aid-o/plans"
+  printf '## Vision\n\n- V1: One rule.\n  - test: a check names it.\n' > "$AID_PROJECT_ROOT/.aid-o/plans/P900-vision.md"
+  bash "$BS" vision-propose P900 --file "$AID_PROJECT_ROOT/.aid-o/plans/P900-vision.md" >/dev/null
+  bash "$BS" vision-approve P900 >/dev/null
+  opponent_ran
+  aid_brainstorm_summary_render P900 "$RUN_DIR/brainstorm-summary-artifact.html" >/dev/null
+  run bash "$BS" approve P900
+  echo "$output"; [ "$status" -eq 0 ]
+  grep -q "V1: One rule" "$AID_PROJECT_ROOT/.aid-o/plans/P900-vision.md"
+}
+
 @test "AC28: an unaccepted run's page may not be written outside its working directory" {
   # Otherwise "artifacts leave the working directory only once the PM accepts"
   # is a sentence the renderer walks past by being handed another path.

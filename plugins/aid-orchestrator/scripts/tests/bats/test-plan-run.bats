@@ -270,14 +270,82 @@ _page() { ( source "$PLUGIN_DIR/scripts/lib/aid-plan-summary.sh" && aid_plan_sum
   [ ! -f "$EV/fsm-state.yaml" ]
 }
 
+# _break_plan — the seeded plan turned broadcast-shaped AFTER its CP1 round (a round is not prepared over a plan
+# readiness refuses, since 2.116), its page re-rendered so the page check passes and readiness is what refuses
+_break_plan() {
+  sed -i 's|^- Modify: `prirucka/README.md` — .*|- Create: `src/core/lengths.py` — funkce `tally_by_length(items)`|' "$PLAN"   # both steps broadcast one output
+  _page
+}
+
 @test "direct: a broadcast-shaped plan never starts a run — readiness refuses it before the seal (D5 shifted left)" {
-  rm -rf "$R" && _mk_project "$R" >/dev/null
-  sed 's|^- Modify: `prirucka/README.md` — .*|- Create: `src/core/lengths.py` — funkce `tally_by_length(items)`|' "$FIXTURE_PLAN" > "$BATS_TEST_TMPDIR/bad.md"   # both steps broadcast one output
-  _seed "$R" "$BATS_TEST_TMPDIR/bad.md"
+  _break_plan
   _run
   [ "$status" -eq 7 ]
-  [[ "$output" == *"nothing was sealed"* ]]
+  [[ "$output" == *"nothing was written"* ]]
   [ ! -f "$GEN/generation-authority.json" ] && [ ! -f "$EV/fsm-state.yaml" ]
+}
+
+# _snap — what a refused first plan-run must leave exactly as it was (3.9.1, ACTA P027)
+_snap() {
+  _snapraw | sha256sum
+}
+_snapraw() {
+  git -C "$R" rev-parse HEAD; git -C "$R" for-each-ref --format='%(refname) %(objectname)'; git -C "$R" worktree list --porcelain
+  local d; for d in "$R/.aid-o/work/plan-state" "$R/.aid-lifecycle/manifests" "$GEN" "$R/.aid-o/work/evidence/E-900-1_1"; do
+    echo "== $d"; [[ -d "$d" ]] && ls -A "$d"; done; return 0
+}
+
+@test "direct: a plan the CP1 gate refuses changes nothing — no transaction, no commit, no plan state, no branch (ACTA P027)" {
+  rm -rf "$R/.aid-o/work/evidence/P900/cp1"            # no CP1 round: the gate refuses
+  local before; before="$(_snap)"
+  _run
+  echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"cp1_not_passed"* ]]
+  [ "$(_snap)" = "$before" ]
+  [ ! -f "$GEN/transaction.json" ]
+}
+
+@test "direct: a plan readiness refuses changes nothing either — no directory, no lock (3.9.1)" {
+  _break_plan
+  local before; before="$(_snap)"
+  _run
+  [ "$status" -eq 7 ]; [ "$(_snap)" = "$before" ]
+}
+
+@test "direct: --force over a HARD CP1 refusal (unreadable round evidence) changes nothing (3.9.1)" {
+  echo '{not json' > "$R/.aid-o/work/evidence/P900/cp1/rounds.json"
+  local before; before="$(_snap)"
+  run bash "$PFSM" plan-run P900 --force --reason "test: the PM overrides the CP1 gate for this plan"
+  echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"aid_cp1_blocked"* && "$output" == *"cp1_not_passed"* ]]
+  [ "$(_snap)" = "$before" ]; [ ! -f "$GEN/transaction.json" ]
+}
+
+@test "direct: --force over a FORCEABLE CP1 refusal (no round) goes on to the seal, which records the override (3.9.1)" {
+  rm -rf "$R/.aid-o/work/evidence/P900/cp1"
+  run bash "$PFSM" plan-run P900 --force --reason "test: the PM overrides the CP1 gate for this plan"
+  echo "$output"; [ "$status" -eq 0 ]                         # the run starts
+  [[ "$output" != *"cp1_not_passed"* ]]
+  [ -f "$GEN/transaction.json" ]                                # past the read-only check
+  [ "$(jq -r '.forced_override' "$GEN/generation-authority.json")" = true ]
+  [ "$(jq -r '.force_reason' "$GEN/generation-authority.json")" = "test: the PM overrides the CP1 gate for this plan" ]
+}
+
+@test "direct: a plan started earlier (plan-start, no plan-run transaction) is checked before plan-run writes anything (3.9.1)" {
+  bash "$PFSM" plan-start P900 --mode plan_branch --project-root "$R" --plan-file "$PLAN" --declared-epics E-900-1_1 >/dev/null 2>&1 || skip "plan-start refused the fixture"
+  rm -f "$R/.aid-o/work/evidence/P900/plan-summary-artifact.html"
+  local before; before="$(_snap)"
+  _run
+  echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"plan_page_missing"* ]]
+  [ "$(_snap)" = "$before" ]; [ ! -f "$GEN/transaction.json" ]
+}
+
+@test "direct: a plan whose PM page is missing changes nothing either (3.9.1)" {
+  rm -f "$R/.aid-o/work/evidence/P900/plan-summary-artifact.html"
+  local before; before="$(_snap)"
+  _run
+  echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"plan_page_missing"* ]]
+  [ "$(_snap)" = "$before" ]
 }
 
 @test "direct: a failing D5 contract check stops plan-run before init and keeps its evidence" {

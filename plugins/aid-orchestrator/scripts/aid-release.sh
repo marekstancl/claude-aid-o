@@ -375,6 +375,21 @@ _release_record_force() {
 #   - it does not blanket-mask the exit status. grep distinguishes 1 (no
 #     match) from >=2 (a real error, including a file that became unreadable
 #     after the `-r` test), and only the former is treated as "no match".
+# _release_changelog_version <file> [first|highest] — a `## [X.Y.Z]` header OUTSIDE fenced code blocks (``` or
+#   ~~~): the top one (first: the section a release renames or prepends above — default) or the highest number
+#   (highest: the version a plan already raised, --bump none). A project that shows an example header in a "how to
+#   write an entry" block (WAN: `## [0.15.0]` above the real 0.41.0) was read as that example (WAN P112, P113, 3.9.1).
+#   Sets _PROBE_RESULT like _release_probe_first (empty: no section); `-` reads stdin.
+_release_changelog_version() {
+  local file="$1" mode="${2:-first}"
+  _PROBE_RESULT=""
+  [[ "$file" == - || -r "$file" ]] || { echo "ERROR: cannot read $file while detecting version" >&2; return 1; }
+  _PROBE_RESULT="$(awk '/^[[:space:]]*(```|~~~)/ { fence = !fence; next }
+    !fence && match($0, /^## \[[0-9]+\.[0-9]+\.[0-9]+\]/) { print substr($0, 5, RLENGTH - 5) }' "$file" \
+    | if [[ "$mode" == highest ]]; then sort -V | tail -1; else head -1; fi)" || return 1
+  return 0
+}
+
 _PROBE_RESULT=""
 _release_probe_first() {
   local file="$1" pattern="$2" out rc
@@ -420,7 +435,7 @@ CURRENT=""
 # "Cannot detect version" diagnostic below could ever print. See
 # _release_probe_first for the three-way outcome this now has.
 if [[ -f "$REPO_ROOT/CHANGELOG.md" ]]; then
-  _release_probe_first "$REPO_ROOT/CHANGELOG.md" '## \[\K[0-9]+\.[0-9]+\.[0-9]+' || exit 1
+  _release_changelog_version "$REPO_ROOT/CHANGELOG.md" || exit 1
   CHANGELOG_HEADER="$_PROBE_RESULT"
 fi
 
@@ -531,7 +546,7 @@ update_changelog() {
   # and a SIGPIPE-truncated probe must never make a populated CHANGELOG look
   # headerless (which would prepend a duplicate entry).
   local header
-  _release_probe_first "$file" '## \[\K[0-9]+\.[0-9]+\.[0-9]+' || exit 1
+  _release_changelog_version "$file" || exit 1
   header="$_PROBE_RESULT"
   if [[ "$header" == "$NEW_VERSION" ]]; then
     # Pre-written entry for upcoming release — header already correct, no-op.
@@ -1169,7 +1184,7 @@ cmd_prepare_plan() {
     # prepare_commit that does not contain it (Codex, 19. 10. 2026)
     git -C "$REPO_ROOT" diff --quiet HEAD -- CHANGELOG.md 2>/dev/null \
       || { echo "PRECONDITION FAIL: prepare-plan --bump none: CHANGELOG.md has uncommitted changes — commit the version the plan raised first" >&2; exit 1; }
-    cv="$(git -C "$REPO_ROOT" show HEAD:CHANGELOG.md 2>/dev/null | grep -oP '^## \[\K[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)"
+    cv="$(git -C "$REPO_ROOT" show HEAD:CHANGELOG.md 2>/dev/null | { _release_changelog_version - highest >/dev/null && printf '%s' "$_PROBE_RESULT"; } || true)"
     [[ -n "$cv" ]] || { echo "PRECONDITION FAIL: prepare-plan --bump none: CHANGELOG.md has no '## [X.Y.Z]' section — the plan's step writes it with the version it raised, or use --bump auto|patch|minor|major" >&2; exit 1; }
     lt="$(git -C "$REPO_ROOT" tag --merged HEAD -l 'v[0-9]*' 2>/dev/null | sed 's/^v//' | sort -V | tail -1 || true)"   # the highest, not the nearest
     if [[ -n "$lt" ]] && [[ "$(printf '%s\n%s\n' "$lt" "$cv" | sort -V | tail -1)" == "$lt" ]]; then

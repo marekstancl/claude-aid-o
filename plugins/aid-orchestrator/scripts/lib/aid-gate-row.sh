@@ -131,15 +131,25 @@ _agr_job_duration_ms() {
   fi
 }
 
+# aid_gate_output_excerpt <text> — what a gate row keeps of a command's output: all of it up to 4000
+#   characters, else the first 1000 (where a runner names what it starts) and the last 3000 (where a test
+#   runner prints its result) with the cut said in between. The first 2000 alone dropped every result
+#   (ACTA P026: two E2E reruns only to read why ts_e2e failed). One rule for every row (run_gate, the
+#   scheduled targeted_tests row, a background job's row).
+aid_gate_output_excerpt() {
+  local s="$1" n="${#1}"
+  if (( n <= 4000 )); then printf '%s' "$s"; return 0; fi
+  printf '%s\n[… %d znaků výstupu vynecháno …]\n%s' "${s:0:1000}" "$(( n - 4000 ))" "${s: -3000}"
+}
+
 # _agr_stdout_excerpt <job_dir>
-#   The first 2000 characters of the job's captured stdout — the SAME
-#   truncation discipline run_gate() applies to a foreground gate's output, so
-#   a background row's `output` field means exactly what a foreground row's
+#   The job's captured stdout through aid_gate_output_excerpt — the SAME rule run_gate() applies to a
+#   foreground gate's output, so a background row's `output` field means exactly what a foreground row's
 #   does. jq does the escaping in the caller.
 _agr_stdout_excerpt() {
   local job_dir="$1" raw=""
   [[ -f "$job_dir/stdout.log" ]] && raw="$(cat "$job_dir/stdout.log" 2>/dev/null || true)"
-  printf '%s' "${raw:0:2000}"
+  aid_gate_output_excerpt "$raw"
 }
 
 # gate_row_from_job <gate_name> <job_dir> <job_id> [live_state]

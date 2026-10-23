@@ -35,7 +35,7 @@ _check() { bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" "$PLAN" --json .aid
 # _round <n> — prepare, drop in the recorded answers, collect, close with the recorded tokens
 _round() {
   local n="$1" rec="$FX/recorded/round-$1"
-  bash "$ROUND" prepare --plan "$PLAN" --round "$n" >/dev/null 2>&1 || return 1
+  bash "$ROUND" prepare --plan "$PLAN" --round "$n" > "$WORK/prepare-$n.log" 2>&1 || { grep -m3 -E "REFUS|FAIL|ERROR|not_ready" "$WORK/prepare-$n.log" | sed "s/^/    prepare: /"; return 1; }
   cp "$rec"/reviewer-*.json "$CP1/round-$n/"
   bash "$ROUND" collect --plan "$PLAN" --round "$n" >/dev/null 2>&1 || return 1
   bash "$ROUND" close --plan "$PLAN" --round "$n" --tokens $(jq -r 'to_entries[] | "\(.key)=\(.value)"' "$rec/tokens.json") >/dev/null 2>&1
@@ -48,11 +48,19 @@ _round() {
 # needs is seeded for the plan entering round 1.
 # shellcheck source=lib/aid-test-plan-fixture.sh
 source "${SCRIPT_DIR}/lib/aid-test-plan-fixture.sh"
-_legacy() { sed -i 's/^lifecycle_strict: true$/lifecycle_strict: false/' "$PLAN"; }
+# the same line holds the docs repository the plan writes to (repo_roots, P112 — undeclared it is refused since
+# 2.118.1); a plan without lifecycle_strict is legacy, so the line count, and every recorded citation, stay
+_legacy() { sed -i 's#^lifecycle_strict: true$#repo_roots: [{name: docs, path: /opt/eco/docs, base_branch: main}]#' "$PLAN"; }
 echo "TEST: the recorded flow replays to a gate PASS"
 cp "$FX/acta-p025.md" "$PLAN"; _legacy; _check
 aid_fixture_seed_critic_check "$PWD" "$PLAN"
 _round 1 && ok "round 1 replayed" || bad "round 1 did not replay"
+# a round that leaves a blocker or major open does not read "pass" (ACTA P027: timeline "pass" over 15 blockers)
+r1="$(jq -r '[.findings[] | select((.severity == "blocker" or .severity == "major") and (.status == "open" or .status == "disputed"))] | length' "$CP1/round-1/merged.json" 2>/dev/null)"
+r1v="$(jq -r '.verdict' "$CP1/round-1/measurement.json" 2>/dev/null)"
+r1t="$(grep -h '"plan_review_round_complete"' .aid-o/work/evidence/P998/timeline.jsonl .aid-o/work/plan-state/P998/timeline.jsonl 2>/dev/null | jq -rs '[.[] | select((.round // "") | tostring == "1")] | last | .verdict // "none"')"
+if [[ "${r1:-0}" -gt 0 ]]; then [[ "$r1v" == fail && "$r1t" == fail ]] && ok "round 1: ${r1} open blocker/major, verdict fail (measurement and timeline)" || bad "round 1: ${r1} open blocker/major but verdict ${r1v} / timeline ${r1t}"
+else bad "round 1 of the recorded flow should leave findings open (fixture changed?)"; fi
 cp "$FX/recorded/plan-round-2.md" "$PLAN"; _legacy
 bash "$ROUND" fix-check --plan "$PLAN" --round 1 >/dev/null 2>&1 && ok "the round-1 fix passes fix-check" || bad "fix-check refused the recorded fix"
 _check

@@ -279,6 +279,16 @@ aid_dispatch_repo_range_ok() {
 # _aid_dc_path_allowed <path> <allowed-json> <own_evidence_suffix> — bash glob
 # match, the same way scripts/gates/scope-check.sh decides. A step's own
 # evidence directory is always allowed: that is where its output is meant to go.
+# _aid_path_covers <pattern> <path> — THE scope rule: an exact path, a glob, or a directory (with or without a
+# trailing /) covering what is under it. Two copies by design (the hook cannot load the plugin):
+# defaults/hooks/pre-commit and scripts/lib/aid-dispatch-contract.sh; test-commit-guard.bats keeps them equal.
+_aid_path_covers() {
+  local _p="$1" _f="$2"
+  # shellcheck disable=SC2254
+  case "$_f" in $_p) return 0 ;; esac
+  [[ "$_f" == "${_p%/}/"* ]]
+}
+
 _aid_dc_path_allowed() {
   local path="$1" allowed="$2" evidence="$3" pattern
   # The evidence dir matches as a whole path segment, never as a substring:
@@ -286,10 +296,7 @@ _aid_dc_path_allowed() {
   case "$path" in "$evidence"|"$evidence"/*|*/"$evidence"|*/"$evidence"/*) return 0 ;; esac
   while IFS= read -r pattern; do
     [[ -n "$pattern" ]] || continue
-    # shellcheck disable=SC2254
-    case "$path" in $pattern) return 0 ;; esac
-    # A declared directory covers what is under it.
-    [[ "$path" == "${pattern%/}/"* ]] && return 0
+    _aid_path_covers "$pattern" "$path" && return 0
   done < <(jq -r '.[]' <<< "$allowed")
   return 1
 }
@@ -556,6 +563,7 @@ aid_dispatch_contract_commit() {
     else rc_wt=""; [[ -n "$rc_pj" ]] && IFS=$'\t' read -r rc_wt _ < <(aid_rr_resolve "$rc_pj" "$rc_repo"); fi
     [[ -n "$rc_wt" ]] && done_repos+="$(git -C "$rc_wt" rev-parse --show-toplevel 2>/dev/null)"$'\n'
   done < <(jq -r '.repo_commits[]?.repo // empty' "$r" 2>/dev/null)
+  local declared_del; declared_del="$(jq -r '.deleted_files[]? // empty' "$r")"
   # Present on disk, or tracked and deleted — a declared deletion is a
   # change like any other and is staged as one. An accepted absolute path is
   # another repository's (validation holds this tree's to relative paths): it
@@ -584,7 +592,10 @@ aid_dispatch_contract_commit() {
       return 1
     fi
     if [[ -f "${root}/${f}" ]]; then forced+=("$f")
-    elif [[ -e "${root}/${f}" ]] || git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then files+=("$f"); fi
+    # a DECLARED deletion staged with `git rm` is in HEAD but neither on disk nor in the index — still the
+    # step's (WAN P113 krok 7: the commit left it out while validation accepted it)
+    elif [[ -e "${root}/${f}" ]] || git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 \
+         || { [[ $'\n'"$declared_del"$'\n' == *$'\n'"$f"$'\n'* ]] && git -C "$root" cat-file -e "HEAD:${f}" 2>/dev/null; }; then files+=("$f"); fi
   done < <(jq -r '.changed_files[]?, .deleted_files[]? // empty' "$r")
   if [[ "$(( ${#files[@]} + ${#forced[@]} ))" -eq 0 ]]; then
     echo "nothing to commit"
@@ -613,9 +624,13 @@ aid_dispatch_contract_commit() {
   rm -f "$tidx"
   local head _p; head="$(git -C "$root" rev-parse HEAD)"; local -a stale=()
   for _p in "${forced[@]}" "${files[@]}"; do git -C "$root" reset -q HEAD -- "$_p" >/dev/null 2>&1 || stale+=("$_p"); done
-  # the commit stands (a retry would make a second one); an index left behind is said, with its repair
-  (( ${#stale[@]} == 0 )) || echo "contract: committed ${head:0:12}, but your index still holds the old state of: ${stale[*]} — bring it to HEAD: git -C ${root} reset -q HEAD -- ${stale[*]}" >&2
   local rec; rec="$(_aid_dc_step_record "$root" "$c")"; mkdir -p "${rec%/*}"
   jq -n --arg c "$head" --arg k "$(realpath "$c")" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{commit: $c, contract: $k, at: $at}' > "$rec"
+  # the commit stands (a retry would make a second one); an index that still differs from HEAD on a path of
+  # the step (the reset failed, or a staged deletion stayed behind) is refused aloud, with its repair
+  if (( ${#stale[@]} > 0 )) || ! git -C "$root" diff --cached --quiet -- "${forced[@]}" "${files[@]}" 2>/dev/null; then
+    echo "contract: committed ${head:0:12}, but your index still differs from it on the step's paths — bring it to HEAD: git -C ${root} reset -q HEAD -- ${forced[*]} ${files[*]}" >&2
+    return 1
+  fi
   echo "$head"
 }

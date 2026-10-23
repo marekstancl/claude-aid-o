@@ -3,6 +3,26 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.9.1] — 2026-10-23
+
+Opravy z hlášení projektů (ACTA, agents, WAN, Trading) a noční běh zase zelený tam, kde ho rozbila 3.7.0 a 3.8.0. Každá oprava má test, který bez ní padá.
+
+### Fixed
+- **Smazání přes `git rm` se dostane do commitu kroku** (WAN P113): 3.8.0 ho uznala při kontrole, ale commit kroku ho vynechal. Po commitu se ověří, že index na cestách kroku odpovídá HEAD, jinak to pomocník řekne a skončí chybou.
+- **Řádek brány nese začátek i konec výstupu** (ACTA P026): dosud prvních 2 000 znaků, takže výsledek testů na konci chyběl; teď 1 000 + 3 000 znaků se značkou vynechání, jedno pravidlo pro všechny řádky.
+- **Kolo kontroly plánu s otevřeným blockerem nebo majorem má verdikt `fail`** (ACTA P027): dosud `pass` v timeline i v záznamu kola.
+- **`plan-run` nic nezapíše, dokud plán neprojde** (ACTA P027): stránka PM, připravenost a CP1 se ověří před transakcí, commitem plánu, stavem plánu i zámkem; odmítnutí `cp1_not_passed` (s označením, zda ho pokryje `--force`).
+- **Verze z CHANGELOGu nečte ukázku v bloku kódu** (WAN P112, P113): `--bump none` bere nejvyšší verzi mimo bloky ``` a `~~~`, vydání dál horní sekci.
+- **B10 („is to be removed“) jen pro soubor, který plán opravdu maže** (`must_not_exist`, `Delete:`), ne pro `must_contain` (ACTA P026).
+- **Cesta API v textu kroku není soubor cizího repa** (WAN P113): bez přípony, neexistující a mimo `repo_roots` se přeskočí.
+- **Dvě cesty v jedné odrážce `Files:`**: `` `a`; `b` `` platí jako `` `a` + `b` ``; řádek bez backticků s druhou cestou za `;` je chyba, ne tichá ztráta (agents P012).
+- **Schválení vize, která už leží v `.aid-o/plans/<id>-vision.md`**, projde (WAN P113).
+- **Složka v `Files:` (`dir/`) a pre-commit hook**: hook a kontrakt kroku mají jedno pravidlo rozsahu (`_aid_path_covers`), test drží obě kopie stejné (WAN P110, P112).
+- **Administrativní uzavření plánu se smazanou větví** (WAN P082, P084, P094): sloučení dokládá zapsaný kandidát; bez větve i kandidáta se plán uzavře jako `closed_administrative` bez tvrzení o sloučení a bez potvrzení pro závislé plány.
+- **`/aid-init` zapíše do `.gitignore` běhové soubory AID** (zámky, logy, ukazatele, cache, companion; Trading); test rozhodne každý soubor, který skripty v `.aid-o/work` píšou, jako běhový nebo verzovaný.
+- Projektová politika, která sama uvádí roli `final_claims`, ji má jednou (3.8.0 ji přidala podruhé).
+- Noční sady zase zelené: `test-review-config`, `test-recovery-ladder` (3.8.0), `test-plan-run`, `test-plan-tier-declaration`, `test-plan-fixture-contract`, `test-plan-review-acceptance` (od 3.7.0: testy zakládaly kolo kontroly nad plánem, který příprava kola odmítne; přehrávaný plán ACTA deklaruje repo dokumentace).
+
 ## [3.9.0] — 2026-10-23
 
 Studio `/aid-ui` umí webové aplikace (P116) a je svižné a přesné (P118): obrazovky a úlohy místo stránek, kostra a testy úloh z jednoho modelu, předání jako zadání změn kódu; hodnocení bez vlastních známek výrobce, nezávislý ověřovatel s podpisem běží s rolemi, kontrola kostry 54 → 4 min, kolo rolí 6 h → 7 min. Ověřeno na aplikaci Trading od nuly: struktura přijatá (vlastník 9,0, odborník 8,0), PM vybral vzhled ze tří skutečných návrhů a celé UI (17 obrazovek) prošlo hodnocením.

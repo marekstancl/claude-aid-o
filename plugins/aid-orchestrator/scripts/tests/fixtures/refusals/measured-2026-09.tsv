@@ -82,3 +82,5 @@
 0	plan_finalize_refused	accepted_risk_stale
 0	delegate_refused	delegation_fix_pending
 0	plan_finalize_refused	plan_tests_failed
+0	plan_run_refused	cp1_not_passed
+0	plan_finalize_refused	cp7_confirmation_not_enough

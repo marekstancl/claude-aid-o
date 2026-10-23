@@ -680,11 +680,12 @@ YAML
   run bash -c 'set -euo pipefail; source "$FSM"; fsm_check_orphan_dispatches "'"$ev"'"'
   [ "$status" -ne 0 ] || { echo "$output"; false; }
 
-  # the refusal itself is UNCHANGED — same headline, same fix command, same
-  # audited PM override
+  # the refusal itself: same headline, same fix command; since 3.8.0 (P117) the way out of a lost run is the
+  # targeted withdrawal, not a PM --force override
   [[ "$output" == *"Orphan dispatch(es) detected — cannot advance step."* ]] || { echo "$output"; false; }
   [[ "$output" == *"aid-emit-dispatch.sh complete"* ]]
-  [[ "$output" == *"--blocked-checks 'dispatch_orphan_complete'"* ]]
+  [[ "$output" == *"aid-emit-dispatch.sh cancel --focus"* ]]
+  [[ "$output" != *"--blocked-checks"* ]]
 
   # ...and it now also names the ladder entry, by class and by command
   [[ "$output" == *"DISPATCH_ORPHANED"* ]] || { echo "$output"; false; }

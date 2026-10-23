@@ -191,6 +191,25 @@ _farm_excluding() {
   [ "$status" -eq 0 ]
 }
 
+# ─── (c2) a declared directory, a glob, an exact path; one rule in the hook and the contract (3.9.1) ───
+@test "c2: a directory declared as dir/ or dir, a glob and an exact path cover their files; dir2 is no prefix of dir; the hook's rule equals the contract's" {
+  git checkout -q -b task/E-test/main
+  cat > "$TEST_EVIDENCE_DIR/plan.json" <<'JSON'
+{ "steps": [ { "id": "s0", "allowed_paths": ["src/a.txt"] },
+             { "id": "s1", "allowed_paths": ["ui/__tests__/", "lib", "docs/*.md", "src/b.txt"] } ] }
+JSON
+  _write_state EXECUTE task/E-test/main "" 1
+  local f; for f in ui/__tests__/new.test.ts lib/x.sh docs/a.md src/b.txt; do
+    git reset -q; _stage "$f"; run bash "$HOOK"; [ "$status" -eq 0 ] || { echo "$f: $output"; false; }
+  done
+  git reset -q; _stage lib2/x.sh; run bash "$HOOK"; [ "$status" -eq 1 ]
+  # one rule, two copies (the hook cannot load the plugin)
+  local hook_fn contract_fn
+  hook_fn="$(sed -n '/^_aid_path_covers() {/,/^}/p' "$HOOK")"
+  contract_fn="$(sed -n '/^_aid_path_covers() {/,/^}/p' "$AID_PLUGIN_PATH/scripts/lib/aid-dispatch-contract.sh")"
+  [ -n "$hook_fn" ] && [ "$hook_fn" = "$contract_fn" ]
+}
+
 # ─── (d) GATES: gate-fix outside per-step but inside union → pass ─────────────
 @test "d: GATES gate-fix inside the union of all steps passes" {
   git checkout -q -b task/E-test/main

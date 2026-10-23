@@ -6728,6 +6728,20 @@ cmd_plan_close() {
     # plan-final evidence is partial, listed, and no reason to refuse.
     local _adm_pb; _adm_pb="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_branch' 2>/dev/null)" || _adm_pb=""
     [[ -n "$_adm_pb" && "$_adm_pb" != null && "$_adm_pb" != not_found ]] || _adm_pb="plan/${plan_id}"
+    # the plan branch deleted after a hand merge (post-merge cleanup): the recorded candidate is the commit whose
+    # ancestry proves it — never the missing ref, never "no branch" alone (WAN P082/P084/P094, 3.9.1)
+    local _adm_unprovable=0
+    if ! git -C "$root" rev-parse --verify -q "${_adm_pb}^{commit}" >/dev/null 2>&1; then
+      if [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] && git -C "$root" cat-file -e "${candidate}^{commit}" 2>/dev/null; then
+        echo "ADMINISTRATIVE CLOSE: ${_adm_pb} no longer exists; its recorded candidate ${candidate:0:12} stands for it." >&2
+        _adm_pb="$candidate"
+      else
+        # neither the branch nor a commit that stands for it: nothing can prove or disprove a merge. The PM's
+        # close goes through as closed_administrative WITHOUT a merge claim (no lifecycle receipt, nothing a
+        # dependent plan may count on), the partial evidence listed (WAN P091 shape, 3.9.1)
+        _adm_unprovable=1
+      fi
+    fi
     if git -C "$root" merge-base --is-ancestor "$_adm_pb" "${target_branch:-main}" 2>/dev/null; then
       # the git fact the lifecycle receipt of an administrative close rests on
       _PFSM_ADMIN_MERGED_REF="$_adm_pb"
@@ -6736,6 +6750,11 @@ cmd_plan_close() {
         printf '%s' "$_adm_bad" >&2
         _adm_bad=""
       fi
+    fi
+    if [[ -n "$_adm_bad" && "$_adm_unprovable" -eq 1 ]]; then
+      echo "ADMINISTRATIVE CLOSE: ${_adm_pb} is gone and no recorded candidate stands for it — closed without any merge claim; its partial plan-final evidence is recorded:" >&2
+      printf '%s' "$_adm_bad" >&2
+      _adm_bad=""
     fi
     if [[ -n "$_adm_bad" ]]; then
       _pfsm_close_release
@@ -9640,6 +9659,41 @@ _pr_main() {
   local trace0; trace0="$(_pr_generation_trace)"
   [[ -z "$trace0" ]] || _pr_refuse epic_path_removed "${plan_id} was generated the EPIC way: ${trace0} — the EPIC path was removed in AID 3.0.0" \
     "finish it on AID 2.118.x (point plugin_path at a 2.118.x checkout), or close it (aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\") and start a NEW plan with a new id: /aid-run P<NNN>" 1
+  # ── 3.9.1: what can refuse the plan is asked BEFORE the first durable change — before the generation
+  #    directory and its lock too. The first plan-run of a plan
+  #    used to write the transaction and commit the plan (plan-start) and only then meet the page, readiness
+  #    and the CP1 gate — ACTA P027: a refused CP1 left a sealed transaction of the old plan and a committed old
+  #    plan, the repaired plan then could not run (plan_changed_since_seal). Read-only: nothing here writes.
+  #    A run resumed from its transaction is past this point; with --force a forceable CP1 refusal goes on to
+  #    the seal (which records the override), a hard one stops here.
+  if [[ ! -f "$tx" ]]; then
+    if [[ -f "${SCRIPT_DIR}/aid-turn-gate.sh" ]]; then
+      bash "${SCRIPT_DIR}/aid-turn-gate.sh" --plan "$plan" \
+        || _pr_refuse plan_page_missing "${plan_id} has no current PM page — the page is what the PM reads instead of the plan" \
+             "render it with the command in the line above, then run plan-run again (nothing was written)" 1
+    fi
+    local pf_out pf_rc=0
+    pf_out="$(bash "${SCRIPT_DIR}/aid-generation-readiness.sh" "$plan" --total 1 --project-root "$PR_ROOT" 2>&1)" || pf_rc=$?
+    if [[ "$pf_rc" -ne 0 ]]; then printf '%s\n' "$pf_out" >&2; echo "ERROR: plan-run: readiness failed for ${plan} — repair the plan; nothing was written." >&2; exit 7; fi
+    if [[ -f "${SCRIPT_DIR}/aid-cp1-gate.sh" ]]; then
+      pf_rc=0; pf_out="$(bash "${SCRIPT_DIR}/aid-cp1-gate.sh" --plan "$plan" --project-root "$PR_ROOT" 2>&1)" || pf_rc=$?
+      # --force covers only what the seal lets it cover: a forceable refusal goes on to the seal (which records
+      # the override), a hard one stops here like without --force
+      local pf_hard=""; [[ "$pf_rc" -ne 0 ]] && pf_hard="$(_gen_gate_hard_condition "$pf_rc" "$pf_out")"
+      if [[ "$pf_rc" -ne 0 && ( "$force" != true || -n "$pf_hard" ) ]]; then
+        # the seal's own classification, first line as the seal prints it: may --force cover this, or not
+        if [[ -n "$pf_hard" ]]; then
+          echo "${AID_GEN_LABEL_BLOCKED}: the CP1 gate refuses ${plan_id} on a condition --force does not cover" >&2
+        else
+          echo "${AID_GEN_LABEL_FORCE_REQUIRED}: the CP1 gate refuses ${plan_id}; a PM-authorized override is plan-run ${plan_id} --force --reason \"<why, 20+ chars>\"" >&2
+        fi
+        printf '%s\n' "$pf_out" >&2
+        _pr_refuse cp1_not_passed "the CP1 gate refuses ${plan} (rc ${pf_rc}, above) — nothing was written: no transaction, no commit, no plan state" \
+          "repair the plan and close another CP1 round (aid-review-round.sh prepare --plan …), then run plan-run again" 1
+      fi
+    fi
+  fi
+
   mkdir -p "$gd" || exit 3
 
   # ── ONE hold for the whole transaction: the generation lock ───────────────

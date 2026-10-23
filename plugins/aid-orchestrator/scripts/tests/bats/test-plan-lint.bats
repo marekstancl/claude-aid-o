@@ -313,6 +313,43 @@ _plan_role() { # <file> <role>
   [[ "$output" != *"names another repository"* ]]
 }
 
+@test "lint advisory: an API route or a docs URL path in prose is no file; a missing file with an extension and an existing directory still are (WAN P113, 3.9.1)" {
+  _plan p.md strict '- Modify: `src/a.ts` — edit'
+  printf '\n**Implementation Detail:** endpoints `/month` and `/partner-facets`, page `/wan/provize`; also `/opt/eco/nowhere/x.md` and `%s`.\n' "$BATS_TEST_TMPDIR" >> p.md
+  run "$LINT" p.md
+  [[ "$output" != *'`/month`'* && "$output" != *'`/partner-facets`'* && "$output" != *'`/wan/provize`'* ]]
+  [[ "$output" == *'`/opt/eco/nowhere/x.md` names another repository'* ]]
+  [[ "$output" == *"\`${BATS_TEST_TMPDIR}\` names another repository"* ]]
+}
+
+@test "files grammar: a bullet without backticks naming a second path after ';' is refused by the lint and plan.json; in a backticked bullet's description it is the advisory; never dropped silently (agents P012, 3.9.1)" {
+  # backticked: a path in the description is the advisory, never dropped silently and never an error
+  _plan p.md strict '- Modify: `src/a.ts` — edit; `src/b.ts` — the other one'
+  run "$LINT" p.md
+  [[ "$output" == *'`src/b.ts` is named only in this entry'*"description"* ]]; [[ "$output" != *"ERROR unparsed text"* ]]
+  _plan q.md strict '- Modify: /opt/eco/docs/x.md (pozn) — edit; /opt/eco/docs/y.md (pozn) — edit'
+  run "$LINT" q.md
+  [ "$status" -ne 0 ]; [[ "$output" == *"ERROR unparsed text after a path"*"y.md"* ]]
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/common.sh' && source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-json.sh' && aid_plan_json_steps_from_plan q.md"
+  [ "$status" -ne 0 ]
+  # `a`; `b` has the grammar of `a` + `b`: an extensionless path or a dunder name too
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-scoping.sh' && _aid_split_path_entry '\`src/a.ts\`; \`Dockerfile\` — two' && _aid_split_path_entry '\`a.py\`; \`pkg/__init__\` — x'"
+  [ "$status" -eq 0 ]; [ "$output" = "$(printf 'src/a.ts\nDockerfile\na.py\npkg/__init__')" ]
+  # `a` + `b` and `a`; `b` declare both paths for every reader; a plain description with a ';' still passes
+  local form; for form in '`src/a.ts` + `src/b.ts`' '`src/a.ts`; `src/b.ts`'; do
+    _plan r.md strict "- Modify: ${form} — both; then run the tests"
+    run "$LINT" r.md; [ "$status" -eq 0 ] || { echo "$form: $output"; return 1; }
+    run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/common.sh' && source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-json.sh' && aid_plan_json_steps_from_plan r.md"
+    [ "$status" -eq 0 ]; [[ "$output" == *'"src/a.ts"'* && "$output" == *'"src/b.ts"'* ]] || { echo "$form: $output"; return 1; }
+    # the step contract the run dispatches allows both
+    jq -n --argjson st "$output" '{steps: $st}' > r.json
+    run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-dispatch-contract.sh' && aid_dispatch_contract_build r.json 0 c.json && jq -c '.allowed_paths' c.json"
+    [ "$status" -eq 0 ]; [[ "$output" == *'"src/a.ts"'* && "$output" == *'"src/b.ts"'* ]] || { echo "$form contract: $output"; return 1; }
+    run bash "$AID_PLUGIN_PATH/scripts/aid-plan-parallel-check.sh" r.md
+    [ "$status" -eq 0 ] || { echo "$form parallel: $output"; return 1; }
+  done
+}
+
 @test "lint advisory: another step's declaration does not cover a step's prose mention" {
   _plan p.md strict '- Modify: `src/a.ts` — edit'
   printf '\n**Error Handling:** see `/opt/eco/docs/x.md`.\n\n### Step 2: docs\n\n**Files:**\n- Modify: `/opt/eco/docs/x.md` — page\n' >> p.md

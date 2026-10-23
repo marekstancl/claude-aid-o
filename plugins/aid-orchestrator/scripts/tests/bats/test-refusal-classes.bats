@@ -15,7 +15,7 @@ setup() {
   codes="$( { grep -roh 'When AID refuses: [a-z0-9_]*' "$AID_PLUGIN_PATH/scripts" | sed 's/.*: //'
               grep -roh '_\(pr\|dlg\)_refuse [a-z0-9_]*' "$AID_PLUGIN_PATH/scripts" | awk '{print $2}'
               grep -roh '_increment_fail [a-z0-9_]*' "$AID_PLUGIN_PATH/scripts/aid-fsm.sh" | awk '{print $2}'
-              grep -roh '_pfsm_precondition "[a-z_]*"' "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh" | cut -d'"' -f2
+              grep -roh '_pfsm_precondition "[a-z0-9_]*"' "$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh" | cut -d'"' -f2
               # the forceable conditions: what --force --blocked-checks may waive
               grep -rohE --include='*.sh' --exclude-dir=tests -e "--blocked-checks [\"'][a-z0-9_]+[\"']" "$AID_PLUGIN_PATH/scripts" | sed -E "s/.*[\"']([a-z0-9_]+)[\"']/\1/"; } \
             | grep -vx -e '' -e with | sort -u)"

@@ -1295,9 +1295,10 @@ to close the round at the revision the reviewers saw; the fix is confirmed by th
   local degraded; degraded="$(jq '.degraded' "${dir}/round.json")"
   [[ "$(jq '(.provider_absent // []) | length' "${dir}/collect.json")" -gt 0 ]] && degraded=true
 
-  local verdict=pass
+  # one rule in both modes: an open blocker or major is a failed round. A CP1 round has no say over the plan
+  # (aid-cp1-gate.sh judges it), but its record must not read "pass" over 15 open blockers (ACTA P027)
+  local verdict; verdict="$(_round_verdict "${dir}/merged.json")"
   if [[ "$MODE" == step ]]; then
-    verdict="$(_round_verdict "${dir}/merged.json")"
     # What stays open after the LAST allowed round is routed or carried before
     # the round is marked closed, so an interrupted close is run again, not lost.
     # Under second_round_when: open_finding_and_fix (P110) the confirmation round

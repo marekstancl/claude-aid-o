@@ -98,15 +98,23 @@ _load_step() { aid_review_config_load "$ROOT" step_review "$STEP_SKILL" && aid_r
 }
 
 # ── the step and EPIC blocks ───────────────────────────────────────────────
-@test "step_review: the plugin default asks both roles on every reviewed step (2.109.0); a gated role lowers the floor to the unconditional count" {
+@test "step_review: the plugin default asks both roles on every reviewed step (2.109.0) and the claims role on a documentation step (3.8.0); a gated role lowers the floor to the unconditional count" {
   aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
-  [ "${#RC_ROLE[@]}" -eq 2 ]; [ "${RC_WHEN[0]}" = "" ]; [ "${RC_WHEN[1]}" = "" ]
+  [ "${#RC_ROLE[@]}" -eq 3 ]; [ "${RC_WHEN[0]}" = "" ]; [ "${RC_WHEN[1]}" = "" ]
+  [ "${RC_ROLE[2]}" = final_claims ]; [ "${RC_WHEN[2]}" = docs_surface ]
   [ "$RC_MIN_ANSWERS" = 2 ]
   _project '.review_checkpoints.step_review.reviewers[1].when = "review+security"'
   aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
   [ "$RC_MIN_ANSWERS" = 1 ]; [ "$(aid_review_config_floor 2)" = 1 ]; [ "$(aid_review_config_floor 1)" = 1 ]
   [ "$RC_EXTRA_SKIP_THRESHOLD_FILES" = 3 ]; [ "$RC_EXTRA_SKIP_THRESHOLD_LINES" = 120 ]   # P110 threshold
   aid_review_config_validate
+}
+@test "step_review: a project policy that lists final_claims itself keeps it as written — one claims role, never a second added (3.9.1)" {
+  _project '.review_checkpoints.step_review.reviewers = [{"role":"step_generalist","provider":"claude","model":"opus"},{"role":"final_claims","provider":"claude","model":"sonnet","when":"review+security"}]'
+  run _load_step; echo "$output"; [ "$status" -eq 0 ]
+  aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
+  [ "$(printf '%s\n' "${RC_ROLE[@]}" | grep -c '^final_claims$')" -eq 1 ]
+  local i; for i in "${!RC_ROLE[@]}"; do [[ "${RC_ROLE[$i]}" == final_claims ]] && [ "${RC_WHEN[$i]}" = "review+security" ] && [ "${RC_MODEL[$i]}" = sonnet ]; done
 }
 @test "step_review: a single-role block passes" {
   _project '.review_checkpoints.step_review.reviewers = [{"role":"step_generalist","provider":"claude","model":"opus"}]'
@@ -168,7 +176,7 @@ _load_step() { aid_review_config_load "$ROOT" step_review "$STEP_SKILL" && aid_r
 
 @test "effort: read into RC_EFFORT, medium when unset, a value outside low|medium|high refused" {
   _load_step
-  [ "${RC_EFFORT[*]}" = "low low" ]   # P110: both step roles light, security full via full_when
+  [ "${RC_EFFORT[*]}" = "low low low" ]   # P110: the step roles light, security full via full_when (claims: 3.8.0)
   _load_cp1
   [ "${RC_EFFORT[0]}" = medium ]
   _project '.review_checkpoints.step_review.reviewers[0].effort = "extreme"'

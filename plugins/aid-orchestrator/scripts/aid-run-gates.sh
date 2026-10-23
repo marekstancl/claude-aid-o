@@ -236,8 +236,8 @@ run_gate() {
     result="fail"; reason="vacuous_pass"
   fi
 
-  # Truncate output to 2000 chars for JSON safety
-  local output_truncated="${output:0:2000}"
+  # the beginning and the end of the output (lib/aid-gate-row.sh aid_gate_output_excerpt)
+  local output_truncated; output_truncated="$(aid_gate_output_excerpt "$output")"
   # Escape for JSON
   output_truncated="${output_truncated//\\/\\\\}"
   output_truncated="${output_truncated//\"/\\\"}"
@@ -977,7 +977,7 @@ require_yq_mikefarah() {
 #   targeted_tests() below (which builds its own gate-row JSON by hand,
 #   never through run_gate()'s generic `bash -c "$command"` capture).
 _gate_output_escape() {
-  local s="${1:0:2000}"
+  local s; s="$(aid_gate_output_excerpt "$1")"
   s="${s//\\/\\\\}"
   s="${s//\"/\\\"}"
   s="${s//$'\n'/\\n}"

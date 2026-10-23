@@ -62,13 +62,24 @@ _aid_split_path_entry() {
   local entry="$1"
   local rest="$entry"
   local candidate found_backtick_path=0 first_span=1
+  # A bullet WITHOUT backticks that names a second path after "; " lost it silently: the step's allowed_paths held
+  # only the first one (agents P012 krok 4, 3.9.1) — refused. With backticks, `a`; `b` and `a` + `b` declare both
+  # (the loop below); a path a backticked bullet names in its DESCRIPTION is the lint's advisory ("named only in
+  # this entry's description"), never an error — descriptions quote code and archive paths (ACTA P025).
+  local _second_re=';[[:space:]]*/[^[:space:]`]+\.[A-Za-z0-9]+'
+  if [[ "$entry" != '`'* && "$entry" =~ $_second_re ]]; then
+    local _m="${BASH_REMATCH[0]##*;}"; _m="${_m#"${_m%%[![:space:]]*}"}"
+    echo "aid-scoping: a second path after ';' in one Files entry (${_m}): write \`a\` + \`b\` or one bullet per path: ${entry}" >&2
+    return 1
+  fi
 
   while true; do
     if [[ "$first_span" -eq 1 ]]; then
       [[ "$rest" == '`'* ]] || break
     else
-      [[ "$rest" == ' + `'* ]] || break
-      rest="${rest# + }"
+      if [[ "$rest" == ' + `'* ]]; then rest="${rest# + }"
+      elif [[ "$rest" == '; `'* ]]; then rest="${rest#; }"   # the same grammar as ' + ' (shape judged below)
+      else break; fi
     fi
     rest="${rest#\`}"           # drop the opening backtick
     candidate="${rest%%\`*}"    # everything up to the next backtick
