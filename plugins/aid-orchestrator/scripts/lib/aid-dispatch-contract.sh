@@ -584,7 +584,10 @@ aid_dispatch_contract_commit() {
       return 1
     fi
     if [[ -f "${root}/${f}" ]]; then forced+=("$f")
-    elif [[ -e "${root}/${f}" ]] || git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then files+=("$f"); fi
+    # a deletion staged with `git rm` is in HEAD but neither on disk nor in the index — still the step's
+    # (WAN P113 krok 7: the commit left it out while validation accepted it)
+    elif [[ -e "${root}/${f}" ]] || git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 \
+         || git -C "$root" cat-file -e "HEAD:${f}" 2>/dev/null; then files+=("$f"); fi
   done < <(jq -r '.changed_files[]?, .deleted_files[]? // empty' "$r")
   if [[ "$(( ${#files[@]} + ${#forced[@]} ))" -eq 0 ]]; then
     echo "nothing to commit"

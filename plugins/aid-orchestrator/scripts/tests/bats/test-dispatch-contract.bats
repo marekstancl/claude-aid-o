@@ -184,6 +184,12 @@ _return() {
   [ "$status" -eq 0 ]
   [ "$output" != "nothing to commit" ]
   [ "$(git show --name-only --format= HEAD)" = "README.md" ]
+  # deleted with `git rm` (staged: in HEAD, neither on disk nor in the index) is committed too (WAN P113 krok 7)
+  echo a > README.md; git add README.md; git commit -qm readme-again; git rm -q README.md
+  _return '{deleted_files: ["README.md"]}'
+  run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 2: drop readme again"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(git show --name-status --format= HEAD)" = "$(printf 'D\tREADME.md')" ]
 }
 
 @test "contract: a declared file the project gitignores is committed; another repository's file is named, not dropped" {
