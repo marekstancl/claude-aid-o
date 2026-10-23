@@ -6728,6 +6728,13 @@ cmd_plan_close() {
     # plan-final evidence is partial, listed, and no reason to refuse.
     local _adm_pb; _adm_pb="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_branch' 2>/dev/null)" || _adm_pb=""
     [[ -n "$_adm_pb" && "$_adm_pb" != null && "$_adm_pb" != not_found ]] || _adm_pb="plan/${plan_id}"
+    # the plan branch deleted after a hand merge (post-merge cleanup): the recorded candidate is the commit whose
+    # ancestry proves it — never the missing ref, never "no branch" alone (WAN P082/P084/P094, 3.8.1)
+    if ! git -C "$root" rev-parse --verify -q "${_adm_pb}^{commit}" >/dev/null 2>&1 \
+       && [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] && git -C "$root" cat-file -e "${candidate}^{commit}" 2>/dev/null; then
+      echo "ADMINISTRATIVE CLOSE: ${_adm_pb} no longer exists; its recorded candidate ${candidate:0:12} stands for it." >&2
+      _adm_pb="$candidate"
+    fi
     if git -C "$root" merge-base --is-ancestor "$_adm_pb" "${target_branch:-main}" 2>/dev/null; then
       # the git fact the lifecycle receipt of an administrative close rests on
       _PFSM_ADMIN_MERGED_REF="$_adm_pb"
