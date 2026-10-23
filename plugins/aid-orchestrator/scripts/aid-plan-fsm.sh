@@ -9690,6 +9690,12 @@ _pr_main() {
     if [[ "$force" != true && -f "${SCRIPT_DIR}/aid-cp1-gate.sh" ]]; then
       pf_rc=0; pf_out="$(bash "${SCRIPT_DIR}/aid-cp1-gate.sh" --plan "$plan" --project-root "$PR_ROOT" 2>&1)" || pf_rc=$?
       if [[ "$pf_rc" -ne 0 ]]; then
+        # the seal's own classification, first line as the seal prints it: may --force cover this, or not
+        if [[ -n "$(_gen_gate_hard_condition "$pf_rc" "$pf_out")" ]]; then
+          echo "${AID_GEN_LABEL_BLOCKED}: the CP1 gate refuses ${plan_id} on a condition --force does not cover" >&2
+        else
+          echo "${AID_GEN_LABEL_FORCE_REQUIRED}: the CP1 gate refuses ${plan_id}; a PM-authorized override is plan-run ${plan_id} --force --reason \"<why, 20+ chars>\"" >&2
+        fi
         printf '%s\n' "$pf_out" >&2
         _pr_refuse cp1_not_passed "the CP1 gate refuses ${plan} (rc ${pf_rc}, above) — nothing was written: no transaction, no commit, no plan state" \
           "repair the plan and close another CP1 round (aid-review-round.sh prepare --plan …), then run plan-run again" 1
