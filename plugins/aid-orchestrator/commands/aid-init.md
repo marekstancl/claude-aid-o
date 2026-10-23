@@ -145,6 +145,31 @@ Appended to project root `.gitignore` (or created if missing). Content:
 
 # Per-plan execution worktrees (P074)
 .aid-worktrees/
+
+# Runtime state AID writes while it runs: caches, locks, logs, pointers (3.8.1; the list a FSM check
+# otherwise saw as "uncommitted changes" — Trading 9. 10. 2026). The plans' own records (plan-state/,
+# brainstorm/), backlog.md and aid-plugin-issues.md are NOT here: a project decides to version them.
+.aid-o/work/audit-log.jsonl
+.aid-o/work/lifecycle-migration.log
+.aid-o/work/active.md
+.aid-o/work/active.md.pre-index
+.aid-o/work/active-runs.json
+.aid-o/work/active-run-pointer.json
+.aid-o/work/auto-mode-state.yaml
+.aid-o/work/codex-probe.json
+.aid-o/work/test-durations.jsonl
+.aid-o/work/release-force-*
+.aid-o/work/companion/
+.aid-o/work/superseded-runs/
+.aid-o/work/plan-final/
+.aid-o/work/runs/
+.aid-o/work/test-audits/
+.aid-o/work/.cache/
+.aid-o/work/*.lock
+.aid-o/config/*.lock
+.aid-o/.lock
+.aid-o/**/*.tmp
+.aid-o/metrics/
 ```
 
 **Upgrade note (P074):** `.aid-worktrees/` is new. `plan-start` creates the plan's
