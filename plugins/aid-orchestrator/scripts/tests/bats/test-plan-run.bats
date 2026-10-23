@@ -285,7 +285,7 @@ _break_plan() {
   [ ! -f "$GEN/generation-authority.json" ] && [ ! -f "$EV/fsm-state.yaml" ]
 }
 
-# _snap — what a refused first plan-run must leave exactly as it was (3.8.1, ACTA P027)
+# _snap — what a refused first plan-run must leave exactly as it was (3.9.1, ACTA P027)
 _snap() {
   _snapraw | sha256sum
 }
@@ -312,7 +312,28 @@ _snapraw() {
   [ "$status" -eq 7 ]; [ "$(_snap)" = "$before" ]
 }
 
-@test "direct: a plan whose PM page is missing changes nothing either (3.8.1)" {
+@test "direct: --force over a CP1 refusal — a hard one changes nothing, a forceable one goes on to the seal (3.9.1)" {
+  rm -rf "$R/.aid-o/work/evidence/P900/cp1"
+  local before; before="$(_snap)"
+  run bash "$PFSM" plan-run P900 --force --reason "test: the PM overrides the CP1 gate for this plan"
+  echo "$output"
+  if [[ "$output" == *"aid_cp1_blocked"* ]]; then
+    [ "$status" -ne 0 ]; [ "$(_snap)" = "$before" ]
+  else
+    [[ "$output" != *"cp1_not_passed"* ]]       # not refused before the seal: the seal records the override
+  fi
+}
+
+@test "direct: a plan started earlier (plan-start, no plan-run transaction) is checked before plan-run writes anything (3.9.1)" {
+  bash "$PFSM" plan-start P900 --mode plan_branch --project-root "$R" --plan-file "$PLAN" --declared-epics E-900-1_1 >/dev/null 2>&1 || skip "plan-start refused the fixture"
+  rm -f "$R/.aid-o/work/evidence/P900/plan-summary-artifact.html"
+  local before; before="$(_snap)"
+  _run
+  echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"plan_page_missing"* ]]
+  [ "$(_snap)" = "$before" ]; [ ! -f "$GEN/transaction.json" ]
+}
+
+@test "direct: a plan whose PM page is missing changes nothing either (3.9.1)" {
   rm -f "$R/.aid-o/work/evidence/P900/plan-summary-artifact.html"
   local before; before="$(_snap)"
   _run

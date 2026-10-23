@@ -191,7 +191,7 @@ _farm_excluding() {
   [ "$status" -eq 0 ]
 }
 
-# ─── (c2) a declared directory, a glob, an exact path; one rule in the hook and the contract (3.8.1) ───
+# ─── (c2) a declared directory, a glob, an exact path; one rule in the hook and the contract (3.9.1) ───
 @test "c2: a directory declared as dir/ or dir, a glob and an exact path cover their files; dir2 is no prefix of dir; the hook's rule equals the contract's" {
   git checkout -q -b task/E-test/main
   cat > "$TEST_EVIDENCE_DIR/plan.json" <<'JSON'

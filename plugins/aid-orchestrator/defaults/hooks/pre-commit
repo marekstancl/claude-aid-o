@@ -105,7 +105,7 @@ _aid_path_covers() {
 }
 
 # _aid_in_scope <file> — true if <file> is covered by any entry of _AID_SCOPE[] (_aid_path_covers: a directory
-# declared as `dir/` used to be compared as `dir//…` and refused its own files, WAN P110/P112, 3.8.1)
+# declared as `dir/` used to be compared as `dir//…` and refused its own files, WAN P110/P112, 3.9.1)
 _aid_in_scope() {
   local _f="$1" _s
   for _s in "${_AID_SCOPE[@]}"; do

@@ -496,7 +496,7 @@ if (( HAS_REPO )); then
   done
   # B10 — a file the plan removes that other files still import or reference
   # (ACTA: db/env.py imported a model the plan deleted; four checks found it). Removed = a must_not_exist point
-  # or a Delete: bullet — a must_contain point names a file the plan keeps (ACTA P026: three false warnings, 3.8.1)
+  # or a Delete: bullet — a must_contain point names a file the plan keeps (ACTA P026: three false warnings, 3.9.1)
   for f in $( { cut -f2- <<< "$VP_BLOCKS" | awk -F $'\x1f' '$3 == "must_not_exist" && $5 != "" {print $5}'
                 for i in "${!FB_LN[@]}"; do [[ "${FB_VERB[$i]}" == Delete ]] && printf '%s\n' ${FB_PATHS[$i]}; done; } | sort -u); do
     _exists "$f" || continue

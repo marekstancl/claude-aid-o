@@ -6729,7 +6729,7 @@ cmd_plan_close() {
     local _adm_pb; _adm_pb="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.plan_branch' 2>/dev/null)" || _adm_pb=""
     [[ -n "$_adm_pb" && "$_adm_pb" != null && "$_adm_pb" != not_found ]] || _adm_pb="plan/${plan_id}"
     # the plan branch deleted after a hand merge (post-merge cleanup): the recorded candidate is the commit whose
-    # ancestry proves it — never the missing ref, never "no branch" alone (WAN P082/P084/P094, 3.8.1)
+    # ancestry proves it — never the missing ref, never "no branch" alone (WAN P082/P084/P094, 3.9.1)
     local _adm_unprovable=0
     if ! git -C "$root" rev-parse --verify -q "${_adm_pb}^{commit}" >/dev/null 2>&1; then
       if [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] && git -C "$root" cat-file -e "${candidate}^{commit}" 2>/dev/null; then
@@ -9664,9 +9664,9 @@ _pr_main() {
   #    used to write the transaction and commit the plan (plan-start) and only then meet the page, readiness
   #    and the CP1 gate — ACTA P027: a refused CP1 left a sealed transaction of the old plan and a committed old
   #    plan, the repaired plan then could not run (plan_changed_since_seal). Read-only: nothing here writes.
-  #    A run resumed from its transaction is past this point; --force leaves the CP1 verdict to the seal,
-  #    which classifies what --force may cover.
-  if [[ ! -f "$tx" && ! -f "$(plan_state_path "$plan_id")" ]]; then
+  #    A run resumed from its transaction is past this point; with --force a forceable CP1 refusal goes on to
+  #    the seal (which records the override), a hard one stops here.
+  if [[ ! -f "$tx" ]]; then
     if [[ -f "${SCRIPT_DIR}/aid-turn-gate.sh" ]]; then
       bash "${SCRIPT_DIR}/aid-turn-gate.sh" --plan "$plan" \
         || _pr_refuse plan_page_missing "${plan_id} has no current PM page — the page is what the PM reads instead of the plan" \
@@ -9675,11 +9675,14 @@ _pr_main() {
     local pf_out pf_rc=0
     pf_out="$(bash "${SCRIPT_DIR}/aid-generation-readiness.sh" "$plan" --total 1 --project-root "$PR_ROOT" 2>&1)" || pf_rc=$?
     if [[ "$pf_rc" -ne 0 ]]; then printf '%s\n' "$pf_out" >&2; echo "ERROR: plan-run: readiness failed for ${plan} — repair the plan; nothing was written." >&2; exit 7; fi
-    if [[ "$force" != true && -f "${SCRIPT_DIR}/aid-cp1-gate.sh" ]]; then
+    if [[ -f "${SCRIPT_DIR}/aid-cp1-gate.sh" ]]; then
       pf_rc=0; pf_out="$(bash "${SCRIPT_DIR}/aid-cp1-gate.sh" --plan "$plan" --project-root "$PR_ROOT" 2>&1)" || pf_rc=$?
-      if [[ "$pf_rc" -ne 0 ]]; then
+      # --force covers only what the seal lets it cover: a forceable refusal goes on to the seal (which records
+      # the override), a hard one stops here like without --force
+      local pf_hard=""; [[ "$pf_rc" -ne 0 ]] && pf_hard="$(_gen_gate_hard_condition "$pf_rc" "$pf_out")"
+      if [[ "$pf_rc" -ne 0 && ( "$force" != true || -n "$pf_hard" ) ]]; then
         # the seal's own classification, first line as the seal prints it: may --force cover this, or not
-        if [[ -n "$(_gen_gate_hard_condition "$pf_rc" "$pf_out")" ]]; then
+        if [[ -n "$pf_hard" ]]; then
           echo "${AID_GEN_LABEL_BLOCKED}: the CP1 gate refuses ${plan_id} on a condition --force does not cover" >&2
         else
           echo "${AID_GEN_LABEL_FORCE_REQUIRED}: the CP1 gate refuses ${plan_id}; a PM-authorized override is plan-run ${plan_id} --force --reason \"<why, 20+ chars>\"" >&2

@@ -153,7 +153,7 @@ aid_review_config_load() {
   # P117 (18): a step that changes documentation has its claims checked in its own review — whatever a project
   # policy lists, the role is there (a project policy replaces the default block whole). A policy that lists the
   # role itself keeps it as written (the validation below judges its `when`); adding a second one made a policy
-  # with its own `when` fail as "duplicate role" (3.8.1)
+  # with its own `when` fail as "duplicate role" (3.9.1)
   local _dsi _has_docs=0
   for _dsi in "${!RC_ROLE[@]}"; do [[ "${RC_ROLE[$_dsi]}" == final_claims ]] && _has_docs=1; done
   if [[ "$block" == step_review ]] && (( ! _has_docs )); then

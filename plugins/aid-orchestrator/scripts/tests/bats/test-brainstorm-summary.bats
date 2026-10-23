@@ -135,7 +135,7 @@ opponent_ran() { dispute '{"opponent":"answered","plan_id":"P900","agree":[],"di
   ! grep -q "Nedokončeno" "$OUT"
 }
 
-@test "approve: a vision proposed straight into .aid-o/plans/<id>-vision.md is already promoted, not refused (WAN P113, 3.8.1)" {
+@test "approve: a vision proposed straight into .aid-o/plans/<id>-vision.md is already promoted, not refused (WAN P113, 3.9.1)" {
   start_run
   mkdir -p "$AID_PROJECT_ROOT/.aid-o/plans"
   printf '## Vision\n\n- V1: One rule.\n  - test: a check names it.\n' > "$AID_PROJECT_ROOT/.aid-o/plans/P900-vision.md"

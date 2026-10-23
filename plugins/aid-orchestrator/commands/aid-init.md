@@ -146,7 +146,7 @@ Appended to project root `.gitignore` (or created if missing). Content:
 # Per-plan execution worktrees (P074)
 .aid-worktrees/
 
-# Runtime state AID writes while it runs: caches, locks, logs, pointers (3.8.1; the list a FSM check
+# Runtime state AID writes while it runs: caches, locks, logs, pointers (3.9.1; the list a FSM check
 # otherwise saw as "uncommitted changes" — Trading 9. 10. 2026). The plans' own records (plan-state/,
 # brainstorm/), backlog.md and aid-plugin-issues.md are NOT here: a project decides to version them.
 .aid-o/work/audit-log.jsonl

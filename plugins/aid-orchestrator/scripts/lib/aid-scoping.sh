@@ -66,8 +66,6 @@ _aid_split_path_entry() {
   # only the first one (agents P012 krok 4, 3.9.1) — refused. With backticks, `a`; `b` and `a` + `b` declare both
   # (the loop below); a path a backticked bullet names in its DESCRIPTION is the lint's advisory ("named only in
   # this entry's description"), never an error — descriptions quote code and archive paths (ACTA P025).
-  # a FILE token: a slash, or a file extension a repository holds — `__init__`, `obj.attr` or `x='FV1'` are code
-  local _file_tok='[^`[:space:]]*(/[^`[:space:]]*|\.(md|py|ts|tsx|js|jsx|mjs|json|ya?ml|sh|bats|sql|css|scss|html|toml|txt|cfg|ini|vue|svelte|go|rs|java|rb|php))'
   local _second_re=';[[:space:]]*/[^[:space:]`]+\.[A-Za-z0-9]+'
   if [[ "$entry" != '`'* && "$entry" =~ $_second_re ]]; then
     local _m="${BASH_REMATCH[0]##*;}"; _m="${_m#"${_m%%[![:space:]]*}"}"
@@ -80,7 +78,7 @@ _aid_split_path_entry() {
       [[ "$rest" == '`'* ]] || break
     else
       if [[ "$rest" == ' + `'* ]]; then rest="${rest# + }"
-      elif [[ "$rest" == '; `'* ]] && [[ "${rest#; }" =~ ^\`${_file_tok}\` ]]; then rest="${rest#; }"
+      elif [[ "$rest" == '; `'* ]]; then rest="${rest#; }"   # the same grammar as ' + ' (shape judged below)
       else break; fi
     fi
     rest="${rest#\`}"           # drop the opening backtick

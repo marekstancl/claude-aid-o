@@ -708,7 +708,7 @@ while IFS=$'\t' read -r _fx_ln _fx_path _fx_head; do
     case "$_fx_path" in "${_project_root%/}"/*) continue ;; esac
   fi
   # an API route or a docs URL path (`/month`, `/wan/provize`) is no file: no extension, not on disk and not
-  # under a declared repo_roots path — skipped (WAN P113, 3.8.1); anything else is still judged
+  # under a declared repo_roots path — skipped (WAN P113, 3.9.1); anything else is still judged
   [[ "${_fx_path##*/}" != *.* && ! -e "$_fx_path" ]] && ! _fx_under_roots "$_fx_path" && continue
   _advisory ":${_fx_ln}" "\`${_fx_path}\` names another repository's file only in prose — declare it in this step's Files (absolute path) or the step cannot touch it; the controller commits it in that repository: ${_fx_head}"
 done < <(awk '

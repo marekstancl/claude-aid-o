@@ -455,7 +455,7 @@ _st() { yq -r ".$2" "$1"; }
   [ "$(jq -r 'has("E-910-1_1")' "$MAP")" = "false" ]
 }
 
-# --- 3.8.1: the plan branch deleted after a hand merge (WAN P082/P084/P094) ---------------------------
+# --- 3.9.1: the plan branch deleted after a hand merge (WAN P082/P084/P094) ---------------------------
 _branchless_plan() {   # <root> <merged|unmerged|none> [noev] — plan/P900 deleted, a candidate recorded (none: not), partial plan-final evidence (noev: none)
   local R="$1" cand
   _gates_plan "$R"
@@ -469,7 +469,7 @@ _branchless_plan() {   # <root> <merged|unmerged|none> [noev] — plan/P900 dele
   git -C "$R" branch -q -D plan/P900 step/s1 2>/dev/null || true
 }
 
-@test "3.8.1: a hand-merged plan whose branch is gone closes administratively through its recorded candidate; an unmerged candidate is refused" {
+@test "3.9.1: a hand-merged plan whose branch is gone closes administratively through its recorded candidate; an unmerged candidate is refused" {
   local R="$BATS_TEST_TMPDIR/m"; mkdir -p "$R"; _branchless_plan "$R" merged
   run bash -c "cd '$R' && AID_TEST_MODE=1 bash '$FSM' plan-close P900 --project-root '$R' --administrative --reason 'P900 merged by hand, its branch cleaned up'"
   echo "$output"; [ "$status" -eq 0 ]

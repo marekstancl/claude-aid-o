@@ -186,7 +186,7 @@ _plan() { # <file> <strict|legacy> [dep2] [files1...]
   run "$CHECK" p.md; [[ "$output" == *"WARN  B10"*"still referenced by"* ]]
   [ "$(grep -c 'WARN  B10' <<< "$output")" -eq 1 ]
 }
-@test "plan-check B10: a file only must_contain or Modify names is kept, no warning; a Delete: bullet warns (ACTA P026, 3.8.1)" {
+@test "plan-check B10: a file only must_contain or Modify names is kept, no warning; a Delete: bullet warns (ACTA P026, 3.9.1)" {
   printf 'from src import existing_helper\n' > src/user.py
   mv src/a.py src/existing_helper.py; git add -A
   _plan p.md strict '- Depends on: Step 1' '- Modify: `src/existing_helper.py` (lines ~1-2) — edit'
