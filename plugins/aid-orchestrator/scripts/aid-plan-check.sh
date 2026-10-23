@@ -593,7 +593,10 @@ while INNER: progs(INNER.pop(0), "")
   if [[ -f "$EXEC_YAML" ]] && [[ "$(yq -r '.plan_checks // [] | length' "$EXEC_YAML" 2>/dev/null)" -gt 0 ]]; then
     NEW_PATHS="$(for i in "${!FB_LN[@]}"; do [[ "${FB_VERB[$i]}" == Create || "${FB_VERB[$i]}" == Test ]] && printf '%s\n' ${FB_PATHS[$i]}; done | sort -u)"
     _np="$(mktemp)"; printf '%s\n' "$NEW_PATHS" | grep -v '^$' > "$_np"
+    _pc_list="$(yq -o=json '.plan_checks' "$EXEC_YAML" 2>/dev/null)"   # the list; each entry is read below
+    _pc_rows="$(jq -r '.[] | [(.name // "unnamed"), (.command // ""), ((.timeout_s // "") | tostring)] | @tsv' <<< "$_pc_list")"
     while IFS=$'\t' read -r pc_name pc_cmd pc_t; do
+      [[ -n "${pc_name}${pc_cmd}" ]] || continue   # an empty list is one empty line through <<<
       [[ -n "$pc_cmd" ]] || { _block "B11" "$EXEC_YAML" "plan_checks entry '${pc_name}' has no command"; continue; }
       [[ "$pc_t" =~ ^[1-9][0-9]*$ ]] || pc_t=60; (( pc_t > 300 )) && pc_t=300
       pc_out="$(cd "$ROOT" && AID_PLAN_FILE="$PLAN" AID_PLAN_NEW_PATHS="$_np" timeout "$pc_t" bash -c "$pc_cmd" < "$_np" 2>&1)"; pc_rc=$?
@@ -601,7 +604,7 @@ while INNER: progs(INNER.pop(0), "")
       elif (( pc_rc != 0 )); then _block "B11" "$PLAN" "project plan check '${pc_name}' refuses the plan (exit ${pc_rc}): $(tail -3 <<< "$pc_out" | tr '\n' ' ')"
       fi
     # through JSON, not yq's @tsv: @tsv quotes a field holding a quote, and the command would reach bash as one word
-    done < <(yq -o=json '.plan_checks' "$EXEC_YAML" 2>/dev/null | jq -r '.[] | [(.name // "unnamed"), (.command // ""), ((.timeout_s // "") | tostring)] | @tsv')
+    done <<< "$_pc_rows"
     rm -f "$_np"
   fi
   # B13 — a test the plan names that the close cannot run (P117 (2)/(17); WAN P111: the close profile never ran

@@ -1576,6 +1576,9 @@ run_all_gates() {
       printf '"required":%s,"required_source":"%s"' \
         "$([[ "${_AID_REQ_RESOLVED[$1]:-false}" == "true" ]] && echo true || echo false)" \
         "${_AID_REQ_SOURCE[$1]:-legacy_default}"
+      # what the gate checks, in the project's words — on EVERY row of the gate, run or not (3.9.2)
+      local _d; _d="$(yq -r ".gates.\"$1\".description // \"\"" "$execution_yaml" 2>/dev/null)"
+      [[ -z "$_d" || "$_d" == null ]] || printf ',"description":%s' "$(jq -Rn --arg d "$_d" '$d')"
     }
 
     # Test-only fault injection (never set in production): drop a gate's
@@ -1681,11 +1684,9 @@ run_all_gates() {
       $first || gates_json+=","
       first=false
       gates_json+="\"${gate_name}\":$(jq -nc --arg g "$gate_name" --arg s "$_ms_list" --arg t "$_plugin_project_root" \
-        --argjson rq "$([[ "${_AID_REQ_RESOLVED[$gate_name]:-false}" == "true" ]] && echo true || echo false)" \
-        --arg rs "${_AID_REQ_SOURCE[$gate_name]:-legacy_default}" \
+        --argjson f "{$(_req_fields "$gate_name")}" \
         '{gate:$g, result:"fail", reason:"missing_script", exit_code:1, duration_ms:0,
-          output:("gate script(s) not in the tree " + $t + ": " + $s), attempts:0,
-          required:$rq, required_source:$rs}')"
+          output:("gate script(s) not in the tree " + $t + ": " + $s), attempts:0} + $f')"
       processed=$((processed+1))
       if [[ "${required:-false}" == "true" ]]; then overall="fail"; fi
       continue
@@ -1852,10 +1853,8 @@ run_all_gates() {
     # from — which is how "overall: pass" survived a failed required gate.
     # `required_source` rides along so a reader can tell WHY a gate was (or
     # was not) required — `explicit` or `legacy_default`.
-    merged_row=$(echo "$gate_result" | jq \
-      --argjson req "$([[ "${required:-false}" == "true" ]] && echo true || echo false)" \
-      --arg reqsrc "${required_source:-legacy_default}" \
-      ". + {\"attempts\":${attempt}, \"required\": \$req, \"required_source\": \$reqsrc}")
+    merged_row=$(echo "$gate_result" | jq --argjson f "{$(_req_fields "$gate_name")}" \
+      ". + {\"attempts\":${attempt}} + \$f")
     # The checkpoint file is a row too, so the contract is applied BEFORE it
     # is written; a row outside the vocabulary ends the run here, by name.
     merged_row="$(_gate_row_finalize "$gate_name" "$merged_row")" || return 1
@@ -2152,6 +2151,14 @@ run_all_gates() {
   # Build base report
   local report
   report="{\"epic_id\":\"${epic_id}\",\"run_id\":\"${run_id}\",\"overall\":\"${overall}\",\"completed_at\":\"${completed_at}\",\"gates\":${gates_json}}"
+  # every row of the report carries its gate's description from execution.yaml as it is NOW — one pass over the
+  # whole report, so a row restored from a checkpoint or a stale fallback gets it like a row run here (3.9.2)
+  local _descs
+  _descs="$(yq -o=json '(.gates // {}) | map_values(.description // "")' "$execution_yaml" 2>/dev/null)" && [[ -n "$_descs" ]] \
+    || { echo "ERROR: ${execution_yaml} could not be read for the gates' descriptions — the report is not written without them" >&2; return 1; }
+  report="$(jq -c --argjson d "$_descs" '.gates |= with_entries(
+      if (($d[.key] // "") | length) > 0 then .value.description = $d[.key] else .value |= del(.description) end)' <<< "$report")" \
+    || { echo "ERROR: the gate report could not take the gates' descriptions" >&2; return 1; }
 
   # ─── jq-merge provenance fields (P032 Step 3) ──────────────────────
   local command_log_array

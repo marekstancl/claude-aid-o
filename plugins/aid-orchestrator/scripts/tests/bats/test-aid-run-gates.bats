@@ -50,6 +50,17 @@ teardown() {
   [[ "$output" =~ ^aid-run-gates\.sh@v ]]
 }
 
+@test "run-all: a gate's description from execution.yaml rides on its row; a gate without one has none (3.9.2)" {
+  yq -i '.gates.alpha.description = "Unit tests of the API pass"' "$EXEC_YAML"
+  "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" >/dev/null 2>&1
+  [ "$(jq -r '.gates.alpha.description' "$REPORT")" = "Unit tests of the API pass" ]
+  [ "$(jq -r '.gates | to_entries | map(select(.key != "alpha")) | .[0].value | has("description")' "$REPORT")" = false ]
+  # a gate that does not run carries it too: no command (skip) and a missing script (fail)
+  yq -i '.gates.gamma = {"description": "Nothing to run yet", "required": false} | .gates.delta = {"command": "bash scripts/no-such-gate.sh", "description": "The custom check", "required": false}' "$EXEC_YAML"
+  "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" >/dev/null 2>&1
+  [ "$(jq -r '.gates.gamma.reason + " | " + .gates.gamma.description' "$REPORT")" = "no_command | Nothing to run yet" ]
+  [ "$(jq -r '.gates.delta.reason + " | " + .gates.delta.description' "$REPORT")" = "missing_script | The custom check" ]
+}
 @test "run-all: timeline.jsonl has gate_runner_start with report_path + gate_count + command_list" {
   "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" >/dev/null 2>&1
   [ -f "$TIMELINE" ]
@@ -1632,6 +1643,30 @@ YAML
   AID_TEST_DROP_GATE_RESTORE=beta run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
   [ "$status" -eq 1 ]
   [[ "$output" == *"gate 'beta'"* && "$output" == *"invented"* ]]
+}
+
+@test "3.9.2: a row restored from its checkpoint carries the gate's description as execution.yaml says it NOW" {
+  _git_init_project
+  local ev="$TEST_PROJECT/.aid-o/work/evidence/E-X/R-1"
+  "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" >/dev/null 2>&1
+  [ -f "$ev/gates_rows/beta.json" ]
+  yq -i '.gates.beta.description = "Added after the row was checkpointed"' "$EXEC_YAML"
+  AID_TEST_DROP_GATE_RESTORE=beta run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  echo "$output"
+  grep -q '"gate_row_restored"' "$ev/timeline.jsonl" "$TIMELINE" 2>/dev/null   # the row came from its checkpoint
+  [ "$(jq -r '.gates.beta.description' "$REPORT")" = "Added after the row was checkpointed" ]
+  # removed from execution.yaml: gone from the row too
+  yq -i 'del(.gates.beta.description)' "$EXEC_YAML"
+  AID_TEST_DROP_GATE_RESTORE=beta run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ "$(jq -r '.gates.beta | has("description")' "$REPORT")" = false ]
+}
+
+@test "3.9.2: execution.yaml unreadable for the descriptions ends the run loudly, never as a report without them" {
+  local real; real="$(command -v yq)"; mkdir -p "$TEST_TMPDIR/fakebin"
+  printf '#!/usr/bin/env bash\n[[ "$*" == *map_values* ]] && exit 1\nexec %q "$@"\n' "$real" > "$TEST_TMPDIR/fakebin/yq"; chmod +x "$TEST_TMPDIR/fakebin/yq"
+  PATH="$TEST_TMPDIR/fakebin:$PATH" run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ "$status" -ne 0 ]; [[ "$output" == *"could not be read for the gates' descriptions"* ]]
+  [ ! -f "$REPORT" ]
 }
 
 @test "P097 rows: no script reads a gate row's result directly — every reader goes through gate_row_normalize (grep guard)" {
