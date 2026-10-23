@@ -324,11 +324,11 @@ _snapraw() {
 @test "direct: --force over a FORCEABLE CP1 refusal (no round) goes on to the seal, which records the override (3.9.1)" {
   rm -rf "$R/.aid-o/work/evidence/P900/cp1"
   run bash "$PFSM" plan-run P900 --force --reason "test: the PM overrides the CP1 gate for this plan"
-  echo "$output"
+  echo "$output"; [ "$status" -eq 0 ]                         # the run starts
   [[ "$output" != *"cp1_not_passed"* ]]
   [ -f "$GEN/transaction.json" ]                                # past the read-only check
-  [ -f "$GEN/generation-authority.json" ]
-  grep -rqs "test: the PM overrides the CP1 gate" "$GEN"        # the seal recorded the PM's reason
+  [ "$(jq -r '.forced_override' "$GEN/generation-authority.json")" = true ]
+  [ "$(jq -r '.force_reason' "$GEN/generation-authority.json")" = "test: the PM overrides the CP1 gate for this plan" ]
 }
 
 @test "direct: a plan started earlier (plan-start, no plan-run transaction) is checked before plan-run writes anything (3.9.1)" {
