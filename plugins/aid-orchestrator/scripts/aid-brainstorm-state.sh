@@ -391,7 +391,9 @@ cmd_approve() {
   vision="$(get "$sf" vision_file)"
   if [[ -n "$vision" && -r "$vision" ]]; then
     mkdir -p "${root}/.aid-o/plans" || { echo "ERROR: cannot create ${root}/.aid-o/plans" >&2; return 1; }
-    cp "$vision" "${root}/.aid-o/plans/${plan_id}-vision.md" || {
+    # a vision written in place is already promoted (WAN P113: cp onto itself refused the approval, 3.8.1)
+    [[ "$vision" -ef "${root}/.aid-o/plans/${plan_id}-vision.md" ]] \
+      || cp "$vision" "${root}/.aid-o/plans/${plan_id}-vision.md" || {
       echo "ERROR: could not promote the vision to ${root}/.aid-o/plans/${plan_id}-vision.md" >&2; return 1; }
     promoted="${root}/.aid-o/plans/${plan_id}-vision.md"
   fi
