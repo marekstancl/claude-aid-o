@@ -1666,6 +1666,7 @@ YAML
   printf '#!/usr/bin/env bash\n[[ "$*" == *map_values* ]] && exit 1\nexec %q "$@"\n' "$real" > "$TEST_TMPDIR/fakebin/yq"; chmod +x "$TEST_TMPDIR/fakebin/yq"
   PATH="$TEST_TMPDIR/fakebin:$PATH" run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
   [ "$status" -ne 0 ]; [[ "$output" == *"could not be read for the gates' descriptions"* ]]
+  [ ! -f "$REPORT" ]
 }
 
 @test "P097 rows: no script reads a gate row's result directly — every reader goes through gate_row_normalize (grep guard)" {
