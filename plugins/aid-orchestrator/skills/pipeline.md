@@ -253,6 +253,20 @@ tool, recorded as `fsm_force_override` in the timeline and the audit log, and
 never an agent's way past a refusal. A refusal that stopped valid work (AID
 was wrong) is an entry in `.aid-o/work/aid-plugin-issues.md`.
 
+Every refusal also prints `class: <class> — <how>` from the refusal registry
+`defaults/refusal-classes.yaml` (P117): `agent_fix` — the agent fixes it and
+retries; `prevent` — the plan check or the run start catches it, inside a
+run its targeted repair (the `next:` line) replaces `--force`;
+`agent_fix_then_stand_in` — the agent fixes it, after a repeated failure the
+stand-in decides; `stand_in` — in `--auto` the independent
+stand-in decides, never the PM (a review finding: `aid-review-round.sh delegate`;
+a run decision: `aid-stand-in.sh ask|record`, `commands/aid-run.md` §Run decisions
+by the stand-in); `pm` — a
+Decision card; `incident` — the environment is broken, fix it and continue,
+nobody decides anything; `not_in_run` — cannot occur inside a run. A code the
+registry does not know is `pm`. In `--auto` no refusal has a global `--force`
+as its only way out: the stand-in never receives `--force`.
+
 The rows are the reasons agents met from 24. 8. to 23. 9. 2026
 (`scripts/tests/fixtures/refusals/measured-2026-09.tsv`); a reason met later
 gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
@@ -268,7 +282,7 @@ gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
 | `plan_gate_profile_excluded` | the plan requires a gate the run's profile left out | state | widen the profile in `execution.yaml`, then `advance-to-gates` | PM, to accept the gap |
 | `steps_incomplete` | not every step advanced | state | finish the next step, `increment-step` | |
 | `step_criteria_failed` | a brief point the step closes, or its own labelled criterion, ran `absent` (`cp2/step-N/plan-diff.json`, P110); `--force` does not waive it | work | fix the step and commit, `increment-step`; or render the Decision card quoting the point and, after the PM's answer, `increment-step <state> --defer-criterion AC<n> --reason "<the PM's words>" --finding-card <card>` | PM, to defer the point |
-| `no_isolation` | the close's measurer has no usable nested `unshare` (util-linux < 2.38 or user namespaces off): every `cmd` point is `absent`, never passed (P110) | state | install util-linux ≥ 2.38 and allow user namespaces (`sysctl kernel.unprivileged_userns_clone=1`), then `plan-finalize --stage produce` again | PM, to accept the gap |
+| `no_isolation` | the close's measurer has no usable nested `unshare` (util-linux < 2.38 or user namespaces off): every `cmd` point is `absent`, never passed (P110); `plan-run` asks the same probe (`lib/aid-measure-env.sh`) and refuses before the first step (P117) | state | install util-linux ≥ 2.38 and allow user namespaces (`sysctl kernel.unprivileged_userns_clone=1`), then `plan-finalize --stage produce` again | PM, to accept the gap |
 | `profile_skips_project_tests` | the change touches the project's tests (`project_tests:` globs, changed paths from git) and the run's profile has no gate flagged `runs_project_tests` (P110) | state | add the gate that runs the project's tests to the profile (flagged, with `--evidence-file`), run the gates again — `aid-run-gates.sh --lint-profiles <execution.yaml>` | PM, to waive (`aid-gate-waiver.sh issue project_tests --reason`) |
 | `project_tests_evidence_missing` | a flagged gate wrote no evidence of what it ran | work | give its command `--evidence-file {evidence_dir}/gates/<gate>.evidence.json` (or wrap it in `aid-run-gates.sh record-tests`), run the gates again | |
 | `project_tests_not_selected` | a flagged gate's evidence does not list the changed test files — the flag proves nothing | work | run them in the flagged gate, run the gates again | PM, to waive |
@@ -325,6 +339,20 @@ gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
 | `active_runs_write_failed` | `aid-fsm.sh init` wrote the state but not its `active-runs.json` entry — the pre-commit hook guards a run only from that map (P112) | state | fix what blocks the map (lock, permissions, a broken file), then the same `init` again (a direct init is idempotent; `plan-run` resumes it) | |
 | `active_runs_unreadable` | the pre-commit hook on `plan/*` or `task/*` cannot read `active-runs.json` (or jq is missing), so the run guarding the branch is unknown (P112) | state | fix or remove the map (`aid-fsm.sh active-runs prune` rebuilds what it can), or install jq, then commit again | |
 | `delegation_missing` | `aid-review-round.sh delegate` with no delegation in force (no `autonomy: auto`, the PM stopped the run, no `standing --delegate`), or a verdict without provenance (a Claude verdict outside its closed bracket `adjudicator-delegated-<fp16>`, a codex verdict whose sha256 is not the runner's) (P112) | work | the PM decides (`dispute --pm … --finding-card`), or the PM records `standing --plan <plan> --delegate --reason "<words>"`; a verdict: dispatch it inside its bracket, or let `delegate --fingerprint` run Codex | PM |
+| `delegation_left_files` | `aid-review-round.sh delegate --verdict`: the Claude stand-in left files in the plan's worktree that were not there when it was dispatched (uv.lock, `__pycache__`, build output) — they would fail the step's return as undeclared (aidlab-apps 15. 10. 2026) | work | remove the stand-in's files, then record the verdict again | controller |
+| `plan_close_worktree_dirty` | `aid-plan-fsm.sh plan-close`: the execution worktree the close removes holds changed or untracked files (WAN 19. 10. 2026: a PM document was deleted with the tree) — checked before any state changes | work | commit them on the plan branch or move them out; deleting them is the explicit `--discard-worktree-changes` | controller |
+| `plan_not_ready` | `aid-review-round.sh prepare --plan` (CP1): the plan-check record does not pass, was taken over another text of the plan, or readiness (`aid-generation-readiness.sh`, what `plan-run` refuses) fails — a round over it pays reviewers for a plan that cannot start (AID 10. and 11. 10. 2026) | work | fix the plan, re-run the plan check and readiness, then prepare again | controller |
+| `dependency_roots_many` | CP1 `prepare`: the plan's `depends_on_plans` names more than one plan whose `plan/<id>` branch is not in the target branch — its paths can be checked against one worktree only (P117) | work | close all but one, or split the plan | PM, to change the plan's scope |
+| `dependency_worktree_missing` | CP1 `prepare` or a later round: the one unmerged dependency has no worktree on `plan/<id>` (P117) | state | `aid-plan-fsm.sh plan-state <dep> --recreate-worktree --reason "<why>"`, then prepare again (a later round: `--restart`) | |
+| `dependency_moved` | a later CP1 round: the dependency's branch moved since round 1 recorded it (`evidence/<plan>/dependency-root.json`); `plan-run`: the dependency merged without the commit CP1 checked against (P117) | state | start the review again (`prepare --round 1 --restart`) | |
+| `stand_in_protected` | `aid-stand-in.sh`: the proposal touches a protected impact (the brief, AID's configuration, `protected_paths` — default `.env*`, `*secret*`, `*credential*`, `deploy/**`, production compose —, a repository outside `repo_roots`, an outside service, a kind the stand-in may not decide), or the stand-in itself classed it so (P117) | work | render the Decision card quoting it; the PM decides | PM |
+| `stand_in_not_allowed`, `stand_in_missing`, `stand_in_verdict_invalid`, `stand_in_verdict_unbound` | `aid-stand-in.sh`: the code is not a stand-in's, the decision was not asked through `ask`, the verdict is incomplete, or it has no origin (Codex: the runner's event; Claude: the closed bracket `stand-in-<id>`) (P117) | state | follow the refusal's `next:` | |
+| `rename_refused`, `rename_outside_step`, `rename_collision`, `rename_breaks_plan` | `aid-fsm.sh amend-contract --rename old=new`: no permission or reason, a path not of the current step or into another directory, a name already used, or the rename makes a plan that passed its check and readiness fail them — every file is put back (P117) | work | in `--auto`: `aid-stand-in.sh ask` with `{"kind": "rename", "step": N, "rename": {"old": …, "new": …}}`, then `--stand-in <auth.json>`; otherwise the PM's card quoting both paths | |
+| `accepted_risk_stale` | `plan-finalize --stage decide`: the PM's `accept-risk` record was given for another candidate, its card changed, or a finding it names changed (P117) | state | a new Decision card for the current candidate and its open findings; `aid-review-round.sh accept-risk --checkpoint cp7 … --finding-card <card>` | PM |
+| `accept_risk_not_protected` | `aid-review-round.sh accept-risk` in an `--auto` run: a finding of the set was not sent to the PM by the delegate as protected — a technical finding is the delegate's (P117) | state | `aid-review-round.sh delegate … --fingerprint <fp>` for it; what it classes brief/money/data comes back to the card | |
+| `cp7_confirmation_not_enough` | `decide`: the last whole-plan round is a confirmation round, but the previous candidate had no passed FULL round, or the fix was not documentation by the built-in list (`lib/aid-docs-surface.sh`) (P117) | work | prepare the next CP7 round (a full round), close it, decide again | |
+| `delegation_fix_pending` | `aid-review-round.sh delegate`: a commit after the round changed the lines the finding cites — the fix is judged by the next round's confirmation, never by an adjudicator, and never marks itself fixed (P117) | state | freeze the new candidate (cp7) or prepare the next round (cp2) | |
+| `plan_tests_failed` | `decide`: a nightly test the plan names failed at the candidate, no `plan_tests` entry runs it, or `plan-tests.json` is missing, stale or not the close's (P117) | work | fix on the plan branch, `plan-finalize --stage freeze`, then `produce` (it runs the tests) | |
 | `delegation_out_of_scope` | the independent agent classed its verdict `brief`, `money` or `data` — the brief, money and live data stay the PM's; `--defer-criterion` never takes a delegate (P112) | work | the finding goes to the PM's card as before (close routes it); the PM answers with `dispute --pm … --finding-card <card>` | PM |
 | `foreign_branch_unverified` | at the close a foreign branch is missing, moved after freeze, or does not carry a range a step reported (a commit in the live checkout does not count) (P111) | work | commit the foreign work in its worktree on its branch (drop a stray live-checkout commit by hand), then `plan-finalize --stage freeze` again | |
 | `repo_root_invalid` | a `repo_roots` entry is not a slug + git repository outside the project, its base branch does not resolve, or its branch `plan/<id>-<project>` already exists without the worktree (P111) | work | fix the frontmatter entry, or rename/delete the stray branch as the line says, then `plan-run` again | |
@@ -597,7 +625,11 @@ Dispatch prompt contains (in order):
    b. If source files exist (TSX/CSS): read relevant source file + lines
       from visual-spec.yaml component entries → paste VERBATIM in prompt
    c. If only PNG: include file paths for agent to Read as confirmation
-   d. If companion HTML: read HTML files from `mockups/` → include verbatim in prompt + generate design-tokens.yaml (same as github source, HTML instead of TSX)
+   d. Companion (`source_type: companion`, skills/visual-companion/SKILL.md step 8): `mockups/` holds the chosen
+      option's source files from the prototype copy and its PNG shots — read the source files and paste them VERBATIM
+      (they are built from the app's shared components, the closest thing to the implementation), the PNGs as paths
+      to Read; the implementation rewrites them against real data, never copies them blind. Older companion HTML
+      (before the kit) is read the same way as source.
    e. Priority: source code > visual-spec.yaml > PNG
 9. **UI CHANGE CONTRACT** — loaded when step has `ui_change_mode: existing_ui` in plan.json:
     a. Extract `step.ui_change_contract` from plan.json (path + sha256 + schema_version)
@@ -952,6 +984,11 @@ when git cannot hand out worktrees, when `aid-plan-parallel-check.sh --group <wa
 steps of THIS wave sharing a file or a declared interface, and when that check cannot run at
 all. **The check never refuses a run; it degrades it.** A wave that cannot be proved safe
 runs in order.
+
+**Steps never run at the same time in one working copy.** `serial` means one step at a time:
+dispatch the next step only after the previous one returned and was committed. Two agents in one
+tree see each other's half-written files and one commit sweeps up the other's work (WAN P111,
+20. 10. 2026). Concurrency exists only on the path below, each step in its own tree.
 
 **Concurrent path** (decision `concurrent slots=N`: N is the ceiling the controller keeps —
 the library does not count agents in flight — a wave larger than N runs in batches, the next

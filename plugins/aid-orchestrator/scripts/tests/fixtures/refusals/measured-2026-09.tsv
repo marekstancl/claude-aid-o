@@ -75,3 +75,10 @@
 0	p112_new	delegation_missing
 0	p112_new	delegation_out_of_scope
 0	p114_new	plan_page_missing
+0	companion_new	delegation_left_files
+0	companion_new	plan_close_worktree_dirty
+0	companion_new	plan_not_ready
+0	review_refused	accept_risk_not_protected
+0	plan_finalize_refused	accepted_risk_stale
+0	delegate_refused	delegation_fix_pending
+0	plan_finalize_refused	plan_tests_failed

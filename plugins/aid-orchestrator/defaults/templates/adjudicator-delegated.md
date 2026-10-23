@@ -34,7 +34,7 @@ below and the repository it names (read-only).
 
 ## Your answer
 
-ONE JSON object, nothing else, written to the file named at the end:
+ONE JSON object, nothing else, as your final message (the end of this prompt says where it is saved):
 
 ```json
 {"fingerprint": "sha256:…", "kind": "dispute|open_after_rounds", "answer": "accepted|rejected|dismiss|fix",

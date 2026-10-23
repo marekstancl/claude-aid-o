@@ -171,6 +171,15 @@ GEN_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # full unbounded test suite inside a single AC is an anti-pattern — bound it or
 # raise this (added 2026-07-10; matches aid-run-gates.sh's per-gate timeout model).
 AC_CMD_TIMEOUT="${AID_PLAN_DIFF_AC_TIMEOUT:-120}"
+# P117: one limit for the step, the gates and produce — a point without its own timeout: gets at least the
+# plan_diff gate's timeout_seconds (WAN P110: AC13 ~290 s against 120 s at the close), never above 1800.
+_PD_GATE_T="$(yq -r '.gates.plan_diff.timeout_seconds // ""' "${STATE_ROOT:-.}/.aid-o/config/execution.yaml" 2>/dev/null || true)"
+# An explicit AID_PLAN_DIFF_AC_TIMEOUT is the operator's own limit and wins (test-plan-diff.sh holds a hanging
+# point to 2 s with it); without it the gate's larger timeout_seconds is the default.
+if [[ -z "${AID_PLAN_DIFF_AC_TIMEOUT:-}" && "$_PD_GATE_T" =~ ^[1-9][0-9]*$ ]] && (( _PD_GATE_T > AC_CMD_TIMEOUT )); then
+  AC_CMD_TIMEOUT="$_PD_GATE_T"
+fi
+(( AC_CMD_TIMEOUT > 1800 )) && AC_CMD_TIMEOUT=1800
 # P112: a floor that raises EVERY point's limit, its own timeout: included — the
 # re-measurement of a step whose point ran out of time (the plan is not edited
 # mid-run, so AID_PLAN_DIFF_AC_TIMEOUT, which only fills a missing timeout:, would
@@ -179,6 +188,16 @@ AC_TIMEOUT_FLOOR="${AID_PLAN_DIFF_AC_TIMEOUT_FLOOR:-}"
 if [[ -n "$AC_TIMEOUT_FLOOR" ]] && { ! [[ "$AC_TIMEOUT_FLOOR" =~ ^[1-9][0-9]*$ ]] || (( AC_TIMEOUT_FLOOR > 1800 )); }; then
   echo "AID_PLAN_DIFF_AC_TIMEOUT_FLOOR='${AC_TIMEOUT_FLOOR}' must be whole seconds from 1 to 1800" >&2; exit 10
 fi
+
+# _pd_effective_timeout [<point timeout:>] — the one limit of a point for the step, the gates and produce
+# (all three run this script): its own timeout: (P110), else AC_CMD_TIMEOUT; raised to the floor; never above 1800.
+_pd_effective_timeout() {
+  local t="${1:-}"
+  [[ "$t" =~ ^[1-9][0-9]*$ ]] || t="$AC_CMD_TIMEOUT"
+  [[ -n "$AC_TIMEOUT_FLOOR" ]] && (( t < AC_TIMEOUT_FLOOR )) && t="$AC_TIMEOUT_FLOOR"
+  (( t > 1800 )) && t=1800
+  echo "$t"
+}
 
 # ── foreign repositories (P112) ─────────────────────────────────────────────
 # A plan with repo_roots measures a point naming a declared foreign path in the
@@ -196,53 +215,43 @@ if [[ -n "$RR_SRC" ]] && ! aid_rr_load "$RR_SRC" "" "$(basename "$STATE_ROOT")";
   exit 4
 fi
 
-# ── isolation (P110, --isolated) ────────────────────────────────────────────
-# PD_NET: unshare | host | none | env_stripped:<VAR> | verification_env_unset:<VAR>
-PD_NET="" PD_NET_LABEL="null" PD_ENV=() PD_ENV_KEYS="[]" PD_NEXT=""
-# <timeout> <cmd file> — the namespace prefix: loopback up as root, then back to
-# the caller's uid. Its own pid namespace too: whatever the point starts in the
-# background (a listener) dies with it instead of outliving the measurer.
-_pd_ns_run() {
-  env -i PATH="$PATH" HOME="${HOME:-/tmp}" TMPDIR="${TMPDIR:-/tmp}" \
-    unshare -rn --pid --fork sh -c 'ip link set lo up 2>/dev/null; exec unshare --map-user="$1" --map-group="$2" timeout "$3" bash "$4"' \
-    _ "$(id -u)" "$(id -g)" "$1" "$2"
+# ── isolation (P110, --isolated) and verification_env (P117): lib/aid-measure-env.sh ──
+# shellcheck source=lib/aid-measure-env.sh
+source "${SCRIPT_DIR}/lib/aid-measure-env.sh"
+if (( ISOLATED )); then _pd_isolation_init
+else _pd_env_load || true   # the step measurement: the same environment, no network namespace
+fi
+
+# A failing point keeps the end of its output (P117; WAN P111 AC10 exited 2 in 21 ms and nothing said why).
+# _pd_stream_* — a point's stdout and stderr never touch the disk unredacted: each goes through a FIFO into a
+# filter that keeps the raw tail in memory only and writes the last 8 KiB redacted (the verification_env values,
+# the host's secret-named variables, token-shaped strings) (Codex review of P117 A+C: the raw temp files were the leak).
+# shellcheck disable=SC2016
+_PD_FILTER="${SCRIPT_DIR}/lib/aid-redact-filter.py"   # the redacting filter, shared with the plan's nightly tests
+# _pd_stream_open — a private dir with the two FIFOs and their filters; sets PD_SD, PD_SP
+_pd_stream_open() {
+  local kv v n; local -a sec=()
+  for kv in "${PD_ENV[@]}"; do v="${kv#*=}"; (( ${#v} >= 4 )) && sec+=("$v"); done
+  while IFS= read -r n; do v="${!n:-}"; (( ${#v} >= 6 )) && sec+=("$v"); done < <(compgen -e | grep -Ei 'TOKEN|SECRET|PASSWORD|PASSWD|_KEY$|APIKEY|CREDENTIAL' || true)
+  # a connection string carries its password in the URL (security review of P117): *_URL / *_DSN values with userinfo
+  while IFS= read -r n; do v="${!n:-}"; [[ "$v" == *://*@* ]] && sec+=("$v"); done < <(compgen -e | grep -Ei '(_URL|_DSN|_URI)$' || true)
+  PD_SD="$(mktemp -d)"; mkfifo -m 600 "$PD_SD/o" "$PD_SD/e"; PD_SP=()
+  local s; for s in o e; do
+    AID_PD_SECRETS="$(printf '%s\n' "${sec[@]}")" python3 "$_PD_FILTER" "$([[ $s == o ]] && echo out || echo err)" \
+      > "$PD_SD/$s.txt" < "$PD_SD/$s" & PD_SP+=($!)   # the file first: a reader blocked on the FIFO holds no caller pipe
+  done
 }
-_pd_isolation_init() {
-  local map key val var probe
-  map="$(yq -o=json '.verification_env // {}' "${STATE_ROOT}/.aid-o/config/execution.yaml" 2>/dev/null || echo '{}')"
-  [[ -n "$map" && "$map" != null ]] || map='{}'
-  if [[ "$(jq 'length' <<< "$map")" -gt 0 ]]; then
-    PD_NET=host; PD_NET_LABEL="host (verification_env)"
-    PD_ENV_KEYS="$(jq -c 'keys' <<< "$map")"
-    while IFS=$'\t' read -r key val; do
-      if [[ "$val" =~ ^\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?$ ]]; then
-        var="${BASH_REMATCH[1]}"
-        [[ -n "${!var+x}" ]] || { PD_NET="verification_env_unset: ${var}"; PD_NEXT="next: set ${var} in the environment that runs the close, or give ${key} a literal value in verification_env"; return 0; }
-        val="${!var}"
-      fi
-      PD_ENV+=("${key}=${val}")
-    done < <(jq -r 'to_entries[] | "\(.key)\t\(.value)"' <<< "$map")
-    return 0
-  fi
-  # a service address a test suite reads (ASISTENT_TEST_DATABASE_URL), not any
-  # name with TEST in it (BATS_TEST_TMPDIR)
-  var="$(compgen -e | grep -E '^[A-Za-z0-9_]*(DATABASE_URL|REDIS_URL|_TEST_[A-Za-z0-9_]*(URL|DSN))$' | head -1)" || true
-  if [[ -n "$var" ]]; then
-    PD_NET="env_stripped: ${var}"
-    PD_NEXT="next: declare ${var} in verification_env (.aid-o/config/execution.yaml) or unset it — a suite that reads it would skip its database tests silently"
-    return 0
-  fi
-  probe="$(mktemp)"; echo true > "$probe"
-  if command -v unshare >/dev/null 2>&1 && _pd_ns_run 10 "$probe" >/dev/null 2>&1; then
-    PD_NET=unshare; PD_NET_LABEL=unshare
-    command -v ip >/dev/null 2>&1 || PD_NET_LABEL="unshare (no loopback)"
-  else
-    PD_NET=none
-    PD_NEXT="next: install util-linux >= 2.38 (unshare --map-user) and allow user namespaces (sysctl kernel.unprivileged_userns_clone=1); until then no point is measured"
-  fi
-  rm -f "$probe"
+# _pd_stream_close <label> — wait for the filters (5 s after the command: a child it left behind may hold the
+# FIFO open), write ac-output/<label>.txt next to plan-diff.json; PD_CAP = its relative path. Not in $( ):
+# a subshell cannot wait for the filters.
+_pd_stream_close() {
+  local label="$1" dir f p i; dir="$(dirname "$OUTPUT_FILE")/ac-output"; mkdir -p "$dir"
+  f="${dir}/${label//[^A-Za-z0-9_-]/_}.txt"
+  for i in $(seq 50); do kill -0 "${PD_SP[0]}" 2>/dev/null || kill -0 "${PD_SP[1]}" 2>/dev/null || break; sleep 0.1; done
+  for p in "${PD_SP[@]}"; do kill -TERM "$p" 2>/dev/null; wait "$p" 2>/dev/null; done
+  cat "$PD_SD/o.txt" "$PD_SD/e.txt" > "$f" 2>/dev/null; rm -rf "$PD_SD"
+  PD_CAP="ac-output/${f##*/}"
 }
-(( ISOLATED )) && _pd_isolation_init
 
 log_event "$TIMELINE_FILE" "plan_diff_start" plan="$PLAN" base_commit="$BASE_COMMIT" head_commit="$HEAD_COMMIT" || true
 
@@ -297,9 +306,7 @@ parse_step_blocks() {
 # Supported types: cmd (exit code), must_not_exist (file absent), must_contain (regex match).
 run_pattern() {
   local type=$1 cmd=$2 file=$3 regex=$4 expected_exit=$5 t="${6:-}" label="${7:-ac}"
-  # the block's own timeout: (P110, 1..1800 s) or the runner's default
-  [[ "$t" =~ ^[1-9][0-9]*$ ]] || t="$AC_CMD_TIMEOUT"
-  [[ -n "$AC_TIMEOUT_FLOOR" ]] && (( t < AC_TIMEOUT_FLOOR )) && t="$AC_TIMEOUT_FLOOR"
+  t="$(_pd_effective_timeout "$t")"
 
   local start_ms end_ms duration_ms
   start_ms=$(date +%s%3N)
@@ -311,7 +318,7 @@ run_pattern() {
   fi
   case "$type" in
     cmd)
-      local actual_exit=0
+      local actual_exit=0 _o _e
       # Per-AC timeout + process isolation. `timeout … bash -c` runs the AC cmd in
       # a SEPARATE process so (a) a hanging or pathologically slow AC cannot wedge
       # the whole DONE-review — timeout kills it after AC_CMD_TIMEOUT and we report
@@ -331,20 +338,23 @@ run_pattern() {
         fi
         # written verbatim, so no shell re-parses the command (nested quotes, $x)
         local cf="${EVIDENCE_DIR}/cmd-${label//[^A-Za-z0-9_-]/_}.sh"; printf '%s\n' "$cmd" > "$cf"
+        _pd_stream_open; _o="$PD_SD/o"; _e="$PD_SD/e"   # after every early return: an unopened FIFO blocks its filter
         if [[ "$PD_NET" == unshare ]]; then
-          _pd_ns_run "$t" "$cf" </dev/null >/dev/null 2>&1 || actual_exit=$?
+          _pd_ns_run "$t" "$cf" </dev/null >"$_o" 2>"$_e" || actual_exit=$?
         else
-          env -i PATH="$PATH" HOME="${HOME:-/tmp}" TMPDIR="${TMPDIR:-/tmp}" "${PD_ENV[@]}" timeout "$t" bash "$cf" </dev/null >/dev/null 2>&1 || actual_exit=$?
+          env -i PATH="$PATH" HOME="${HOME:-/tmp}" TMPDIR="${TMPDIR:-/tmp}" "${PD_ENV[@]}" timeout "$t" bash "$cf" </dev/null >"$_o" 2>"$_e" || actual_exit=$?
         fi
       else
-        timeout "$t" bash -c "$cmd" </dev/null >/dev/null 2>&1 || actual_exit=$?
+        _pd_stream_open; _o="$PD_SD/o"; _e="$PD_SD/e"
+        env "${PD_ENV[@]}" timeout "$t" bash -c "$cmd" </dev/null >"$_o" 2>"$_e" || actual_exit=$?
       fi
+      local _cap; _pd_stream_close "$label"; _cap="$PD_CAP"
       if [[ "$actual_exit" -eq 124 && "$expected_exit" -ne 124 ]]; then
-        verdict="absent"; evidence="neměřeno: limit ${t} s (reason=timeout)"
+        verdict="absent"; evidence="neměřeno: limit ${t} s (reason=timeout); output: ${_cap}"
       elif [[ "$actual_exit" -eq "$expected_exit" ]]; then
-        verdict="present"; evidence="exit=$actual_exit"
+        verdict="present"; evidence="exit=$actual_exit (limit ${t} s)"
       else
-        verdict="absent"; evidence="exit=$actual_exit (expected $expected_exit)"
+        verdict="absent"; evidence="exit=$actual_exit (expected $expected_exit, limit ${t} s); output: ${_cap}"
       fi
       ;;
     must_not_exist)
@@ -518,15 +528,27 @@ fi
 # while its Decision card passes aid_pm_card_check again — a hand-written file
 # defers nothing. A deferred absent point no longer counts as absent here.
 if [[ "$SCOPE" == step && -f "${STEP_DIR}/deferred.json" ]]; then
-  while IFS=$'\t' read -r dlabel dcard; do
+  while IFS=$'\t' read -r dlabel dcard dby dauth; do
     [[ -n "$dlabel" ]] || continue
-    if why="$(aid_pm_card_check "$dcard" "$dlabel")"; then
+    [[ "$dcard" == - ]] && dcard=""   # no empty field: IFS=tab collapses two tabs into one
+    if [[ "$dby" == stand_in ]]; then
+      # P117: honoured while the permission holds AND the fresh measurement still fails for a technical reason
+      declare -F aid_stand_in_record_ok >/dev/null || source "${SCRIPT_DIR}/lib/aid-stand-in.sh"
+      dreason="$(jq -r --arg l "$dlabel" 'first(.[] | select(.ac_label == $l) | .reason // "") // ""' <<< "$results_json")"
+      if ! why="$(aid_stand_in_record_ok "$EVIDENCE_DIR" "$dauth" measurement_failed "$(jq -nc --argjson s "${STEP_N:-0}" --arg c "$dlabel" '{step: $s, criterion: $c}')")"; then
+        echo "aid-plan-diff: deferral of ${dlabel} not honoured: ${why}" >&2; continue
+      elif [[ ! "$dreason" =~ $AID_PD_UNMEASURED_RE ]]; then
+        echo "aid-plan-diff: deferral of ${dlabel} not honoured: the point was measured now (${dreason:-ran}) — the stand-in deferred only a technical failure" >&2; continue
+      fi
+      results_json="$(jq -c --arg l "$dlabel" --slurpfile d "${STEP_DIR}/deferred.json" \
+        'map(if .ac_label == $l then . + {deferred: $d[0][$l]} else . end)' <<< "$results_json")"
+    elif why="$(aid_pm_card_check "$dcard" "$dlabel")"; then
       results_json="$(jq -c --arg l "$dlabel" --slurpfile d "${STEP_DIR}/deferred.json" \
         'map(if .ac_label == $l then . + {deferred: $d[0][$l]} else . end)' <<< "$results_json")"
     else
       echo "aid-plan-diff: deferral of ${dlabel} not honoured: ${why}" >&2
     fi
-  done < <(jq -r 'to_entries[] | "\(.key)\t\(.value.card // "")"' "${STEP_DIR}/deferred.json" 2>/dev/null)
+  done < <(jq -r 'to_entries[] | "\(.key)\t\(.value.card // "-")\t\(.value.by // "pm")\t\(.value.stand_in // "-")"' "${STEP_DIR}/deferred.json" 2>/dev/null)
   absent_count="$(jq '[.[] | select(.verdict == "absent" and .deferred == null)] | length' <<< "$results_json")"
 fi
 
@@ -570,9 +592,10 @@ jq -n \
   + (if $scope == "step" then {unmeasured_step: false} else {} end)
   + (if $scope == "step" and $ps == null then {plan_step_note: "no plan_step (EPIC generated before 2.116.0): only the brief points of zavira were run, the step section was not read"} else {} end)
   + {isolation: (if $iso == 1 then {worktree: $wt, env_keys: $ek, network: (if $net == "null" then null else $net end)} else null end)}
+  + (if $iso != 1 and ($ek | length) > 0 then {env_keys: $ek} else {} end) + {ac_timeout_default_s: $actd}
   + (if $next == "" then {} else {next: $next} end)' \
   --argjson um "$unmeasured_json" --arg scope "$SCOPE" --argjson st "${STEP_N:-null}" --argjson ps "$PLAN_STEP" \
-  --argjson iso "$ISOLATED" --arg wt "$(pwd)" --argjson ek "$PD_ENV_KEYS" --arg net "$PD_NET_LABEL" --arg next "$PD_NEXT" > "$OUTPUT_FILE"
+  --argjson iso "$ISOLATED" --arg wt "$(pwd)" --argjson ek "$PD_ENV_KEYS" --arg net "$PD_NET_LABEL" --arg next "$PD_NEXT" --argjson actd "$AC_CMD_TIMEOUT" > "$OUTPUT_FILE"
 [[ -n "$PD_NEXT" ]] && echo "$PD_NEXT" >&2
 
 # sha256 binds the file to this run: increment-step accepts a step's

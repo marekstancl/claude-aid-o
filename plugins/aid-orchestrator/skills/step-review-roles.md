@@ -213,7 +213,11 @@ holds the claims question. A project that lists `final_claims` in its own
 
 What the delivery says about itself against what the code does. You hold
 `claims.patch` (CHANGELOG, README and docs hunks of the range) and the code at
-the candidate.
+the candidate. In a step review (CP2, P117: the default policy asks this role
+when the step changes documentation — `when: docs_surface`) the claims are the
+documentation hunks of the step's `diff.patch`, checked against the code at the
+step's commit; question 3 then reads the step's objective instead of the plan's
+type.
 
 ### Questions
 

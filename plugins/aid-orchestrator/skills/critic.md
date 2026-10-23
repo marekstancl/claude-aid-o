@@ -87,7 +87,10 @@ effort would buy), a different symptom (whether what is being solved follows
 from something else), opportunity cost (what lies next to it and is more
 urgent). Never a verdict such as "do not build"; what is built is the PM's
 decision, your job is the material for it. An empty level 2 is a correct
-result and better than a manufactured suggestion. Level 2 never overrides
+result and better than a manufactured suggestion; write it as the opening sentence and then exactly
+„Změnu rozsahu nenavrhuji.“ (or „No change to the scope.“). The check also reads „Další změnu rozsahu
+nenavrhuji.“, „Nic k rozsahu nemám.“ and „Nothing to suggest.“ as empty (critics wrote them before this
+rule); any other text is read as a suggestion and shown to the PM. Level 2 never overrides
 level 1: a proposal that is wrong inside is fixed, and a smaller scope is not a
 way around a defect.
 

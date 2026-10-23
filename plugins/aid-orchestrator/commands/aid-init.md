@@ -258,7 +258,7 @@ makes the hash stale: the command refuses (exit 2), writes nothing, and prints t
 
 **1a. The project_tests offer (P110).** When the file has no `project_tests:` key
 (`execution_yaml_lacks_project_tests` in `scripts/lib/aid-init-execution-yaml.sh`), `/aid-init`
-shows the PM the block `render_project_tests_block <detected stacks>` prints — the test-file globs
+shows the PM the block `render_project_tests_block --root <project root> <detected stacks>` prints (the globs of the test files the repository actually tracks; none found is said, never proposed) — the test-file globs
 of each stack — and appends it only on the PM's yes. Without the key the gate runner refuses
 nothing (`declared: false`) and only advises (`project_tests_undeclared`). With it, a change under
 those globs needs a gate flagged `runs_project_tests: true` whose command writes
@@ -357,6 +357,14 @@ deliberately desktop-only application sets it to `false` and the mobile obligati
 project with no UI at all is not asked: no UI steps, no obligation, and the key may be left out
 (absent reads as the default). Detection and the omit rule are in
 `skills/setup/project-scan.md` §"Project Scan", next to the `documentation.*` facts.
+
+The companion kit (`scripts/aid-companion.sh`, the UI proposals of a brainstorm) needs where the UI
+lives and how it starts: show the PM the block `source "$AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh" &&
+aid_ui_config_detect <project root>` prints (`ui.dir`, `ui.components`, `ui.dev_cmd`, `ui.ready_path`,
+`ui.api_prefix` — detected from `vite.config.*` / `next.config.*` and the sources; what it cannot find is a
+comment, never a guess; `ui.rules[]` (the files with the project's UI rules) and `ui.api_origins[]` (an API
+on another origin) are asked for, never detected) and merge it into `project.yaml` only on the PM's yes. A project without UI is
+not asked.
 
 ### What the project has to document with
 

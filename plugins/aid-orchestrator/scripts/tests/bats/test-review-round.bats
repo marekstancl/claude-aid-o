@@ -14,6 +14,8 @@ setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"
   export AID_PLUGIN_PATH
   ROUND_SH="$AID_PLUGIN_PATH/scripts/aid-review-round.sh"
+  # the packet fixtures are minimal plans; the readiness refusal has its own case (real readiness there)
+  export AID_TEST_MODE=1 AID_REVIEW_READINESS_STUB=pass
   ROOT="$(mktemp -d)"; cd "$ROOT"
   git init -q .
   mkdir -p .aid-o/plans .aid-o/work/evidence/P900 scripts
@@ -34,7 +36,7 @@ _plan() {
 }
 _check() {
   jq -n --arg s "$(sha256sum "$PLAN" | cut -d' ' -f1)" \
-    '{plan_sha256: $s, warnings: [{id: "A9", location: "p.md", message: "size"}]}' > "$EV/plan-check.json"
+    '{pass: true, plan_sha256: $s, warnings: [{id: "A9", location: "p.md", message: "size"}]}' > "$EV/plan-check.json"
 }
 
 @test "prepare: six prompts, the packet, round.json and an index entry" {
@@ -495,6 +497,19 @@ _mplan() {
   echo "nález $fp" >> "$card"; touch -d '-10 seconds' "$card"
   run _S "${pm[@]}" --finding-card "$card"; [ "$status" -eq 1 ]; [[ "$output" == *"no PM prompt after"* ]]
 }
+@test "step: a step that changes documentation gets final_claims in its own review (when: docs_surface); a step that does not, does not" {
+  _repo; _sc
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" != *"prompt-final_claims.md"* ]]
+  rm -rf "$E/cp2"
+  echo "- **New thing** — the app now does it" > "$R/CHANGELOG.md"; git -C "$R" add -A; git -C "$R" commit -qm "docs: changelog"
+  jq '.steps[0].outputs += ["Modify: `CHANGELOG.md` — the line"]' "$E/plan.json" > "$E/p" && mv "$E/p" "$E/plan.json"; _sc
+  run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"prompt-final_claims.md"* ]]
+  [ "$(jq -r '.reviewers_expected | index("final_claims") != null' "$(D 1)/round.json")" = true ]
+  # a project policy that lists no final_claims still gets it for a documentation step (a policy replaces the block)
+  rm -rf "$E/cp2"; yq -i 'del(.review_checkpoints.step_review.reviewers[] | select(.role == "final_claims"))' "$R/.aid-o/config/policies/review-checkpoints.yaml"; _sc
+  run _S prepare --round 1; [ "$status" -eq 0 ]; [[ "$output" == *"prompt-final_claims.md"* ]]
+}
+
 @test "step: prepare needs a step check at HEAD and a review verdict; the default asks security on every reviewed step, a gated project only on a pattern" {
   _repo
   run _S prepare --round 1; [ "$status" -eq 1 ]; [[ "$output" == *"no step-check.json"* ]]
@@ -930,6 +945,51 @@ _fanswer() {
 }
 _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blocker", claim: "the changelog claims an import the app never makes", command: "grep -n import src/app.py", evidence: "src/app.py:1", fix: "import new", rule: "every change the changelog claims is in the code"}] | del(.no_findings_reason)'
 
+@test "accept-risk: the PM closes with an open blocker on ONE card naming the candidate and the finding; a card missing either is refused, the record is bound to both" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_BLOCKER"
+  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null || true
+  local fp f16 head card; fp="$(jq -r '.findings[0].fingerprint' "$(FD 1)/merged.json")"; f16="$(sed 's/^sha256://' <<< "$fp" | cut -c1-16)"
+  head="$(git -C "$R" rev-parse HEAD)"; card="$ROOT/card.md"
+  export AID_HOOK_AUDIT="$ROOT/audit.jsonl"
+  printf 'Rozhodnutí 1: zavřít %s s otevřeným nálezem
+' "${head:0:12}" > "$card"; touch -d '-10 seconds' "$card"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
+  run _F accept-risk --round 1 --finding-card "$card" --reason "PM: zavřít s tímto rizikem, oprava v dalším plánu"
+  [ "$status" -ne 0 ]; [[ "$output" == *"does not quote ${f16}"* ]]
+  printf -- '- nález %s: přijímám riziko\n' "$f16" >> "$card"; touch -d '-10 seconds' "$card"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$AID_HOOK_AUDIT"
+  # in an --auto run a finding the delegate did not send to the PM is not the PM's to accept
+  mkdir -p "$R/.aid-o/work/plan-state/P901"; printf 'plan_id: P901\nautonomy: auto\n' > "$R/.aid-o/work/plan-state/P901/plan-state.yaml"
+  run _F accept-risk --round 1 --finding-card "$card" --reason "PM: zavřít s tímto rizikem, oprava v dalším plánu"
+  [ "$status" -ne 0 ]; [[ "$output" == *"accept_risk_not_protected"* ]]
+  rm "$R/.aid-o/work/plan-state/P901/plan-state.yaml"
+  run _F accept-risk --round 1 --finding-card "$card" --reason "PM: zavřít s tímto rizikem, oprava v dalším plánu"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.findings[0].resolution' "$(FD 1)/merged.json")" = accepted_risk ]
+  [ "$(jq -r '"\(.candidate_sha) \(.findings | length) \(.by)"' "$(FD 1)/accepted-risk.json")" = "${head} 1 pm" ]
+  [ "$(jq -r '.findings[0] | "\(.status) \(.dispute.pm.accepted_risk)"' "$(FD 1)/merged.json")" = "fixed true" ]
+  [ "$(jq -r .verdict "$E/cp7/rounds.json")" = pass ]
+  # no card naming the candidate: refused
+  printf -- '- nález %s\n' "$f16" > "$ROOT/card2.md"; touch -d '-10 seconds' "$ROOT/card2.md"
+  run _F accept-risk --round 1 --finding-card "$ROOT/card2.md" --reason "PM: zavřít s tímto rizikem, oprava v dalším plánu"
+  [ "$status" -ne 0 ]
+  # decide holds the record to its candidate, its card and its findings
+  _stale() { run bash -c "source '$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh' >/dev/null 2>&1; _pfsm_accepted_risk_stale '$E' '$1' '$R'"; }
+  _stale "$head"; [ "$status" -eq 0 ]
+  _stale "$(printf 'a%.0s' {1..40})"; [ "$status" -eq 1 ]; [[ "$output" == *"was given for candidate ${head:0:12}"* ]]
+  jq '.findings[0].claim = "something else"' "$(FD 1)/merged.json" > "$ROOT/m" && cp "$ROOT/m" "$(FD 1)/merged.json"
+  _stale "$head"; [ "$status" -eq 1 ]; [[ "$output" == *"is not the one the PM accepted"* ]]
+  echo extra >> "$card"; _stale "$head"; [ "$status" -eq 1 ]; [[ "$output" == *"card"*"changed after the PM answered"* ]]
+  # a finding added to the round after the PM's decision: the set is not the one accepted
+  cp "$(FD 1)/merged.json" "$ROOT/m0"; head -c -0 "$card" >/dev/null
+  git -C "$R" checkout -q -- . 2>/dev/null || true
+  jq '.findings[0].claim = "the changelog claims an import the app never makes"' "$ROOT/m0" | jq '.findings += [(.findings[0] | .fingerprint = "sha256:\("0" * 64)" | .status = "open" | .dispute = null)]' > "$(FD 1)/merged.json"
+  sed -i '$d' "$card"
+  _stale "$head"; [ "$status" -eq 1 ]; [[ "$output" == *"not the set the PM accepted"* || "$output" == *"changed after"* ]]
+  rm "$(FD 1)/accepted-risk.json"; _stale "$head"; [ "$status" -eq 1 ]; [[ "$output" == *"without the PM's record"* ]]
+}
+
 @test "cp7: produce's inputs hold the plan's criteria and the EPIC findings; prepare prints the two default prompts with cp7 foci" {
   _frepo; _fsc
   grep -q "the app imports new" "$E/cp7/criteria.md"; grep -q "it works end to end" "$E/cp7/criteria.md"
@@ -1008,6 +1068,10 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [ "$(jq -r '.carried_from // {} | length' "$(FD 1)/round.json")" -eq 0 ]           # a code fix carries nobody
   [ -s "$(FD 1)/packet/fix.patch" ]; [ "$(jq '.findings | length' "$(FD 1)/packet/open-findings.json")" -eq 1 ]
   grep -q "This is a confirmation round" "$(FD 1)/prompt-final_generalist.md"
+  # P117 (16): after a failing round the next attempt is a FULL round — the open findings to re-check, and the whole plan
+  [ "$(jq -r .mode "$(FD 1)/round.json")" = full ]
+  grep -q "This is a FULL round over the new candidate" "$(FD 1)/prompt-final_generalist.md"
+  ! grep -q "Do not review the rest again" "$(FD 1)/prompt-final_generalist.md"
 }
 
 @test "cp7: a finding of a final role validates against the finding schema's checkpoint and role lists" {
@@ -1023,11 +1087,24 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   local first="$E"; echo "- **Fix** — wording" >> "$R/CHANGELOG.md"; git -C "$R" commit -qam "docs: wording"
   E="$(dirname "$first")/R-P901-final-2"; mkdir -p "$E"; cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"; : > "$E/timeline.jsonl"
   mkdir -p "$E/cp7"; cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$first/cp7/brief.json" "$E/cp7/"
-  jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-1" '{previous_run_dir: $d, class: "delivery", docs_only: true, invalidated_feeds: ["claims"]}' > "$E/fix-class.json"
+  jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-1" '{previous_run_dir: $d, class: "delivery", docs_only: true, invalidated_feeds: ["claims"], reason: null, changed_paths: [{path: "CHANGELOG.md", kind: "modified", feeds: ["claims"]}]}' > "$E/fix-class.json"
   _fsc
   run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq -r '.carried_from // {} | length' "$(FD 1)/round.json")" -eq 0 ]
   [ -f "$(FD 1)/prompt-final_criteria.md" ] && [ -f "$(FD 1)/prompt-final_generalist.md" ]
+  # P117 (15): the previous candidate passed a full round and the fix is docs only — a confirmation round
+  [ "$(jq -r .mode "$(FD 1)/round.json")" = confirmation ]
+  grep -q "This is a confirmation round over the whole plan" "$(FD 1)/prompt-final_generalist.md"
+  grep -q "read the WHOLE candidate" "$(FD 1)/prompt-final_generalist.md"; [ -s "$(FD 1)/packet/fix.patch" ]
+  # decide accepts it only with that predecessor: the previous candidate's head, a docs-only fix
+  _conf() { run bash -c "source '$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh' >/dev/null 2>&1; _pfsm_cp7_confirmation_bad '$E'"; }
+  jq --arg h "$(jq -r .head_sha "$first/cp7/round-1/round.json")" '.previous_candidate = $h' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
+  _conf; [ "$status" -eq 0 ]
+  # a markdown file that drives behaviour (a skill) is not documentation (security review)
+  jq '.changed_paths += [{path: "plugins/x/skills/run.md", kind: "modified", feeds: ["claims"]}]' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
+  _conf; [ "$status" -eq 1 ]; [[ "$output" == *"not documentation only"* ]]
+  jq '.changed_paths |= map(select(.path == "CHANGELOG.md")) | .previous_candidate = "0000000000000000000000000000000000000000"' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
+  _conf; [ "$status" -eq 1 ]; [[ "$output" == *"not the previous candidate"* ]]
 }
 @test "cp7-zadani: a fix that touched only the plan's criteria asks both roles again (final_generalist reads the criteria too), never carries final_criteria" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
@@ -1755,7 +1832,15 @@ _DLG() { "$ROUND_SH" delegate --checkpoint cp2 --evidence-dir "$E" --step 0 --pr
 _verdict() { jq -n --arg f "${5:-$FP}" --arg a "$2" --arg c "${3:-technical}" --arg p "${4:-claude}" \
   '{fingerprint: $f, kind: (if $a | IN("accepted", "rejected") then "dispute" else "open_after_rounds" end), answer: $a, class: $c,
     reason: "the reviewer read the live checkout; the worktree has it", rerun: {cmd: "grep -n new src/app.py", exit: 0, output_tail: "3:new"}, provider: $p}' > "$1"; }
+# _snap <round dir> <fp16> [root] — the before-record the STAND-IN dispatch writes (aid-review-round.sh
+# _dlg_tree_state), for a test that hands a stand-in's verdict in without going through that dispatch
+_snap() {
+  ( cd "${3:-$R}" && { git status --porcelain --untracked-files=all --ignored=traditional | grep -v '^.. \.aid-o/' || true
+      printf '## head %s\n' "$(git rev-parse HEAD)"
+      printf '## tracked-content %s\n' "$(git diff HEAD --binary | sha256sum | cut -d' ' -f1)"; } | sort ) > "$1/adjudicator-delegated-$2.status-before"
+}
 _adj_bracket() {   # <fp16> <verdict file>
+  [[ -f "$(D 1)/adjudicator-delegated-$1.status-before" ]] || _snap "$(D 1)" "$1"
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "adjudicator-delegated-$1" --agent-id claude:adjudicator-delegated --evidence-dir "$(D 1)" >/dev/null
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "adjudicator-delegated-$1" --output-file "$2" --evidence-dir "$(D 1)" >/dev/null
 }
@@ -1845,6 +1930,42 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   run _DLG --fingerprint "$FP"; [ "$status" -eq 0 ]; [[ "$output" == *"already settled"*"nothing dispatched"* ]]
   [ "$(grep -c . "$R/.aid-o/work/evidence/P950/delegated-disputes.jsonl")" = 1 ]
 }
+@test "delegate: new evidence (a new commit) allows ONE new verdict; the old one is superseded in merged.json, the ledger and on disk" {
+  _dlg auto; _dispute; _fake_codex
+  export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "fine on the worktree", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
+  _DLG --fingerprint "$FP" >/dev/null
+  local L="$R/.aid-o/work/evidence/P950/delegated-disputes.jsonl"
+  git -C "$R" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "the author's new evidence"
+  export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "rejected", class: "technical", reason: "the new commit does not fix it", rerun: {cmd: "grep", exit: 1, output_tail: "no"}}')"
+  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"superseded"* ]]
+  [ -f "$(D 1)/adjudicator-delegated-${F16}.superseded-1.json" ]
+  [ "$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | "\(.status) \(.dispute.delegated.answer) \(.delegated_history | length)"' "$(D 1)/merged.json")" = "open rejected 1" ]
+  [ "$(grep -c . "$L")" = 2 ]; [ "$(tail -1 "$L" | jq -r '.supersedes | length')" = 64 ]
+  # without new evidence no new verdict
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 0 ]; [[ "$output" == *"on this evidence; nothing dispatched"* ]]
+  [ "$(grep -c . "$L")" = 2 ]
+  # yet more evidence: no third opinion — the PM decides (no verdict shopping)
+  git -C "$R" -c user.email=t@t -c user.name=t commit -q --allow-empty -m "more"
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_out_of_scope"*"a third opinion is not asked"* ]]
+  [ "$(grep -c . "$L")" = 2 ]
+}
+@test "delegate: a fix that changed the cited lines goes to the next round's confirmation, not to the adjudicator; a change elsewhere does not" {
+  _dlg auto; _dispute; _fake_codex
+  export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "fine", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
+  local ev; ev="$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .evidence' "$(D 1)/merged.json")"
+  local file="${ev%%:*}" line="${ev#*:}"; line="${line%%[!0-9]*}"
+  sed -i "${line}s/.*/the fix/" "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "fix the cited line"
+  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_fix_pending"* ]]
+  [ "$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .status' "$(D 1)/merged.json")" = disputed ]   # never marked fixed by itself
+  git -C "$R" reset -q --hard HEAD~1
+  # a second citation of the finding fixed: the same (every citation counts)
+  local m="$(D 1)/merged.json"; jq --arg f "$FP" '.findings |= map(if .fingerprint == $f then .evidence = (.evidence + "; src/new.py:1") else . end)' "$m" > "$m.t" && mv "$m.t" "$m"
+  echo "fixed too" > "$R/src/new.py"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "fix the second citation"
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_fix_pending"* ]]
+  git -C "$R" reset -q --hard HEAD~1
+  echo "an unrelated line" >> "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "elsewhere"
+  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]
+}
 @test "delegate: after /aid-stop (the run declared manual) the automatic delegation is not in force" {
   _dlg auto; _dispute
   mkdir -p "$R/.aid-o/work"; echo 'mode: manual' > "$R/.aid-o/work/auto-mode-state.yaml"
@@ -1894,7 +2015,7 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   _F collect --round 1 >/dev/null
   run _F close --round 1 --tokens final_criteria=5 final_generalist=5; [ "$status" -eq 1 ]; [[ "$output" == *"await an independent verdict"* ]]
   local fp f16 v; fp="$(_F delegate --round 1 --pending)"; f16="$(sed 's/^sha256://' <<< "$fp" | cut -c1-16)"; v="$(FD 1)/adjudicator-delegated-${f16}.json"
-  _verdict "$v" dismiss technical claude "$fp"
+  _verdict "$v" dismiss technical claude "$fp"; _snap "$(FD 1)" "$f16"
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "adjudicator-delegated-${f16}" --agent-id claude:adjudicator-delegated --evidence-dir "$(FD 1)" >/dev/null
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "adjudicator-delegated-${f16}" --output-file "$v" --evidence-dir "$(FD 1)" >/dev/null
   run _F delegate --round 1 --fingerprint "$fp" --verdict "$v"; echo "$output"; [ "$status" -eq 0 ]
@@ -1936,4 +2057,145 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   run _DLG --pending; [ -z "$output" ]                       # the second finding goes to the extra round, not to a verdict now
   f="$(tail -1 <<< "$fps")"
   run _DLG --fingerprint "$f"; [ "$status" -eq 1 ]; [[ "$output" == *"not the last one"* ]]
+}
+
+@test "delegate: the adjudicator's prompt asks for the verdict as the final message, never to write a file in a read-only sandbox (aidlab-apps 16. 10. 2026)" {
+  _dlg auto; _dispute; _probe false rate_limited
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 4 ]
+  local p; p="$(ls "$(D 1)"/adjudicator-delegated-*.prompt.md)"
+  grep -q 'Your final message is ONE JSON object' "$p"
+  grep -q 'In a read-only sandbox do not try to write a file' "$p"
+  ! grep -q '^Write your verdict as ONE JSON object to:' "$p"
+}
+
+@test "delegate: a Claude stand-in that left a file in the worktree is refused delegation_left_files; once removed, the verdict records (aidlab-apps 15. 10. 2026)" {
+  _dlg auto; _dispute; _probe false rate_limited
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 4 ]
+  touch "$R/uv.lock"
+  _verdict "$VF" accepted; _adj_bracket "$F16" "$VF"
+  run _DLG --fingerprint "$FP" --verdict "$VF"
+  [ "$status" -eq 1 ]; [[ "$output" == *"delegation_left_files"* ]]; [[ "$output" == *"uv.lock"* ]]
+  rm "$R/uv.lock"
+  run _DLG --fingerprint "$FP" --verdict "$VF"; echo "$output"; [ "$status" -eq 0 ]
+}
+
+@test "delegate: a CP7 dispute settled after the round closed leaves every cp7 file recorded — the decision's stage-writes check passes (WAN 18. 10. 2026)" {
+  _frepo; _fsc
+  # what the earlier stages (produce, gates) record in a real close
+  bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh' && aid_stage_writes_record '$E' fixture \$(aid_stage_writes_inputs '$E')"
+  _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "${_BLOCKER/blocker/major}"
+  _F collect --round 1 >/dev/null
+  run _F close --round 1 --tokens final_criteria=5 final_generalist=5; echo "$output"; [ "$status" -eq 0 ]
+  local fp f16 v; fp="$(jq -r '.findings[0].fingerprint' "$(FD 1)/merged.json")"; f16="$(sed 's/^sha256://' <<< "$fp" | cut -c1-16)"; v="$(FD 1)/adjudicator-delegated-${f16}.json"
+  "$ROUND_SH" standing --plan "$R/.aid-o/plans/P901-x.md" --project-root "$R" --delegate --reason "PM: nezávislý agent rozhodne spory za mě" >/dev/null
+  _F dispute --round 1 --fingerprint "$fp" --reason "the import is in src/app.py on the plan branch" >/dev/null
+  _probe false rate_limited
+  run _F delegate --round 1 --fingerprint "$fp"; [ "$status" -eq 4 ]
+  _verdict "$v" accepted technical claude "$fp"
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "adjudicator-delegated-${f16}" --agent-id claude:adjudicator-delegated --evidence-dir "$(FD 1)" >/dev/null
+  bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "adjudicator-delegated-${f16}" --output-file "$v" --evidence-dir "$(FD 1)" >/dev/null
+  run _F delegate --round 1 --fingerprint "$fp" --verdict "$v"; echo "$output"; [ "$status" -eq 0 ]
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh' && aid_stage_writes_verify '$E'"
+  echo "$output"; [ "$status" -eq 0 ]
+}
+
+@test "delegate: the stand-in check also sees an ignored __pycache__ it left and an edit to a tracked file; without the before-record it refuses (Codex review 19. 10. 2026)" {
+  _dlg auto; _dispute; _probe false rate_limited
+  printf '__pycache__/\n' >> "$R/.gitignore"; git -C "$R" add .gitignore; git -C "$R" commit -qm ignore
+  run _DLG --fingerprint "$FP"; [ "$status" -eq 4 ]
+  _verdict "$VF" accepted; _adj_bracket "$F16" "$VF"
+  mkdir -p "$R/src/__pycache__"; touch "$R/src/__pycache__/app.cpython-312.pyc"
+  run _DLG --fingerprint "$FP" --verdict "$VF"
+  [ "$status" -eq 1 ]; [[ "$output" == *"delegation_left_files"*"__pycache__"* ]]
+  rm -r "$R/src/__pycache__"; echo "# touched" >> "$R/src/app.py"
+  run _DLG --fingerprint "$FP" --verdict "$VF"
+  [ "$status" -eq 1 ]; [[ "$output" == *"delegation_left_files"*"tracked-content"* ]]
+  git -C "$R" checkout -q -- src/app.py
+  git -C "$R" commit -q --allow-empty -m "a stand-in's commit"
+  run _DLG --fingerprint "$FP" --verdict "$VF"
+  [ "$status" -eq 1 ]; [[ "$output" == *"delegation_left_files"*"head"* ]]
+  git -C "$R" reset -q --hard HEAD~1
+  rm "$(D 1)/adjudicator-delegated-${F16}.status-before"
+  run _DLG --fingerprint "$FP" --verdict "$VF"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no record of the worktree before the stand-in ran"* ]]
+}
+
+@test "delegate: a CP7 dispute settled by Codex after the round closed leaves every cp7 file recorded, the runner's own files included (Codex review 19. 10. 2026)" {
+  _frepo; _fsc
+  bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh' && aid_stage_writes_record '$E' fixture \$(aid_stage_writes_inputs '$E')"
+  yq -i '.review_checkpoints.final_review.reviewers[1].provider = "codex" | .review_checkpoints.final_review.reviewers[1].model = "gpt-5"' "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "${_BLOCKER/blocker/major}"
+  _F collect --round 1 >/dev/null
+  run _F close --round 1 --tokens final_criteria=5 final_generalist=5; echo "$output"; [ "$status" -eq 0 ]
+  local fp; fp="$(jq -r '.findings[0].fingerprint' "$(FD 1)/merged.json")"
+  "$ROUND_SH" standing --plan "$R/.aid-o/plans/P901-x.md" --project-root "$R" --delegate --reason "PM: nezávislý agent rozhodne spory za mě" >/dev/null
+  _F dispute --round 1 --fingerprint "$fp" --reason "the import is in src/app.py on the plan branch" >/dev/null
+  _fake_codex
+  export CODEX_VERDICT="$(jq -nc --arg f "$fp" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "the import is there", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}, provider: "codex"}')"
+  run _F delegate --round 1 --fingerprint "$fp" </dev/null; echo "$output"; [ "$status" -eq 0 ]
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh' && aid_stage_writes_verify '$E'"
+  echo "$output"; [ "$status" -eq 0 ]
+}
+
+# _dep <id> — an unmerged plan <id>: its branch plan/<id> with a worktree and one commit main does not have
+_dep() {
+  git -C "$ROOT" rev-parse -q --verify HEAD >/dev/null || { git -C "$ROOT" checkout -q -b main 2>/dev/null; git -C "$ROOT" add -A; git -C "$ROOT" -c user.email=t@t -c user.name=t commit -qm init; }
+  git -C "$ROOT" worktree add -q -b "plan/$1" "$ROOT/.aid-worktrees/plan-$1"
+  echo "$1" > "$ROOT/.aid-worktrees/plan-$1/dep-$1.txt"
+  git -C "$ROOT/.aid-worktrees/plan-$1" add -A; git -C "$ROOT/.aid-worktrees/plan-$1" -c user.email=t@t -c user.name=t commit -qm "$1"
+}
+
+@test "prepare: a plan standing on one unmerged plan is checked in its worktree, the binding is recorded and held; two unmerged plans are refused" {
+  _dep P899
+  sed -i 's/^type: regular$/type: regular\ndepends_on_plans: [P899]/' "$PLAN"
+  # step 1 extends a file only the dependency's worktree has (WAN P112)
+  sed -i 's/^uses {{x}} literally$/uses {{x}} literally\n\n**Files:**\n- Modify: `dep-P899.txt` — extend what P899 adds/' "$PLAN"; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  # against the main checkout the plan check does not find it …
+  bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" "$PLAN" --project-root "$ROOT" --json "$BATS_TEST_TMPDIR/main-check.json" --quiet || true
+  jq -e '[.blocking[], .legacy_advisory[], .warnings[]] | map(.message) | any(test("dep-P899"))' "$BATS_TEST_TMPDIR/main-check.json"
+  local wt="$ROOT/.aid-worktrees/plan-P899" bf="$EV/dependency-root.json"
+  run "$ROUND_SH" prepare "$PLAN" --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"stands on unmerged P899"*"$wt"* ]]
+  [ "$(jq -r '[.plan, .branch, .head == "'"$(git -C "$wt" rev-parse HEAD)"'"] | join(" ")' "$bf")" = "P899 plan/P899 true" ]
+  [ "$(jq -r .worktree "$bf")" = "$wt" ]
+  [ "$(jq -r .project_root "$EV/plan-check.json")" = "$wt" ]   # the plan check was taken again in the dependency
+  jq -e '[.blocking[], .legacy_advisory[], .warnings[]] | map(.message) | any(test("dep-P899")) | not' "$EV/plan-check.json"   # … in its worktree it does
+  # the dependency moves under the review: the next round is refused
+  echo more >> "$wt/dep-P899.txt"; git -C "$wt" -c user.email=t@t -c user.name=t commit -qam more
+  run "$ROUND_SH" prepare "$PLAN" --round 2; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"dependency_moved"*"prepare --round 1 --restart"* ]]
+  # a refused readiness names the dependency's worktree in its next: line
+  unset AID_REVIEW_READINESS_STUB
+  printf '\n**Files:**\n- Remove: `x.sh` — no such label\n' >> "$PLAN"; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"plan_not_ready"* && "$output" == *"--project-root ${wt}"* ]]
+  # two unmerged plans: refused with the reason, no round
+  _dep P898; export AID_REVIEW_READINESS_STUB=pass
+  sed -i 's/^depends_on_plans: \[P899\]$/depends_on_plans: [P899, P898]/' "$PLAN"; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"
+  run "$ROUND_SH" prepare "$PLAN" --round 1; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"dependency_roots_many"*"P899 P898"* ]]
+}
+
+@test "prepare: a point the close's measurement cannot run (its program missing) gets no round; a point that only fails yet does" {
+  git -C "$ROOT" add -A >/dev/null 2>&1; git -C "$ROOT" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1
+  unset AID_REVIEW_READINESS_STUB
+  _ac() { _plan regular; printf '\n## Acceptance Criteria\n\n- [ ] AC1: x\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "%s"\n    expected_exit: 0\n  ```\n' "$1" >> "$PLAN"; _check; _critic_answer "$(sha256sum "$PLAN" | cut -d' ' -f1)"; }
+  _ac "no-such-tool-xyz --run"
+  run "$ROUND_SH" prepare "$PLAN" --round 1; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"plan_not_ready"*"points the measurement cannot run"*"AC1: exit=127"* ]]; [ ! -d "$CP1/round-1/packet" ]
+  [ -z "$(git -C "$ROOT" worktree list | sed 1d)" ]          # the throwaway copy is gone
+  _ac "false"
+  run "$ROUND_SH" prepare "$PLAN" --round 1; echo "$output"; [ "$status" -eq 0 ]
+}
+
+@test "prepare: a plan whose check did not pass, or that fails readiness, gets no round (AID 10. and 11. 10. 2026)" {
+  jq '.pass = false' "$EV/plan-check.json" > "$EV/p" && mv "$EV/p" "$EV/plan-check.json"
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"plan_not_ready"*"does not pass"* ]]; [ ! -d "$CP1/round-1/packet" ]
+  _check; unset AID_REVIEW_READINESS_STUB
+  printf '\n**Files:**\n- Remove: `x.sh` — no such label\n' >> "$PLAN"; _check
+  run "$ROUND_SH" prepare "$PLAN" --round 1
+  [ "$status" -eq 1 ]; [[ "$output" == *"plan_not_ready"*"readiness fails"* ]]; [ ! -d "$CP1/round-1/packet" ]
 }

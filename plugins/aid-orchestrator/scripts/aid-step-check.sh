@@ -143,12 +143,13 @@ fi
 # step: the step's return names its commits there (repo_commits), and a
 # declared repository the return names no commits in is reported, never skipped.
 OTHER_MISSING=()
+OUTSIDE_GIT=()   # declared absolute paths in no git repository: no diff can show them, the reviewers are told
 OTHER_REPOS=()   # P112: the verified ranges in declared repositories — the review packet takes them
 if [[ "$CHECKPOINT" == cp2 && -f "$PLAN_JSON" ]]; then
   ret="$EVID/steps/$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "$PLAN_JSON")/return.json"
   declare -A seen_repo=(); root_phys="$(cd "$ROOT" && pwd -P)"
   while IFS= read -r ap; do
-    repo="$(aid_rr_phys_repo "$ap")"; [[ -n "$repo" ]] || continue
+    repo="$(aid_rr_phys_repo "$ap")"; [[ -n "$repo" ]] || { OUTSIDE_GIT+=("$ap"); continue; }
     [[ "$repo" != "$root_phys" && -z "${seen_repo[$repo]:-}" ]] || continue
     seen_repo[$repo]=1
     # P111: a repository the plan declares in repo_roots is named by its slug
@@ -258,6 +259,7 @@ STREAMLINED=false
 
 verdict="" reason=""
 if (( ${#OTHER_MISSING[@]} > 0 )); then verdict=review; reason="declared repository with no commits named in the step's return (repo_commits): ${OTHER_MISSING[*]}"
+elif (( ${#OUTSIDE_GIT[@]} > 0 )); then verdict=review; reason="declared path(s) outside any git repository — no diff shows them, the reviewers read them as they are: ${OUTSIDE_GIT[*]}"
 elif (( ${#FILES[@]} == 0 )); then verdict=no_change; reason="the range $RANGE has no changes"
 elif [[ "$STREAMLINED" == true ]]; then verdict=skip; reason="streamlined"
 elif (( ${#forbidden[@]} > 0 )); then verdict=review; reason="forbidden path touched: ${forbidden[*]}"
@@ -293,7 +295,7 @@ jq -n --arg cp "$CHECKPOINT" --argjson step "${STEP:-null}" --arg head "$HEAD_SH
   --argjson nfiles "${#FILES[@]}" --argjson nlines "$LINES" --argjson handlers "$(_arr "${handler_ids[@]}")" \
   --arg verdict "$verdict" --arg reason "$reason" --argjson sf "$script_findings" --argjson dod "$dod_json" \
   --arg streamlined "$STREAMLINED" --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --argjson other "$(_jarr "${OTHER_REPOS[@]}")" '
+  --argjson other "$(_jarr "${OTHER_REPOS[@]}")" --argjson nogit "$(_arr "${OUTSIDE_GIT[@]}")" '
   {checkpoint: $cp, step: $step, head_sha: $head, range: $range, range_source: $src,
    files: {in_scope: $in, outside_files: $out, forbidden_touched: $forb, scope_declared: ($scope_declared == 1)},
    security: {matched_rules: $rules, lines: $rlines},
@@ -301,7 +303,8 @@ jq -n --arg cp "$CHECKPOINT" --argjson step "${STEP:-null}" --arg head "$HEAD_SH
    size: {files: $nfiles, lines: $nlines}, handler_patterns: $handlers,
    streamlined: ($streamlined == "true"), script_findings: $sf, dod: $dod,
    verdict: $verdict, reason: $reason, generated_at: $now}
-  + (if ($other | length) > 0 then {other_repos: $other} else {} end)' > "$tmp"
+  + (if ($other | length) > 0 then {other_repos: $other} else {} end)
+  + (if ($nogit | length) > 0 then {outside_git: $nogit} else {} end)' > "$tmp"
 sha="$(sha256sum "$tmp" | cut -d' ' -f1)"
 jq --arg s "$sha" '. + {sha256: $s}' "$tmp" > "$tmp.2" && mv -f "$tmp.2" "$CPDIR/step-check.json" && rm -f "$tmp"
 log_event "$TIMELINE" "step_check" checkpoint="$CHECKPOINT" step="${STEP:-null}" head_sha="$HEAD_SHA" verdict="$verdict" sha256="$sha"

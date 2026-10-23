@@ -3,6 +3,71 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.8.0] — 2026-10-21
+
+Plán dojede v `--auto` bez PM a uzávěr se netočí (P117, vstup WAN P109–P112: osm zastavení na PM za dva dny, uzávěr P111 čtyři pokusy a tři hodiny). Každé odmítnutí má třídu, která říká, kdo jedná; technická rozhodnutí v běhu dělá nezávislý zástupce, chráněné dopady pozná kód a jdou na PM; čemu jde předejít, zastaví kontrola plánu nebo start běhu; uzávěr opakuje jen to, co oprava zasáhla.
+
+### Added
+- **Registr odmítnutí** `defaults/refusal-classes.yaml`: každý kód, který plugin vypisuje, i každá podmínka `--blocked-checks` má třídu (`agent_fix`, `prevent`, `agent_fix_then_stand_in`, `stand_in`, `pm`, `incident`, `not_in_run`); každé odmítnutí ji vypíše (`class: …`), neznámý kód je `pm`.
+- **Zástupce místo PM:** `scripts/aid-stand-in.sh ask|record` pro rozšíření rozsahu, krok bez změny, vizuální kontrolu, technicky selhané měření, přejmenování a blokovaný krok; Codex, při jeho výpadku Claude v závorce dispatch; povolení (`auth.json`) je svázané s návrhem, verdiktem, během a ledgerem a použije se jednou. Přijímají ho `amend-scope --stand-in`, `increment-step --stand-in`, `--defer-criterion … --stand-in` (jen technicky selhané měření, bod změří uzávěr znovu), `amend-contract --rename`, `step-redispatch`.
+- **Chráněný dopad pozná kód** (`lib/aid-protected.sh`): zadání a plán, konfigurace AID, `protected_paths` projektu (výchozí `.env*`, `*secret*`, `*credential*`, `deploy/**`, produkční compose), cizí repo mimo `repo_roots`, placená nebo cizí služba, neznámý druh rozhodnutí – vše jde na kartu PM, ať zástupce říká cokoli.
+- **`aid-fsm.sh amend-contract --rename old=new`:** čistá záměna cesty ve zmrazeném plánu (plan.json, kontrakt kroku, plán, zadání s verzí +1), obnovené otisky, zneplatněné měření a revize dotčených kroků, kontrola plánu a připravenost znovu, při selhání vše zpět.
+- **`aid-fsm.sh step-redispatch`:** krok s blokovaným návratem znovu na povolení zástupce (jen v EXECUTE, svázané s otiskem toho návratu).
+- **`aid-review-round.sh accept-risk`:** jedno rozhodnutí PM zavřít s otevřenými nálezy, svázané s kandidátem, kartou a celou sadou; `decide` ho odmítne, když se cokoli z toho změní (`accepted_risk_stale`).
+- **Kontrola plánu:** projektové kontroly z `execution.yaml` `plan_checks:` nad cestami, které plán vytváří (B11); body `cmd`, jejichž program tu není nebo čtou proměnnou, kterou izolované měření nemá (B12, s ohledem na uvozovky, `$(…)`, `cd`, `env`, `timeout`); test jmenovaný plánem, který uzávěr neumí spustit (B13).
+- **Start běhu** odmítne hostitele bez izolace dřív, než udělá první krok (`no_isolation`, `lib/aid-measure-env.sh`).
+- **CP1 závislého plánu:** plán na jednom nesloučeném plánu se kontroluje v jeho pracovní kopii, vazba (plán, worktree, větev, HEAD) se drží v dalších kolech i při startu běhu (`dependency_*`).
+- **Uzávěr:** potvrzovací kolo CP7 jen po prošlém plném kole a opravě čistě dokumentace (`lib/aid-docs-surface.sh`), jinak plné kolo; noční testy jmenované plánem pustí uzávěr sám (`execution.yaml` `plan_tests:`, `plan-tests.json` svázaný s kandidátem, plánem a konfigurací); role `final_claims` už v CP2 u kroku, který mění dokumentaci; nález, jehož citované řádky oprava změnila, jde do dalšího kola, ne rozhodčímu (`delegation_fix_pending`).
+- **Companion:** `ui.copy_extra[]` (soubory repa mimo `ui.dir`, nikdy tajemství), `capture: {"scroll": …}`, `ui.first_shot_timeout_s` (1–120 s), návod pro Vite s `--configLoader runner`.
+- **Cílené opravy místo `--force`:** `aid-emit-dispatch.sh repair` (poškozený záznam dispatch; záznam useknutý dřív, než jde poznat, že to nebyl start, nebo start s nečitelným jménem odmítne a nechá člověku), `cancel` (osiřelý start).
+
+### Fixed
+- **`expected_deletions` po commitu kroku** (regrese 3.7.0, WAN P112 stál na `--force`): smazání prokáže commit kroku; smazání přes `git rm` (připravené v indexu, soubor je ještě v HEAD) platí také (nalezeno pilotem testbedu); smazání hotové už před začátkem kroku (kontrakt ho zapíše jako `deleted_before_start`) se neuzná.
+- **Commit kroku je transakční** (dočasný index; index uživatele se nikdy nezapíše) a `.aid-o/*` v návratu je hlasité odmítnutí, ne tiché zahození.
+- **Jedno prostředí a jeden limit měření** pro krok, bránu i `produce` (`verification_env`, `_pd_effective_timeout`); výstup bodu, který selhal, se ukládá (8 KiB na proud) a tajemství i hesla v URL se redigují dřív, než cokoli jde na disk.
+- **Delegace:** nový verdikt jen na nový důkaz, starý `superseded`, nejvýš jednou na nález a kolo (pak PM).
+- Stop hook a `communication.md` jmenují `aid_decision_card_render`; `pipeline.md` zakazuje souběh kroků v jedné kopii.
+- Zbytkový adresář testu `plugins/aid-orchestrator/2/` (od P094) smazán; citace v registru kontrol po přepisu companionu (noční sada padala na 3.7.0).
+
+### Known limits
+- Detektor chráněných dopadů vidí jen to, co návrh deklaruje (cesty, `external`); placené volání v kódu kroku, které návrh nezmíní, chytá revize kroku.
+- „Profil uzávěru obsahuje testy plánu“ (bod 2 zadání) je řešený uzávěrem (`plan_tests`) a kontrolou B13, ne rozborem příkazů bran.
+- `floor` limitu měření (P112) zvedá i vlastní `timeout:` bodu (vzorec zadání ho nezmínil; cesta přeměření P112 na něm stojí).
+- Potvrzovací kolo CP7 a oprava CHANGELOG po CP7 se v testbedu offline neměří (modeloví revizoři); měří je testy `test-review-round.bats`.
+
+## [3.7.0] — 2026-10-19
+
+Companion jako hotová stavebnice a opravy z projektů: agent dodá varianty ze sdílených komponent a tři datové soubory, server, kopii aplikace, focení, stránku i odpovědi PM dělá jeden příkaz. Server companionu se od 2.118.0 vůbec nespustil a poznámky PM se agentovi nezapisovaly – obojí opraveno a hlídáno testem nad skutečným serverem. K tomu 20 oprav z deníků WAN, aidlab-apps, agents, share a AID, každá s testem, který na 3.6.0 padá.
+
+### Added
+- **`scripts/aid-companion.sh up|proto|shots|show|answers|down --plan <P>`** – jedna složka na plán (`.aid-o/work/companion/<P>/`): `up` spustí nebo znovu použije server téže verze pluginu, `proto` zkopíruje UI aplikace mimo repo a spustí vývojový server ve vlastní ověřené skupině procesů, `shots` nafotí počítač i telefon nad smyšlenými daty (kroky, selektory, přihlášení, mocky jen na API, volání bez mocku je chyba), `show` postaví pevnou stránku z `navrh.json` a sama ji zkontroluje, `answers` vypíše volby a poznámky PM.
+- **Pevná stránka návrhu** podle PM (WAN 19. 10. 2026): jedna obrazovka, tři sloupce, náhled nikdy větší než skutečnost, přepínač počítač/telefon, minulé kolo, přilepená poznámka, „Zvoleno n z m“, textový bod bez náhledu.
+- **„Podle existujících vzorů“ hlídá kód:** komponenty v `postaveno_z` musí soubory varianty skutečně importovat z `ui.components` (relativní cesty, aliasy z `tsconfig`, index), nový soubor komponenty jen v `nove[]` s důvodem (PM ho vidí označený), změněný soubor kopie musí patřit právě jedné možnosti.
+- **`/aid-init` navrhne klíče `ui`** (`dir`, `components`, `dev_cmd`, `ready_path`, `api_prefix`) z `vite.config.*` / `next.config.*` (`lib/aid-ui-config.sh`).
+- **Štítek `Delete:`** v popisu souborů kroku; kontrakt kroku ověří, že sledovaný soubor zmizel a krok ho uvedl v `deleted_files`.
+- **`prepare-plan --bump none`** pro verzi, kterou už zvedl krok plánu (čte commitnutý CHANGELOG, nic necommituje).
+- **`amend-scope --pm-card <karta>`**: rozšíření rozsahu na výslovné rozhodnutí PM, zapsané jako `pm_decision`.
+
+### Fixed
+- **Server companionu se spustí** (od 2.118.0 padal na chybějícím `confirm-store`); volby, poznámky i odeslání PM se zapisují do `answers.jsonl` a nemažou se; websocket přijme jen vlastní stránku.
+- **`plan-close` nesmaže pracovní kopii se změnami** (WAN 19. 10. 2026) – odmítne před jakoukoli změnou stavu (`plan_close_worktree_dirty`), smazat jde jen výslovně (`--discard-worktree-changes`).
+- **Delegace sporů:** Codex vrací verdikt poslední zprávou (sandbox jen pro čtení ho nezapsal), delegovaný verdikt CP7 nezablokuje uzávěr plánu, náhradník nesmí nechat soubory v pracovní kopii (`delegation_left_files`).
+- **Kontrola plánu (CP1):** kolo se nepřipraví nad plánem, který neprošel připraveností (`plan_not_ready`); odložený adresář `round-N.x` není kolo; citace nálezu projde bránou i kontrolou fragmentů (zpětné uvozovky, uvozovka po `>>`).
+- **Kritik:** návrh rozsahu v próze se už nehlásí jako prázdná úroveň 2; `\|` v buňce odpovědi nerozbije sloupce; odstavec „Co je v sázce“ jen s cenou se pojmenuje přesně.
+- **Kontrola kroku** nespadne na souboru mimo git (`outside_git`, krok jde k revizi); u souborů cizího repa s platným `repo_commits` hlásí „committed there“.
+- **`/aid-init`:** testové brány dostanou limit 900 s, `plan_diff` je definovaná; návrh `project_tests` vychází ze sledovaných testovacích souborů.
+- Kontrola rozdílů mezi kódem a dokumentací vidí i kódy odmítnutí předané pomocnou funkcí; podklady testů ve složce `docs/` nejsou ignorované; kořen pluginu nikdy není kořen projektu; zastaralý podklad testu gramatiky výsledků (noční červená).
+
+### Changed
+- Návod `visual-companion` je jeden postup (134 řádků místo 504); starý režim stránek (fragmenty, `/screen`, `data-confirm`) server dál umí.
+
+### Known limits
+- Karta PM u `--pm-card` má stejnou slabinu jako ostatní karty (IMP-692): kdo umí zapsat soubor karty a událost hooku, umí ji padělat.
+- `proto` neumí workspace/monorepo ani pnpm bez `node_modules` v `ui.dir`; `shots` neumí nové okno, iframe a nahrání souboru – obojí odmítne s výzvou zapsat případ.
+- Vývojový server je v testech jednoduchý statický server; skutečný Vite ověřil nezávislý agent (AC9).
+- Návrh klíčů `ui` při `/aid-init` je pokyn průvodce (`/aid-init` provádí agent); kód je `aid_ui_config_detect` s testem, samotné zapojení do průvodce test nemá.
+- Převzetí portu cizím procesem mezi výběrem a startem vývojového serveru se odhalí (port musí patřit skupině procesů prototypu), ale deterministický test toho závodu není.
+
 ## [3.6.0] — 2026-10-18
 
 Studio `/aid-ui` předává plánu a běhu (P115): převzetí webu zapíše jeden předávací balík, z balíku vznikne jedním příkazem zadání plánu nasazení, brána běhu pustí na doménu jen předaný web bez otevřeného kritického bodu, ostrý web má vlastní hodnocení a studio používá Codex a ceník AIDu místo vlastních kopií. Ověřeno na testovacím projektu a v testbedu (dráha `ui_package_to_gate`); skutečný web se tímto vydáním nenasazoval (PM 3A).

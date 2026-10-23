@@ -333,3 +333,11 @@ JSON
   run "$GATE" "$plan_json.2"
   echo "$output" | jq -e '[.checks[] | select(.id == "ac_no_fragments")][0].status != "pass"'
 }
+
+@test "aid-contract-validate.sh: ac_no_fragments accepts a quoted finding whose SQL quotes follow '>>' (WAN P109 6c4dc643, 18. 10. 2026)" {
+  local plan_json="$TEST_TMPDIR/wan-quote.json"
+  jq -n --arg ac "Resolved review finding: „Step 1's acceptance query counts diff_state->>'consumption' = 'open', but the revised Data…“ — the Step 1 check reads \`diff_state->'consumption'->>'state'\`." \
+    '{epic_id: "E-WAN-1_1", version: 1, steps: [{id: "step_1_backend", role: "backend", outputs: ["Create: `a.py`"], allowed_paths: ["a.py"], acceptance_criteria: [$ac]}], dependencies: []}' > "$plan_json"
+  run "$GATE" "$plan_json"
+  echo "$output" | jq -e '[.checks[] | select(.id == "ac_no_fragments")][0].status == "pass"'
+}

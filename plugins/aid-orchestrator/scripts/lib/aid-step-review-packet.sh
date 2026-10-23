@@ -280,9 +280,25 @@ aid_step_review_prompt_render() {
     echo
     # A confirmation or delta round (P110, IMP-689) reads the fix diff and what
     # stays open, not the whole step again; without a fix.patch it falls back.
-    local narrow=0
+    local narrow=0 cp7_mode
+    cp7_mode="$(jq -r '.mode // "full"' "${dir}/round.json" 2>/dev/null)"
     [[ -f "${dir}/packet/open-findings.json" && -f "${dir}/packet/fix.patch" && "$cp" != cp7 ]] && narrow=1
-    if (( narrow )) && [[ "$(jq '.findings | length' "${dir}/packet/open-findings.json")" == 0 ]]; then
+    [[ "$cp" == cp7 && "$cp7_mode" == confirmation && -f "${dir}/packet/fix.patch" ]] && narrow=1
+    if [[ "$cp" == cp7 && "$cp7_mode" == confirmation ]]; then
+      # P117 (15): the previous candidate passed a full round; the fix touched documentation only
+      echo "## This is a confirmation round over the whole plan"
+      echo
+      echo "The previous candidate ($(jq -r '.previous_candidate[:12]' "$(dirname "$(dirname "$dir")")/fix-class.json" 2>/dev/null)) passed a full whole-plan round. Since then the author changed documentation only (fix.patch below; areas it invalidates: $(jq -r '.invalidated_feeds | join(", ")' "$(dirname "$(dirname "$dir")")/fix-class.json" 2>/dev/null))."
+      echo "Your job:"
+      echo "1. The fix is right: every claim it adds or changes is true of the code at HEAD."
+      echo "2. A regression the fix caused indirectly: you can read the WHOLE candidate at HEAD — a claim now contradicting the code elsewhere, a broken reference, an instruction that no longer matches the behaviour. Look for it."
+      echo "3. Any finding still listed below: confirm it is fixed everywhere, or report it again."
+      echo "Do not re-review code the fix did not change; the full round already did."
+      echo
+      jq -r '.findings[] | "- [\(.severity)] \(.claim) (evidence: \(.evidence))"' "${dir}/packet/open-findings.json" 2>/dev/null
+      _aid_sr_patch "${dir}/packet/fix.patch" "What the author changed (fix.patch)" | sed 's/^## /### /'
+      echo
+    elif (( narrow )) && [[ "$(jq '.findings | length' "${dir}/packet/open-findings.json")" == 0 ]]; then
       echo "## This is a delta round"
       echo
       echo "The previous round passed and the step moved since. Review only the new commits (fix.patch below) against the Definition of Done; do not review the rest again."
@@ -294,7 +310,12 @@ aid_step_review_prompt_render() {
       echo
       echo "The author fixed the change after the previous round. Your job now:"
       echo "1. For each finding below, check that its rule holds everywhere in the current tree, not only at the cited line: every path, input form and caller the rule covers. Fixed everywhere: do not report it. Not fixed, or fixed only where it was cited (a variant the fix missed): report it again with the same claim and the same first evidence citation, and append the variant's citation after it."
-      echo "2. Report NEW problems only when the fix (fix.patch below) introduced them. Do not review the rest again."
+      if [[ "$cp" == cp7 ]]; then
+        # P117 (16): after a failing round, or a fix beyond documentation, the whole plan is reviewed again
+        echo "2. This is a FULL round over the new candidate: review the whole plan as below, not only the fix."
+      else
+        echo "2. Report NEW problems only when the fix (fix.patch below) introduced them. Do not review the rest again."
+      fi
       echo
       echo "### Findings still open"
       jq -r '.findings[] | "- [\(.severity)] \(.claim) (evidence: \(.evidence); fix asked: \(.fix)\(if .rule then "; rule: \(.rule)" else "" end))"' "${dir}/packet/open-findings.json"
@@ -323,6 +344,14 @@ aid_step_review_prompt_render() {
       echo "## What the step reviews already judged (do not repeat; read ACROSS the steps)"
       jq -r '.epics[] | "- \(.epic): its steps were reviewed one by one — \(.findings | length) finding(s) the step rounds left open" + ((.findings | map("\n  - [\(.severity), \(.status)] \(.claim) (\(.evidence))") | join("")))' "${dir}/packet/epic-findings.json"
       echo
+      # P117 (17): the plan's nightly tests, run by the close at this candidate
+      local _ptf; _ptf="$(dirname "$(dirname "$dir")")/plan-tests.json"
+      if [[ -f "$_ptf" ]] && [[ "$(jq '.tests | length' "$_ptf")" -gt 0 ]]; then
+        echo "## The plan's nightly tests, run by the close at $(jq -r '.candidate_sha[:12]' "$_ptf") (${_ptf})"
+        jq -r '.tests[] | "- \(.path): \(if .exit == 0 then "pass" elif .exit == null then "NOT RUN — \(.reason)" else "exit \(.exit)" end)\(if .duration_s then " in \(.duration_s) s" else "" end) — \(.command // "")"' "$_ptf"
+        echo "This is the evidence for these tests; do not report them as unproven."
+        echo
+      fi
       echo "## Gates at the candidate (gates_report.json on disk: ${dir}/packet/gates_report.json)"
       jq -r "${AID_GATE_ROW_JQ}"'.gates | gate_rows_normalize | to_entries[] | select((.key|startswith("_")|not) and (.value|type) == "object")
              | "- \(.key): \(.value.status) (\(.value.reason))" + (if .value.waived then " waived" else "" end)

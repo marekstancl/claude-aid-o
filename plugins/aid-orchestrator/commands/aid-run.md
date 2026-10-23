@@ -232,7 +232,7 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 14. **Per-plan C+A review** — after a plan's run, ALL C+A findings (S+M+L) must be addressed before starting next plan
 15. **Wave dispatch is decided by code** — before a wave, `aid_parallel_decide` (`lib/aid-parallel-dispatch.sh`) says `concurrent` or `serial: <reason>`; only `concurrent` may dispatch several agents at once, each in its own step worktree, and never more than `orchestration.yaml → dispatch.max_parallel`. Returns are still taken ONE at a time: validate the contract return, commit, write step-verify, merge, increment-step (`pipeline.md §4` "Parallel groups").
 16c. **A regenerated plan is accepted through `rebase-plan`, never by hand** — when `increment-step` reports "plan.json hash mismatch" after the PM regenerated the plan, run `bash {plugin_path}/scripts/aid-fsm.sh rebase-plan <state_file> --reason "<why, 20+ chars>"`. It accepts only when the step in flight and every done step are unchanged (future steps may change), re-stamps the hash and records the rebase. Never `set-field plan_json_hash`; re-init is the last resort (it rewrites `base_commit`).
-16b. **Scope grows through `amend-scope`, never by hand** — when a step needs a file its `allowed_paths` do not list, run `bash {plugin_path}/scripts/aid-fsm.sh amend-scope <state_file> --add <path> [--add ...] --reason "<why, 20+ chars>"` and re-dispatch. It widens `plan.json` for the current step, re-stamps `plan_json_hash`, writes `steps/<id>/scope-amendment.json` and a timeline event — so the commit hook, `increment-step` and the contract validator all accept the file. A missing test file beside an in-scope source is routine (no PM ask); new production files are a PM decision (rule 11 of `skills/pipeline.md` escalations). After the last step it widens the last step and says which; another repository's file cannot be added this way — it must be in the step's `Files:` (`skills/pipeline.md` §Scope amendment). **A plan bound to a brief (P109):** the `--reason` names the `AC<n>` of the brief the widening serves — one the current step closes (`**Zavírá:**`), any step's during GATES — and the record carries it as `zadani_point`; a widening that serves none is refused (`amend_scope_no_brief_point`, `amend_scope_reason_names_no_point`) and is the PM's decision (rule 11). The trace is for the step review and the close; it does not judge the content.
+16b. **Scope grows through `amend-scope`, never by hand** — when a step needs a file its `allowed_paths` do not list, run `bash {plugin_path}/scripts/aid-fsm.sh amend-scope <state_file> --add <path> [--add ...] --reason "<why, 20+ chars>"` and re-dispatch. It widens `plan.json` for the current step, re-stamps `plan_json_hash`, writes `steps/<id>/scope-amendment.json` and a timeline event — so the commit hook, `increment-step` and the contract validator all accept the file. A missing test file beside an in-scope source is routine (no PM ask); new production files are a PM decision (rule 11 of `skills/pipeline.md` escalations). After the last step it widens the last step and says which; another repository's file cannot be added this way — it must be in the step's `Files:` (`skills/pipeline.md` §Scope amendment). **A plan bound to a brief (P109):** the `--reason` names the `AC<n>` of the brief the widening serves — one the current step closes (`**Zavírá:**`), any step's during GATES — and the record carries it as `zadani_point`; a widening that serves none is refused (`amend_scope_no_brief_point`, `amend_scope_reason_names_no_point`) and is the PM's decision (rule 11) — in an `--auto` run the stand-in's (`--stand-in <auth.json>`, §Run decisions by the stand-in), unless the path is protected. The trace is for the step review and the close; it does not judge the content.
 16a. **AID's own defects go to `.aid-o/work/aid-plugin-issues.md`** (date → plugin version → what happened → what it caused → what you did), never to the project backlog — see `skills/agent-protocol.md` §"Problems with AID itself". The file exists from the first run (created at plan-start / init, rules in its header). This includes anything you had to `--force` past and every `amend-scope`, and plugin defects Codex reports (you write those — Codex is read-only). The Stop hook reminds once per session when AID refused or was bypassed and nothing was written.
 16. **Per-step commit** — the controller commits each accepted return (`aid_dispatch_contract_commit`) BEFORE calling `increment-step`. One commit per step, never a bulk commit at the end — also when steps ran concurrently.
 
@@ -660,11 +660,36 @@ a second verdict, `dismiss` or class `brief`), a class and, for a technical
 dispute about a check, the re-run command with its exit and output. Class
 `technical` is the delegate's to decide; **`brief`, `money` and `data` go to the
 PM's card** (`delegation_out_of_scope` — the brief, money and live data stay the
-PM's) and `--defer-criterion` never takes a delegate. A Claude verdict counts
+PM's) and `--defer-criterion` takes no review delegate (a technically failed
+measurement is the stand-in's, below). A Claude verdict counts
 only under its closed bracket and a Codex verdict only with the runner's
 `delegate_codex_verdict` event of its sha256 (`delegation_missing` otherwise).
 Every settlement is a line of `evidence/<plan>/delegated-disputes.jsonl`; the
-close card and page list them.
+close card and page list them. **P117:** a verdict is bound to its evidence (the
+finding, the author's dispute, HEAD); new evidence allows one new verdict, the old
+one is kept as `superseded` — once per finding and round, then the PM. A finding
+whose cited lines a later commit changed is never delegated
+(`delegation_fix_pending`): the next round's confirmation judges the fix.
+
+## Run decisions by the stand-in (P117)
+
+The same delegation covers the run's own decisions that are not review findings —
+every refusal prints its class (`defaults/refusal-classes.yaml`): `stand_in` and
+`agent_fix_then_stand_in` (after the agent's own fix failed) are the stand-in's in
+an `--auto` run, `pm` stays the PM's, `incident` is fixed and run again. The loop:
+
+1. Write the proposal: `{"kind": "scope_extension|no_change_step|visual_check|measurement_failed|rename|blocked_step", "step": <0-based index>, …}`
+   (`paths` / `criterion` / `rename: {old, new}` / `action: "redispatch", return_sha256` — the action exactly).
+2. `aid-stand-in.sh ask --evidence-dir <run> --code <the refusal code> --proposal <file>`.
+   **Exit 3 `PROTECTED`** — the brief, AID's config, a `protected_paths` path, another repository, an outside
+   service: render the Decision card; the PM decides. **Exit 4 `STAND-IN:`** — dispatch the prompt to an
+   independent `general-purpose` agent inside the bracket `stand-in-<id>` (start … complete with
+   `--output-file` the verdict file it names), then `aid-stand-in.sh record --evidence-dir <run> --id <id> --verdict <file>`.
+3. Run the command with the permission it printed: `amend-scope … --stand-in <auth.json>`,
+   `increment-step <state> --stand-in <auth.json>` (a step without a change, the visual check),
+   `increment-step <state> --defer-criterion AC<n> --reason "…" --stand-in <auth.json>` (a point whose step
+   measurement failed technically; the close measures it again), `amend-contract <state> --rename old=new --reason "…" --stand-in <auth.json>`,
+   `step-redispatch <state> --stand-in <auth.json> --reason "…"`. A permission covers that one action, once.
 
 
 ### State: READY
@@ -890,7 +915,7 @@ worktree (`.aid-worktrees/plan-<id>`) on `plan/<id>` for the whole close.
 
 | # | Command | What it does | It refuses when |
 |---|---------|--------------|-----------------|
-| 0 | `bash "$AID_PLUGIN_PATH/scripts/aid-release.sh" prepare-plan <plan> --bump minor\|patch --plan-branch plan/<plan>` (`auto` asks when the plan's commits carry no type) | the version commit, BEFORE the freeze, so the candidate already contains the release metadata | the tree is dirty; HEAD is not the plan branch |
+| 0 | `bash "$AID_PLUGIN_PATH/scripts/aid-release.sh" prepare-plan <plan> --bump minor\|patch --plan-branch plan/<plan>` (`auto` asks when the plan's commits carry no type; `none` when a step of the plan already raised the version and wrote its CHANGELOG section — recorded, nothing committed) | the version commit, BEFORE the freeze, so the candidate already contains the release metadata | the tree is dirty; HEAD is not the plan branch |
 | 1 | `<fsm> plan-finalize <plan> --stage freeze` | merges the target branch into `plan/<plan>`, freezes the candidate, mints `R-<plan>-final-<N>` | an EPIC is not terminal; the merge conflicts (exit 4, state CONFLICT); the tree is dirty |
 | 2 | `<fsm> plan-finalize <plan> --stage gates` | the plan-final gate run; a gate that passed in the previous attempt and whose `inputs:` did not change is copied (`reused_from`), not executed | a gate fails (the report names it); the branch moved off the candidate |
 | 3 | `<fsm> plan-finalize <plan> --stage produce` | review profile, plan-diff, acceptance evidence, and what the round reads (`cp7/`) | gates have not passed; the candidate moved |

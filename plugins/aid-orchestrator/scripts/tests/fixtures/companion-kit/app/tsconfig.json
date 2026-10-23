@@ -1,0 +1,4 @@
+{
+  // a comment, as real tsconfig files have
+  "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["src/*"] } },
+}

@@ -135,8 +135,16 @@ aid_critic_prepare() {
   if [[ "$_ac_moment" == "plan" && -f "$_ac_plan" ]] && zfile="$(_aid_critic_brief_file "$_ac_plan" "$_ac_root")"; then
     _aid_critic_strip_cost "$(_aid_plan_section "$zfile" "${AID_ZADANI_HEADINGS[0]}" | awk '/^\*\*Co je v sázce:\*\*/ { exit } { print }')"
     brief="$_acs_body"; total=$(( total + _acs_stripped ))
-    _aid_critic_strip_cost "$(aid_zadani_stakes "$zfile")" || true
-    [[ -n "${_acs_body// /}" ]] || { echo "critic: the brief ${zfile} has no **Co je v sázce:** paragraph — aid-plan-lint.sh --zadani ${zfile}" >&2; return 3; }
+    local raw_stakes; raw_stakes="$(aid_zadani_stakes "$zfile")"
+    _aid_critic_strip_cost "$raw_stakes" || true
+    if [[ -z "${_acs_body// /}" ]]; then
+      if [[ -n "${raw_stakes//[[:space:]]/}" ]]; then   # agents 12. 10. 2026: the paragraph was there, only cost lines
+        echo "critic: the **Co je v sázce:** paragraph of ${zfile} holds only cost lines, which the critic never sees — say in words what is at stake; a cost figure may stay on a line of its own" >&2
+      else
+        echo "critic: the brief ${zfile} has no **Co je v sázce:** paragraph — aid-plan-lint.sh --zadani ${zfile}" >&2
+      fi
+      return 3
+    fi
     stakes="$_acs_body"; total=$(( total + _acs_stripped ))
     source_sha="$(sha256sum "$zfile" | cut -d' ' -f1)"
   else
@@ -274,14 +282,27 @@ aid_critic_check() {
       fi
     fi
     if [[ -z "$reason" ]]; then
-      [[ "$(_aid_critic_nonblank "$l2")" -le 2 && ! "$l2" =~ (^|$'\n')[[:space:]]*[-*] ]] && level2_empty=true
+      # Level 2 opens with the sentence that it is a suggestion for the PM (skills/critic.md); it is
+      # empty when nothing follows but, at most, one sentence saying there is nothing to suggest. A
+      # prose suggestion without a bullet is NOT empty (share P001 14. 10. 2026: it was, and the PM
+      # never saw it) — a needless line on the card is the smaller harm than a lost suggestion.
+      local l2rest l2n
+      l2rest="$(printf '%s\n' "$l2" | grep -v '^#' | tr '\n' ' ' | sed -E 's/^[[:space:]]*[^.!?]*[.!?]+//; s/^[[:space:]]+|[[:space:]]+$//g')"
+      l2n="$(grep -oE '[.!?]+([[:space:]]|$)' <<< "$l2rest" | wc -l)"
+      # the whole rest must BE one of the fixed "nothing" sentences (skills/critic.md), never merely contain
+      # a negative word: "Nenavrhuji rušit API, ale odložil bych UI." is a suggestion (Codex, 19. 10. 2026)
+      local l2norm; l2norm="$(sed -E 's/[[:space:]]+/ /g; s/[.!? ]+$//' <<< "${l2rest,,}")"
+      if [[ ! "$l2rest" =~ [[:alpha:]] ]] || { (( l2n <= 1 )) && [[ "$l2norm" =~ ^(další\ )?změnu\ rozsahu\ nenavrhuji$|^nic\ k\ rozsahu\ nemám$|^no\ change\ to\ the\ scope$|^nothing\ to\ suggest$ ]]; }; then
+        level2_empty=true
+      fi
     fi
   fi
   if [[ -z "$reason" ]]; then
     [[ -f "$response" ]] || reason="the author did not write ${response}"
   fi
   if [[ -z "$reason" ]]; then
-    rows="$(grep -E '^\|[[:space:]]*[0-9]+[[:space:]]*\|' "$response" || true)"
+    # an escaped pipe (\|) inside a cell is text, not a column border (AID 11. 10. 2026)
+    rows="$(grep -E '^\|[[:space:]]*[0-9]+[[:space:]]*\|' "$response" | sed 's/\\|/\x01/g' || true)"
     got="$( [[ -n "$rows" ]] && printf '%s\n' "$rows" | sed -E 's/^\|[[:space:]]*([0-9]+).*/\1/' | sort -n | tr '\n' ' ' || echo '' )"
     expected="$( [[ "$n_items" -gt 0 ]] && seq 1 "$n_items" | tr '\n' ' ' || echo '' )"
     if [[ "$got" != "$expected" ]]; then

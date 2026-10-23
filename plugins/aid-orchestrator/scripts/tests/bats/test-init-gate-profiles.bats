@@ -392,3 +392,30 @@ YAML
   printf 'project_tests: []\n' >> .aid-o/config/execution.yaml
   ! execution_yaml_lacks_project_tests .aid-o/config/execution.yaml
 }
+
+@test "a fresh python workspace gets the test gate a suite-sized timeout and the plan_diff gate every plan-final run owes (aidlab-apps 16. 10. 2026)" {
+  touch pyproject.toml
+  source "$HELPER"
+  mapfile -t stacks < <(detect_stacks "$PWD")
+  mkdir -p .aid-o/config
+  compose_execution_yaml "$PWD" .aid-o/config/execution.yaml "${stacks[@]}"
+  [ "$(yq '.gates.py_test.timeout_seconds' .aid-o/config/execution.yaml)" = 900 ]
+  [ "$(yq '.gates.plan_diff.required' .aid-o/config/execution.yaml)" = true ]
+  [[ "$(yq '.gates.plan_diff.command' .aid-o/config/execution.yaml)" == *"aid-plan-diff.sh --plan {plan_path}"*"--isolated --cwd ."* ]]
+}
+
+@test "project_tests is proposed from the test files the repository tracks, an existing project without tests is told so with no key, a fresh workspace keeps the stack defaults with a note (agents 12. 10. 2026)" {
+  source "$HELPER"
+  git init -q .; mkdir -p tests asistent/tests web/src
+  touch tests/tests-a.sh asistent/tests/test_x.py web/src/b.test.ts
+  git add -A; git -c user.email=t@t -c user.name=t commit -qm x
+  run render_project_tests_block --root . bash
+  [[ "$output" == *'project_tests: ["**/*.test.ts","**/test_*.py","**/tests-*.sh"]'* ]]
+  local e; e="$(mktemp -d)"; git -C "$e" init -q
+  run render_project_tests_block --root "$e" bash
+  [[ "$output" == *"no tracked file matches the usual test patterns"* && "$output" != *"project_tests: ["* ]]
+  run render_project_tests_block --root "$e" --fresh bash
+  [[ "$output" == *"No tracked file matches a test pattern yet"* && "$output" == *'project_tests: ["**/*.bats","**/test-*.sh"]'* ]]
+  run render_project_tests_block --root "$e"
+  [[ "$output" == *"no tracked file matches the usual test patterns"* && "$output" != *"project_tests: ["* ]]
+}

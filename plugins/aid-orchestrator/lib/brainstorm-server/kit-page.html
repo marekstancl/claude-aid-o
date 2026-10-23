@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<!-- The companion kit page (scripts/aid-companion.sh show). Fixed: the agent fills navrh.json, never this file.
+     Layout (PM, 19. 10. 2026): everything to decide in one panel on the left, the preview takes the rest; the
+     variant tabs above the preview. The page itself never scrolls, a long panel scrolls inside itself. -->
+<style>
+:root{
+  --bg:#f4f5f7; --panel:#ffffff; --ink:#1f2933; --text:#3e4c59; --mute:#52606d; --line:#e4e7eb; --soft:#f5f7fa;
+  --accent:#3b5bdb; --accent-soft:#edf2ff; --accent-line:#bac8ff; --rec:#0c7a5b; --rec-soft:#e6f6f0; --new:#9a4f00; --new-soft:#fff4e5;
+  --r:10px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--bg);color:var(--text);font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;color:inherit}
+.ap{display:grid;grid-template-columns:420px minmax(0,1fr);height:100vh}
+.ap>*{min-height:0}
+
+/* ── the panel: everything to decide ── */
+.l{background:var(--panel);border-right:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+.head{padding:16px 20px 12px;border-bottom:1px solid var(--line)}
+.kicker{font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+#nav{display:flex;flex-direction:column;gap:4px;margin-top:10px;max-height:30vh;overflow:auto}
+.nav{display:flex;align-items:baseline;gap:10px;width:100%;text-align:left;border:1px solid transparent;background:none;border-radius:8px;padding:7px 10px;cursor:pointer}
+.nav:hover{background:var(--soft)}
+.nav.on{background:var(--accent-soft);border-color:var(--accent-line)}
+.nav .n{flex:none;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;background:var(--soft);color:var(--mute)}
+.nav.on .n{background:var(--accent);color:#fff}
+.nav .t{flex:1;color:var(--ink);font-weight:500}
+.nav small{flex:none;font-size:12px;color:var(--mute)}
+.rs{flex:1;min-height:0;overflow:auto;padding:18px 20px}
+.r h2{margin:0;font-size:19px;line-height:1.35;color:var(--ink)}
+.q{margin:8px 0 0;color:var(--text)}
+.sec{margin:18px 0 8px;font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--mute)}
+.opt{display:block;width:100%;text-align:left;border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;background:#fff;cursor:pointer;margin-top:8px;transition:border-color .15s,background .15s}
+.opt:hover{border-color:var(--accent-line)}
+.opt.sel{border-color:var(--accent);background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+.opt .top{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.opt .k{flex:none;width:24px;height:24px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;background:var(--soft);color:var(--ink)}
+.opt.sel .k{background:var(--accent);color:#fff}
+.opt b{font-size:15px;color:var(--ink)}
+.opt p{margin:6px 0 0;font-size:14px;color:var(--text)}
+.opt .z{font-size:13px;color:var(--mute)}
+.badge{display:inline-block;border-radius:999px;font-size:12px;font-weight:600;padding:1px 9px;background:var(--rec-soft);color:var(--rec)}
+.badge.new{background:var(--new-soft);color:var(--new)}
+.why{margin-top:14px;padding:12px 14px;border-radius:var(--r);background:var(--rec-soft);font-size:14px;color:var(--ink)}
+.why b{color:var(--rec)}
+.rules{margin-top:12px;padding:12px 14px;border-radius:var(--r);background:var(--soft);font-size:13px;color:var(--text)}
+.rules b{color:var(--ink)}
+.rules ul{margin:6px 0 0;padding-left:18px}
+.decided{margin-top:16px;font-size:13px;color:var(--mute)}
+.decided summary{cursor:pointer}
+.decided p{margin:4px 0 0}
+.rf{border-top:1px solid var(--line);padding:12px 20px 16px;background:var(--panel)}
+textarea{width:100%;min-height:62px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit;font-size:14px;resize:vertical;color:var(--ink)}
+textarea:focus,.opt:focus-visible,.nav:focus-visible,button:focus-visible{outline:2px solid var(--accent-line);outline-offset:1px}
+.row{display:flex;gap:8px;margin-top:10px;align-items:center}
+.ghost{flex:1;border:1px solid var(--line);background:#fff;border-radius:8px;padding:8px;cursor:pointer;color:var(--ink)}
+.ghost:hover:not(:disabled){border-color:var(--accent-line);color:var(--accent)}
+.ghost:disabled{opacity:.45;cursor:default}
+.send{flex:2;border:0;border-radius:8px;padding:9px 12px;cursor:pointer;background:var(--accent);color:#fff;font-weight:600}
+.send:hover{filter:brightness(1.08)}
+.small{font-size:12px;color:var(--mute);margin:8px 0 0}
+
+/* ── the preview: the rest of the screen ── */
+.c{display:flex;flex-direction:column;min-width:0;padding:14px 20px 12px}
+.bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding-bottom:12px}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;flex:1}
+.tab{border:1px solid var(--line);background:#fff;border-radius:999px;padding:6px 14px;font-size:14px;cursor:pointer;color:var(--text)}
+.tab:hover{border-color:var(--accent-line)}
+.tab.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}
+.tab.past{border-style:dashed}
+.seg{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden;background:#fff}
+.seg button{border:0;background:none;padding:6px 14px;cursor:pointer;font-size:14px;color:var(--text)}
+.seg button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.pv{flex:1;min-height:0;overflow:auto;background:#e9ecf0;border-radius:12px;padding:16px;display:flex;justify-content:center;align-items:flex-start}
+.pv img{display:block;height:auto;border-radius:6px;box-shadow:0 2px 12px rgba(31,41,51,.14);cursor:zoom-in;background:#fff}
+.pv.d img{max-width:min(100%,960px)}.pv.m img{max-width:min(100%,390px)}
+.pv.real img{max-width:none;cursor:zoom-out}
+.hint{font-size:13px;color:var(--mute);margin:8px 2px 0}
+.empty{margin:auto;max-width:420px;text-align:center;color:var(--mute)}
+.ap.text .pv img{display:none}
+
+@media (max-width:900px){
+  html,body{overflow:auto}
+  .ap{display:block;height:auto}
+  .l{border:0}.c{padding:10px}.pv{max-height:70vh}
+}
+</style>
+</head>
+<body>
+<div class="ap" id="ap">
+ <aside class="l">
+  <div class="head"><div class="kicker" id="ptitle"></div><div id="nav"></div></div>
+  <div class="rs r">
+   <h2 id="title"></h2><p class="q" id="q"></p>
+   <div class="sec">Možnosti</div><div id="opts"></div>
+   <div class="why" id="why"></div>
+   <div class="rules" id="rules"></div>
+   <div class="decided" id="decided"></div>
+  </div>
+  <div class="rf">
+   <textarea id="note" placeholder="Poznámka k tomuto bodu – co upravit, co se nelíbí (nepovinné)"></textarea>
+   <div class="row"><button class="ghost" id="prev">← Předchozí</button><button class="ghost" id="next">Další →</button></div>
+   <div class="row"><button class="send" id="send">Odeslat volby a poznámky</button></div>
+   <p class="small"><span id="count"></span> · ↑ ↓ přepíná body <span id="sent"></span></p>
+  </div>
+ </aside>
+ <section class="c">
+  <div class="bar"><div class="tabs" id="tabs"></div>
+   <div class="seg" id="viewbox"><button data-view="desktop">Počítač</button><button data-view="mobile">Telefon</button></div></div>
+  <div class="pv d" id="pv"><img id="img" alt="náhled" hidden><p class="empty" id="empty" hidden>Tento bod je otázka bez náhledu – odpověz vlevo.</p></div>
+  <p class="hint" id="cap"></p>
+ </section>
+</div>
+<script type="application/json" id="navrh">__DATA__</script>
+<script>
+(function(){
+const D = JSON.parse(document.getElementById('navrh').textContent);
+const B = D.body, VIEWS = D.zobrazeni;
+const st = { i:0, view:VIEWS[0], pick:{}, tab:0, past:false, notes:{}, real:false };
+B.forEach(b => { st.pick[b.id] = b.doporuceni; });
+const $ = s => document.querySelector(s);
+const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const send = o => { const e = Object.assign({ kolo: D.kolo, page: D.page }, o); if (window.brainstorm) window.brainstorm.send(e); };
+function shotsOf(b){ const o = b.moznosti.find(x => x.klic === st.pick[b.id]); return st.past ? b.minule : (o ? o.snimky : []); }
+function render(){
+  const b = B[st.i], o = b.moznosti.find(x => x.klic === st.pick[b.id]);
+  const hasShots = B.some(x => x.moznosti.some(m => m.snimky.length) || x.minule.length);
+  const pointShots = b.moznosti.some(m => m.snimky.length) || b.minule.length;
+  $('#ap').classList.toggle('text', !pointShots);
+  $('#viewbox').style.display = (hasShots && VIEWS.length > 1) ? '' : 'none';
+  $('#ptitle').textContent = D.plan + ' · kolo ' + D.kolo;
+  $('#nav').innerHTML = B.map((x, i) => `<button class="nav ${i===st.i?'on':''}" data-i="${i}"><span class="n">${i+1}</span><span class="t">${esc(x.title)}</span><small>${st.pick[x.id] ? 'volba ' + esc(st.pick[x.id]) : '–'}${st.notes[x.id] ? ' · ✎' : ''}</small></button>`).join('');
+  $('#decided').innerHTML = D.rozhodnuto.length ? '<details><summary>Už rozhodnuto (' + D.rozhodnuto.length + ')</summary>' + D.rozhodnuto.map(t => `<p>${esc(t)}</p>`).join('') + '</details>' : '';
+  document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x.dataset.view === st.view));
+  $('#empty').hidden = !!pointShots;
+  if (pointShots) {
+    const list = shotsOf(b), sc = list[Math.min(st.tab, Math.max(list.length - 1, 0))];
+    $('#tabs').innerHTML = (b.minule.length ? `<button class="tab past ${st.past?'on':''}" data-past="1">Minulé kolo</button>` : '')
+      + (o ? o.snimky.map((x, k) => `<button class="tab ${!st.past && k===st.tab ? 'on' : ''}" data-tab="${k}">${esc(o.klic)} · ${esc(x.popisek)}</button>`).join('') : '');
+    $('#pv').className = 'pv ' + (st.view === 'desktop' ? 'd' : 'm') + (st.real ? ' real' : '');
+    const src = sc ? sc.soubory[st.view] : '';
+    if (src) $('#img').src = src; $('#img').hidden = !src;
+    $('#cap').textContent = sc ? (st.past ? 'Minulé kolo – ' : '') + sc.popisek + (src ? ' · klik na náhled ukáže skutečnou velikost' : ' (pro toto zobrazení snímek není)') : '';
+  } else { $('#tabs').innerHTML = ''; $('#cap').textContent = ''; $('#img').hidden = true; }
+  $('#title').textContent = b.title; $('#q').textContent = b.otazka;
+  $('#opts').innerHTML = b.moznosti.map(x => `<button class="opt ${o && x.klic===o.klic ? 'sel' : ''}" data-k="${esc(x.klic)}"><span class="top"><span class="k">${esc(x.klic)}</span><b>${esc(x.nazev)}</b>${x.klic===b.doporuceni ? '<span class="badge">doporučuju</span>' : ''}${x.nove.map(n => `<span class="badge new" title="${esc(n.duvod)}">nová komponenta</span>`).join('')}</span><p>${esc(x.popis)}</p>${x.postaveno_z.length ? `<p class="z">Postaveno z: ${esc(x.postaveno_z.join(', '))}</p>` : ''}${x.nove.map(n => `<p class="z">Nová komponenta ${esc(n.komponenta)}: ${esc(n.duvod)}</p>`).join('')}</button>`).join('');
+  $('#why').innerHTML = `<b>Doporučuju ${esc(b.doporuceni)}.</b> ${esc(b.proc)}`;
+  $('#rules').innerHTML = b.soulad_s_pravidly.length ? '<b>Agent uvádí, z jakých pravidel vychází</b><ul>' + b.soulad_s_pravidly.map(r => `<li>${esc(r.pravidlo)}: ${esc(r.jak)}</li>`).join('') + '</ul>' : '';
+  $('#rules').style.display = b.soulad_s_pravidly.length ? '' : 'none';
+  $('#note').value = st.notes[b.id] || '';
+  $('#prev').disabled = st.i === 0; $('#next').disabled = st.i === B.length - 1;
+  const n = B.filter(x => st.pick[x.id]).length;
+  $('#count').textContent = `Zvoleno ${n} z ${B.length}`;
+}
+function go(i){ st.i = i; st.tab = 0; st.past = false; st.real = false; render(); }
+document.addEventListener('click', e => {
+  if (e.target.id === 'img') { st.real = !st.real; render(); return; }
+  const t = e.target.closest('button'); if (!t) return; const b = B[st.i];
+  if (t.dataset.i !== undefined) return go(+t.dataset.i);
+  if (t.dataset.view) { st.view = t.dataset.view; st.real = false; }
+  else if (t.dataset.k) { st.pick[b.id] = t.dataset.k; st.tab = 0; st.past = false; send({ type: 'choice', bod: b.id, volba: t.dataset.k }); }
+  else if (t.dataset.tab !== undefined) { st.tab = +t.dataset.tab; st.past = false; }
+  else if (t.dataset.past) { st.past = true; st.tab = 0; }
+  else if (t.id === 'prev') return go(st.i - 1);
+  else if (t.id === 'next') return go(st.i + 1);
+  else if (t.id === 'send') {
+    const sel = B.map(x => ({ bod: x.id, volba: st.pick[x.id] || null }));
+    send({ type: 'confirm', selected: sel, notes: st.notes });
+    $('#sent').textContent = '· odesláno, napiš do terminálu „hotovo“'; return;
+  } else return;
+  render();
+});
+$('#note').addEventListener('input', e => { st.notes[B[st.i].id] = e.target.value.trim(); });
+$('#note').addEventListener('change', e => { send({ type: 'note', bod: B[st.i].id, text: e.target.value.trim() }); render(); });
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'TEXTAREA') return;
+  if (e.key === 'ArrowDown' && st.i < B.length - 1) go(st.i + 1);
+  else if (e.key === 'ArrowUp' && st.i > 0) go(st.i - 1);
+  else return; e.preventDefault();
+});
+render();
+})();
+</script>
+</body>
+</html>

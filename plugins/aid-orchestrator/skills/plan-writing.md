@@ -246,8 +246,12 @@ hard pre-flight of `plan-run` (readiness); a violation stops the run's start wit
 exact line).** Each Files bullet MUST be exactly:
 
 ```
-- <Create|Modify|Test|Rewrite>: `path` [ + `path`]* [(lines ~N-M)] [(tier: t0|t1|t2)] [— prose]
+- <Create|Modify|Test|Rewrite|Delete>: `path` [ + `path`]* [(lines ~N-M)] [(tier: t0|t1|t2)] [— prose]
 ```
+
+- `Delete:` declares a file the step removes: the step's return must name it in
+  `deleted_files`, and it must be gone from the tree (how it was removed is the step's
+  business). Earlier plans wrote a deletion as `Modify: … — deleted`, which still reads.
 
 - The path(s) come FIRST, each in backticks, immediately after the `Verb:` label.
 - Multiple files in one bullet ONLY via an explicit `` + `` between backtick paths.
@@ -788,7 +792,10 @@ Before the plan document is written to disk, the AI MUST pass this gate. This is
 is given), 9, 13, 14, 17a, 17d, 17e, 18 and 20a-c, plus what no check below
 asked for (a file the plan founds already exists; a removed file is still
 imported elsewhere; a criterion that already holds on HEAD; a revision that adds
-behaviour). Run it and repair its `BLOCK` lines — "I evaluated the checklist"
+behaviour; P117: the project's own `plan_checks:` from `execution.yaml` over the
+paths the plan creates (B11), and a `cmd` point of the plan or its brief whose
+program is not here, or that reads a variable the isolated measurement does not
+have (B12)). Run it and repair its `BLOCK` lines — "I evaluated the checklist"
 is not an answer the generation gate accepts, because `aid-generation-readiness.sh`
 runs the same script. The checks that remain a judgment (1-3, 10-12, 15, 16,
 17c, 19, 21) are what the model reviewers are for.

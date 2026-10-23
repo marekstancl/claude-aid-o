@@ -107,6 +107,16 @@ aid_dispatch_contract_build() {
       artifact_paths+=("$p")
     done < <(_aid_split_path_entry "$body" 2>/dev/null || true)
   done < <(jq -r '.outputs[]? // empty' <<< "$step")
+  # Deletions: the paths behind Delete bullets (AID 13. 10. 2026) — gone after the step, and named in
+  # its deleted_files; how the step removed them (git rm, a generator) is its own business.
+  local -a deletion_paths=()
+  while IFS= read -r bullet; do
+    [[ "$bullet" =~ ^Delete:[[:space:]]* ]] || continue
+    body="${bullet#*:}"; body="${body#"${body%%[![:space:]]*}"}"
+    while IFS= read -r p; do [[ -n "$p" ]] && deletion_paths+=("$p"); done < <(_aid_split_path_entry "$body" 2>/dev/null || true)
+  done < <(jq -r '.outputs[]? // empty' <<< "$step")
+  local deletions='[]'
+  (( ${#deletion_paths[@]} > 0 )) && deletions="$(printf '%s\n' "${deletion_paths[@]}" | awk '!seen[$0]++' | jq -Rsc 'split("\n") | map(select(length > 0))')"
   local artifacts='[]'
   if (( ${#artifact_paths[@]} > 0 )); then
     artifacts="$(printf '%s\n' "${artifact_paths[@]}" | awk '!seen[$0]++' | jq -Rsc 'split("\n") | map(select(length > 0))')"
@@ -133,6 +143,7 @@ aid_dispatch_contract_build() {
   body_json="$(jq -c \
     --argjson i "$idx" \
     --argjson artifacts "$artifacts" \
+    --argjson deletions "$deletions" \
     --arg evidence "${evroot:+${evroot%/}/}steps/${step_id}" \
     --slurpfile plan "$plan" \
     --arg id "$step_id" \
@@ -145,11 +156,30 @@ aid_dispatch_contract_build() {
       forbidden_paths: (.forbidden_paths // []),
       depends_on: [ ($plan[0].dependencies // [])[] | select(.after == $id) | .before ],
       expected_artifacts: $artifacts,
+      expected_deletions: $deletions,
       acceptance_criteria: (.acceptance_criteria // []),
       ui_change_contract: (.ui_change_contract // null),
       evidence_dir: $evidence
     } + (if (($plan[0].repo_roots // []) | length) > 0 and ($plan[0].direct // false)
          then {repo_roots: [($plan[0].repo_roots)[] | {name, worktree, branch, never: .path}]} else {} end)' <<< "$step")" || { echo "contract: could not assemble the packet for step ${idx}" >&2; return 1; }
+
+  # A declared deletion already done in the run's checkout when the contract is built (staged or gone from the
+  # tree) is no deletion of this step (AC2; Codex review 20. 10. 2026) — recorded here, refused by validate.
+  if [[ "$deletions" != "[]" ]]; then
+    local _root _gone='[]' _dp
+    source "${_AID_DCT_LIB_DIR}/aid-roots.sh"
+    _root="$(aid_run_checkout_root "$(dirname "$plan")/fsm-state.yaml" "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null)" || _root=""
+    if [[ -n "$_root" ]] && git -C "$_root" rev-parse --verify -q HEAD >/dev/null 2>&1; then
+      while IFS= read -r _dp; do
+        [[ -n "$_dp" && "$_dp" != /* ]] || continue
+        git -C "$_root" cat-file -e "HEAD:${_dp}" 2>/dev/null || continue
+        if ! git -C "$_root" ls-files --error-unmatch -- "$_dp" >/dev/null 2>&1 || [[ ! -e "${_root}/${_dp}" ]]; then
+          _gone="$(jq -c --arg p "$_dp" '. + [$p]' <<< "$_gone")"
+        fi
+      done < <(jq -r '.[]' <<< "$deletions")
+    fi
+    [[ "$_gone" != "[]" ]] && body_json="$(jq -c --argjson g "$_gone" '. + {deleted_before_start: $g}' <<< "$body_json")"
+  fi
 
   local version; version="$(_aid_dc_version "$body_json")"
   jq --arg v "$version" '. + {version: $v,
@@ -325,7 +355,8 @@ aid_dispatch_contract_validate() {
   got="$(jq -r '.contract_version // ""' "$r")"
   if [[ -z "$got" ]]; then
     _add reasons "the return does not confirm a contract version (expected ${want})"
-  elif [[ "$got" != "$want" ]]; then
+  elif [[ "$got" != "$want" ]] && ! jq -e --arg g "$got" '(.superseded_versions // []) | index($g) != null' "$c" >/dev/null 2>&1; then
+    # a version superseded by an audited rename (amend-contract, P117 (13)) is the same instructions under a new name
     _add reasons "the return confirms contract version ${got}, the dispatched packet is ${want} — the agent worked against stale instructions"
   fi
 
@@ -358,6 +389,27 @@ aid_dispatch_contract_validate() {
     [[ -e "$_a_path" ]] || _add missing "$a"
   done <<< "$expected"
   [[ "$missing" != "[]" ]] && _add reasons "expected artifacts are missing on disk: $(jq -r 'join(", ")' <<< "$missing")"
+  local gone=() d _d_path
+  while IFS= read -r d; do
+    [[ -n "$d" ]] || continue
+    [[ "$d" == /* ]] && _d_path="$d" || _d_path="${root}/${d}"
+    if [[ -e "$_d_path" ]]; then gone+=("${d} (still on disk)")
+    elif jq -e --arg p "$d" '(.deleted_before_start // []) | index($p) != null' "$c" >/dev/null 2>&1 \
+         && ! _aid_dc_deleted_by_step "$root" "$c" "$d"; then
+      gone+=("${d} (already deleted when the step started — nothing was deleted by this step)")
+    elif [[ $'\n'"$deleted"$'\n' != *$'\n'"$d"$'\n'* ]]; then gone+=("${d} (not in deleted_files)")
+    # a deletion of a TRACKED file: still in the index (deleted in the tree), staged (`git rm`: in HEAD, not in
+    # the index) or gone in a commit of the step
+    elif [[ "$d" != /* ]] && ! git -C "$root" ls-files --error-unmatch -- "$d" >/dev/null 2>&1 \
+         && ! git -C "$root" cat-file -e "HEAD:${d}" 2>/dev/null \
+         && ! _aid_dc_deleted_by_step "$root" "$c" "$d"; then
+      # before the step's commit the path is still in the index; after it, the step's own commit
+      # (recorded by aid_dispatch_contract_commit, _aid_dc_step_record) must be the one that deleted it — an old
+      # deletion in history proves nothing about this step (WAN P112 krok 4, 20. 10. 2026).
+      gone+=("${d} (not a tracked file — nothing was deleted by this step)")
+    fi
+  done < <(jq -r '.expected_deletions[]? // empty' "$c")
+  (( ${#gone[@]} )) && _add reasons "declared deletions not done: ${gone[*]}"
 
   # Commits the step made in another repository (repo_commits, read by the step
   # check) must exist there: a range that does not resolve is refused, named.
@@ -442,6 +494,24 @@ aid_dispatch_contract_validate() {
 #   what makes a mega-commit impossible even when three agents return at once,
 #   because the controller takes them one at a time.
 # ---------------------------------------------------------------------------
+# _aid_dc_step_record <root> <contract> — where aid_dispatch_contract_commit records the step's commit: the
+# tree's own git directory (per worktree, never a change git status reports), keyed by the contract's path.
+_aid_dc_step_record() {
+  local key; key="$(realpath "$2" | sha1sum | cut -c1-16)"
+  echo "$(git -C "$1" rev-parse --path-format=absolute --git-path "aid-step-commits/${key}.json")"
+}
+
+# _aid_dc_deleted_by_step <root> <contract> <path> — the step's recorded commit deleted <path> and is on
+# the current branch.
+_aid_dc_deleted_by_step() {
+  local root="$1" rec; rec="$(_aid_dc_step_record "$1" "$2")"
+  [[ -f "$rec" ]] || return 1
+  local sha; sha="$(jq -r '.commit // ""' "$rec" 2>/dev/null)"
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
+  git -C "$root" merge-base --is-ancestor "$sha" HEAD 2>/dev/null || return 1
+  git -C "$root" show --format= --name-only --diff-filter=D "$sha" 2>/dev/null | grep -qxF -- "$3"
+}
+
 aid_dispatch_contract_commit() {
   local root="${1:?contract: tree root required}" c="${2:?contract: contract file required}" r="${3:?contract: return file required}" msg="${4:?contract: commit message required}"
   # A step commit lands on the run's task branch, or on its own step/<id> branch
@@ -476,6 +546,16 @@ aid_dispatch_contract_commit() {
   fi
   local -a files=() forced=()
   local f
+  # The repositories the return already committed in (repo_commits, validated above): a file there is
+  # reported as committed there, not as something still to do (aidlab-apps 15. 10. 2026).
+  local done_repos=$'\n' rc_repo rc_wt rc_pj="" cand
+  for cand in "$(dirname "$c")/../../plan.json" "$(dirname "$c")/plan.json"; do [[ -f "$cand" ]] && { rc_pj="$cand"; break; }; done
+  while IFS= read -r rc_repo; do
+    [[ -n "$rc_repo" ]] || continue
+    if [[ "$rc_repo" == /* ]]; then rc_wt="$rc_repo"
+    else rc_wt=""; [[ -n "$rc_pj" ]] && IFS=$'\t' read -r rc_wt _ < <(aid_rr_resolve "$rc_pj" "$rc_repo"); fi
+    [[ -n "$rc_wt" ]] && done_repos+="$(git -C "$rc_wt" rev-parse --show-toplevel 2>/dev/null)"$'\n'
+  done < <(jq -r '.repo_commits[]?.repo // empty' "$r" 2>/dev/null)
   # Present on disk, or tracked and deleted — a declared deletion is a
   # change like any other and is staged as one. An accepted absolute path is
   # another repository's (validation holds this tree's to relative paths): it
@@ -488,10 +568,21 @@ aid_dispatch_contract_commit() {
       local d="${f%/*}" owner=""
       while [[ -n "$d" && ! -d "$d" ]]; do d="${d%/*}"; done
       owner="$(git -C "${d:-/}" rev-parse --show-toplevel 2>/dev/null)" || owner="unknown — not inside a git repository"
-      echo "contract: not committed here: ${f} (another repository: ${owner} — commit it there and name it in the return's repo_commits)" >&2
+      if [[ "$done_repos" == *$'\n'"$owner"$'\n'* ]]; then
+        echo "contract: ${f} is in ${owner}, committed there (the return's repo_commits, checked with the step)" >&2
+      else
+        echo "contract: not committed here: ${f} (another repository: ${owner} — commit it there and name it in the return's repo_commits)" >&2
+      fi
       continue
     fi
-    [[ "$f" == .aid-o/* ]] && continue   # AID's own state is never the step's delivery
+    # AID's own state is never the step's delivery: the step's evidence is left to AID; anything else under
+    # .aid-o/ (backlog.md, config) lives in the primary checkout and is refused aloud, never dropped
+    # silently (WAN P111 krok 10, 20. 10. 2026)
+    if [[ "$f" == .aid-o/* ]]; then
+      [[ "$f" == .aid-o/work/evidence/* ]] && continue
+      echo "contract: ${f} is AID's state, not the step's delivery — it is written in the primary checkout's .aid-o (the run's state root) and never committed by a step; drop it from changed_files" >&2
+      return 1
+    fi
     if [[ -f "${root}/${f}" ]]; then forced+=("$f")
     elif [[ -e "${root}/${f}" ]] || git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1; then files+=("$f"); fi
   done < <(jq -r '.changed_files[]?, .deleted_files[]? // empty' "$r")
@@ -502,13 +593,29 @@ aid_dispatch_contract_commit() {
   # -f only for a declared regular file: one the project gitignores (docs/ in
   # AID itself) is still the step's delivery. A directory is added without it,
   # so its ignored contents (build output, .env) never ride along.
-  { [[ "${#forced[@]}" -eq 0 ]] || git -C "$root" add -f -- "${forced[@]}"; } 2>/dev/null \
-    && { [[ "${#files[@]}" -eq 0 ]] || git -C "$root" add -A -- "${files[@]}"; } 2>/dev/null \
-    || { echo "contract: git add refused in ${root}" >&2; return 1; }
-  if git -C "$root" diff --cached --quiet; then
-    echo "nothing to commit"
+  # transactional: the step is staged and committed in a temporary index built from HEAD (GIT_INDEX_FILE, which
+  # hooks see too); the user's index is never written while that happens and nothing the user staged rides along.
+  # After the commit only the step's own paths are brought to the new HEAD in the real index (Codex, P117 A+C;
+  # WAN P112: a refused commit left the step's files staged and the retry saw a rename as no deletion).
+  local tidx; tidx="$(mktemp)"; rm -f "$tidx"
+  if ! GIT_INDEX_FILE="$tidx" git -C "$root" read-tree HEAD 2>/dev/null \
+     || ! { { [[ "${#forced[@]}" -eq 0 ]] || GIT_INDEX_FILE="$tidx" git -C "$root" add -f -- "${forced[@]}"; } 2>/dev/null \
+            && { [[ "${#files[@]}" -eq 0 ]] || GIT_INDEX_FILE="$tidx" git -C "$root" add -A -- "${files[@]}"; } 2>/dev/null; }; then
+    rm -f "$tidx"; echo "contract: git add refused in ${root} — your index is untouched" >&2; return 1
+  fi
+  if GIT_INDEX_FILE="$tidx" git -C "$root" diff --cached --quiet; then
+    rm -f "$tidx"; echo "nothing to commit"
     return 0
   fi
-  git -C "$root" commit -q -m "$msg" 2>/dev/null || { echo "contract: git commit refused in ${root}" >&2; return 1; }
-  git -C "$root" rev-parse HEAD
+  if ! GIT_INDEX_FILE="$tidx" git -C "$root" commit -q -m "$msg" 2>/dev/null; then
+    rm -f "$tidx"; echo "contract: git commit refused in ${root} — your index is untouched" >&2; return 1
+  fi
+  rm -f "$tidx"
+  local head _p; head="$(git -C "$root" rev-parse HEAD)"; local -a stale=()
+  for _p in "${forced[@]}" "${files[@]}"; do git -C "$root" reset -q HEAD -- "$_p" >/dev/null 2>&1 || stale+=("$_p"); done
+  # the commit stands (a retry would make a second one); an index left behind is said, with its repair
+  (( ${#stale[@]} == 0 )) || echo "contract: committed ${head:0:12}, but your index still holds the old state of: ${stale[*]} — bring it to HEAD: git -C ${root} reset -q HEAD -- ${stale[*]}" >&2
+  local rec; rec="$(_aid_dc_step_record "$root" "$c")"; mkdir -p "${rec%/*}"
+  jq -n --arg c "$head" --arg k "$(realpath "$c")" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{commit: $c, contract: $k, at: $at}' > "$rec"
+  echo "$head"
 }

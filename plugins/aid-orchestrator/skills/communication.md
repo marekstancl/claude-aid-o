@@ -64,8 +64,8 @@ Alternativy: B — <meaningful alternative>; C — <stop/defer when relevant>.
 Riziko / co není ověřeno: <only material uncertainty>.
 ```
 
-This card is **built, not imitated**: `scripts/lib/aid-decision-card.sh` assembles
-it from data and refuses data with fewer than two options, no recommendation or
+This card is **built, not imitated**: `aid_decision_card_render <data.json>` in
+`scripts/lib/aid-decision-card.sh` assembles it from data and refuses data with fewer than two options, no recommendation or
 a recommendation without a reason — so the renderer cannot emit an incomplete
 card. It cannot stop anyone from typing an ad-hoc question by hand instead;
 what catches that is `scripts/aid-turn-gate.sh` on a written card and a `Stop`

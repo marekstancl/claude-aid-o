@@ -85,6 +85,9 @@ _unzipped/
 # Public GitHub should contain plugin/runtime assets and plugin-facing docs in
 # plugin paths, not private planning material under docs/.
 docs/
+# ...except a test fixture's own docs/ (a sample project's docs/content/*.yaml): ignored, the gate suite
+# passed only on the machine that had them (AID 14. 10. 2026, release 3.2.0)
+!plugins/aid-orchestrator/scripts/tests/fixtures/**/docs/
 # EXCEPTION: the live-probe findings ledger must stay tracked — it was
 # accidentally caught by a merge-conflict "delete" resolution on 2026-07-08
 # specifically because it lost tracking here with no negation rule. Restored

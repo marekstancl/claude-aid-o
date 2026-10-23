@@ -150,6 +150,13 @@ aid_review_config_load() {
     RC_ROLE+=("$role"); RC_PROVIDER+=("$provider"); RC_MODEL+=("$model"); RC_EFFORT+=("$effort"); RC_WHEN+=("$when"); RC_FULL_WHEN+=("$full_when")
     [[ -z "$when" ]] && unconditional=$((unconditional + 1))
   done < <(yq -r "${b}.reviewers // [] | .[] | [.role, .provider, .model, (.effort // \"medium\"), (.when // \"-\"), (.full_when // \"-\")] | @tsv" "$RC_CONFIG_FILE")
+  # P117 (18): a step that changes documentation has its claims checked in its own review — whatever a project
+  # policy lists, the role is there (a project policy replaces the default block whole)
+  local _dsi _has_docs=0
+  for _dsi in "${!RC_ROLE[@]}"; do [[ "${RC_ROLE[$_dsi]}" == final_claims && "${RC_WHEN[$_dsi]}" == docs_surface ]] && _has_docs=1; done
+  if [[ "$block" == step_review ]] && (( ! _has_docs )); then
+    RC_ROLE+=(final_claims); RC_PROVIDER+=(claude); RC_MODEL+=(opus); RC_EFFORT+=(low); RC_WHEN+=(docs_surface); RC_FULL_WHEN+=("")
+  fi
   # The model a Claude stand-in runs at when a codex role gives no answer.
   RC_STAND_IN_MODEL="$(yq -r "${b}.stand_in_model // \"opus\"" "$RC_CONFIG_FILE")"
   # A low-effort role goes to the light reviewer only while its prompt fits:
@@ -219,8 +226,8 @@ aid_review_config_validate() {
     esac
     case "${RC_WHEN[$i]}" in
       "") unconditional=$((unconditional + 1)) ;;
-      review+security) ;;
-      *) _aid_rc_fail "role ${role}: when must be review+security (got '${RC_WHEN[$i]}')"; return 1 ;;
+      review+security|docs_surface) ;;   # docs_surface (P117 (18)): the step changes documentation (lib/aid-docs-surface.sh)
+      *) _aid_rc_fail "role ${role}: when must be review+security or docs_surface (got '${RC_WHEN[$i]}')"; return 1 ;;
     esac
     case "${RC_FULL_WHEN[$i]:-}" in
       ""|review+security) ;;
