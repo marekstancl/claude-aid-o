@@ -456,7 +456,7 @@ _st() { yq -r ".$2" "$1"; }
 }
 
 # --- 3.8.1: the plan branch deleted after a hand merge (WAN P082/P084/P094) ---------------------------
-_branchless_plan() {   # <root> <merged|unmerged> — plan-final evidence present, plan/P900 deleted, candidate recorded
+_branchless_plan() {   # <root> <merged|unmerged|none> [noev] — plan/P900 deleted, a candidate recorded (none: not), partial plan-final evidence (noev: none)
   local R="$1" cand
   _gates_plan "$R"
   if [[ "$2" == merged ]]; then cand="$(git -C "$R" rev-parse plan/P900)"
@@ -464,7 +464,7 @@ _branchless_plan() {   # <root> <merged|unmerged> — plan-final evidence presen
   else git -C "$R" checkout -q -b side main; git -C "$R" commit -q --allow-empty -m "never merged"; cand="$(git -C "$R" rev-parse HEAD)"; git -C "$R" checkout -q main; git -C "$R" branch -q -D side; fi
   local mf="$R/.aid-o/work/plan-state/P900/plan-boundary-manifest.json"
   jq --arg c "$cand" '.plan_boundary_manifest.candidate_sha = (if $c == "" then null else $c end)' "$mf" > "$mf.t" && mv "$mf.t" "$mf"
-  mkdir -p "$R/.aid-o/work/evidence/P900/R-P900-final-1"; echo '{"verdict":"pass"}' > "$R/.aid-o/work/evidence/P900/R-P900-final-1/curator-report.json"
+  [[ "${3:-}" == noev ]] || { mkdir -p "$R/.aid-o/work/evidence/P900/R-P900-final-1"; echo '{"verdict":"pass"}' > "$R/.aid-o/work/evidence/P900/R-P900-final-1/curator-report.json"; }
   git -C "$R" worktree remove --force "$R/.aid-worktrees/step-s1" 2>/dev/null || true
   git -C "$R" branch -q -D plan/P900 step/s1 2>/dev/null || true
 }
@@ -481,7 +481,7 @@ _branchless_plan() {   # <root> <merged|unmerged> — plan-final evidence presen
   [ "$(yq -r .plan_state "$U/.aid-o/work/plan-state/P900/plan-state.yaml")" != CLOSED ]
 }
 
-@test "3.9.1: no branch and no recorded candidate — the close goes through as closed_administrative with no merge claim and no lifecycle receipt" {
+@test "3.9.1: no branch, no candidate, PARTIAL plan-final evidence — closed_administrative with the evidence listed, no merge claim, no receipt" {
   local R="$BATS_TEST_TMPDIR/n"; mkdir -p "$R"; _branchless_plan "$R" none; _lifecycle_manifest "$R"
   run bash -c "cd '$R' && AID_TEST_MODE=1 bash '$FSM' plan-close P900 --project-root '$R' --administrative --reason 'P900 merged by hand, its branch cleaned up'"
   echo "$output"; [ "$status" -eq 0 ]
@@ -490,4 +490,12 @@ _branchless_plan() {   # <root> <merged|unmerged> — plan-final evidence presen
   [[ "$output" != *"receipt_administrative"* ]]
   ! git -C "$R" show main:.aid-lifecycle/receipts/P900.yaml >/dev/null 2>&1
   [ ! -e "$R/.aid-lifecycle/receipts/P900.yaml" ]
+}
+
+@test "3.9.1: no branch, no candidate and no plan-final evidence — closed_administrative, no merge claim, no receipt" {
+  local R="$BATS_TEST_TMPDIR/e"; mkdir -p "$R"; _branchless_plan "$R" none noev; _lifecycle_manifest "$R"
+  run bash -c "cd '$R' && AID_TEST_MODE=1 bash '$FSM' plan-close P900 --project-root '$R' --administrative --reason 'P900 merged by hand, its branch cleaned up'"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"closed_administrative"* && "$output" != *"receipt_administrative"* ]]
+  ! git -C "$R" show main:.aid-lifecycle/receipts/P900.yaml >/dev/null 2>&1
 }

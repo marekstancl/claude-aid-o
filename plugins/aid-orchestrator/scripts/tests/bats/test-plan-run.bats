@@ -270,10 +270,15 @@ _page() { ( source "$PLUGIN_DIR/scripts/lib/aid-plan-summary.sh" && aid_plan_sum
   [ ! -f "$EV/fsm-state.yaml" ]
 }
 
+# _break_plan — the seeded plan turned broadcast-shaped AFTER its CP1 round (a round is not prepared over a plan
+# readiness refuses, since 2.116), its page re-rendered so the page check passes and readiness is what refuses
+_break_plan() {
+  sed -i 's|^- Modify: `prirucka/README.md` — .*|- Create: `src/core/lengths.py` — funkce `tally_by_length(items)`|' "$PLAN"   # both steps broadcast one output
+  _page
+}
+
 @test "direct: a broadcast-shaped plan never starts a run — readiness refuses it before the seal (D5 shifted left)" {
-  rm -rf "$R" && _mk_project "$R" >/dev/null
-  sed 's|^- Modify: `prirucka/README.md` — .*|- Create: `src/core/lengths.py` — funkce `tally_by_length(items)`|' "$FIXTURE_PLAN" > "$BATS_TEST_TMPDIR/bad.md"   # both steps broadcast one output
-  _seed "$R" "$BATS_TEST_TMPDIR/bad.md"
+  _break_plan
   _run
   [ "$status" -eq 7 ]
   [[ "$output" == *"nothing was written"* ]]
@@ -301,9 +306,7 @@ _snapraw() {
 }
 
 @test "direct: a plan readiness refuses changes nothing either — no directory, no lock (3.9.1)" {
-  rm -rf "$R" && _mk_project "$R" >/dev/null
-  sed 's|^- Modify: `prirucka/README.md` — .*|- Create: `src/core/lengths.py` — funkce `tally_by_length(items)`|' "$FIXTURE_PLAN" > "$BATS_TEST_TMPDIR/bad.md"
-  _seed "$R" "$BATS_TEST_TMPDIR/bad.md" || skip "the fixture plan does not seed (nightly-red test-plan-run case 18)"
+  _break_plan
   local before; before="$(_snap)"
   _run
   [ "$status" -eq 7 ]; [ "$(_snap)" = "$before" ]

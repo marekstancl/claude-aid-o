@@ -62,13 +62,16 @@ _aid_split_path_entry() {
   local entry="$1"
   local rest="$entry"
   local candidate found_backtick_path=0 first_span=1
-  # A second path after "; " in the DESCRIPTION, or in a bullet without backticks, used to vanish: the step's
-  # allowed_paths held only the first one (agents P012 krok 4, 3.9.1). Paths are `a` + `b` or `a`; `b` right
-  # after each other (the loop below), or two bullets; after a description they are refused, never dropped.
-  local _second_re='(—|--|\)|[^`;+[:space:]])[^`]*;[[:space:]]*(`[^`[:space:]]+`|/[^[:space:]`]+\.[A-Za-z0-9]+)'
-  [[ "$entry" == '`'* ]] || _second_re=';[[:space:]]*(`[^`[:space:]]+`|/[^[:space:]`]+\.[A-Za-z0-9]+)'
-  if [[ "$entry" =~ $_second_re ]]; then
-    echo "aid-scoping: a second path after ';' in one Files entry (${BASH_REMATCH[${#BASH_REMATCH[@]}-1]}): write \`a\` + \`b\` or one bullet per path: ${entry}" >&2
+  # A bullet WITHOUT backticks that names a second path after "; " lost it silently: the step's allowed_paths held
+  # only the first one (agents P012 krok 4, 3.9.1) — refused. With backticks, `a`; `b` and `a` + `b` declare both
+  # (the loop below); a path a backticked bullet names in its DESCRIPTION is the lint's advisory ("named only in
+  # this entry's description"), never an error — descriptions quote code and archive paths (ACTA P025).
+  # a FILE token: a slash, or a file extension a repository holds — `__init__`, `obj.attr` or `x='FV1'` are code
+  local _file_tok='[^`[:space:]]*(/[^`[:space:]]*|\.(md|py|ts|tsx|js|jsx|mjs|json|ya?ml|sh|bats|sql|css|scss|html|toml|txt|cfg|ini|vue|svelte|go|rs|java|rb|php))'
+  local _second_re=';[[:space:]]*/[^[:space:]`]+\.[A-Za-z0-9]+'
+  if [[ "$entry" != '`'* && "$entry" =~ $_second_re ]]; then
+    local _m="${BASH_REMATCH[0]##*;}"; _m="${_m#"${_m%%[![:space:]]*}"}"
+    echo "aid-scoping: a second path after ';' in one Files entry (${_m}): write \`a\` + \`b\` or one bullet per path: ${entry}" >&2
     return 1
   fi
 
@@ -77,7 +80,7 @@ _aid_split_path_entry() {
       [[ "$rest" == '`'* ]] || break
     else
       if [[ "$rest" == ' + `'* ]]; then rest="${rest# + }"
-      elif [[ "$rest" == '; `'* ]]; then rest="${rest#; }"
+      elif [[ "$rest" == '; `'* ]] && [[ "${rest#; }" =~ ^\`${_file_tok}\` ]]; then rest="${rest#; }"
       else break; fi
     fi
     rest="${rest#\`}"           # drop the opening backtick

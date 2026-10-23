@@ -322,23 +322,28 @@ _plan_role() { # <file> <role>
   [[ "$output" == *"\`${BATS_TEST_TMPDIR}\` names another repository"* ]]
 }
 
-@test "files grammar: a second path after ';' in one bullet is refused by the lint and by plan.json, never dropped (agents P012, 3.8.1)" {
+@test "files grammar: a bullet without backticks naming a second path after ';' is refused by the lint and plan.json; in a backticked bullet's description it is the advisory; never dropped silently (agents P012, 3.9.1)" {
+  # backticked: a path in the description is the advisory, never dropped silently and never an error
   _plan p.md strict '- Modify: `src/a.ts` — edit; `src/b.ts` — the other one'
   run "$LINT" p.md
-  [ "$status" -ne 0 ]; [[ "$output" == *"ERROR unparsed text after a path"*"src/b.ts"* ]]
+  [[ "$output" == *'`src/b.ts` is named only in this entry'*"description"* ]]; [[ "$output" != *"ERROR unparsed text"* ]]
   _plan q.md strict '- Modify: /opt/eco/docs/x.md (pozn) — edit; /opt/eco/docs/y.md (pozn) — edit'
   run "$LINT" q.md
   [ "$status" -ne 0 ]; [[ "$output" == *"ERROR unparsed text after a path"*"y.md"* ]]
-  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-json.sh' && aid_plan_json_steps_from_plan p.md"
-  [ "$status" -ne 0 ] || [[ "$output" != *'"src/a.ts"'* ]]
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/common.sh' && source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-json.sh' && aid_plan_json_steps_from_plan q.md"
+  [ "$status" -ne 0 ]
   # `a` + `b` and `a`; `b` declare both paths for every reader; a plain description with a ';' still passes
   local form; for form in '`src/a.ts` + `src/b.ts`' '`src/a.ts`; `src/b.ts`'; do
     _plan r.md strict "- Modify: ${form} — both; then run the tests"
-    run "$LINT" r.md; [[ "$output" != *"unparsed text after a path"* ]] || { echo "$form: $output"; return 1; }
-    run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-json.sh' && aid_plan_json_steps_from_plan r.md"
+    run "$LINT" r.md; [ "$status" -eq 0 ] || { echo "$form: $output"; return 1; }
+    run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/common.sh' && source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-json.sh' && aid_plan_json_steps_from_plan r.md"
     [ "$status" -eq 0 ]; [[ "$output" == *'"src/a.ts"'* && "$output" == *'"src/b.ts"'* ]] || { echo "$form: $output"; return 1; }
+    # the step contract the run dispatches allows both
+    jq -n --argjson st "$output" '{steps: $st}' > r.json
+    run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-dispatch-contract.sh' && aid_dispatch_contract_build r.json 0 c.json && jq -c '.allowed_paths' c.json"
+    [ "$status" -eq 0 ]; [[ "$output" == *'"src/a.ts"'* && "$output" == *'"src/b.ts"'* ]] || { echo "$form contract: $output"; return 1; }
     run bash "$AID_PLUGIN_PATH/scripts/aid-plan-parallel-check.sh" r.md
-    [[ "$output" != *"unparsed"* && "$output" != *"second path"* ]]
+    [ "$status" -eq 0 ] || { echo "$form parallel: $output"; return 1; }
   done
 }
 

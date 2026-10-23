@@ -60,8 +60,9 @@ _plan() {
 # _generate — what plan-run does before it builds anything (P114: the EPIC
 # generator is gone): readiness (the plan lint inside it) and the shared
 # plan.json reader, which refuses a NEW suite without its tier.
+# (No CP1 round: readiness and the plan.json reader do not read one, and since 2.116 a round is not even
+# prepared over a plan readiness refuses — seeding one made every refusal case fail in setup, 3.7.0-3.9.0.)
 _generate() {
-  aid_fixture_seed_plan_review "$ROOT" "$1" || return 1
   run bash -c 'bash "$AID_PLUGIN_PATH/scripts/aid-generation-readiness.sh" "$1" --total 1 --project-root "$ROOT" \
     && source "$AID_PLUGIN_PATH/scripts/lib/common.sh" && source "$AID_PLUGIN_PATH/scripts/lib/aid-plan-json.sh" \
     && aid_plan_json_steps_from_plan "$1" >/dev/null' _ "$1" 3>&-

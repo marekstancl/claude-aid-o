@@ -139,6 +139,7 @@ aid_fixture_seed_plan() {
   fi
   local plan_id; plan_id="$(basename "$name")"; plan_id="${plan_id%%[-.]*}"
   local page="$root/.aid-o/work/evidence/${plan_id}/plan-summary-artifact.html"
+  local no_page=0
   if true; then
     mkdir -p "$(dirname "$page")"
     local rrc=0
@@ -154,7 +155,7 @@ aid_fixture_seed_plan() {
     ) || rrc=$?
     case "$rrc" in
       0) ;;
-      3) echo "aid_fixture_seed_plan: the renderer declined ${name}; no page seeded because no page is owed" >&2 ;;
+      3) echo "aid_fixture_seed_plan: the renderer declined ${name}; no page seeded because no page is owed" >&2; no_page=1 ;;
       9) echo "aid_fixture_seed_plan: ${summary_lib} has no renderer entry points — the page cannot be seeded and the fixture is not generation-ready" >&2; return 1 ;;
       *) echo "aid_fixture_seed_plan: rendering ${name}'s PM page failed (rc=${rrc})" >&2; return 1 ;;
     esac
@@ -192,7 +193,13 @@ aid_fixture_seed_plan() {
 
   # ── 5. P093 Step 7 (2026-09-18): the CP1 gate needs a closed plan-review round
   #       (and since P109 Step 3, a passed critic check — seeded inside it).
-  aid_fixture_seed_plan_review "$root" "$plan" || return 1
+  #       A plan the renderer declines is no plan a round could review (prepare refuses it since 2.116): none
+  #       is seeded, and the helper says so (3.9.1 — the case failed in setup on every night since 3.7.0).
+  if [[ "$no_page" -eq 1 ]]; then
+    echo "aid_fixture_seed_plan: no plan-review round seeded for ${name} either — a plan with no page is not one a round reviews" >&2
+  else
+    aid_fixture_seed_plan_review "$root" "$plan" || return 1
+  fi
 
   printf '%s\n' "$plan"
 }
@@ -322,8 +329,9 @@ aid_fixture_seed_plan_review() {
   aid_fixture_seed_critic_check "$root" "$plan" || return 1
   bash "$plugin/scripts/aid-plan-check.sh" "$plan" --project-root "$root" \
     --json "$root/.aid-o/work/evidence/${id}/plan-check.json" --quiet >/dev/null 2>&1 || true
-  bash "$round_sh" prepare --plan "$plan" --round 1 --project-root "$root" >/dev/null 2>&1 || {
-    echo "aid_fixture_seed_plan_review: prepare failed for ${plan}" >&2; return 1; }
+  local _prep_out
+  _prep_out="$(bash "$round_sh" prepare --plan "$plan" --round 1 --project-root "$root" 2>&1)" || {
+    echo "aid_fixture_seed_plan_review: prepare failed for ${plan}: $(grep -m2 -E 'REFUS|FAIL|ERROR|not_ready|plan_not' <<< "$_prep_out" | tr '\n' ' ')" >&2; return 1; }
   for role in $(jq -r '.reviewers_expected[]' "$dir/round-1/round.json"); do
     jq -n --arg r "$role" '{role: $r, findings: [], no_findings_reason: "fixture: nothing to review"}' \
       > "$dir/round-1/reviewer-${role}.json"
