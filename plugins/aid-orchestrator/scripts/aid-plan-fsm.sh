@@ -9647,32 +9647,8 @@ _pr_main() {
   local trace0; trace0="$(_pr_generation_trace)"
   [[ -z "$trace0" ]] || _pr_refuse epic_path_removed "${plan_id} was generated the EPIC way: ${trace0} — the EPIC path was removed in AID 3.0.0" \
     "finish it on AID 2.118.x (point plugin_path at a 2.118.x checkout), or close it (aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\") and start a NEW plan with a new id: /aid-run P<NNN>" 1
-  mkdir -p "$gd" || exit 3
-
-  # ── ONE hold for the whole transaction: the generation lock ───────────────
-  if ! aid_gen_lock "$plan_id"; then
-    _pr_refuse generation_lock_held "a generation or plan-run for ${plan_id} holds $(_gen_transaction_path "$plan_id").lock (holder pid $(aid_gen_lock_holder "$plan_id")); waited ${AID_GEN_LOCK_TIMEOUT}s" \
-      "wait for that run to finish, then run plan-run again — it resumes" 3
-  fi
-  trap 'aid_gen_unlock' EXIT
-
-  # ── the two roads exclude each other by their artefacts ───────────────────
-  local trace dead
-  trace="$(_pr_generation_trace)"
-  [[ -z "$trace" ]] || _pr_refuse epic_path_removed "${plan_id} was generated the EPIC way: ${trace} — the EPIC path was removed in AID 3.0.0" \
-    "finish it on AID 2.118.x (point plugin_path at a 2.118.x checkout), or close it (aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\") and start a NEW plan with a new id: /aid-run P<NNN>" 1
-  # P112: a run that made no step is set aside and the plan runs again
-  PR_RESTART_DIR=""
-  [[ "$restart" -eq 1 ]] && { _pr_restart "$plan" "$force_reason" || exit $?; }
-  dead="$(_pr_dead_run)"
-  if [[ -n "$dead" ]]; then
-    local fw
-    fw="$(jq -r '[.repo_roots[]?.worktree] | join(", ")' "$pj" 2>/dev/null || true)"
-    _pr_refuse plan_run_already_started "${plan_id}: ${dead}${fw:+ — foreign worktrees to remove by hand: ${fw}}" \
-      "/aid-run --resume ${plan_id}; when the run made no step: aid-plan-fsm.sh plan-run ${plan_id} --restart --reason \"<why, 20+ chars>\"; else close the plan administratively: aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\"" 1
-  fi
-
-  # ── 3.8.1: what can refuse the plan is asked BEFORE the first durable change. The first plan-run of a plan
+  # ── 3.9.1: what can refuse the plan is asked BEFORE the first durable change — before the generation
+  #    directory and its lock too. The first plan-run of a plan
   #    used to write the transaction and commit the plan (plan-start) and only then meet the page, readiness
   #    and the CP1 gate — ACTA P027: a refused CP1 left a sealed transaction of the old plan and a committed old
   #    plan, the repaired plan then could not run (plan_changed_since_seal). Read-only: nothing here writes.
@@ -9701,6 +9677,31 @@ _pr_main() {
           "repair the plan and close another CP1 round (aid-review-round.sh prepare --plan …), then run plan-run again" 1
       fi
     fi
+  fi
+
+  mkdir -p "$gd" || exit 3
+
+  # ── ONE hold for the whole transaction: the generation lock ───────────────
+  if ! aid_gen_lock "$plan_id"; then
+    _pr_refuse generation_lock_held "a generation or plan-run for ${plan_id} holds $(_gen_transaction_path "$plan_id").lock (holder pid $(aid_gen_lock_holder "$plan_id")); waited ${AID_GEN_LOCK_TIMEOUT}s" \
+      "wait for that run to finish, then run plan-run again — it resumes" 3
+  fi
+  trap 'aid_gen_unlock' EXIT
+
+  # ── the two roads exclude each other by their artefacts ───────────────────
+  local trace dead
+  trace="$(_pr_generation_trace)"
+  [[ -z "$trace" ]] || _pr_refuse epic_path_removed "${plan_id} was generated the EPIC way: ${trace} — the EPIC path was removed in AID 3.0.0" \
+    "finish it on AID 2.118.x (point plugin_path at a 2.118.x checkout), or close it (aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\") and start a NEW plan with a new id: /aid-run P<NNN>" 1
+  # P112: a run that made no step is set aside and the plan runs again
+  PR_RESTART_DIR=""
+  [[ "$restart" -eq 1 ]] && { _pr_restart "$plan" "$force_reason" || exit $?; }
+  dead="$(_pr_dead_run)"
+  if [[ -n "$dead" ]]; then
+    local fw
+    fw="$(jq -r '[.repo_roots[]?.worktree] | join(", ")' "$pj" 2>/dev/null || true)"
+    _pr_refuse plan_run_already_started "${plan_id}: ${dead}${fw:+ — foreign worktrees to remove by hand: ${fw}}" \
+      "/aid-run --resume ${plan_id}; when the run made no step: aid-plan-fsm.sh plan-run ${plan_id} --restart --reason \"<why, 20+ chars>\"; else close the plan administratively: aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\"" 1
   fi
 
   # ── the transaction file (kind: plan_run) ─────────────────────────────────

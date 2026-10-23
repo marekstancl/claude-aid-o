@@ -469,4 +469,10 @@ PY
   run bash "$RELEASE" prepare-plan P900 --bump none --plan-branch plan/P900 --project-root "$TEST_PROJECT_ROOT"
   echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq -r .version "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P900/release-prep.json")" = 2.0.1 ]
+  # sections out of order: the highest one counts, not the first
+  { printf '# Changelog\n\n## [1.9.0] — old note on top\n\n- x\n\n'; sed '1{/^# /d}' CHANGELOG.md; } > CHANGELOG.new && mv CHANGELOG.new CHANGELOG.md
+  git commit -qam "an older section above"
+  run bash "$RELEASE" prepare-plan P900 --bump none --plan-branch plan/P900 --project-root "$TEST_PROJECT_ROOT"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .version "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/P900/release-prep.json")" = 2.0.1 ]
 }
