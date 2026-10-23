@@ -187,3 +187,20 @@ m.verify_append(sys.argv[1], "struktura", {"artifact": art, "at": "t", "round": 
   echo "změna" >> "$P/docs/design/screens.json"   # another version: the record is not over it
   [ "$(seen)" = "[]" ]
 }
+
+@test "places (PM 1A 23. 10. 2026): a finished app's round needs the quick gate over this model and this site, not the full gate; a site changed after it refuses" {
+  app_places_project
+  Q="$SC/aid-ui-quality.py"
+  python3 "$C" freeze "$P" --type webapp >/dev/null
+  mkdir -p "$P/site"; echo '<html lang="cs"><body>app</body></html>' > "$P/site/index.html"
+  python3 - "$P" > "$P/self.json" <<'PY'
+import json, sys
+print(json.dumps({"requirements": [{"id": "z1", "source": "zadani.md:2", "text": "poznámky", "covered_by": ["task:zalozit", "screen:seznam"]}]}))
+PY
+  run python3 "$Q" self "$P" --place web --file "$P/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"rychlá kontrola kostry neproběhla"* ]]
+  sha="$(sha256sum "$P/docs/design/screens.json" | cut -d' ' -f1)"; mkdir -p "$P/.aid-ui/quick"; sleep 1
+  python3 "$SC/aid-ui-screens.py" matrix "$P" | jq --arg s "$sha" '{model_sha256: $s, rows: [.rows[] | {check, page, state, status: "pass"}]}' > "$P/.aid-ui/quick/result.json"
+  run python3 "$Q" self "$P" --place web --file "$P/self.json"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }   # no full gate needed
+  sleep 1; echo '<p>změna</p>' >> "$P/site/index.html"
+  run python3 "$Q" self "$P" --place web --file "$P/self.json"; [ "$status" -eq 1 ]; [[ "$output" == *"nad starší verzí webu"* ]]
+}

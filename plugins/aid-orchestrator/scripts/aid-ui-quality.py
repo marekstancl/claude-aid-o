@@ -222,18 +222,25 @@ def self_problems(p, doc):
             if miss:
                 bad.append(f"{r['id']}: {', '.join(miss)} není úloha ani obrazovka modelu (task:<id> | screen:<id>)")
     # P118: no marks of the producer - they never matched the roles (always 9, roles 4.9-8.8); the machine checks decide
-    if model is not None and PLACE in ("struktura", "vzhled"):   # an app's skeleton passed its own gate on this model first
+    if model is not None and PLACE in ("struktura", "vzhled", "web"):   # an app passed its quick gate on this model and this site first
+        # (PM 1A 23. 10. 2026: also the finished app - the full gate (15-25 min) runs once before the handover, not before every round)
         msha = hashlib.sha256(open(os.path.join(p, "docs", "design", "screens.json"), "rb").read()).hexdigest() if model else ""
-        res = None
+        res, res_f = None, None
         for pre in ("quick", "precheck"):   # the quick check (widest width, ~3 min) is enough before the roles; the full gate decides the handover
+            f_ = os.path.join(p, ".aid-ui", pre, "result.json")
             try:
-                r_ = json.load(open(os.path.join(p, ".aid-ui", pre, "result.json"), encoding="utf-8"))
+                r_ = json.load(open(f_, encoding="utf-8"))
             except (OSError, ValueError):
                 continue
             if r_.get("model_sha256") == msha:
-                res = r_; break
-            res = res or r_
-        if not res:
+                res, res_f = r_, f_; break
+            if res is None:
+                res, res_f = r_, f_
+        site = os.path.join(p, "site")
+        newest = max((os.path.getmtime(os.path.join(d, f)) for d, _, fs in os.walk(site) for f in fs), default=0)
+        if res and newest > os.path.getmtime(res_f):   # the site changed after it
+            bad.append("rychlá kontrola běžela nad starší verzí webu; pusť ji znovu (aid-ui-verify.sh <projekt> --quick)"); res = None
+        elif not res:
             bad.append("rychlá kontrola kostry neproběhla (aid-ui-verify.sh <projekt> --quick)")
         elif res.get("model_sha256") != msha:
             bad.append("rychlá kontrola běžela nad jiným modelem; pusť ji znovu (aid-ui-verify.sh <projekt> --quick)")
@@ -596,7 +603,7 @@ def do_round(p, web):
         why = self_ok(p)
         if why:
             die("no round: the version is not ready for the roles - " + why)
-    if PLACE == "web":   # the regression check guards the built site; earlier places have no build yet
+    if PLACE == "web" and model_of(p) is None:   # the regression check guards a built web; an app's quick gate is in self (PM 1A 23. 10.)
         ok, msg = gate_ok(p)
         if not ok:
             die("the site does not pass the regression check (aid-ui-state.sh gate-check); rebuild, build-record and run the gate first:\n" + msg)

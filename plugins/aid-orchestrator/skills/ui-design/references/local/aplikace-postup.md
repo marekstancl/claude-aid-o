@@ -131,6 +131,10 @@ načtení obrazovky (u výpadku sítě a odmítnutí serverem každým svým `fa
 projektu, ne jen proti zadání obrazovek (P116 kolo 5).
 
 ## 5. Brána
+**Kolo hotové aplikace má trvat kolem 15 minut** (PM 23. 10. 2026, 1A; Trading 22. 10.: s plnou bránou před každým kolem
+60-90 minut): oprav jen nálezy přijaté v triáži, bez přestavby a přefocování všeho; pak `aid-ui-verify.sh <projekt>
+--quick` (asi 3-4 min, nad tímto modelem i touto verzí webu - starší `self` odmítne) a kolo. **Plná brána (bod 2) běží
+jednou, před předáním** (zapisuje ji balík).
 1. `aid-ui-flows.py generate <projekt>` napíše z modelu do `.aid-ui/scenarios/` jeden test na úlohu (kroky, pak
    výsledek `done_when`) a jeden na každou cestu selhání (vnucená chyba, vstup zůstal, obnova, výsledek). Úloha, která
    odesílá data a cestu selhání v modelu nemá, dostane vygenerovanou chybu sítě na posledním odeslání.

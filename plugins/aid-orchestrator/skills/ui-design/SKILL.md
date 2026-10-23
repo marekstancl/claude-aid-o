@@ -113,7 +113,7 @@ detaily. Před každým kolem místa (`aid-ui-quality.py round`, všechna místa
    opravdu dělá** (kód, roadmapa, runbook), ne proti zadání obrazovek (P116 kolo 5: tři ukázky popisovaly chování,
    které appka nemá). Fakta vytěží dva nezávislí čtenáři: `aid-ui-client.py facts <projekt>` (postup aplikace 3b).
 3. **Lint modelu** (`aid-ui-screens.py check`, sekundy) bez nálezu.
-4. **Strojové kontroly zelené:** u aplikace `aid-ui-verify.sh <projekt> --quick` nad kostrou a modelem teď (úlohy,
+4. **Strojové kontroly zelené:** u aplikace (i hotové, PM 23. 10. 2026) `aid-ui-verify.sh <projekt> --quick` nad modelem a webem teď (úlohy,
    stavy, klávesnice, obnova na nejširší šířce, asi 3 minuty; stačí i `--precheck`), u hotového webu brána a
    `gate-check`. Plná předběžná brána rozhoduje až předání.
 Zápis `aid-ui-quality.py self <projekt> --place <místo> --file <kontrola.json>` (jen soupis požadavků) to ověří a váže
