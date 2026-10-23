@@ -1645,6 +1645,22 @@ YAML
   [[ "$output" == *"gate 'beta'"* && "$output" == *"invented"* ]]
 }
 
+@test "3.9.2: a row restored from its checkpoint carries the gate's description as execution.yaml says it NOW" {
+  _git_init_project
+  local ev="$TEST_PROJECT/.aid-o/work/evidence/E-X/R-1"
+  "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" >/dev/null 2>&1
+  [ -f "$ev/gates_rows/beta.json" ]
+  yq -i '.gates.beta.description = "Added after the row was checkpointed"' "$EXEC_YAML"
+  AID_TEST_DROP_GATE_RESTORE=beta run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  echo "$output"
+  grep -q '"gate_row_restored"' "$ev/timeline.jsonl" "$TIMELINE" 2>/dev/null   # the row came from its checkpoint
+  [ "$(jq -r '.gates.beta.description' "$REPORT")" = "Added after the row was checkpointed" ]
+  # removed from execution.yaml: gone from the row too
+  yq -i 'del(.gates.beta.description)' "$EXEC_YAML"
+  AID_TEST_DROP_GATE_RESTORE=beta run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ "$(jq -r '.gates.beta | has("description")' "$REPORT")" = false ]
+}
+
 @test "P097 rows: no script reads a gate row's result directly — every reader goes through gate_row_normalize (grep guard)" {
   run grep -rn '\.gates\[[^]]*\]\.result\|\.gates\[\]\.result\|\.value\.result\|gates_rows/[^ ]*\.json[^|]*\.result' \
     "$AID_PLUGIN_PATH/scripts" --exclude-dir=tests --exclude=aid-gate-row.sh

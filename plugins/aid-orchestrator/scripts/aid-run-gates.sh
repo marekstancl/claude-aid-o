@@ -2151,6 +2151,12 @@ run_all_gates() {
   # Build base report
   local report
   report="{\"epic_id\":\"${epic_id}\",\"run_id\":\"${run_id}\",\"overall\":\"${overall}\",\"completed_at\":\"${completed_at}\",\"gates\":${gates_json}}"
+  # every row of the report carries its gate's description from execution.yaml as it is NOW — one pass over the
+  # whole report, so a row restored from a checkpoint or a stale fallback gets it like a row run here (3.9.2)
+  local _descs; _descs="$(yq -o=json '(.gates // {}) | map_values(.description // "")' "$execution_yaml" 2>/dev/null)" || _descs='{}'
+  report="$(jq -c --argjson d "${_descs:-\{\}}" '.gates |= with_entries(
+      if (($d[.key] // "") | length) > 0 then .value.description = $d[.key] else .value |= del(.description) end)' <<< "$report")" \
+    || { echo "ERROR: the gate report could not take the gates' descriptions" >&2; return 1; }
 
   # ─── jq-merge provenance fields (P032 Step 3) ──────────────────────
   local command_log_array
