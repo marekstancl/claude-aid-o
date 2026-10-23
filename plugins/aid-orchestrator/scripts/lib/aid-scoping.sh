@@ -62,6 +62,13 @@ _aid_split_path_entry() {
   local entry="$1"
   local rest="$entry"
   local candidate found_backtick_path=0 first_span=1
+  # A second path after "; " (in the description or a bullet without backticks) used to vanish: the step's
+  # allowed_paths held only the first one (agents P012 krok 4, 3.8.1). Two paths are `a` + `b` or two bullets.
+  local _second_re=';[[:space:]]*(`[^`[:space:]]+`|/[^[:space:]`]+\.[A-Za-z0-9]+)'
+  if [[ "$entry" =~ $_second_re ]]; then
+    echo "aid-scoping: a second path after ';' in one Files entry (${BASH_REMATCH[1]}): write \`a\` + \`b\` or one bullet per path: ${entry}" >&2
+    return 1
+  fi
 
   while true; do
     if [[ "$first_span" -eq 1 ]]; then

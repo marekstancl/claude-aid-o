@@ -322,6 +322,20 @@ _plan_role() { # <file> <role>
   [[ "$output" == *"\`${BATS_TEST_TMPDIR}\` names another repository"* ]]
 }
 
+@test "files grammar: a second path after ';' in one bullet is refused by the lint and by plan.json, never dropped (agents P012, 3.8.1)" {
+  _plan p.md strict '- Modify: `src/a.ts` — edit; `src/b.ts` — the other one'
+  run "$LINT" p.md
+  [ "$status" -ne 0 ]; [[ "$output" == *"ERROR unparsed text after a path"*"src/b.ts"* ]]
+  _plan q.md strict '- Modify: /opt/eco/docs/x.md (pozn) — edit; /opt/eco/docs/y.md (pozn) — edit'
+  run "$LINT" q.md
+  [ "$status" -ne 0 ]; [[ "$output" == *"ERROR unparsed text after a path"*"y.md"* ]]
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-json.sh' && aid_plan_json_steps_from_plan p.md"
+  [ "$status" -ne 0 ] || [[ "$output" != *'"src/a.ts"'* ]]
+  # the + form and a plain description with a ';' still pass
+  _plan r.md strict '- Modify: `src/a.ts` + `src/b.ts` — both; then run the tests'
+  run "$LINT" r.md; [[ "$output" != *"unparsed text after a path"* ]]
+}
+
 @test "lint advisory: another step's declaration does not cover a step's prose mention" {
   _plan p.md strict '- Modify: `src/a.ts` — edit'
   printf '\n**Error Handling:** see `/opt/eco/docs/x.md`.\n\n### Step 2: docs\n\n**Files:**\n- Modify: `/opt/eco/docs/x.md` — page\n' >> p.md
