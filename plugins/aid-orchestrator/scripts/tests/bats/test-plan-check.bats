@@ -184,6 +184,16 @@ _plan() { # <file> <strict|legacy> [dep2] [files1...]
   _plan p.md strict '- Depends on: Step 1' '- Modify: `src/b.py` (lines ~1-2) — edit'
   printf '\n## Acceptance Criteria\n\n- [ ] gone\n  ```yaml\n  verification_pattern:\n    type: must_not_exist\n    file: "src/existing_helper.py"\n  ```\n' >> p.md
   run "$CHECK" p.md; [[ "$output" == *"WARN  B10"*"still referenced by"* ]]
+  [ "$(grep -c 'WARN  B10' <<< "$output")" -eq 1 ]
+}
+@test "plan-check B10: a file only must_contain or Modify names is kept, no warning; a Delete: bullet warns (ACTA P026, 3.8.1)" {
+  printf 'from src import existing_helper\n' > src/user.py
+  mv src/a.py src/existing_helper.py; git add -A
+  _plan p.md strict '- Depends on: Step 1' '- Modify: `src/existing_helper.py` (lines ~1-2) — edit'
+  printf '\n## Acceptance Criteria\n\n- [ ] kept\n  ```yaml\n  verification_pattern:\n    type: must_contain\n    file: "src/existing_helper.py"\n    regex: "x"\n  ```\n' >> p.md
+  run "$CHECK" p.md; [[ "$output" != *"B10"* ]]
+  _plan p.md strict '- Depends on: Step 1' '- Delete: `src/existing_helper.py` — replaced'
+  run "$CHECK" p.md; [[ "$output" == *"WARN  B10"*"existing_helper"* ]]
 }
 @test "plan-check C: --snapshot without --fixes is a usage error (C1)" {
   _plan p.md strict; cp p.md old.md

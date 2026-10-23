@@ -495,8 +495,10 @@ if (( HAS_REPO )); then
     [[ -n "$clash" ]] && _warn "B9" "$PLAN" "new test file \`${p}\` shares its basename with \`${clash}\` — pytest rejects duplicate test module names unless both directories are packages"
   done
   # B10 — a file the plan removes that other files still import or reference
-  # (ACTA: db/env.py imported a model the plan deleted; four checks found it).
-  for f in $(cut -f2- <<< "$VP_BLOCKS" | awk -F $'\x1f' '$5 != "" {print $5}' | sort -u); do
+  # (ACTA: db/env.py imported a model the plan deleted; four checks found it). Removed = a must_not_exist point
+  # or a Delete: bullet — a must_contain point names a file the plan keeps (ACTA P026: three false warnings, 3.8.1)
+  for f in $( { cut -f2- <<< "$VP_BLOCKS" | awk -F $'\x1f' '$3 == "must_not_exist" && $5 != "" {print $5}'
+                for i in "${!FB_LN[@]}"; do [[ "${FB_VERB[$i]}" == Delete ]] && printf '%s\n' ${FB_PATHS[$i]}; done; } | sort -u); do
     _exists "$f" || continue
     stem="${f##*/}"; stem="${stem%.*}"
     [[ ${#stem} -ge 4 ]] || continue
