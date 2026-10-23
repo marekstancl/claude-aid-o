@@ -548,13 +548,14 @@ YML
 
 @test "flow ids that are not an allowlisted name are refused and nothing is imported; a symlinked scenario is refused; role/state cannot move a screenshot" {
   mkdir -p "$T/out" "$PROJ/.aid-ui/scenarios"
-  echo '{"viewports":[390],"browsers":["chromium"],"checks":{"http_200":"x","app_task_states":"x"}}' > "$T/ck.json"
+  echo '{"viewports":[390],"browsers":["chromium"],"checks":{"http_200":"x","app_task_states":"x","screenshots_reviewed":"x"}}' > "$T/ck.json"
   for f in "$PROJ/x.mjs" "$PROJ/.aid-ui/x.mjs" "$T/evil.mjs"; do
     echo "import fs from 'node:fs'; fs.writeFileSync('$T/imported', '$f'); export default async () => {};" > "$f"
   done
   ln -s "$T/evil.mjs" "$PROJ/.aid-ui/scenarios/evil.mjs"
+  # a pwa keeps structure.flows (a webapp runs its model, P116): the allowlist guards that path
   echo "export default async ({ page, base }) => { await page.goto(base); };" > "$PROJ/.aid-ui/scenarios/ok.mjs"
-  jq -n '{variant:{type:"webapp"},build:{id:"x",fingerprints:{"index.html":"a"}},
+  jq -n '{variant:{type:"pwa"},build:{id:"x",fingerprints:{"index.html":"a"}},
     structure:{roles:["../../../../esc"],flows:[{id:"../../x",states:["s"]},{id:"a/../../x",states:["s"]},{id:"X",states:["s"]},
       {id:"evil",states:["s"]},{id:"ok",states:["../../../../esc2"]}]}}' > "$T/state.json"
   url="$(AID_UI_PROJECT="$PROJ" bash "$SC/aid-ui-serve.sh" preview "$SITE" | sed -n 's/^URL: //p')"
@@ -786,4 +787,231 @@ vst() { jq -r --arg c "$1" --arg p "$2" '[.rows[] | select(.check == $c and .pag
   run bash "$SC/aid-ui-verify.sh" "$PROJ"
   jq -e '.rows[] | select(.check == "seo" and .page == "o-nas/index.html") | .status == "fail" and (.detail | contains("brief-h1"))' "$RES" >/dev/null || { jq -c '.rows[] | select(.check == "seo")' "$RES"; return 1; }
   ! jq -r '.rows[] | select(.check == "seo" and .page != "o-nas/index.html") | .detail' "$RES" | grep -q 'brief-h1: expected'
+}
+
+# ---------------------------------------------------------------- P116: the gate of a web application
+# app_gate [model jq filter] - the verify project as a webapp with the fixture model (approved by the PM: the sha the
+# studio stores), the fixture app as the build, the gate narrowed to the four app checks at 1440 px in Chromium
+app_gate() {
+  AFX="$BATS_TEST_DIRNAME/../fixtures/aid-ui/app"
+  mkdir -p "$PROJ/docs/design"
+  jq "${1:-.}" "$AFX/docs/design/screens.json" > "$PROJ/docs/design/screens.json"
+  local sha; sha="$(sha256sum "$PROJ/docs/design/screens.json" | cut -d' ' -f1)"
+  jq --arg s "$sha" '.variant = {type: "webapp", brand: "none", local: false} | .app = {approved_model_sha: $s, answer: "t", at: "t"}' \
+    "$PROJ/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
+  rm -rf "$T/appsite"; cp -r "$AFX/site" "$T/appsite"
+  NARROW_VP=1440 narrow app_flows app_states keyboard_flows task_recovery
+  yq -i '.browsers = ["chromium"]' "$T/cov/checks.yaml"
+}
+gate_app() { "$SC/aid-ui-state.sh" build-record "$PROJ" "$T/appsite" >/dev/null; run bash "$SC/aid-ui-verify.sh" "$PROJ"; }
+# row <check> <page> <state> - status of that one row
+row() { jq -r --arg c "$1" --arg p "$2" --arg s "$3" '[.rows[] | select(.check == $c and .page == $p and .state == $s) | .status] | join(",")' "$RES"; }
+detail() { jq -r --arg c "$1" --arg p "$2" --arg s "$3" '[.rows[] | select(.check == $c and .page == $p and .state == $s) | .detail] | join(" | ")' "$RES"; }
+
+@test "app-gate: the app built from the model passes every task, state, keyboard and recovery row; each result carries the model's sha" {
+  app_gate; gate_app
+  [ "$status" -eq 0 ] || { echo "$output"; jq -c '.rows[] | select(.status != "pass") | [.check, .page, .state, .detail]' "$RES" | head; return 1; }
+  sha="$(sha256sum "$PROJ/docs/design/screens.json" | cut -d' ' -f1)"
+  for x in "app_flows zalozit normal" "app_flows smazat normal" "keyboard_flows zalozit keyboard" "keyboard_flows smazat keyboard" \
+           "task_recovery zalozit fail-1" "app_states screen:formular loading" "app_states screen:detail error"; do
+    set -- $x; [ "$(row "$1" "$2" "$3")" = pass ] || { echo "$x: $(row "$1" "$2" "$3")"; return 1; }
+  done
+  [ "$(jq -r .model_sha256 "$RES")" = "$sha" ]
+  jq -e --arg s "$sha" '[.rows[] | select(.check == "app_flows")] | length > 0 and all(.model_sha256 == $s)' "$RES" >/dev/null
+  # the scenarios were generated from that model by the gate itself
+  grep -q "export const model_sha256 = \"$sha\"" "$PROJ/.aid-ui/scenarios/zalozit.mjs"
+}
+
+@test "app-gate: a task that clicks through without its result fails app_flows (and the keyboard and recovery rows of it)" {
+  app_gate
+  sed -i '/aid-break: result/s/.*/    void 0;/' "$T/appsite/app.js"
+  gate_app
+  [ "$status" -eq 3 ] || { echo "$output"; return 1; }
+  [ "$(row app_flows zalozit normal)" = fail ]; [ "$(row app_flows smazat normal)" = pass ]
+  [[ "$(detail app_flows zalozit normal)" == *"výsledek nenastal"* ]]
+}
+
+@test "app-gate: a screen without one of its states fails app_states for that screen and state only" {
+  app_gate
+  sed -i '/data-aid-state="loading"/d' "$T/appsite/formular/index.html"
+  gate_app
+  [ "$status" -eq 3 ]
+  [ "$(row app_states screen:formular loading)" = fail ]; [ "$(row app_states screen:formular error)" = pass ]
+  [ "$(row app_states screen:seznam loading)" = pass ]
+}
+
+@test "app-gate: a task that cannot be finished by keyboard fails keyboard_flows while the mouse path passes" {
+  app_gate
+  sed -i 's|<button type="submit" data-aid-action="formular.ulozit">Uložit</button>|<span data-aid-action="formular.ulozit" onclick="this.closest('"'"'form'"'"').requestSubmit()">Uložit</span>|' "$T/appsite/formular/index.html"
+  gate_app
+  [ "$status" -eq 3 ]
+  [ "$(row keyboard_flows zalozit keyboard)" = fail ]; [ "$(row app_flows zalozit normal)" = pass ]
+  [[ "$(detail keyboard_flows zalozit keyboard)" == *"klávesnicí nedosažitelné"* ]]
+}
+
+@test "app-gate: a forced failure that loses the input fails task_recovery" {
+  app_gate
+  sed -i 's|/\* aid-break: lost-input \*/|form.reset();|' "$T/appsite/app.js"
+  gate_app
+  [ "$status" -eq 3 ]
+  [ "$(row task_recovery zalozit fail-1)" = fail ]; [ "$(row app_flows zalozit normal)" = pass ]
+  [[ "$(detail task_recovery zalozit fail-1)" == *"ztratil vstup nazev"* ]]
+}
+
+@test "app-gate: a recover action that does nothing fails task_recovery - the input stays, the result never comes" {
+  app_gate
+  sed -i 's|<button type="submit" data-aid-action="formular.znovu">|<button type="button" data-aid-action="formular.znovu">|' "$T/appsite/formular/index.html"
+  gate_app
+  [ "$status" -eq 3 ]; [ "$(row task_recovery zalozit fail-1)" = fail ]
+  [[ "$(detail task_recovery zalozit fail-1)" == *"výsledek nenastal"* ]]
+}
+
+@test "app-gate: a submitting task without a failure path in the model still gets the generated network failure" {
+  app_gate '.tasks[0].failure_paths = [] | .tasks[0].states.failure = "nenastává, protože ukládá jen do prohlížeče" | .tasks[0].local = true'
+  sed -i 's|/\* aid-break: lost-input \*/|form.reset();|' "$T/appsite/app.js"
+  gate_app
+  [ "$status" -eq 3 ]
+  [ "$(row task_recovery zalozit fail-1)" = fail ]
+  jq -e '.variants["fail-1"] | .generated and .kind == "network" and .recover == "ulozit"' <(sed -n 's/^const T = \(.*\);$/\1/p' "$PROJ/.aid-ui/scenarios/zalozit.mjs") >/dev/null
+}
+
+@test "app-gate: the gate refuses a model the PM did not approve or that changed since; nothing is recorded" {
+  app_gate
+  jq '.app.approved_model_sha = "0000"' "$PROJ/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$PROJ/docs/design/brand-state.json"
+  gate_app
+  [ "$status" -eq 1 ]; [[ "$output" == *"changed since the owner approved it"* ]]; [[ "$output" == *"only on the model the owner approved"* ]]
+  [ ! -f "$RES" ]
+}
+
+@test "app-gate: baseline capture plays each approved task of today's app with its stored login; an expired login names the task" {
+  EX="$BATS_TEST_DIRNAME/../fixtures/aid-ui/app-existing"
+  P="$T/old"; mkdir -p "$P/.aid-ui/baseline/storage" "$P/docs/design"
+  cp "$EX/tasks.json" "$P/.aid-ui/baseline/tasks.json"
+  sha="$(sha256sum "$P/.aid-ui/baseline/tasks.json" | cut -d' ' -f1)"
+  echo "{\"variant\": {\"type\": \"webapp\", \"existing\": true}, \"app_baseline\": {\"approved_sha\": \"$sha\", \"answer\": \"b1\"}, \"answers\": {\"b1\": {\"kind\": \"exception\", \"decision\": \"approve\", \"by\": \"pm\", \"target\": \"baseline@$sha\"}}}" > "$P/docs/design/brand-state.json"
+  port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  python3 -m http.server "$port" --bind 127.0.0.1 --directory "$EX/site" >/dev/null 2>&1 3>&- & HOLD=$!
+  for i in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$port/" && break; sleep 0.1; done
+  # the stored browser login (Playwright storageState): the cookie today's app wants
+  echo "{\"cookies\": [{\"name\": \"prihlasen\", \"value\": \"1\", \"domain\": \"127.0.0.1\", \"path\": \"/\", \"expires\": -1, \"httpOnly\": false, \"secure\": false, \"sameSite\": \"Lax\"}], \"origins\": []}" > "$T/login.json"
+  run python3 "$SC/aid-ui-baseline.py" capture "$P" --url "http://127.0.0.1:$port/" --login "$T/login.json"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e --arg s "$sha" '.tasks_sha256 == $s and ([.results[] | select(.passed)] | length) == 2' "$P/.aid-ui/baseline/result.json" >/dev/null
+  [ -f "$P/.aid-ui/baseline/shots/hledat-1.png" ] && [ -f "$P/.aid-ui/baseline/shots/prehled-2.png" ]
+  # without the login (it expired): the tasks do not reach their result and are named
+  run python3 "$SC/aid-ui-baseline.py" capture "$P" --url "http://127.0.0.1:$port/"
+  [ "$status" -eq 1 ]; [[ "$output" == *"prehled ("*"není vidět (bez přihlášení)"* ]]
+  # a task that would lead the browser and its login out of the app is refused at its step
+  jq '.[0].steps[0].url = "http://example.invalid/"' "$P/.aid-ui/baseline/tasks.json" > "$T/t.json" && mv "$T/t.json" "$P/.aid-ui/baseline/tasks.json"
+  sha="$(sha256sum "$P/.aid-ui/baseline/tasks.json" | cut -d' ' -f1)"
+  jq --arg s "$sha" '.app_baseline.approved_sha = $s | .answers.b1.target = "baseline@" + $s' "$P/docs/design/brand-state.json" > "$T/s.json" && mv "$T/s.json" "$P/docs/design/brand-state.json"
+  run python3 "$SC/aid-ui-baseline.py" capture "$P" --url "http://127.0.0.1:$port/" --login "$T/login.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"není adresa aplikace"* ]]
+}
+
+@test "app-gate: package gate runs the tasks - --package-gate --launch of an app's package passes on the app, fails when a task's result breaks" {
+  app_gate; gate_app
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  echo '{"type": "webapp", "items": [], "used_answers": []}' > "$PROJ/.aid-ui/launch.json"
+  "$SC/aid-ui-state.sh" chapter "$PROJ" vize navrh >/dev/null
+  # the package as the handover writes it (its own suite covers the handover answer): make + the PM's verdict
+  python3 - "$SC/aid-ui-package.py" "$PROJ" <<'PY'
+import importlib.util, json, os, sys
+spec = importlib.util.spec_from_file_location("pkg", sys.argv[1]); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+p = m.make(sys.argv[2], True); p["handover"] = {"verdict": "prevzit", "rating": None, "answer": "h1", "comment": ""}
+os.makedirs(os.path.join(sys.argv[2], "docs/ui"), exist_ok=True)
+json.dump(p, open(os.path.join(sys.argv[2], "docs/ui/predani.json"), "w"), ensure_ascii=False)
+PY
+  run python3 "$SC/aid-ui-package.py" check "$PROJ/docs/ui/predani.json" --project "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  git -C "$PROJ" init -q; mkdir -p "$PROJ/.aid-o/plans"
+  printf -- '---\nid: P001\nui_package: docs/ui/predani.json\nui_package_sha256: %s\n---\n# plán\n' "$(sha256sum "$PROJ/docs/ui/predani.json" | cut -d' ' -f1)" > "$PROJ/.aid-o/plans/P001.md"
+  # before the deployment: the package and the model are right, --launch refuses
+  run bash "$SC/aid-ui-verify.sh" --package-gate "$PROJ/.aid-o/plans/P001.md"
+  [ "$status" -eq 0 ]; [[ "$output" == *"před nasazením"* ]]
+  run bash "$SC/aid-ui-verify.sh" --package-gate "$PROJ/.aid-o/plans/P001.md" --launch
+  [ "$status" -eq 1 ]
+  # the project's app running (here: the fixture app as the code's build), the address in nasazeni.json
+  cp -r "$AFX/site" "$T/code"
+  port="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+  python3 -m http.server "$port" --bind 127.0.0.1 --directory "$T/code" >/dev/null 2>&1 3>&- & HOLD=$!
+  for i in $(seq 1 50); do curl -s -o /dev/null "http://127.0.0.1:$port/" && break; sleep 0.1; done
+  echo "{\"url\": \"http://127.0.0.1:$port\"}" > "$PROJ/docs/ui/nasazeni.json"
+  run bash "$SC/aid-ui-verify.sh" --package-gate "$PROJ/.aid-o/plans/P001.md" --launch
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"PASS: úlohy modelu"* ]]
+  (cd "$PROJ" && python3 "$SC/aid-ui-package.py" live-row docs/ui/predani.json app_flows --detail 'zalozit / normal: výsledek nastal')
+  # the code breaks one task's result: the gate fails and that task's point too
+  sed -i '/aid-break: result/s/.*/    void 0;/' "$T/code/app.js"
+  run bash "$SC/aid-ui-verify.sh" --package-gate "$PROJ/.aid-o/plans/P001.md" --launch
+  [ "$status" -eq 1 ]; [[ "$output" == *"úlohy aplikace nad"*"neprošly"* ]]
+  cd "$PROJ"; run python3 "$SC/aid-ui-package.py" live-row docs/ui/predani.json app_flows --detail 'zalozit / normal: výsledek nastal'
+  [ "$status" -eq 1 ]
+}
+
+@test "app-gate: each task row runs in a fresh browser context - data one task leaves behind never decides another's row" {
+  app_gate
+  # a detail page that marks the browser, and a list that hides its notes once marked: with a shared context the task
+  # that opens a note after another task visited a detail would fail
+  sed -i "s|  if (screen === 'detail') {|  if (screen === 'detail') { localStorage.setItem('navstiveno', '1');|" "$T/appsite/app.js"
+  sed -i "s|    notes.forEach(function (n, i) {|    if (localStorage.getItem('navstiveno')) notes = [];\n    notes.forEach(function (n, i) {|" "$T/appsite/app.js"
+  gate_app
+  [ "$status" -eq 0 ] || { jq -c '.rows[] | select(.status != "pass") | [.check, .page, .state, .detail]' "$RES" | head; return 1; }
+}
+
+@test "app-gate (P118): one worker or four give the same rows in the same order; a gate that names no screenshot takes none" {
+  app_gate
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$T/appsite" >/dev/null
+  AID_UI_GATE_WORKERS=1 run bash "$SC/aid-ui-verify.sh" "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -c '[.rows[] | [.check, .page, .state, .viewport, .status]]' "$RES" > "$T/w1.json"
+  AID_UI_GATE_WORKERS=4 run bash "$SC/aid-ui-verify.sh" "$PROJ"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -c '[.rows[] | [.check, .page, .state, .viewport, .status]]' "$RES" > "$T/w4.json"
+  cmp -s "$T/w1.json" "$T/w4.json" || { diff <(jq -c '.[]' "$T/w1.json") <(jq -c '.[]' "$T/w4.json") | head; return 1; }
+  # the precheck names six checks and no screenshot: none is taken (P118: 70 % of the gate was unread work)
+  python3 "$SC/lib/aid-ui-skeleton.py" build "$PROJ" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ" --precheck; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ -z "$(find "$PROJ/.aid-ui/precheck" -name '*.png' 2>/dev/null)" ]
+}
+
+@test "app-gate (P118): --quick runs the precheck's rows at the widest width only, into its own folder; the precheck's result is untouched" {
+  app_gate; python3 "$SC/lib/aid-ui-skeleton.py" build "$PROJ" >/dev/null
+  mkdir -p "$PROJ/.aid-ui/precheck"; echo '{"sentinel": 1}' > "$PROJ/.aid-ui/precheck/result.json"
+  run bash "$SC/aid-ui-verify.sh" "$PROJ" --quick; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"QUICK: "*"(0 open rows)"* ]]
+  [ "$(jq -c '[.rows[].viewport] | unique' "$PROJ/.aid-ui/quick/result.json")" = '["1440"]' ]
+  [ "$(cat "$PROJ/.aid-ui/precheck/result.json")" = '{"sentinel": 1}' ]   # the precheck's result untouched
+  jq -e '[.rows[] | select(.check == "app_flows" and .page == "zalozit" and .state == "normal")] | length == 1' "$PROJ/.aid-ui/quick/result.json" >/dev/null
+}
+
+@test "app-gate (P118): a version changed under a running gate gives no result" {
+  app_gate
+  "$SC/aid-ui-state.sh" build-record "$PROJ" "$T/appsite" >/dev/null
+  rm -f "$RES"
+  ( bash "$SC/aid-ui-verify.sh" "$PROJ" > "$T/gate.log" 2>&1; echo "exit=$?" >> "$T/gate.log" ) &
+  for _ in $(seq 100); do pgrep -f "[a]id-ui-verify.mjs --state.*$PROJ" >/dev/null && break; sleep 0.1; done
+  sleep 2; echo '<!-- změna během běhu -->' >> "$T/appsite/index.html"
+  wait
+  grep -q "changed during the run" "$T/gate.log" || { cat "$T/gate.log"; return 1; }
+  ! grep -q '^exit=0' "$T/gate.log"
+}
+
+@test "app-gate (P118): an action outside its modes is off with its reason in every mode, loading says aria-busy; an action that ignores its mode fails its row" {
+  app_gate '.modes = [{id: "bezi", label: "Běží"}, {id: "pauza", label: "Pauza"}] | .screens[0].actions[0].modes = ["bezi"] | .screens[0].actions[0].disabled_reason = "V pauze nové poznámky nejdou."'
+  python3 "$SC/lib/aid-ui-skeleton.py" build "$PROJ" >/dev/null
+  run bash "$SC/aid-ui-verify.sh" "$PROJ" --quick; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  Q="$PROJ/.aid-ui/quick/result.json"
+  [ "$(jq -r '[.rows[] | select(.check == "app_states" and .page == "mode:seznam") | .state + "=" + .status] | sort | join(",")' "$Q")" = "bezi=pass,pauza=pass" ]
+  jq -e '[.rows[] | select(.check == "app_states" and .page == "screen:seznam" and .state == "loading")][0].status == "pass"' "$Q" >/dev/null
+  sed -i 's/ data-aid-modes="bezi"//' "$PROJ/site/seznam/index.html"   # the button forgets its mode
+  run bash "$SC/aid-ui-verify.sh" "$PROJ" --quick; [ "$status" -eq 3 ]
+  jq -e '[.rows[] | select(.check == "app_states" and .page == "mode:seznam" and .state == "pauza")][0] | .status == "fail" and (.detail | contains("nemá jít, ale jde"))' "$Q" >/dev/null
+}
+
+@test "app-gate (P118, Trading 22. 10.): an app runs no web_only check of checks.yaml (IČO, brand fonts, favicon, contact form...) and its record does not ask for them; a forced failure is no broken link" {
+  app_gate
+  NARROW_VP=1440 narrow app_flows app_states keyboard_flows task_recovery business_minimum required_files form_states links_resources
+  gate_app; [ "$status" -eq 0 ] || { echo "$output"; jq -c '.rows[] | select(.status != "pass") | [.check, .page, .detail]' "$RES" | head; return 1; }
+  [ "$(jq '[.rows[] | select(.check == "business_minimum" or .check == "required_files" or .check == "form_states")] | length' "$RES")" -eq 0 ]
+  # a failure variant's forced 500 or dropped connection is the test, not a broken link
+  [ "$(jq '[.rows[] | select(.check == "links_resources" and (.state | startswith("fail-")) and .status != "pass")] | length' "$RES")" -eq 0 ]
+  [ "$(jq -r '.gate.run_at // ""' "$PROJ/docs/design/brand-state.json")" = "$(jq -r .run_at "$RES")" ]   # recorded
 }

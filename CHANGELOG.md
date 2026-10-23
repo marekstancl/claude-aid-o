@@ -3,6 +3,30 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.9.0] — 2026-10-23
+
+Studio `/aid-ui` umí webové aplikace (P116) a je svižné a přesné (P118): obrazovky a úlohy místo stránek, kostra a testy úloh z jednoho modelu, předání jako zadání změn kódu; hodnocení bez vlastních známek výrobce, nezávislý ověřovatel s podpisem běží s rolemi, kontrola kostry 54 → 4 min, kolo rolí 6 h → 7 min. Ověřeno na aplikaci Trading od nuly: struktura přijatá (vlastník 9,0, odborník 8,0), PM vybral vzhled ze tří skutečných návrhů a celé UI (17 obrazovek) prošlo hodnocením.
+
+### Added
+- **Webová aplikace (`variant.type: webapp`)** jako vlastní cesta studia (`references/local/aplikace-postup.md`): model obrazovek a úloh `docs/design/screens.json` (schéma `references/screens.schema.json`), úlohy se sedmi stavy, výsledkem (`done_when`) a cestami selhání; kostra z modelu (`aid-ui-serve.sh skeleton`, :3918) s přepínačem stavů a režimů; brána úloh `app_flows`, `app_states`, `keyboard_flows`, `task_recovery` a řádky režimů; existující aplikace se zahraje a porovná (`aid-ui-baseline.py`); balík verze 2 a zadání změn kódu (`aid-ui-package.py zadani`).
+- **Lint modelu** (`aid-ui-screens.py check`): částka, R, procento, páka i mez (znaky, čas, počet) napsaná přímo místo pojmenované hodnoty, číslo v účelu obrazovky, zapisující úloha bez oprávnění nebo bez cesty selhání sítě i serveru, pole slibující mez, kterou nemá, úloha nového chování bez požadavku (`new`).
+- **Fakta appky** (`aid-ui-client.py facts`): Codex a Claude Opus souběžně a nezávisle, soudce páruje stejná tvrzení bez ohledu na id a řádky, dohodnutá fakta přežijí další běh, lint blokuje jen rozpory; povinná u existující aplikace.
+- **Nezávislý ověřovatel** (`aid-ui-client.py verify`): nafotí každou adresu verze (i vypnuté akce, obsah polí a potvrzení slovy), Codex (záskok Opus) hledá rozpory a ověřuje opravy; podepsaný záznam mimo projekt. **Běží s rolemi v kole** (PM 21. 10., 1A), jeho rozpory a neviděné opravy jsou nálezy kola.
+- **Klient-agent** dodá, co role nechaly na klientovi (`supply`), a schvaluje model aplikace za vlastníka; `aid-ui-client.py decided` vypíše, co rozhodl bez PM.
+- **Delta kolo** po přijatém místě nad opravenou verzí; věcná chyba nalezená v delta kole dostane ještě jedno; `place-verdict --fixed-in` a `place-record` přestanou počítat věcnou chybu, kterou ověřovatel viděl opravenou.
+- `aid-ui-verify.sh --quick` (nejširší šířka, ~3 min), pool pracovníků brány `AID_UI_GATE_WORKERS`, fáze kola a jejich čas ve `status`, zadání oprav pro výrobce v čerstvém kontextu (`aid-ui-quality.py brief`), výsledek rychlé kontroly v podkladech rolí (`testy-kostry.md`).
+
+### Changed
+- **Kolo hotové aplikace kolem 15 minut** (PM 23. 10., 1A): před kolem jen rychlá kontrola nad modelem a touto verzí webu (Trading 3,6 min), plná brána jednou před předáním; opravují se jen přijaté nálezy. Dřív 60-90 minut na cyklus.
+- Brána aplikace neměří kontroly firemního webu (`web_only` v checks.yaml: IČO, značka, favicon, kontaktní formulář…), vnucené selhání není rozbitý odkaz, role dostanou výsledek brány v podkladech.
+- **Výrobce si už nedává vlastní známky** (`SELF_MIN` pryč): `self` = soupis požadavků, lint a rychlá kontrola nad modelem teď.
+- Kostra nabízí akci jen tam, kde dává smysl (bez záznamu, při načítání, obnova až po selhání; lišta nikdy), stav úlohy na obrazovce, kde nastává, vyplněné pole v chybě a selhání, filtr s vlastním formulářem, lišta s ukázkou podle režimu.
+- Interní aplikace bez značky se hodnotí bez konkurentů; klient-agent odpovídá česky; `triage`/`fixed` najdou místo nálezu samy.
+
+### Known limits
+- IMP-704: pevné porty testů se srazí s nočním CI na tomtéž stroji (obejde se `AID_UI_TEST_PREVIEW_PORT`).
+- Tabulka cen a Docusaurus `/aid/commands/aid-ui` popisují stav k vydání; měření H5 na druhé neviděné aplikaci neproběhlo.
+
 ## [3.8.0] — 2026-10-21
 
 Plán dojede v `--auto` bez PM a uzávěr se netočí (P117, vstup WAN P109–P112: osm zastavení na PM za dva dny, uzávěr P111 čtyři pokusy a tři hodiny). Každé odmítnutí má třídu, která říká, kdo jedná; technická rozhodnutí v běhu dělá nezávislý zástupce, chráněné dopady pozná kód a jdou na PM; čemu jde předejít, zastaví kontrola plánu nebo start běhu; uzávěr opakuje jen to, co oprava zasáhla.

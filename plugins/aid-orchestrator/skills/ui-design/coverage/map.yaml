@@ -202,7 +202,7 @@ items:
     do: "script:form_states"
   - id: "ecosystem/specs/frontend-build-standard.md#Návrh a stavba frontendu (/aid-ui) > How — fáze a kdo rozhoduje > Pohyb a měření (FB-25, FB-26, FB-27; 10.–12. 10. 2026)#7fed1da8"
     text: "**FB-29 Co zákazník hledá, najde do dvou kroků.** Projekt má v `docs/content/ta"
-    do: {"web": "script:task_test", "webapp": "na:a task of an application is a flow (app_task_states)", "pwa": "na:a task of an application is a flow (app_task_states)"}
+    do: {"web": "script:task_test", "webapp": "na:a task of an application is a flow of its model (app_flows)", "pwa": "na:a task of an application is a flow (app_task_states)"}
   - id: "ecosystem/specs/frontend-build-standard.md#Návrh a stavba frontendu (/aid-ui) > How — fáze a kdo rozhoduje > Pohyb a měření (FB-25, FB-26, FB-27; 10.–12. 10. 2026)#6b810507"
     text: "**FB-30 Fotka, kterou klient teprve dodá, má místo v přesném tvaru.** Každá tak"
     do: "script:photo_slots"
@@ -217,10 +217,10 @@ items:
     do: "script:mobile_native"
   - id: "ecosystem/specs/design-system-standard.md#Design systém aplikací > Kontrola před nasazením#9fbc1652"
     text: "Prázdný, chybový a načítací stav existují (ne jen šťastná cesta)."
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "script:app_states", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/design-system-standard.md#Design systém aplikací > Kontrola před nasazením#66a229a3"
     text: "Klávesnice: dá se to projít a ovládat bez myši, fokus je vidět."
-    do: "script:keyboard"
+    do: {"web": "script:keyboard", "webapp": "script:keyboard_flows", "pwa": "script:keyboard"}
   - id: "ecosystem/specs/design-system-standard.md#Design systém aplikací > Kontrola před nasazením#562f4286"
     text: "Žádná nová ad-hoc varianta komponenty; hodnoty jen přes tokeny."
     do: "agent: ad-hoc varianta komponenty: důkaz, že komponenta se generuje z jedné šablony; hodnoty mimo tokeny hlídá token_usage"
@@ -1156,7 +1156,7 @@ items:
     do: "script:axe"
   - id: "ecosystem/specs/frontend-build-standard.md#Návrh a stavba frontendu (/aid-ui) > What — definice hotového frontu#ace9e802"
     text: "**FB-11 Úlohy × stavy** | u aplikace projdou scénáře z [mapy úloh](./webapp-tasks-states-s"
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "script:app_flows", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/frontend-build-standard.md#Návrh a stavba frontendu (/aid-ui) > What — definice hotového frontu#d118da44"
     text: "**FB-12 Obrázky** | formát WebP (nebo AVIF), jeden obrázek ≤ 200 kB | skript"
     do: "script:image_weight"
@@ -1234,43 +1234,43 @@ items:
     do: {"webapp": "pm:task_map", "pwa": "pm:task_map"}
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > What — co musí aplikace mít#1133db3a"
     text: "**1. Běžná cesta** | kroky od vstupu po potvrzení výsledku"
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "script:app_flows", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > What — co musí aplikace mít#699b33da"
     text: "**2. Chyba validace** | co uživatel zadal špatně, kde se to dozví, co zůstane vyplněné (UA"
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "script:task_recovery", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > What — co musí aplikace mít#fb74f6eb"
     text: "**3. Prázdno** | úloha nemá data (první spuštění, filtr bez výsledku) (UA-3)"
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "script:app_states", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > What — co musí aplikace mít#023e91d5"
     text: "**4. Načítání** | co se načítá a jak dlouho to smí trvat, než přijde vysvětlení (UA-4)"
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "script:app_states", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > What — co musí aplikace mít#49332405"
     text: "**5. Selhání** | síť, server nebo cizí služba selže (UA-5)"
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "script:task_recovery", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > What — co musí aplikace mít#c354e81c"
     text: "**6. Oprávnění / role** | co vidí a smí role, která úlohu dělat nesmí, a proč (UA-6)"
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "pm:task_map", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > What — co musí aplikace mít#326bb1a1"
     text: "**7. Obnova po přerušení** | zavřený prohlížeč, ztracené spojení, souběžná úprava (UA-7)"
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "script:task_recovery", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > How — pravidla ke stavům#8b21aae4"
     text: "**UA-2 Chyba validace.** Hláška stojí u pole a říká, co je špatně a jak to opravit; u delš"
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "script:task_recovery", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > How — pravidla ke stavům#2c336228"
     text: "**UA-3 Prázdno.** Prázdný stav říká, co tu bude, a nabízí první krok (tlačítko, které data"
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "script:app_states", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > How — pravidla ke stavům#4f51c7eb"
     text: "**UA-4 Načítání.** Načítání říká, co se načítá („Načítám faktury…\"). Operace delší než pár"
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "script:app_states", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > How — pravidla ke stavům#2bca0de6"
     text: "**UA-5 Selhání.** Hláška říká, co se stalo a co dál: tlačítko „Zkusit znovu\", jiná cesta n"
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "script:task_recovery", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > How — pravidla ke stavům#417af302"
     text: "**UA-6 Oprávnění a role.** Pro každou roli je řečeno, jestli úlohu nevidí, vidí jen pro čt"
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "pm:task_map", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > How — pravidla ke stavům#983d6db9"
     text: "**UA-7 Obnova po přerušení.** Rozpracovaný vstup delší než pár polí přežije zavření karty "
-    do: {"webapp": "script:app_task_states", "pwa": "script:app_task_states"}
+    do: {"webapp": "script:task_recovery", "pwa": "script:app_task_states"}
   - id: "ecosystem/specs/webapp-tasks-states-standard.md#Úlohy a stavy webové aplikace > How — navigace, hromadné akce, grafy#0b59b608"
     text: "**UA-8 Hluboké odkazy.** Stav, který má smysl sdílet (vybraný záznam, filtr, záložka, strá"
     do: {"webapp": "pm:design_standard", "pwa": "pm:design_standard"}

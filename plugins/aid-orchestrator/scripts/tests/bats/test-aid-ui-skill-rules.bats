@@ -79,16 +79,18 @@ setup() {
 
 # P113 step 4: the workshop's procedures as a layer that wins over the part of a step it names
 @test "local-layer: every procedure and template under references/local is required reading of some method in sections.json" {
-  for f in $(cd "$SK" && find references/local -type f | sort); do
+  # spusteni.md (P115) is the launch table aid-ui-package.py reads into the deployment brief, not a procedure of a step
+  for f in $(cd "$SK" && find references/local -type f ! -name spusteni.md | sort); do
     jq -e --arg f "skills/ui-design/$f" '[.methods[] | select(type == "object") | .files[]] | index($f) != null' "$SK/sections.json" >/dev/null ||
       { echo "no method reads $f"; return 1; }
   done
-  [ "$(ls "$SK"/references/local/*.md | wc -l)" -eq 6 ]
+  [ "$(ls "$SK"/references/local/*.md | wc -l)" -eq 8 ]
   jq -e '.methods.identity.files | index("skills/ui-design/references/local/logo-postup.md") != null' "$SK/sections.json" >/dev/null
 }
 
 @test "local-layer: every step a procedure names in its Nahrazuje line links back to that procedure; SKILL.md states the precedence" {
   for p in "$SK"/references/local/*.md; do
+    [[ "$(basename "$p")" != spusteni.md ]] || continue   # the launch table, not a layered procedure
     line="$(grep -m1 '^\*\*Nahrazuje:\*\*' "$p")" || { echo "$(basename "$p"): no Nahrazuje line"; return 1; }
     grep -q '^\*\*Platí dál:\*\*' "$p" || { echo "$(basename "$p"): no Platí dál line"; return 1; }
     steps="$(grep -oE 'steps/[0-9a-z-]+\.md' <<<"$line" | sort -u)"; [ -n "$steps" ]

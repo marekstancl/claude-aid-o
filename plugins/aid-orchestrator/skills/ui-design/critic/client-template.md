@@ -6,8 +6,8 @@ a ukazuje karty s návrhy; rozhoduješ jako skutečný klient, který za to plat
 Co chceš: {persona_wants}.
 
 O svém podniku víš jen to, co je v podkladech v pracovním adresáři (`docs/content/product-context.md`,
-`docs/content/facts.yaml`, `.aid-ui/sources/`, `.aid-ui/old-site/`). Nic si nevymýšlej; když ti chybí fakt,
-řekni, že ho dodáš později, nebo zvol kartu, která to řeší.
+`docs/content/facts.yaml`, `.aid-ui/sources/`, `.aid-ui/old-site/`; u aplikace i zadání, roadmapa a plány v `docs/`
+a kód projektu). Nic si nevymýšlej; když ti chybí fakt, řekni, že ho dodáš později, nebo zvol kartu, která to řeší.
 
 Pravidla:
 {persona_rules}

@@ -33,6 +33,8 @@ so `web` has six scores. Without --place every command means `web`.
       Three blind ratings of one place by one role (the closing audit): the `audit` block of the place's gate file
       (median_min, any_min, criterion_median_min). Exit 0 accepted, 3 not accepted, 1 invalid answer.
   place-verdict <project> --place <p> --score <score.json>... [--pm-choice <direction> --reason <t>] [--pm-veto <t>] [--supplied]
+                [--fixed-in <round>]  (a fact or law finding of that round no longer returns the place once it was accepted,
+                fixed and the independent verifier saw the fix over the version now)
       The place's decision from every score of the place (one per role): facts and law > the expert's craft defect >
       the client's choice (D5). A `fakt`/`zakon` finding returns the place (on one direction: that direction is out); a
       direction is out when any of its scores failed or the expert has a blocking `remeslo` finding on it; among the
@@ -57,7 +59,7 @@ SKILL = os.path.join(HERE, "..", "skills", "ui-design")
 CRIT = os.path.join(SKILL, "critic")
 RATINGS = 3   # blind closing ratings of one place
 # what a role must not read: scores, thresholds, acceptance (the context docs are written by the agent)
-LEAK = re.compile(r"\b\d{1,2}(?:[.,]\d)?\s*/\s*10\b|quality_score|akcept|accept|threshold|\bprah|\bpráh|známk", re.I)
+LEAK = re.compile(r"\b\d{1,2}(?:[.,]\d)?\s*/\s*10\b|quality_score|akcept|accept|threshold|\bprah|\bpráh|\bznámk", re.I)   # \b: not "Poznámky"
 ROLES = ("owner", "tech")   # the client (owner) and the expert (tech)
 PLACES = ("sdeleni", "logo", "pohyb", "struktura", "vzhled", "web")
 LABEL = {"sdeleni": "sdělení", "logo": "logo", "pohyb": "pohyb", "struktura": "struktura", "vzhled": "vzhled", "web": "hotový web"}
@@ -83,6 +85,39 @@ PLACE_FILES = {
     "vzhled": [(".aid-ui/directions/*/**", True)],
     "web": [("site/**", True)],
 }
+# P116: a web application's places - the type decides which exist (aplikace-postup.md): struktura (screens and tasks),
+# vzhled and web (the finished app); logo only for a new brand; sdeleni and pohyb are skipped with their reason
+APP_WHAT = {
+    "struktura": "Model obrazovek a úloh aplikace (`podklady/screens.json`: obrazovky s akcemi a stavy, úlohy se sedmi stavy, výsledkem "
+                 "a cestami selhání) a proklikávací kostra na stálé adrese níže: proklikej každou úlohu jako uživatel, přepínej stavy (?stav=).",
+    "vzhled": "Tři směry vzhledu nad kostrou aplikace (každý ve vlastní složce v `podklady/`): hlavní obrazovka, obrazovka úlohy a její stavy, "
+              "na počítači i telefonu.",
+    "web": "Hotová aplikace (nebo ověřovací stavba studia) na stálé adrese, výsledky brány studia (`podklady/overenie.json`: app_flows, "
+           "app_states, keyboard_flows, task_recovery, axe) a soubory aplikace v pracovním adresáři (jen ke čtení).",
+}
+APP_FILES = {"web": [("site/**", True), (".aid-ui/verify/result.json", False)],   # the built app and the gate's result
+             "struktura": [("docs/design/screens.json", True), (".aid-ui/precheck/result.json", False), (".aid-ui/baseline/tasks.json", False), ("zadani.md", False),
+                           ("docs/plans/roadmap.md", False)]}
+APP_SKIP = {"sdeleni": "aplikace slogan ani hlavní sdělení nepotřebuje (aplikace-postup.md, oddíl 0)",
+            "pohyb": "aplikace pohyb značky nemá, dokud o něj PM výslovně nepožádá",
+            "logo": "značka existuje nebo jde o interní nástroj (brand existing|none)"}
+
+
+def variant_of(proj):
+    try:
+        return json.load(open(os.path.join(proj, "docs/design/brand-state.json"), encoding="utf-8")).get("variant") or {}
+    except (OSError, ValueError):
+        return {}
+
+
+def skipped_place(proj, place):
+    """The reason a place does not exist for this project's type, or '' (P116: only a webapp skips places)."""
+    v = variant_of(proj)
+    if v.get("type") != "webapp" or place not in APP_SKIP or (place == "logo" and v.get("brand") == "new"):
+        return ""
+    return APP_SKIP[place]
+
+
 UPSTREAM = {"sdeleni": [], "logo": ["sdeleni"], "pohyb": ["logo"], "struktura": [], "vzhled": ["struktura", "logo", "pohyb"],
             "web": ["vzhled", "struktura", "logo", "pohyb", "sdeleni"]}
 EXTRA = {"web": ("vzhled", "struktura")}   # the finished web is rated with these places' rubrics too (F6 1a)
@@ -130,11 +165,14 @@ def rounds_dir(proj, place="web"):
 
 
 def rubric_file(typ, role, key, place):
-    """The rubric a role rates with at a place: `web` keeps <type>.<role>.yaml; an extra rubric is its place's."""
+    """The rubric a role rates with at a place: `web` keeps <type>.<role>.yaml; an extra rubric is its place's. A web
+    application with a new brand rates its logo with the web's logo rubrics (P116: an app has none of its own)."""
+    typ = "web-local" if (typ, key) == ("webapp", "logo") else typ
     return os.path.join(CRIT, f"{typ}.{role}.yaml" if key == "web" else f"{typ}.{role}.{key}.yaml")
 
 
 def gates_file(typ, role, key):
+    typ = "web-local" if (typ, key) == ("webapp", "logo") else typ
     return os.path.join(CRIT, f"{typ}.{role}.{key}.gates.yaml")
 
 
@@ -165,6 +203,10 @@ def freeze(proj, typ, force, phase="build", place="web"):
         die(f"a quality loop has rounds in {rd}: the rubric cannot change under it (archive the rounds to start a new loop)")
     if phase not in ("build", "launch"):
         die("--phase is build (before the deployment) or launch", 2)
+    if (typ == "webapp") != (variant_of(proj).get("type") == "webapp"):   # the bundle follows the variant: they must agree
+        die(f"--type {typ} but the project's recorded variant is {variant_of(proj).get('type') or 'none'} (docs/design/brand-state.json)", 2)
+    if typ == "webapp" and skipped_place(proj, place):
+        die(f"place {place} does not exist for a web application: {skipped_place(proj, place)}", 2)
     common_p = os.path.join(CRIT, f"{typ}.yaml")
     keys = (place,) + EXTRA.get(place, ())
     files = {(r, k): rubric_file(typ, r, k, place) for r in ROLES for k in keys}
@@ -181,12 +223,20 @@ def freeze(proj, typ, force, phase="build", place="web"):
     ctx_parts = [("Kontext produktu", "docs/content/product-context.md"), ("Vize", "docs/product-vision.md"),
                  ("Zadání pro vyhledávání", "docs/seo/brief.md")]
     ctx = "\n\n".join(f"## {t}\n\n{read(os.path.join(proj, p))}" for t, p in ctx_parts if read(os.path.join(proj, p)))
-    if not ctx:
-        die("no project context (docs/content/product-context.md, docs/product-vision.md): the critic must know the business")
     leak = [ln.strip() for ln in ctx.splitlines() if LEAK.search(ln)]
     if leak:   # dropped, not refused: a loop must not stop on an old audit score in the vision
         ctx = "\n".join(ln for ln in ctx.splitlines() if not LEAK.search(ln))
         print(f"DROPPED {len(leak)} context line(s) about scores or acceptance: " + " | ".join(x[:80] for x in leak[:3]), file=sys.stderr)
+    if typ == "webapp":   # P116: the project's own brief and code, never filtered - its thresholds are the app's, not the studio's
+        if not read(os.path.join(proj, "zadani.md")):
+            die("no zadani.md in the project: the client role of an app stands on the project's brief and code (aplikace-postup.md)")
+        own = "\n\n".join(f"## {t}\n\n{read(os.path.join(proj, p))}" for t, p in (("Zadání projektu", "zadani.md"), ("Plán projektu", "docs/plans/roadmap.md"))
+                           if read(os.path.join(proj, p)))
+        if api_routes(proj):
+            own += "\n\n## Cesty API v kódu projektu (co aplikace umí)\n\n" + "\n".join("- " + r for r in api_routes(proj))
+        ctx = own + ("\n\n" + ctx if ctx else "")
+    if not ctx:
+        die("no project context (docs/content/product-context.md, docs/product-vision.md): the critic must know the business")
     lang = "sk"
     try:
         st = json.load(open(os.path.join(proj, "docs/design/brand-state.json"), encoding="utf-8"))
@@ -228,8 +278,9 @@ def freeze(proj, typ, force, phase="build", place="web"):
         client_memory = ("\nJako klient jsi jedna role na všech místech rozhodnutí: v `podklady/historie.json` máš i svá hodnocení a "
                          "odpovědi z dřívějších míst a rozhodnutí PM (označená jako jeho). Drž se toho, co jsi řekl, a změnu názoru "
                          "zdůvodni.\n" if r == "owner" else "")
-        role = tpl.format(persona_who=main["persona"]["who"], persona_wants=main["persona"]["wants"], place_name=LABEL[place],
-                          place_what=WHAT[place], directions_rule=directions_rule, client_memory=client_memory,
+        role = tpl.format(persona_who=main["persona"]["who"], persona_wants=main["persona"]["wants"],
+                          place_name="hotová aplikace" if typ == "webapp" and place == "web" else LABEL[place],
+                          place_what=(APP_WHAT if typ == "webapp" else WHAT).get(place, WHAT[place]), directions_rule=directions_rule, client_memory=client_memory,
                           persona_rules="\n".join("- " + x for x in persona_rules), criteria="\n\n".join(sections), context=ctx,
                           lang=lang, schema=schema)
         if phase == "build" and place == "web":
@@ -248,6 +299,22 @@ def freeze(proj, typ, force, phase="build", place="web"):
     os.makedirs(os.path.dirname(out), exist_ok=True)
     json.dump(rec, open(out, "w", encoding="utf-8"), ensure_ascii=False, indent=1)
     print(f"FROZEN {typ} {place} {rec['sha256'][:12]} -> {out} (owner {roles['owner']['sha256'][:12]}, tech {roles['tech']['sha256'][:12]})")
+
+
+def api_routes(proj, limit=80):
+    """The HTTP routes the project's code declares (FastAPI/Flask decorators, Express calls): what the app can do."""
+    out = []
+    pat = re.compile(r"""@(?:\w+\.)?(?:get|post|put|patch|delete|route)\(\s*["']([^"']+)["']|\b(?:app|router)\.(get|post|put|patch|delete)\(\s*["']([^"']+)["']""")
+    for root, dirs, files in os.walk(proj):
+        dirs[:] = [d for d in dirs if d not in (".git", "node_modules", ".venv", "venv", ".aid-ui", ".aid-o", "site", "__pycache__")]
+        for f in sorted(files):
+            if f.endswith((".py", ".js", ".ts")):
+                for m in pat.finditer(read(os.path.join(root, f), 200000)):
+                    r = m.group(1) or m.group(3)
+                    out.append(f"{r}  ({os.path.relpath(os.path.join(root, f), proj)})")
+                    if len(out) >= limit:
+                        return out
+    return out
 
 
 def digest(rec):
@@ -333,6 +400,8 @@ def check(rec, ans):
             if c.get("studio_score") is not None and not c["to_ten"]["client"]:   # what holds it down is named as the client's part
                 return f"{c['id']}: studio_score without what the client supplies (to_ten.client)"
     for f in ans["findings"]:
+        if rec.get("role_id") == "tech" and "blocking" not in f and f.get("severity") in ("blocking", "major", "minor"):
+            f["blocking"] = f["severity"] == "blocking"   # the expert's own severity says it (Trading 22. 10.: two answers lost on a missing flag)
         if rec.get("role_id") == "tech" and not isinstance(f.get("blocking"), bool):   # D5: the expert says it, never implied
             return f"finding {f['id']}: the expert's finding needs blocking true|false"
         if f["criterion"] not in want:
@@ -488,13 +557,17 @@ def bundle_files(proj, place, need=True):
         if w.get("without"):
             return [".aid-ui/critic/pohyb-without.json"] if os.path.isfile(os.path.join(proj, ".aid-ui/critic/pohyb-without.json")) else []
     out = []
-    for pat, req in PLACE_FILES[place]:
+    files = APP_FILES.get(place, PLACE_FILES[place]) if variant_of(proj).get("type") == "webapp" else PLACE_FILES[place]
+    for pat, req in files:
         root = os.path.realpath(proj)   # P113 whole review: no file reached through a symlink anywhere on its path
         hits = sorted(os.path.relpath(f, proj) for f in glob.glob(os.path.join(proj, pat), recursive=True)
                       if os.path.isfile(f) and os.path.realpath(f) == os.path.join(root, os.path.relpath(f, proj)))
         if req and not hits and need:
             die(f"{place}: missing input {pat} (the place's roles rate it; it is not replaced by site/)")
         out += hits
+    sup = os.path.join(".aid-ui", "client", "supplied", place + ".json")   # P116: what the client supplied for this place
+    if os.path.isfile(os.path.join(proj, sup)) and os.path.realpath(os.path.join(proj, sup)) == os.path.join(os.path.realpath(proj), sup):
+        out.append(sup)
     return sorted(set(out))
 
 
@@ -525,7 +598,22 @@ def place_state(proj):
 
 # ---------------------------------------------------------------- the place verdict
 
-def decide(proj, place, scores, pm_choice=None, reason=None, pm_veto=None, supplied=False):
+def fixed_and_seen(proj, place, n):
+    """{finding id}: the findings of round n of the place that were accepted and fixed (evidence) and whose fix the
+    independent verifier saw (verdict overeno) over the place's version now - a fact a role found stops returning the
+    place only then (run 5, 22. 10. 2026: every round found a new sample-number nit and the place never closed)."""
+    import aid_ui_memory as memory
+    try:
+        rnd = json.load(open(os.path.join(critic_dir(proj), "rounds", place, str(n), "round.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    fixed = {f["id"] for f in rnd.get("findings") or [] if f.get("state") == "accepted" and f.get("evidence")}
+    seen = {k for r in memory.verify_records(proj, place, bundle_sha(proj, place)) if r.get("round") == n
+            for k, v in (r.get("fixes") or {}).items() if isinstance(v, dict) and v.get("verdict") == "overeno"}
+    return fixed & seen
+
+
+def decide(proj, place, scores, pm_choice=None, reason=None, pm_veto=None, supplied=False, resolved=None, rnd=None):
     expect = {(r, k) for r in ROLES for k in (place,) + EXTRA.get(place, ())}
     have = {(s["role"], x["rubric"]) for s in scores for x in s["directions"]}
     sets = {(s["role"], x["rubric"]): None for s in scores for x in s["directions"]}
@@ -547,6 +635,8 @@ def decide(proj, place, scores, pm_choice=None, reason=None, pm_veto=None, suppl
     seen = set()
     for s in scores:   # facts and law first (D5); both roles reporting one fact count once
         for f in s["findings"]:
+            if f.get("kind") in ("fakt", "zakon") and ({f"r{rnd}-{s['role']}-{f['id']}", f["id"]} & (resolved or set())):
+                continue   # fixed, and the verifier saw the fix in the version now
             if f.get("kind") in ("fakt", "zakon"):
                 key = (f["kind"], f.get("direction"), re.sub(r"\W+", " ", (f.get("text") or "").lower()).strip())   # the roles' criteria differ
                 if key in seen:
@@ -632,7 +722,8 @@ def place_check(proj, place, vfile):
             die(f"place_verdict_handmade: {r}'s answer of round {rnd.get('n')} is not the one the round recorded")
         scores.append(scored(proj, place, r, a))
     o = v.get("options") or {}
-    again = decide(proj, place, scores, o.get("pm_choice"), o.get("reason"), o.get("pm_veto"), o.get("supplied"))
+    n = rnd.get("n")   # the last round's facts that were fixed and that the verifier saw no longer return it (as place-verdict --fixed-in)
+    again = decide(proj, place, scores, o.get("pm_choice"), o.get("reason"), o.get("pm_veto"), o.get("supplied"), fixed_and_seen(proj, place, n), n)
     for k in ("status", "chosen", "chosen_by", "answers", "scores", "target"):
         if again[k] != v.get(k):
             die(f"place_verdict_handmade: {k} of the verdict ({v.get(k)}) is not what the place's last round gives ({again[k]})"
@@ -644,6 +735,10 @@ def place_guard(proj, place):
     """What aid-ui-state.sh checks before an accepting answer of the place's question (or build-record for pohyb):
     a current accepted verdict of the place, standing on the CURRENT bundles of its upstream places."""
     st = place_state(proj)
+    why = skipped_place(proj, place)
+    if why:
+        print(f"PLACE {place}: N/A pro aplikaci ({why})")
+        return
     v = st.get(place)
     if not v:
         die(f"place_verdict_missing: place {LABEL[place]} ({place}) has no verdict; rate it (aid-ui-quality.py round --place {place}),"
@@ -653,7 +748,7 @@ def place_guard(proj, place):
     cur = bundle_sha(proj, place)
     if v.get("target") != cur:
         die(f"place_verdict_missing: place {place} was decided over another bundle (verdict {str(v.get('target'))[:12]}, now {cur[:12]}); rate it again")
-    for u in UPSTREAM[place]:
+    for u in [x for x in UPSTREAM[place] if not skipped_place(proj, x)]:
         uv = st.get(u) or {}
         if uv.get("status") not in ("accepted", "accepted_with_reservation"):
             die(f"place_verdict_missing: place {place} stands on {u}, which has no accepted verdict")
@@ -692,7 +787,7 @@ def main(a):
     pos = []
     i = 1
     while i < len(a):
-        if a[i] in ("--role", "--place", "--type", "--phase", "--metrics-dir", "--score", "--pm-choice", "--reason", "--pm-veto"):
+        if a[i] in ("--role", "--place", "--type", "--phase", "--metrics-dir", "--score", "--pm-choice", "--reason", "--pm-veto", "--fixed-in"):
             i += 2
         elif a[i] in ("--force", "--supplied"):
             i += 1
@@ -737,7 +832,10 @@ def main(a):
                 scores.append(json.load(open(f, encoding="utf-8")))
             except (OSError, ValueError) as e:
                 die(f"{f}: not readable JSON ({e})")
-        print(json.dumps(decide(os.path.abspath(pos[0]), place, scores, opt("--pm-choice"), opt("--reason"), opt("--pm-veto"), "--supplied" in a), ensure_ascii=False))
+        rn = opt("--fixed-in")   # the round whose fixed and verified facts no longer return the place
+        res = fixed_and_seen(os.path.abspath(pos[0]), place, int(rn)) if rn and rn.isdigit() else set()
+        print(json.dumps(decide(os.path.abspath(pos[0]), place, scores, opt("--pm-choice"), opt("--reason"), opt("--pm-veto"), "--supplied" in a,
+                                res, int(rn) if rn and rn.isdigit() else None), ensure_ascii=False))
         return
     if cmd == "place-check" and len(pos) == 2 and "--place" in a:
         return place_check(os.path.abspath(pos[0]), place, pos[1])

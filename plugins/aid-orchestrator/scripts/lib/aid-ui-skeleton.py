@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""aid-ui-skeleton.py - the live skeleton of a web from its structure (P113 step 6; struktura-postup.md).
+"""aid-ui-skeleton.py - the live skeleton of a web from its structure (P113 step 6; struktura-postup.md), or of a web
+application from its model of screens and tasks (P116, build_app; aplikace-postup.md) - one builder, a branch on the
+kind (variant.type webapp in docs/design/brand-state.json, else .aid-ui/variant.json).
 
   build <project>
       Writes one page per entry of .aid-ui/structure.json into <project>/site/ (url "/" -> site/index.html,
@@ -154,6 +156,8 @@ def write_atomic(f, text):
 
 
 def build(p):
+    if app_kind(p):
+        return build_app(p)
     s, facts = load(p)
     site = os.path.join(p, "site")
     no_symlinks(p, "site", ".aid-ui/skeleton")
@@ -168,14 +172,36 @@ def build(p):
     for r in s.get("redirects") or []:
         if not (isinstance(r, dict) and isinstance(r.get("from"), str) and r["from"].strip() and isinstance(r.get("to"), str) and r["to"].startswith("/")):
             die(f"redirect {r!r}: needs from (non-empty) and to (a site path starting with /)", 2)
-    os.makedirs(site, exist_ok=True)
-    real = os.path.realpath(site)
     if not s.get("nav"):
         warn("structure.json has no nav: the page order is the navigation")
     lang = s.get("lang") or "cs"
-    want, missing, kept, written = set(), set(), [], []
-    for pg in s["pages"]:
-        f = page_file(site, pg.get("url") or "/")
+    missing = set()
+    out = write_pages(p, site, [(page_file(site, pg.get("url") or "/"), lambda pg=pg: render(s, facts, pg, lang, missing)) for pg in s["pages"]])
+    rd = os.path.join(p, ".aid-ui", "skeleton")
+    rf = os.path.join(rd, "redirects.csv")
+    if s.get("redirects"):
+        import io
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["from", "to"])
+        for r in s["redirects"]:
+            w.writerow([r["from"], r["to"]])
+        write_atomic(rf, buf.getvalue())
+    elif os.path.exists(rf):
+        os.remove(rf)
+    for k in sorted(missing):
+        warn(f"fact {k} is not in docs/content/facts.yaml: shown as čeká na klienta")
+    print(json.dumps(out | {"missing_facts": sorted(missing)}, ensure_ascii=False))
+
+
+def write_pages(p, site, entries):
+    """Write [(file, render)] under site/: a page without the skeleton's mark is a built page and kept; a page the
+    skeleton wrote before (manifest) that is no longer wanted moves to .aid-ui/skeleton/removed/. Shared by the web
+    and the app skeleton (P116)."""
+    os.makedirs(site, exist_ok=True)
+    real = os.path.realpath(site)
+    want, kept, written = set(), [], []
+    for f, render_page in entries:
         if not os.path.realpath(os.path.dirname(f)).startswith(real) and os.path.exists(os.path.dirname(f)):
             die(f"{f} resolves outside {site}", 2)
         want.add(os.path.relpath(f, site))
@@ -183,7 +209,7 @@ def build(p):
             kept.append(os.path.relpath(f, site))   # a built page: the skeleton never overwrites it
             continue
         os.makedirs(os.path.dirname(f), exist_ok=True)
-        write_atomic(f, render(s, facts, pg, lang, missing))
+        write_atomic(f, render_page())
         written.append(os.path.relpath(f, site))
     rd = os.path.join(p, ".aid-ui", "skeleton")
     os.makedirs(rd, exist_ok=True)
@@ -213,20 +239,330 @@ def build(p):
         os.replace(src, dst)
         removed.append(rel)
     write_atomic(mf, json.dumps({"pages": sorted(want)}, ensure_ascii=False))
-    rf = os.path.join(rd, "redirects.csv")
-    if s.get("redirects"):
-        import io
-        buf = io.StringIO()
-        w = csv.writer(buf)
-        w.writerow(["from", "to"])
-        for r in s["redirects"]:
-            w.writerow([r["from"], r["to"]])
-        write_atomic(rf, buf.getvalue())
-    elif os.path.exists(rf):
-        os.remove(rf)
-    for k in sorted(missing):
-        warn(f"fact {k} is not in docs/content/facts.yaml: shown as čeká na klienta")
-    print(json.dumps({"written": written, "kept": kept, "removed": removed, "missing_facts": sorted(missing)}, ensure_ascii=False))
+    return {"written": written, "kept": kept, "removed": removed}
+
+
+# --- P116: the skeleton of a web application, from docs/design/screens.json -------------------------------------
+STATES = (("empty", "Prázdno"), ("loading", "Načítání"), ("error", "Chyba"), ("filled", "Naplněno"))   # the model's order
+APP_JS = """(function(){function failFor(k,e){if(!k)return null;var kind=(e&&/^[0-9]+$/.test(e.message))?'server':'network';   // an HTTP status vs a dropped connection
+return document.querySelector('[data-aid-fail-for="'+k+'"][data-aid-fail-kind="'+kind+'"]')||document.querySelector('[data-aid-fail-for="'+k+'"]:not([data-aid-fail-kind])');}
+function showRecover(how,v){document.querySelectorAll('[data-aid-recover]').forEach(function(x){if((x.dataset[how]||'').split(' ').indexOf(v)>=0)x.hidden=false;});}   // a recover-only action shows once its own step failed (by the failed action, the task, or the form's screen)
+function clearFail(){document.querySelectorAll('[data-aid-fail-for],[data-aid-error],[data-aid-error-global],[data-aid-recover]').forEach(function(x){x.hidden=true;});}   // a new try shows only its own outcome
+var q=new URLSearchParams(location.search),st=q.get('stav')||'filled',ok=false,done=(q.get('vysledek')||'').split(',');
+if(/\.empty$/.test(st))st='empty';   // a task's empty state is the screen with nothing on it
+document.querySelectorAll('main [data-aid-state]').forEach(function(e){if(e.dataset.aidState===st)ok=true;});
+if(!ok)st='filled';document.querySelectorAll('main [data-aid-state]').forEach(function(e){e.hidden=e.dataset.aidState!==st;});
+document.querySelectorAll('[data-aid-stav-link]').forEach(function(a){if(a.dataset.aidStavLink===st)a.setAttribute('aria-current','true');});
+document.querySelectorAll('[data-aid-back]').forEach(function(a){a.addEventListener('click',function(ev){if(document.referrer&&new URL(document.referrer).origin===location.origin){ev.preventDefault();history.back();}});});
+var main=document.querySelector('main');if(st==='loading')main.setAttribute('aria-busy','true');
+var ts=q.get('stav')||'';document.querySelectorAll('[data-aid-task-state]').forEach(function(e){e.hidden=e.dataset.aidTaskState!==ts;});
+document.querySelectorAll('[data-aid-retry]').forEach(function(a){var x=new URL(location.href);x.searchParams.delete('stav');a.setAttribute('href',x.pathname+x.search);});   // the same screen and its id, without the error
+var rz=q.get('rezim');try{if(rz)sessionStorage.setItem('aid-rezim',rz);rz=sessionStorage.getItem('aid-rezim');}catch(e){}
+var modes=document.querySelector('[data-aid-modes-list]');if(modes){var all=modes.dataset.aidModesList.split(' ');if(all.indexOf(rz)<0)rz=all[0];
+document.querySelectorAll('[data-aid-rezim-link]').forEach(function(a){if(a.dataset.aidRezimLink===rz)a.setAttribute('aria-current','true');});
+document.querySelectorAll('[data-aid-mode-is]').forEach(function(e){e.hidden=e.dataset.aidModeIs!==rz;});
+document.querySelectorAll('[data-aid-modes]').forEach(function(b){var off=b.dataset.aidModes.split(' ').indexOf(rz)<0;b.toggleAttribute('disabled',off);b.setAttribute('aria-disabled',off?'true':'false');
+if(b.tagName==='A'){if(off&&b.hasAttribute('href')){b.dataset.href=b.getAttribute('href');b.removeAttribute('href');}else if(!off&&b.dataset.href)b.setAttribute('href',b.dataset.href);}
+var r=document.getElementById(b.dataset.aidReason);if(r)r.hidden=!off;});}
+var an=document.querySelector('[data-aid-stav-oznameni]');if(an&&q.get('stav'))setTimeout(function(){an.textContent='Zobrazen stav: '+(document.querySelector('[data-aid-stav-link="'+st+'"]')||{}).textContent;},400);   // after load: a reader announces it
+document.querySelectorAll('[data-aid-after]').forEach(function(e){e.hidden=done.indexOf(e.dataset.aidAfter)<0;});
+document.querySelectorAll('[data-aid-hide-in]').forEach(function(e){if(e.dataset.aidHideIn.split(' ').indexOf(st)>=0)e.hidden=true;});   // no record, still loading: its actions are not offered
+var rt=/^([a-z0-9-]+)\.(failure|recovery)$/.exec(ts);if(rt)showRecover('aidRecoverTask',rt[1]);
+if(st==='error'&&main.hasAttribute('data-aid-form'))showRecover('aidRecoverScreen',main.dataset.aidScreen);   // a form's error is its send failing: its own recover action is there
+if(/\.(loading|permission)$/.test(ts))document.querySelectorAll('[data-aid-hide-in~="loading"]').forEach(function(b){b.setAttribute('aria-disabled','true');if(b.tagName==='A')b.removeAttribute('href');else b.disabled=true;});   // the task's state: its sending is off
+var inp=document.querySelector('[data-aid-inputs]'),fill=null;try{inp=inp?JSON.parse(inp.textContent):{};}catch(e){inp={};}
+var tm=/^([a-z0-9-]+)\.(failure|recovery|loading|permission)$/.exec(ts);if(tm)fill=inp[tm[1]];else if(['filled','error','loading'].indexOf(q.get('stav'))>=0){for(var k in inp){fill=inp[k];break;}}   // what the person typed stays: show it
+var vt=/^([a-z0-9-]+)\.validation$/.exec(ts);if(vt)document.querySelectorAll('main [id$="-chyba"]').forEach(function(e){var i=document.getElementById(e.id.replace(/-chyba$/,''));
+if(!i||(inp[vt[1]]&&!(i.name in inp[vt[1]])))return;e.hidden=false;i.setAttribute('aria-invalid','true');});   // the message of the task's own fields, where they are
+if(fill)Object.keys(fill).forEach(function(n){var i=document.querySelector('main [name="'+n+'"]');if(i&&!i.value)i.value=fill[n];});
+document.querySelectorAll('[data-aid-draft]').forEach(function(i){var k='aid-draft:'+location.pathname+':'+i.id;try{var v=localStorage.getItem(k);if(v!==null&&!i.value)i.value=v;}catch(e){}
+i.addEventListener('input',function(){try{localStorage.setItem(k,i.value);}catch(e){}});});
+document.querySelectorAll('[data-aid-result]').forEach(function(e){e.hidden=done.indexOf(e.dataset.aidResult)<0;});
+document.querySelectorAll('dialog[data-aid-confirm]').forEach(function(d){d.close();var b=document.querySelector('[data-aid-action="'+d.dataset.aidConfirm+'"]');
+if(b)b.addEventListener('click',function(){d.showModal();d.querySelector('[data-aid-confirm-no]').focus();});
+d.querySelector('[data-aid-confirm-no]').addEventListener('click',function(){d.close();if(b)b.focus();});
+d.addEventListener('cancel',function(){setTimeout(function(){if(b)b.focus();},0);});   // Esc closes it: the focus goes back to its button
+var y=d.querySelector('[data-aid-confirm-yes]'),ge=document.querySelector('[data-aid-error-global]');
+y.setAttribute('role','button');y.addEventListener('keydown',function(ev){if(ev.key===' '){ev.preventDefault();y.click();}});y.addEventListener('click',function(ev){ev.preventDefault();clearFail();
+fetch(y.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=y.href;}).catch(function(e){d.close();var fe=failFor(d.dataset.aidConfirm,e)||ge;fe.hidden=false;showRecover('aidRecoverFor',d.dataset.aidConfirm);fe.focus();});});});
+document.querySelectorAll('a[data-aid-checked]').forEach(function(a){a.addEventListener('click',function(ev){if(!a.href)return;ev.preventDefault();clearFail();var ge=document.querySelector('[data-aid-error-global]');
+fetch(a.href).then(function(r){if(!r.ok)throw new Error(r.status);location.href=a.href;}).catch(function(e){var fe=failFor(a.dataset.aidAction,e)||ge;if(fe){fe.hidden=false;showRecover('aidRecoverFor',a.dataset.aidAction);fe.focus();}});});});
+document.querySelectorAll('form[data-aid-form]').forEach(function(f){var err=f.querySelector('[data-aid-error]');
+f.addEventListener('submit',function(ev){ev.preventDefault();clearFail();var bad=null;f.querySelectorAll('input,select').forEach(function(i){var e=document.getElementById(i.id+'-chyba');
+if(e)e.hidden=i.checkValidity();if(!i.checkValidity()){i.setAttribute('aria-invalid','true');bad=bad||i;}else i.removeAttribute('aria-invalid');});
+if(bad){bad.focus();return;}var b=ev.submitter,to=(b&&b.getAttribute('formaction'))||f.getAttribute('action'),d=new URLSearchParams(new FormData(f));
+if(b&&b.name)d.set(b.name,b.value);var x=new URL(to,location.href);d.forEach(function(v,k){x.searchParams.set(k,v);});var u=x.pathname+x.search;f.setAttribute('aria-busy','true');if(b)b.disabled=true;
+fetch(u).then(function(r){if(!r.ok)throw new Error(r.status);f.querySelectorAll('[data-aid-draft]').forEach(function(i){try{localStorage.removeItem('aid-draft:'+location.pathname+':'+i.id);}catch(e){}});location.href=u;}).catch(function(e){f.removeAttribute('aria-busy');if(b)b.disabled=false;
+var fe=(b&&failFor(b.dataset.aidAction,e))||err;fe.hidden=false;if(b)showRecover('aidRecoverFor',b.dataset.aidAction);fe.focus();});});});})();"""
+
+
+def app_kind(p):
+    """True for a webapp project: the recorded variant, else the studio's .aid-ui/variant.json."""
+    for f, key in ((os.path.join(p, "docs", "design", "brand-state.json"), "variant"), (os.path.join(p, ".aid-ui", "variant.json"), None)):
+        try:
+            d = json.load(open(f, encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        v = d.get(key) if key else d
+        if isinstance(v, dict) and v.get("type"):
+            return v["type"] == "webapp"
+    return False
+
+
+def screens_module():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("aid_ui_screens", os.path.join(HERE, "..", "aid-ui-screens.py"))
+    m = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m)
+    return m
+
+
+def gate_attrs(sid, a):
+    """An action that goes only in some modes: its modes and the id of the sentence why not."""
+    if not a.get("modes"):
+        return "", ""
+    rid = f"proc-{esc(sid)}-{esc(a['id'])}"
+    return (f' data-aid-modes="{esc(" ".join(a["modes"]))}" data-aid-reason="{rid}" aria-describedby="{rid}"',
+            f'<span id="{rid}" class="proc" hidden>{esc(a["disabled_reason"])}</span>')
+
+
+def actions_html(m, scr, url, fields, ends, item=None):
+    """The actions of one screen (data-aid-action) and the form of its submit actions. ends: action id -> the tasks it
+    ends - a link, a submit button or a confirm carries ?vysledek=<tasks>, and the result shows only then. item None:
+    the screen's actions without an item; item k: the actions of sample row k, with their own form holding the inputs
+    the tasks give those actions."""
+    sid = scr["id"]
+    mine = [a for a in scr["actions"] if a.get("item") == item]
+    own = {n for t in m["tasks"] for st in t["steps"] if st["screen"] == sid and any(a["id"] == st["action"] and "item" in a for a in scr["actions"])
+           for n in st.get("input") or {}}   # inputs that go with an item's action live in that item's form
+    if item is None:
+        fields = [n for n in fields if n not in own]
+    else:
+        fields = [n for t in m["tasks"] for st in t["steps"] if st["screen"] == sid and any(a["id"] == st["action"] for a in mine) for n in st.get("input") or {}]
+        fields = list(dict.fromkeys(fields))
+    then = {t["id"]: t["then_mode"] for t in m["tasks"] if t.get("then_mode")}
+    def after_mode(a):   # the mode a task this action ends leaves the app in (STOP -> pozastaveno)
+        return next((then[t] for t in ends.get(a["id"]) or [] if t in then), None)
+    def tail(a):   # the target's parameters: a deep link (query), the tasks the action ends (vysledek), the mode after them
+        ps = ([a["query"]] if a.get("query") else []) + ([f"vysledek={','.join(ends[a['id']])}"] if ends.get(a["id"]) else []) \
+            + ([f"rezim={after_mode(a)}"] if after_mode(a) else [])
+        return esc("?" + "&".join(ps)) if ps else ""
+    # a link whose failure the model names (failure_paths at its step) checks the way first and stays on error (P116 pilot:
+    # a plain link that fails lands on the browser's error page, the screen and the way back are gone)
+    risky = {t["steps"][fp["at_step"] - 1]["action"] for t in m["tasks"] for fp in t["failure_paths"]
+             if fp["at_step"] <= len(t["steps"]) and t["steps"][fp["at_step"] - 1]["screen"] == sid}
+    scrs = {x["id"]: x for x in m["screens"]}
+    rec = screens_module().recover_only(m)
+    def hide_in(a):   # the screen states in which the action is not offered (H2/H5, P118: Smazat on a note that is not there)
+        if scr.get("shell"):   # the bar (STOP, PANIC) stays whatever the screen under it shows (H5 run 5)
+            return ""
+        record = a.get("item") is not None or a.get("query") or a["kind"] == "destructive" or (
+            a["kind"] == "navigate" and not a.get("back") and not a.get("external") and str(scrs.get(a.get("to"), {}).get("states", {}).get("empty", "")).strip().lower().startswith("nenastává"))
+        ks = (["empty", "error"] if record else []) + (["loading"] if record or a["kind"] in ("submit", "destructive") else [])
+        return f' data-aid-hide-in="{" ".join(ks)}"' if ks else ""
+    typed = {st["action"] for t in m["tasks"] for st in t["steps"] if st["screen"] == sid and st.get("input")}   # actions a task types into before
+    acts, btns, navs = [], [], {}
+    for a in mine:
+        if (sid, a["id"]) in rec:   # whose failure it recovers: the failed actions, their tasks, this screen
+            fps = [(t["id"], f'{sid}.{t["steps"][fp["at_step"] - 1]["action"]}') for t in m["tasks"] for fp in t.get("failure_paths") or []
+                   if fp.get("recover") == a["id"] and fp["at_step"] <= len(t["steps"]) and t["steps"][fp["at_step"] - 1]["screen"] == sid]
+            recv = (f' data-aid-recover data-aid-recover-for="{esc(" ".join(sorted({x for _, x in fps})))}"'
+                    f' data-aid-recover-task="{esc(" ".join(sorted({x for x, _ in fps})))}" data-aid-recover-screen="{esc(sid)}" hidden')
+        da = f'data-aid-action="{esc(sid)}.{esc(a["id"])}"' + hide_in(a) + (f' data-aid-after="{esc(a["after"])}" hidden' if a.get("after")
+                                                                       else recv if (sid, a["id"]) in rec else "")
+        owner = next((t for t in m["tasks"] for x in t["steps"] if x["screen"] == sid and x["action"] == a["id"]), None)
+        if owner and (a["kind"] != "navigate" or a["id"] in risky):   # the task's own failure text (not the screen's load error), per kind when the model says
+            k = f'{esc(sid)}.{esc(a["id"])}'
+            acts.append(f'<p class="chyba" role="alert" tabindex="-1" data-aid-fail-for="{k}" hidden>{esc(owner["states"]["failure"])}</p>'
+                        + "".join(f'<p class="chyba" role="alert" tabindex="-1" data-aid-fail-for="{k}" data-aid-fail-kind="{"network" if fp["kind"] == "network" else "server"}" hidden>{esc(fp["text"])}</p>'
+                                  for fp in owner["failure_paths"] if fp.get("text")))
+        if a["kind"] == "navigate" and a["id"] in typed and not a.get("external"):   # a filter or search: its fields go with it (H5 run 3)
+            ga, why = gate_attrs(sid, a)
+            navs[a["id"]] = (a, f'<button type="submit" {da}{ga}>{esc(a["label"])}</button>{why}')
+        elif a["kind"] == "navigate":
+            back = " data-aid-back" if a.get("back") else ""
+            ga, why = gate_attrs(sid, a)
+            chk = " data-aid-checked" if a["id"] in risky and not a.get("back") else ""
+            if a.get("external"):
+                acts.append(f'<a class="akce" href="{esc(a["external"])}" target="_blank" rel="noopener" {da}{ga}>{esc(a["label"])} (otevře se v nové kartě)</a>{why}')
+            else:
+                acts.append(f'<a class="akce" href="{esc(url[a["to"]])}{tail(a)}" {da}{back}{chk}{ga}>{esc(a["label"])}</a>{why}')
+        elif a["kind"] == "submit":
+            v = f' name="vysledek" value="{esc(",".join(ends[a["id"]]))}"' if ends.get(a["id"]) else ""
+            ga, why = gate_attrs(sid, a)
+            q = "&".join(([esc(a["query"])] if a.get("query") else []) + ([f"rezim={esc(after_mode(a))}"] if after_mode(a) else []))
+            q = f"?{q}" if q else ""
+            btns.append(f'<button type="submit" formaction="{esc(url[a["to"]])}{q}"{v} {da}{ga}>{esc(a["label"])}</button>{why}')
+        else:   # destructive: the button opens its confirm dialog (the focus on Zrušit); without JS it stands open under it
+            k = f'{esc(sid)}.{esc(a["id"])}'
+            ga, why = gate_attrs(sid, a)
+            acts.append(f'<button type="button" {da} aria-haspopup="dialog"{ga}>{esc(a["label"])}</button>{why}'
+                        f'<dialog open class="potvrzeni" data-aid-confirm="{k}" aria-label="{esc(a["confirm"])}"><p>{esc(a["confirm"])}</p>'
+                        f'<a href="{esc(url[a["to"]])}{tail(a)}" data-aid-confirm-yes="{k}">{esc(a.get("confirm_yes") or "Potvrdit")}</a> '
+                        f'<button type="button" data-aid-confirm-no>{esc(a.get("confirm_no") or "Zrušit")}</button></dialog>')
+    form = ""
+    spec = {f["name"]: f for f in scr.get("fields") or []}
+    if btns or navs:
+        def field(n):
+            f = spec.get(n) or {"name": n, "label": n}
+            hid, fid = f"h-{esc(sid)}-{esc(n)}", f"f-{esc(sid)}-{esc(n)}"
+            hint = f' aria-describedby="{hid} {fid}-chyba"' if f.get("hint") else f' aria-describedby="{fid}-chyba"'
+            note = f'<span id="{hid}" class="napoveda">{esc(f["hint"])}</span>' if f.get("hint") else ""
+            note += f'<span id="{fid}-chyba" class="chyba-pole" role="alert" hidden>{esc(f.get("error") or "Zkontrolujte hodnotu.")}</span>'
+            lim = (" required" if f.get("required") else "") + (" data-aid-draft" if f.get("draft") else "") + (f' maxlength="{f["maxlength"]}"' if f.get("maxlength") else "")
+            if "min" in f or "max" in f:
+                lim += ' type="number" step="any"' + (f' min="{f["min"]}"' if "min" in f else "") + (f' max="{f["max"]}"' if "max" in f else "")
+            if f.get("choices"):
+                opts = "".join(f'<option value="{esc(c["value"])}">{esc(c["label"])}</option>' for c in f["choices"])
+                return f'<p><label for="f-{esc(sid)}-{esc(n)}">{esc(f["label"])}</label> <select id="f-{esc(sid)}-{esc(n)}" name="{esc(n)}"{hint}>{opts}</select> {note}</p>'
+            return f'<p><label for="{fid}">{esc(f["label"])}</label> <input id="{fid}" name="{esc(n)}"{hint}{lim}> {note}</p>'
+        # a filter has its own form with its own fields (the inputs its steps type), the sends keep the rest (H5 run 3 review)
+        own_of = lambda aid: list(dict.fromkeys(n for t in m["tasks"] for st in t["steps"] if st["screen"] == sid and st["action"] == aid for n in st.get("input") or {}))
+        nav_only = {n for aid in navs for n in own_of(aid)} - {n for t in m["tasks"] for st in t["steps"] if st["screen"] == sid and st["action"] not in navs for n in st.get("input") or {}}
+        if btns:
+            first = next(a for a in mine if a["kind"] == "submit")
+            form = (f'<form method="get" action="{esc(url[first["to"]])}" data-aid-form novalidate>{"".join(field(n) for n in fields if n not in nav_only)}'
+                    f'<p class="chyba" role="alert" tabindex="-1" data-aid-error hidden>{esc(scr["states"]["error"])}</p>{"".join(btns)}</form>')
+        for aid, (a, b) in navs.items():
+            form += (f'<form method="get" action="{esc(url[a["to"]])}{tail(a)}" data-aid-form novalidate>{"".join(field(n) for n in own_of(aid) if n in nav_only)}'
+                     f'<p class="chyba" role="alert" tabindex="-1" data-aid-error hidden>{esc(scr["states"]["error"])}</p>{b}</form>')
+    return form + (f'<div class="akce">{"".join(acts)}</div>' if acts else "")
+
+
+STATE_NAMES = (("validation", "chyba validace"), ("empty", "prázdno"), ("loading", "načítání"), ("failure", "selhání"),
+               ("permission", "oprávnění"), ("recovery", "obnova po přerušení"))
+
+
+def app_page(m, scr, approved, fields, results, ends, shell):
+    sid = scr["id"]
+    url = {x["id"]: (x.get("url") or f"/{x['id']}/") for x in m["screens"]}
+    cur = ' aria-current="page"'
+    nav = "".join(f'<li><a href="{esc(url[x["id"]])}"{cur if x["id"] == sid else ""}>{esc(x["title"])}</a></li>'
+                  for x in m["screens"] if x["nav"] and not x.get("shell"))
+    mo = m.get("modes") or []
+    msw = ("" if not mo else f'<p class="rezimy" data-aid-modes-list="{esc(" ".join(x["id"] for x in mo))}">Režim (ukázka): '
+           + " ".join(f'<a href="?rezim={esc(x["id"])}" data-aid-rezim-link="{esc(x["id"])}" title="{esc(x.get("text") or "")}">{esc(x["label"])}</a>' for x in mo) + "</p>")
+    bar = msw + "".join(f'<div class="lista" role="group" data-aid-screen="{esc(x["id"])}" aria-label="{esc(x["title"])}">'
+                  + ("" if not mo else '<p class="lista-rezim" role="status">' + "".join(   # the mode now, with what it means (P116 pilot: the bar said Demo běží in every mode)
+                      f'<span data-aid-mode-is="{esc(md["id"])}"{"" if i == 0 else " hidden"}>{esc(md["label"])}' + (f': {esc(md["text"])}' if md.get("text") else "") + '</span>'
+                      for i, md in enumerate(mo)) + "</p>")
+                  + f'<p class="lista-stav" role="status">{esc(x["states"]["filled"])}</p>'
+                  + ("" if not (x.get("sample") or x.get("mode_sample")) else '<ul class="lista-ukazka">' + "".join(f"<li>{esc(v)}</li>" for v in x.get("sample") or [])
+                     + "".join(f'<li data-aid-mode-is="{esc(md)}"{"" if md == (mo or [{}])[0].get("id") else " hidden"}>{esc(v)}</li>' for md, rows in (x.get("mode_sample") or {}).items() for v in rows) + "</ul>")   # what the bar shows, not only its buttons; its own sample (H5 run 3)
+                  + f'{actions_html(m, x, url, shell[x["id"]][0], shell[x["id"]][1])}</div>' for x in m["screens"] if x.get("shell"))
+    switch = "".join(f'<a href="?stav={k}" data-aid-stav-link="{k}">{t}</a> ' for k, t in STATES)
+    res = "".join(f'<p class="vysledek" role="status" data-aid-result="{esc(t)}">{esc(e)}</p>' for t, e in results)
+    retry = f'<p><a class="akce" href="{esc(url[sid])}" data-aid-retry>Zkusit znovu</a></p>'
+    tables = "".join(f'<table tabindex="0"><caption>{esc(tb["caption"])}</caption><thead><tr>' + "".join(f'<th scope="col">{esc(c)}</th>' for c in tb["columns"])
+                     + "</tr></thead><tbody>" + "".join("<tr>" + "".join(f"<td>{esc(c)}</td>" for c in row) + "</tr>" for row in tb["rows"]) + "</tbody></table>"
+                     for tb in scr.get("tables") or [])
+    first_mode = (m.get("modes") or [{}])[0].get("id")
+    sample = ("" if not (scr.get("sample") or scr.get("mode_sample") or tables) else '<figure class="ukazka"><figcaption>Ukázka (ne skutečná data)</figcaption>'
+              + ("" if not (scr.get("sample") or scr.get("mode_sample")) else "<ul>" + "".join(f"<li>{esc(x)}" + (f'<div class="polozka-akce">{actions_html(m, scr, url, fields, ends, k)}</div>' if any(a.get("item") == k for a in scr["actions"]) else "")
+                                                               + "</li>" for k, x in enumerate(scr.get("sample") or []))
+                 + "".join(f'<li data-aid-mode-is="{esc(md)}"{"" if md == first_mode else " hidden"}>{esc(x)}</li>' for md, rows in (scr.get("mode_sample") or {}).items() for x in rows)
+                 + "</ul>") + tables + "</figure>")
+    form_screen = any(a["kind"] == "submit" for a in scr["actions"])   # a form's error is retried by its own send, its input kept - not by a reload
+    states = "".join(f'<section class="stav" data-aid-state="{k}"><h2>{t}</h2><p>{esc(scr["states"][k])}</p>{sample if k == "filled" else ""}'
+                     f'{retry if k == "error" and not scr["states"][k].lower().startswith("nenastává") and not form_screen else ""}</section>' for k, t in STATES)
+    mine = [t for t in m["tasks"] if any(st["screen"] == sid for st in t["steps"])]
+    mod = screens_module()
+    tstates = "".join(f'<section class="stav-ulohy" role="status" data-aid-task-state="{esc(t["id"])}.{k}" hidden><h2>{esc(t["title"])}: {n}</h2><p>{esc(t["states"][k])}</p></section>'
+                      for t in m["tasks"] for k, n in STATE_NAMES if mod.task_state_url(m, t, k)[1] == sid)
+    inputs = {t["id"]: {k: v for st in t["steps"] if st["screen"] == sid for k, v in (st.get("input") or {}).items()} for t in mine}
+    inputs = {k: v for k, v in inputs.items() if v}
+    inputs_js = ("" if not inputs else '<script type="application/json" data-aid-inputs>' + json.dumps(inputs, ensure_ascii=False).replace("</", "<\\/") + "</script>")
+    tasks = ("" if not mine else '<details class="ulohy"><summary>Stavy úloh na této obrazovce</summary>' + "".join(
+        f'<h3>{esc(t["title"])}</h3><ul>' + "".join(f"<li>{n}: {esc(t['states'][k])}</li>" for k, n in STATE_NAMES) + "</ul>" for t in mine)
+        + "</details>")
+    data = ("" if not scr.get("data") else '<details class="data"><summary>Odkud jsou data na obrazovce</summary><ul>' + "".join(
+        f'<li>{esc(d["what"])}: {esc(d["source"])}; {esc(d["freshness"])}</li>' for d in scr["data"]) + "</ul></details>")
+    li = lambda xs: "<ul>" + "".join(f"<li>{x}</li>" for x in xs) + "</ul>"
+    foot = "".join(f'<details><summary>{t}</summary>{li(xs)}</details>' for t, xs in (
+        ("Slovník pojmů", [f"<b>{esc(g['term'])}</b>: {esc(g['meaning'])}" for g in m.get("glossary") or []]),
+        ("Odkud jsou čísla v ukázkách", [f"<b>{esc(v['value'])}</b>: {esc(v['source'])}" for v in (m.get("values") or {}).values()]),
+        ("Co aplikace záměrně nedělá", [f"{esc(o['what'])}: {esc(o['why'])}" for o in m.get("out_of_scope") or []]),
+        ("Stopa požadavků", [f"{esc(r['id'])} ({esc(r['source'])}): {esc(r['text'])} → " + esc(", ".join(r.get("covered_by") or []) or "mimo rozsah: " + str(r.get("out_of_scope")))
+                             for r in m.get("requirements") or []])) if xs)
+    banner = "" if approved else '<p class="navrh" role="status" data-aid-draft>Návrh: model čeká na schválení vlastníkem.</p>'
+    return (f'<!doctype html>\n<html lang="cs" {MARK} data-aid-app>\n<head><meta charset="utf-8">'
+            f'<meta name="viewport" content="width=device-width, initial-scale=1"><title>{esc(scr["title"])} · {esc(m.get("app") or "aplikace")}</title>'
+            '<style>[hidden]{display:none!important}table{display:block;max-width:100%;overflow-x:auto}body{font:16px/1.5 system-ui,sans-serif;margin:0}header,main,footer{padding:16px;max-width:1100px;margin:auto}'
+            'nav ul{display:flex;flex-wrap:wrap;gap:12px;list-style:none;padding:0}.stav{border:1px solid #888;padding:12px;margin:12px 0}'
+            '.navrh{background:#fe9;padding:8px 16px;margin:0}.chyba{border:2px solid #b00;padding:8px}.lista{border-bottom:2px solid #333;padding:8px 0}'
+            'a,button,summary,input{min-height:44px}a,button{display:inline-block;margin:4px 8px 4px 0}'
+            ':focus-visible{outline:3px solid #06c;outline-offset:2px}</style></head>\n<body>\n'
+            f'{banner}<header><p class="znacka">{esc(m.get("app") or "")}</p>{bar}<nav aria-label="Aplikace"><ul>{nav}</ul></nav></header>\n'
+            f'<main data-aid-screen="{esc(sid)}"{" data-aid-form" if form_screen else ""}><h1>{esc(scr["title"])}</h1><p class="ucel">{esc(scr["purpose"])}</p>'
+            f'<nav class="stavy" aria-label="Stav obrazovky">{switch}</nav><p class="oznameni" role="status" aria-live="polite" data-aid-stav-oznameni></p>{res}{tstates}{states}<p class="chyba" role="alert" tabindex="-1" data-aid-error-global hidden>{esc(scr["states"]["error"])}</p>{actions_html(m, scr, url, fields, ends)}{data}{tasks}{inputs_js}</main>\n'
+            + (f'<footer>{foot}</footer>\n' if foot else "") + f'<script>{APP_JS}</script>\n</body>\n</html>\n')
+
+
+def build_app(p):
+    """One page per screen at site/<screen>/index.html (site/index.html = the first screen in the navigation): the
+    navigation, the screen's four states (?stav=, all visible without JS), its actions with data-aid-action, the
+    submit actions in one form whose fields are the inputs the model's tasks give there (sent with fetch: a failing
+    request shows the error state and keeps the input), destructive actions behind their confirm question, and on the
+    screen where a task ends the text its done_when expects. A model not approved by the PM (or changed since) is
+    built with the draft banner on every page."""
+    mf = os.path.join(p, "docs", "design", "screens.json")
+    if not os.path.isfile(mf):
+        die("no docs/design/screens.json: the app skeleton is built from the model of screens and tasks "
+            "(step Obrazovky a úlohy, references/local/aplikace-postup.md)", 2)
+    mod = screens_module()
+    try:
+        m = mod.load(p)
+    except ValueError as e:
+        die(f"docs/design/screens.json is not JSON ({e})", 2)
+    bad = mod.violations(m, p)
+    if bad:
+        die("the model fails aid-ui-screens.py check:\n" + "\n".join("screens: " + b for b in bad), 2)
+    m = mod.resolved(m)   # the named values in every text: one number, one place
+    site = os.path.join(p, "site")
+    no_symlinks(p, "site", ".aid-ui/skeleton")
+    import hashlib
+    sha = hashlib.sha256(open(mf, "rb").read()).hexdigest()
+    try:
+        approved = (json.load(open(os.path.join(p, "docs", "design", "brand-state.json"), encoding="utf-8")).get("app") or {}).get("approved_model_sha") == sha
+    except (OSError, ValueError):
+        approved = False
+    fields = {x["id"]: [f["name"] for f in x.get("fields") or []] for x in m["screens"]}   # every field the screen declares
+    for t in m["tasks"]:
+        for st in t["steps"]:
+            for n in st.get("input") or {}:
+                fields.setdefault(st["screen"], [])
+                if n not in fields[st["screen"]]:
+                    fields[st["screen"]].append(n)
+    results, ends = {}, {}
+    for t in m["tasks"]:
+        results.setdefault(t["done_when"]["screen"], []).append((t["id"], t["done_when"]["expect"]))
+        last = t["steps"][-1]   # the actions that end the task: its last step's, and a recover of a failure at that step
+        acts = [last["action"]] + [fp["recover"] for fp in t["failure_paths"] if fp["at_step"] == len(t["steps"])]
+        for a in acts:
+            ends.setdefault(last["screen"], {}).setdefault(a, [])
+            if t["id"] not in ends[last["screen"]][a]:
+                ends[last["screen"]][a].append(t["id"])
+    shell = {x["id"]: (fields.get(x["id"], []), ends.get(x["id"], {})) for x in m["screens"] if x.get("shell")}
+    home = next(x for x in m["screens"] if x["nav"] and not x.get("shell"))
+    files = {}
+    for x in m["screens"]:   # two screens on one address would overwrite each other silently; the shell has no page
+        if x.get("shell"):
+            continue
+        f = page_file(site, mod.screen_url(x))
+        if f in files:
+            die(f"screens {files[f]} and {x['id']} both become {os.path.relpath(f, site)}", 2)
+        files[f] = x["id"]
+    entries = [(page_file(site, mod.screen_url(x)),
+                lambda x=x: app_page(m, x, approved, fields.get(x["id"], []), results.get(x["id"], []), ends.get(x["id"], {}), shell))
+               for x in m["screens"] if not x.get("shell")]
+    if os.path.join(site, "index.html") not in files:   # no screen at "/": the home page is the first screen in the navigation
+        entries.append((os.path.join(site, "index.html"), lambda: app_page(m, home, approved, fields.get(home["id"], []), results.get(home["id"], []),
+                                                                         ends.get(home["id"], {}), shell)))
+    out = write_pages(p, site, entries)
+    if not approved and out["kept"]:   # a built page is never rewritten: it cannot carry the banner; the gate refuses the model
+        warn("built pages kept without the draft banner (the model is not approved): " + ", ".join(out["kept"])
+             + "; the gate refuses until the PM approves this model")
+    print(json.dumps(out | {"model_sha256": sha, "approved": approved}, ensure_ascii=False))
 
 
 def facts_row(p, site, pages, facts, tmp):
@@ -266,6 +602,15 @@ def facts_row(p, site, pages, facts, tmp):
 
 
 def check(p):
+    if app_kind(p):   # P116: an app's skeleton stands on its model; the web's tree, H1 and facts rows do not apply
+        mod = screens_module()
+        bad = mod.violations(mod.load(p), p) if os.path.isfile(os.path.join(p, "docs", "design", "screens.json")) else ["no docs/design/screens.json"]
+        for b in bad:
+            print("FAIL " + b)
+        if bad:
+            sys.exit(1)
+        print("skeleton-check: OK (aplikace: model obrazovek a úloh prošel kontrolou)")
+        return
     s, facts = load(p)
     site = os.path.join(p, "site")
     no_symlinks(p, "site", ".aid-ui/skeleton")

@@ -82,6 +82,17 @@ brief that `/aid-plan` writes the plan from; the run gate `check_ui_handover` th
 only the handed-over files with no critical item open; `aid-ui-quality.py launch` rates the live
 web in its own loop. Detail: `skills/ui-design/SKILL.md`, section Předání.
 
+## Web applications (P116)
+
+For `type: webapp` the studio leads its own path (`skills/ui-design/references/local/aplikace-postup.md`): the model of
+screens and tasks `docs/design/screens.json` (`aid-ui-screens.py check`; tasks with the seven states of UA-1 and a
+verifiable result) instead of the page structure, a clickable skeleton with every screen's states, the tasks approved
+by the product owner (the PM's answer only, bound to the model's sha), a gate whose task scenarios are generated from
+the model (`app_flows`, `app_states`, `keyboard_flows`, `task_recovery`), for an existing app a baseline that every
+task of today must survive (`aid-ui-baseline.py`), rubrics of both roles for apps, and package version 2 whose brief
+is a code-change brief; the run gate runs the tasks against the project's app. Slogan, SEO and logo (brand
+`existing|none`) are skipped with a recorded reason.
+
 ## Relationship
 
 The studio itself runs outside the FSM: no AID run calls it. It hands over to `/aid-plan` and

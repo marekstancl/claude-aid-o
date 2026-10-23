@@ -1,0 +1,4 @@
+[
+ {"id": "prehled", "title": "Podívat se na dnešní souhrn", "steps": [{"url": "/"}], "login": null, "result": {"url": "/", "expect": "3 objednávky čekají"}},
+ {"id": "hledat", "title": "Najít zboží", "steps": [{"url": "/?hledat=1", "input": {"Hledaný výraz": "mouka"}, "action": "Hledat"}], "login": null, "result": {"expect": "Nalezeno: mouka"}}
+]

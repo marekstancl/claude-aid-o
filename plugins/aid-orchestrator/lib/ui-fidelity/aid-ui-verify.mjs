@@ -16,6 +16,12 @@
 // `aid-ui-state.sh build-id` (same files -> same digests). Screenshots: <out>/shots/.
 // Browsers: chromium ($CHROME, else Playwright's), webkit (Playwright's); a launch failure
 // -> that browser's rows not_covered with the install hint.
+// Webapp (P116): the flows are the rows of aid-ui-screens.py matrix (docs/design/screens.json): every task x normal
+// (app_flows), keyboard (keyboard_flows), fail-<n> (task_recovery) through its generated scenario
+// .aid-ui/scenarios/<task>.mjs (aid-ui-flows.py; one of another model fails the row), which returns {response, done, why}
+// - the row passes only with done === true; every screen x empty|loading|error|filled (page "screen:<id>", app_states)
+// opened at <url>?aid-test=1&stav=<state>, passing when its data-aid-state block shows text. Every row of the four
+// checks and the result carry model_sha256. A pwa keeps structure.flows below.
 // App flows: <project>/.aid-ui/scenarios/<flow id>.mjs, default export
 // async ({page, base, role, state, credentials}) that drives the screen into that state and
 // throws on failure; credentials = <project>/.aid-ui/test-credentials.json[role] (test
@@ -31,6 +37,7 @@
 // Exit: 0 result written, 1 run error, 2 usage.
 import { chromium, webkit } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -61,6 +68,17 @@ fs.mkdirSync(out, { recursive: true });
 // page key -> URL: a/index.html -> /a/, index.html -> /, x.html -> /x.html
 const urlOf = p => new URL(p === 'index.html' ? '' : p.endsWith('/index.html') ? p.slice(0, -10) : p, base).href;
 const sha = f => createHash('sha256').update(fs.readFileSync(f)).digest('hex');
+// P118: one artifact per run - the site (and an app's model and scenarios) as they were when the run began; a run
+// whose version changed under it writes no result (a gate over half the old and half the new version proves nothing)
+const treeSha = d => { const h = createHash('sha256'); const root = fs.existsSync(d) ? fs.realpathSync(d) : d; const seen = new Set();
+  const walk = x => { if (!fs.existsSync(x)) return; const rx = fs.realpathSync(x); if (seen.has(rx)) return; seen.add(rx);   // no loop
+  for (const e of fs.readdirSync(x, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    const f = path.join(x, e.name); const st_ = fs.statSync(f, { throwIfNoEntry: false }); if (!st_) continue;   // a link counts as its target,
+    const rf = fs.realpathSync(f); if (rf !== root && !rf.startsWith(root + path.sep)) { h.update(path.relative(d, f) + '\0outside\n'); continue; }   // never one out of the tree
+    if (st_.isDirectory()) walk(f); else if (st_.isFile()) h.update(path.relative(d, f) + '\0' + sha(f) + '\n'); } }; walk(d); return h.digest('hex'); };
+const artifactNow = () => [treeSha(site), project ? treeSha(path.join(project, '.aid-ui', 'scenarios')) : '', project && fs.existsSync(path.join(project, 'docs/design/screens.json')) ? sha(path.join(project, 'docs/design/screens.json')) : ''].join('|');
+const ARTIFACT = artifactNow();
+fs.rmSync(path.join(out, 'result.json'), { force: true });   // a run that stops leaves no older result behind
 const inside = (root, f) => { const r = path.resolve(root, f); return r === root || r.startsWith(root + path.sep) ? r : null; };
 // site file behind a same-origin URL, or null (outside the site or not a file)
 function siteFile(u) {
@@ -312,11 +330,14 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
   // a web is measured as a first visit (privacy_before_consent); an app keeps its logged-in session
   if (st.variant?.type === 'web' || !st.variant?.type) await ctx.clearCookies();
   // a request the page itself cancelled by navigating away (a redirect to the login screen) is not a broken resource
-  page.on('requestfailed', r => { if (!/ABORTED|cancel/i.test(r.failure()?.errorText || '')) bad.push(`failed ${r.url()}`); });
+  // a task's failure variant forces its request to fail (aid-ui-flows.py): that failure is the test, not a broken link -
+  // the same page's other rows catch a link that is really broken (Trading 22. 10.: 64 rows of forced 500s)
+  const forced = /^fail-/.test(String(state || ''));
+  page.on('requestfailed', r => { if (!forced && !/ABORTED|cancel/i.test(r.failure()?.errorText || '')) bad.push(`failed ${r.url()}`); });
   let bytes = 0;
   page.on('response', async r => {
     bytes += Number(r.headers()['content-length'] || (await r.body().catch(() => Buffer.alloc(0))).length) || 0;
-    if (r.status() >= 400 && r.url() !== url) bad.push(`${r.status()} ${r.url()}`);
+    if (r.status() >= 400 && r.url() !== url && !forced) bad.push(`${r.status()} ${r.url()}`);
     if (r.request().resourceType() === 'image') {
       const len = Number(r.headers()['content-length'] || (await r.body().catch(() => Buffer.alloc(0))).length);
       // a 304 from the cache carries no content-type: the file extension stands in
@@ -329,20 +350,35 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
   let resp;
   try {
     resp = await page.goto(url, { waitUntil: 'networkidle' });
-    if (run) resp = (await run(page)) || resp;
+    if (run) {   // P116: an app scenario returns {response, done, why}; a web flow's plain return keeps working
+      const rv = await run(page);
+      if (rv && typeof rv === 'object' && 'done' in rv) { res.task = { done: rv.done === true, why: String(rv.why || '') }; resp = rv.response || resp; }
+      else resp = rv || resp;
+    }
+    if (!PAGE_ROW_CHECKS.some(want)) {   // P116: a gate that names no page check (a narrowed run) measures nothing more
+      for (const c of PAGE_ROW_CHECKS) res[c] = NA('not named in this checks.yaml');
+      Object.assign(res, { header: '', footer: '', html: await page.content() });
+      await page.close();
+      return res;
+    }
   } catch (e) {
     await page.close();
     return { error: String(e.message || e).slice(0, 200) };
   }
   res.http_200 = resp && resp.status() === 200 ? ['pass', ''] : ['fail', `HTTP ${resp ? resp.status() : 'no response'} for ${url}`];
   await page.evaluate(() => document.fonts.ready).catch(() => {});
-  const settled = await settleMotion(page);
+  // P118: a gate that does not measure motion, on a page that started no animation and has no intro, does not wait for
+  // motion to settle (the app skeleton: ~1.5 s a row); a gate that measures motion always waits
+  const still = !applies('motion_settled') && await page.evaluate(() => !document.getAnimations().length && !document.querySelector('[data-aid-intro]')).catch(() => false);
+  const settled = still ? { ok: true, ms: 0 } : await settleMotion(page);
   await scrollAll(page);
   // reveals fire while scrolling: settle again before anything is measured or photographed
-  const settled2 = settled.ok ? await settleMotion(page) : settled;
+  const still2 = still && await page.evaluate(() => !document.getAnimations().length).catch(() => false);   // scrolling may start a reveal
+  const settled2 = still2 ? settled : settled.ok ? await settleMotion(page) : settled;
   // script motion watched once per page, width and browser (3 s each)
   const smKey = `${url}@${page.viewportSize()?.width}@${page.context().browser()?.browserType().name()}`;   // per width (whole review: a phone-only loop)
-  const scripted = !settled2.ok ? null : SCRIPTED.has(smKey) ? SCRIPTED.get(smKey) : SCRIPTED.set(smKey, await scriptMotion(page)).get(smKey);
+  if (settled2.ok && applies('motion_settled') && !SCRIPTED.has(smKey)) SCRIPTED.set(smKey, scriptMotion(page));   // the promise: rows at once watch once
+  const scripted = !settled2.ok || !applies('motion_settled') ? null : await SCRIPTED.get(smKey);
   res.motion_settled = !settled2.ok ? ['fail', settled2.why] : scripted ? ['fail', `skriptová animace běží dál: ${scripted}`]
     : ['pass', `settled after ${settled.ms} ms, ${settled2.ms} ms after scrolling, no script motion`];
   // H1 (12. 10. 2026, klient-Codex retro): what the visitor sees without scripts and before any scroll
@@ -378,12 +414,13 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
     res.brand_assets = drawn.length ? ['fail', `not from the brand package: ${drawn.join(', ')}`] : ['pass', ''];
   }
   const broken = [...bad];
-  for (const h of new Set(o.hrefs.map(h => h.split('#')[0]).filter(h => h.startsWith(new URL(base).origin)))) {
+  if (applies('links_resources')) for (const h of new Set(o.hrefs.map(h => h.split('#')[0]).filter(h => h.startsWith(new URL(base).origin)))) {
     const r = await page.request.get(h).catch(() => null);
     if (!r || r.status() >= 400) broken.push(`link ${h.replace(base, '/')} ${r ? r.status() : 'failed'}`);
   }
   res.links_resources = broken.length ? ['fail', [...new Set(broken)].join(', ')] : ['pass', ''];
-  try {
+  if (!applies('axe')) res.axe = NA('not named in this gate');
+  else try {
     const ax = await new AxeBuilder({ page }).analyze();
     const v = ax.violations.filter(x => x.impact === 'serious' || x.impact === 'critical');
     res.axe = v.length ? ['fail', v.map(x => `${x.impact} ${x.id} (${x.nodes.length})`).join(', ')] : ['pass', ''];
@@ -391,7 +428,7 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
   // P113 (fix 64): density of the widest file a 2x screen can get - every candidate (src, srcset, <picture> sources) is
   // loaded in a fresh Image() and its real width read (srcset descriptors are claims; the element's naturalWidth is already
   // divided by the density); widest under 2x the shown width = blurred. A pass that cannot run is not a pass.
-  const dens = await page.evaluate(async list => {
+  const dens = !applies('image_weight') ? [] : await page.evaluate(async list => {
     const out = [];
     const width = u => new Promise(r => { const im = new Image(); im.onload = () => r(im.naturalWidth); im.onerror = () => r(0); im.src = u; });
     for (const x of list) {
@@ -422,10 +459,14 @@ async function pageRows(ctx, url, key, role, state, run, facts, brand, applies =
   res.business_minimum = biz.length ? ['fail', biz.join('; ')] : ['pass', ''];
   const shot = inside(path.join(out, 'shots'), path.join(...key));
   if (!shot) throw new Error(`screenshot path ${key.join('/')} leaves the output directory`);
-  fs.mkdirSync(path.dirname(shot), { recursive: true });
-  await page.screenshot({ path: shot, fullPage: true });
-  res.screenshots_reviewed = ['pass', `screenshot ${path.relative(out, shot)}; the PM's review is approve-page`];
-  Object.assign(res, await moreRows(page, url, requested, applies));   // after the screenshot: these move focus and media
+  if (applies('screenshots_reviewed')) {
+    fs.mkdirSync(path.dirname(shot), { recursive: true });
+    await page.screenshot({ path: shot, fullPage: true });
+    res.screenshots_reviewed = ['pass', `screenshot ${path.relative(out, shot)}; the PM's review is approve-page`];
+  } else res.screenshots_reviewed = NA('not named in this gate');
+  const MORE = ['privacy_before_consent', 'token_usage', 'sticky_panels', 'safe_area', 'touch_targets', 'keyboard', 'a11y_basics', 'mobile_native', 'reduced_motion'];
+  if (MORE.some(c => applies(c))) Object.assign(res, await moreRows(page, url, requested, applies));   // after the screenshot: these move focus and media
+  else for (const c of MORE) res[c] = NA('not named in this gate');   // after the screenshot: these move focus and media
   res.html = await page.content();
   await page.close();
   return res;
@@ -1139,7 +1180,13 @@ const CHECKS = ['http_200', 'glyph_coverage', 'no_overflow', 'one_line_controls'
   'app_task_states', 'screenshots_reviewed', 'no_overlap', 'brand_consistency', 'page_weight', 'business_minimum', 'ai_search',
   'brand_package', 'design_standard_doc', 'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets',
   'safe_area', 'privacy_before_consent', 'vision_doc', 'coverage', 'customer_page', 'all_pages', 'copy_review', 'motion_settled', 'motion_fidelity',
-  'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots', 'form_delivery', 'text_clearance', 'a11y_basics', 'mobile_native'];
+  'content_without_js', 'first_paint_visible', 'form_states', 'task_test', 'photo_slots', 'form_delivery', 'text_clearance', 'a11y_basics', 'mobile_native',
+  'app_flows', 'app_states', 'keyboard_flows', 'task_recovery'];
+// the checks pageRows measures on every row (PAGE_CHECKS) plus brand_consistency, which the caller also reads
+const PAGE_ROW_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed',
+  'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets', 'safe_area', 'privacy_before_consent',
+  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states', 'photo_slots', 'text_clearance', 'a11y_basics', 'mobile_native',
+  'brand_consistency'];
 const named = Object.keys(ck.checks || {});
 const extra = CHECKS.filter(c => !named.includes(c)), unimpl = named.filter(c => !CHECKS.includes(c));
 if (unimpl.length) usage(`checks without an implementation: ${unimpl.join(', ')}`);
@@ -1243,12 +1290,26 @@ if (opt['copy-subject']) {
 }
 
 const isApp = ['webapp', 'pwa'].includes(st.variant?.type);
-const flows = isApp ? (st.structure?.flows || []) : [];
+// P116: a webapp's flows are the rows of its model (aid-ui-screens.py matrix: task x normal | keyboard | fail-<n>,
+// screen x four states); a pwa keeps structure.flows
+const APP_CHECKS = ['app_flows', 'app_states', 'keyboard_flows', 'task_recovery'];
+const APPV = st.variant?.type === 'webapp' ? (() => {
+  if (!project) { console.error('aid-ui-verify.mjs: a webapp gate needs --project (its model docs/design/screens.json)'); process.exit(1); }
+  const r = spawnSync('python3', [path.join(HERE, '../../scripts/aid-ui-screens.py'), 'matrix', project], { encoding: 'utf8' });
+  if (r.status !== 0) { console.error(`aid-ui-verify.mjs: the app model: ${(r.stderr || '').trim().split('\n').pop()}`); process.exit(1); }
+  return JSON.parse(r.stdout);
+})() : null;
+const flows = isApp && !APPV ? (st.structure?.flows || []) : [];
+const STORAGE = APPV && fs.existsSync(path.join(project, '.aid-ui/test-storage.json')) ? path.join(project, '.aid-ui/test-storage.json') : null;
 const roles = (st.structure?.roles || []).map(r => String(r?.id ?? r));
 const matrix = [];
 for (const p of pages) for (const v of VPS) for (const b of BRS) matrix.push({ page: p, viewport: v, browser: b, role: '', state: '' });
 for (const f of flows) for (const s of f.states || []) for (const r of (roles.length ? roles : [''])) for (const v of VPS) for (const b of BRS)
   matrix.push({ page: String(f.id), viewport: v, browser: b, role: r, state: String(s?.id ?? s) });
+// checks.yaml app_rows: the widths and browsers the app rows run at (a task is walked on a desktop and a phone)
+const AVPS = ck.app_rows?.viewports ? VPS.filter(v => ck.app_rows.viewports.map(String).includes(v)) : VPS;
+const ABRS = ck.app_rows?.browsers ? BRS.filter(b => ck.app_rows.browsers.map(String).includes(b)) : BRS;
+for (const a of APPV?.rows || []) for (const v of AVPS) for (const b of ABRS) matrix.push({ page: a.page, viewport: v, browser: b, role: '', state: a.state });
 
 const rows = [];
 const AP = ck.applies || {};
@@ -1261,7 +1322,15 @@ const applies = (check, m) => { const a = AP[check] || {};
   if (!brs.includes(m.browser) || (m.viewport !== undefined && !vps.includes(m.viewport)) || (a.flows === false && m.state)) return false;
   return a.scope !== 'project' || m.page === undefined
     || (m.page === home && m.viewport === vps[vps.length - 1] && m.browser === brs[0] && !m.state); };
-const put = (m, check, status, detail) => { if (want(check) && applies(check, m)) rows.push({ check, ...m, status, detail: detail || '' }); };
+// P118: rows run on this many browser contexts at once (AID_UI_GATE_WORKERS; default the CPUs less two, at most 10;
+// 1 = one after another). Results are the same and in the same order whatever the number (measured: F1 Trading 2112 rows)
+const WORKERS = Math.max(1, Math.min(16, Number(process.env.AID_UI_GATE_WORKERS) || Math.min(10, os.cpus().length - 2)));
+const ROWAT = new WeakMap();   // P118: result row -> its matrix row's index (rows of one matrix row are written by one worker, in order)
+const put = (m, check, status, detail, more) => {
+  if (!(want(check) && applies(check, m))) return;
+  const r = { check, ...m, status, detail: detail || '', ...(more || {}) };
+  ROWAT.set(r, matrix.indexOf(m)); rows.push(r);
+};
 const facts = factLeaves(), brand = brandFiles();
 const seo = want('seo') || want('ai_search') ? runSeo() : null;
 // ai: false -> the seo row (every finding not named ai-*), true -> the ai_search row. Site-wide
@@ -1332,9 +1401,8 @@ for (const p of pages) {
 let creds = {};
 if (project && fs.existsSync(path.join(project, '.aid-ui/test-credentials.json'))) creds = readJson(path.join(project, '.aid-ui/test-credentials.json'));
 
-const PAGE_CHECKS = ['http_200', 'no_overflow', 'one_line_controls', 'no_placeholders', 'facts_match', 'brand_assets', 'links_resources', 'axe', 'image_weight', 'screenshots_reviewed',
-  'token_usage', 'sticky_panels', 'keyboard', 'reduced_motion', 'touch_targets', 'safe_area', 'privacy_before_consent',
-  'no_overlap', 'page_weight', 'business_minimum', 'motion_settled', 'content_without_js', 'first_paint_visible', 'form_states', 'photo_slots', 'text_clearance', 'a11y_basics', 'mobile_native'];
+const PAGE_CHECKS = PAGE_ROW_CHECKS.filter(c => c !== 'brand_consistency');
+
 // brand_consistency also compares header and footer with the first page loaded in the same browser and viewport
 const firstShape = {};
 const visited = new Set();   // all_pages: every page load that answered, whichever checks are named
@@ -1351,33 +1419,84 @@ for (const b of BRS) {
     const ms = matrix.filter(m => m.browser === b && m.viewport === v);
     if (!browser) { for (const m of ms) for (const c of named) put(m, c, 'not_covered', why); continue; }
     const ctx = await browser.newContext({ viewport: { width: Number(v), height: HEIGHT[v] || 900 } });
-    for (const m of ms) {
-      const flow = flows.find(f => String(f.id) === m.page && m.state);
-      let run = null;
-      if (flow) {
+    const rowFn = async m => {   // one row; P118: rows run on WORKERS contexts at once, results sorted at the end
+      const app = APPV?.rows.find(a => a.page === m.page && a.state === m.state);
+      const flow = app || flows.find(f => String(f.id) === m.page && m.state);
+      let run = null, rowUrl = null;
+      const sha = APPV ? { model_sha256: APPV.model_sha256 } : undefined;
+      if (app && app.check === 'app_states' && m.page.startsWith('mode:')) {   // P118: in this mode each gated action is on or off as its modes say, off with its reason
+        rowUrl = new URL(`${app.url.replace(/^\/+/, '')}?aid-test=1&rezim=${m.state}`, base).href;
+        run = async page => {
+          const bad = [];
+          for (const x of app.expect || []) {
+            const el = page.locator(`[data-aid-action="${x.action}"]`).first();
+            // off = it cannot be used: a disabled control or a link without a target (aria-disabled alone is no stop)
+            const off = await el.evaluate(e => e.disabled === true || (e.tagName === 'A' && !e.hasAttribute('href'))).catch(() => null);
+            const rid = await el.getAttribute('data-aid-reason').catch(() => null);
+            const why = !!rid && await page.locator(`[id="${rid}"]`).first().isVisible().catch(() => false) && (await page.locator(`[id="${rid}"]`).first().innerText().catch(() => '')).trim().length > 0;
+            if (off === null) bad.push(`${x.action}: na stránce není`);
+            else if (off === x.enabled) bad.push(`${x.action}: v režimu ${m.state} ${x.enabled ? 'má jít, ale je vypnutá' : 'nemá jít, ale jde'}`);
+            else if (off && !why) bad.push(`${x.action}: vypnutá bez viditelného důvodu`);
+          }
+          return { response: null, done: !bad.length, why: bad.join('; ') };
+        };
+      } else if (app && app.check === 'app_states') {   // the screen (or a task's state) in test mode with ?stav=: its block shows text
+        const task = m.page.startsWith('task:') ? m.page.slice('task:'.length) : null;
+        const scr = task ? app.screen : m.page.slice('screen:'.length);
+        rowUrl = new URL(`${app.url.replace(/^\/+/, '')}?aid-test=1&stav=${task ? task + '.' : ''}${m.state}`, base).href;
+        run = async page => {
+          const loc = page.locator(task ? `[data-aid-task-state="${task}.${m.state}"]` : `[data-aid-screen="${scr}"] [data-aid-state="${m.state}"]`).first();
+          // P118: the screen's loading state says it to a reader, and no other state keeps saying it
+          const busyNow = task ? null : await page.locator(`main[data-aid-screen="${scr}"][aria-busy="true"]`).count().catch(() => 0) > 0;
+          const busy = task || (m.state === 'loading' ? busyNow : !busyNow);
+          const ok = busy && (await loc.isVisible().catch(() => false)) && (await loc.innerText().catch(() => '')).trim().length > 0;
+          return { response: null, done: ok, why: ok ? '' : task ? `úloha ${task}: stav ${m.state} nejde v testovacím režimu vyvolat (?stav=${task}.${m.state}, viditelný data-aid-task-state s textem)`
+            : !busy ? (m.state === 'loading' ? `obrazovka ${scr}: stav načítání nemá na obsahu aria-busy="true"` : `obrazovka ${scr}: stav ${m.state} nechává aria-busy="true"`)
+            : `obrazovka ${scr} v testovacím režimu (?aid-test=1&stav=${m.state}) neukazuje stav ${m.state} (viditelný data-aid-state s textem)` };
+        };
+      } else if (flow) {
         // flow ids come from the project's state: allowlisted, and the module must resolve inside .aid-ui/scenarios
-        if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(m.page)) { for (const c of named) put(m, c, 'not_covered', `refused flow id ${JSON.stringify(m.page)}: must match ^[a-z0-9][a-z0-9-]{0,63}$; no scenario imported`); continue; }
+        if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(m.page)) { for (const c of named) put(m, c, 'not_covered', `refused flow id ${JSON.stringify(m.page)}: must match ^[a-z0-9][a-z0-9-]{0,63}$; no scenario imported`); return; }
         const scen = project && path.join(project, '.aid-ui/scenarios');
         let script = scen && inside(scen, `${m.page}.mjs`);
         // a symlinked scenario must not lead outside the scenarios directory either
         if (script && fs.existsSync(script)) script = fs.statSync(script).isFile() && inside(fs.realpathSync(scen), path.basename(script)) === fs.realpathSync(script) ? script : null;
-        if (!script || !fs.existsSync(script)) { for (const c of named) put(m, c, 'not_covered', `no scenario .aid-ui/scenarios/${m.page}.mjs`); continue; }
-        const { default: scenario } = await import(pathToFileURL(script).href);
+        if (!script || !fs.existsSync(script)) { for (const c of named) put(m, c, 'not_covered', `no scenario .aid-ui/scenarios/${m.page}.mjs`); return; }
+        const mod = await import(pathToFileURL(script).href), scenario = mod.default;
+        if (app && mod.model_sha256 !== APPV.model_sha256) {   // generated from another model: the row tests what the agent remembered
+          for (const c of named) put(m, c, APP_CHECKS.includes(c) && c === app.check ? 'fail' : 'not_covered',
+            `scénář .aid-ui/scenarios/${m.page}.mjs je z jiného modelu (${String(mod.model_sha256).slice(0, 12)}, model ${APPV.model_sha256.slice(0, 12)}); aid-ui-flows.py generate`, sha);
+          return;
+        }
         run = async page => scenario({ page, base, role: m.role, state: m.state, credentials: creds[m.role] || null });
       }
       // page, role and state come from the project's state: one filename segment, no path separators or leading dots
       const key = [b, v, `${m.page}${m.role ? '.' + m.role : ''}${m.state ? '.' + m.state : ''}.png`.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+/, '_')];
-      const r = await pageRows(ctx, flow ? base : urlOf(m.page), key, m.role, m.state, run, facts, brand, c => applies(c, m));
+      // P116: every app row in a fresh context (one task's data or login never leaks into the next), with the project's
+      // stored test login (.aid-ui/test-storage.json, Playwright storageState) when it has one
+      // rows at once never share a context; a page row starts as it would in the shared one (no stored login)
+      const rctx = app ? await browser.newContext({ viewport: { width: Number(v), height: HEIGHT[v] || 900 }, ...(STORAGE ? { storageState: STORAGE } : {}) })
+        : WORKERS > 1 ? await browser.newContext({ viewport: { width: Number(v), height: HEIGHT[v] || 900 } }) : ctx;
+      let r;
+      try { r = await pageRows(rctx, rowUrl || (flow ? base : urlOf(m.page)), key, m.role, m.state, run, facts, brand, c => want(c) && applies(c, m)); }   // P118: only what this gate names is measured
+      finally { if (rctx !== ctx) await rctx.close().catch(() => {}); }
       if (r.error) {
-        for (const c of named) put(m, c, flow && c === 'app_task_states' ? 'fail' : 'not_covered', `${flow ? 'scenario' : 'page'} failed: ${r.error}`);
-        continue;
+        for (const c of named) put(m, c, flow && (c === 'app_task_states' || c === app?.check) ? 'fail' : APP_CHECKS.includes(c) ? 'pass' : 'not_covered',
+          APP_CHECKS.includes(c) && c !== app?.check ? `N/A: a row of ${app?.check || 'a flow'}` : `${flow ? 'scenario' : 'page'} failed: ${r.error}`, sha);
+        return;
+      }
+      for (const c of APP_CHECKS) {   // P116: each app row decides its own check; every other row of the matrix has it N/A
+        if (app && c === app.check) put(m, c, r.task?.done ? 'pass' : 'fail',
+          r.task?.done ? `${m.page} / ${m.state}: výsledek nastal` : (r.task ? r.task.why || 'výsledek nenastal' : 'scénář nevrátil {done}'), sha);
+        else put(m, c, 'pass', app ? `N/A: a row of ${app.check}` : APPV ? 'N/A: a page, not a task' : 'N/A: not a web application (webapp)', sha);
       }
       if (!flow && r.http_200[0] === 'pass') visited.add(`${m.page}@${m.viewport}@${m.browser}`);
       for (const c of PAGE_CHECKS) put(m, c, ...r[c]);
       if (!flow) {
         const k = `${b}/${v}`, f0 = firstShape[k] || (firstShape[k] = { page: m.page, header: r.header, footer: r.footer });
-        const diff = [r.header !== f0.header && 'header', r.footer !== f0.footer && 'footer'].filter(Boolean);
-        put(m, 'brand_consistency', ...(r.brand_consistency[0] === 'fail' || !diff.length ? r.brand_consistency
+        const diff = f0.failed ? [] : [r.header !== f0.header && 'header', r.footer !== f0.footer && 'footer'].filter(Boolean);
+        if (f0.failed && r.brand_consistency[0] !== 'fail') put(m, 'brand_consistency', 'not_covered', `the reference page ${f0.page} failed: header and footer not compared`);
+        else put(m, 'brand_consistency', ...(r.brand_consistency[0] === 'fail' || !diff.length ? r.brand_consistency
           : ['fail', `${diff.join(' and ')} differ from page ${f0.page}`]));
       } else put(m, 'brand_consistency', ...r.brand_consistency);
       put(m, 'app_task_states', 'pass', flow ? `scenario ${m.page} / ${m.state} passed` : (isApp ? 'a page, not a task' : 'not an application'));
@@ -1388,7 +1507,7 @@ for (const b of BRS) {
         put(m, 'required_files', site.length ? 'fail' : 'pass', site.join(', '));
         put(m, 'seo', ...(seo ? seoRow('_site') : ['pass', '']));
         put(m, 'ai_search', ...(seo ? seoRow('_site', true) : ['pass', '']));
-        continue;
+        return;
       }
       if (b !== 'chromium') put(m, 'glyph_coverage', 'not_covered', 'the font check reads Chrome DevTools data; Chromium only');
       // ponytail: aid-ui-glyph-check.mjs renders at 1440 px only; the result stands for every viewport
@@ -1405,7 +1524,14 @@ for (const b of BRS) {
       if (want('task_test') && applies('task_test', m)) put(m, 'task_test', ...(await taskTest(browser)));
       if (want('form_delivery') && applies('form_delivery', m)) put(m, 'form_delivery', ...(await formDelivery(browser)));
       if (want('copy_review') && applies('copy_review', m)) put(m, 'copy_review', ...(await copyRow(browser, m.page)));
-    }
+    };
+    // P118: the first page row alone (brand_consistency compares every page with it), then a pool of WORKERS
+    const firstPage = ms.find(m => !(APPV?.rows.find(a => a.page === m.page && a.state === m.state) || flows.find(f => String(f.id) === m.page && m.state)));
+    if (firstPage) await rowFn(firstPage);
+    if (firstPage && !firstShape[`${b}/${v}`]) firstShape[`${b}/${v}`] = { page: firstPage.page, failed: true };   // never a reference picked by timing
+    const rest = ms.filter(m => m !== firstPage);
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(WORKERS, rest.length) }, async () => { while (next < rest.length) await rowFn(rest[next++]); }));
     await ctx.close();
   }
   if (browser) await browser.close();
@@ -1422,8 +1548,12 @@ if (want('all_pages')) {
   for (const m of matrix) put(m, 'all_pages', ...st2);
 }
 
-const result = { run_at: new Date().toISOString(), build_id: st.build?.id, matrix, rows, fingerprints: fps };
-fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify(result, null, 1));
+// P118: the matrix's order whatever ran first; a stable sort keeps each matrix row's checks in the order they were written
+rows.sort((a, b) => ROWAT.get(a) - ROWAT.get(b));
+if (artifactNow() !== ARTIFACT) { console.error('aid-ui-verify.mjs: the version (site, model or scenarios) changed during the run; no result - run the gate again on one version'); process.exit(1); }
+const result = { run_at: new Date().toISOString(), artifact: createHash('sha256').update(ARTIFACT).digest('hex'), build_id: st.build?.id, matrix, rows, fingerprints: fps, ...(APPV ? { model_sha256: APPV.model_sha256 } : {}) };
+fs.writeFileSync(path.join(out, 'result.json.part'), JSON.stringify(result, null, 1));
+fs.renameSync(path.join(out, 'result.json.part'), path.join(out, 'result.json'));   // a reader never sees half a result
 const count = rows.reduce((a, r) => (a[r.status] = (a[r.status] || 0) + 1, a), {});
 console.log(`VERIFY: ${JSON.stringify(count)} -> ${path.join(out, 'result.json')}`);
 if (extra.length) console.log(`note: checks not named in this checks.yaml, not run: ${extra.join(', ')}`);

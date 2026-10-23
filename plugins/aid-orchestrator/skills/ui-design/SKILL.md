@@ -102,6 +102,91 @@ vstup klienta není kritérium práce studia. Schválit otázku místa jde jen s
 i míst, na kterých stojí. Projekt bez pohybu značky jen výjimkou PM (`place-record --place pohyb --without <odpověď>`).
 `aid-ui-state.sh decide --step` bere přesný název kroku z `sections.json` (sdělení i logo patří do „Zadání a obsah“).
 
+## Verze 1 je kompletní, kritik jen dolaďuje (PM 18. 10. 2026; P118 20. 10. 2026, všechna místa)
+
+Kdo vyrábí verzi pro role, dodá ji **se vším ze zadání a ověřenou**: role ji mají nezávisle hodnotit 9-10 a najít jen
+detaily. Před každým kolem místa (`aid-ui-quality.py round`, všechna místa, web i aplikace), v tomto pořadí:
+1. **Soupis požadavků** ze zadání projektu (zadání, plán fáze, podklady) - každý bod se zdrojem `soubor:řádek`, pokrytý
+   (`covered_by`: kde) nebo `out_of_scope` s důvodem. U aplikace na místě struktura míří `covered_by` na `task:<id>` nebo
+   `screen:<id>` modelu.
+2. **Návrh se píše proti nejvyšší kotvě** měřítek obou rolí místa a u existující aplikace proti tomu, **co appka
+   opravdu dělá** (kód, roadmapa, runbook), ne proti zadání obrazovek (P116 kolo 5: tři ukázky popisovaly chování,
+   které appka nemá). Fakta vytěží dva nezávislí čtenáři: `aid-ui-client.py facts <projekt>` (postup aplikace 3b).
+3. **Lint modelu** (`aid-ui-screens.py check`, sekundy) bez nálezu.
+4. **Strojové kontroly zelené:** u aplikace (i hotové, PM 23. 10. 2026) `aid-ui-verify.sh <projekt> --quick` nad modelem a webem teď (úlohy,
+   stavy, klávesnice, obnova na nejširší šířce, asi 3 minuty; stačí i `--precheck`), u hotového webu brána a
+   `gate-check`. Plná předběžná brána rozhoduje až předání.
+Zápis `aid-ui-quality.py self <projekt> --place <místo> --file <kontrola.json>` (jen soupis požadavků) to ověří a váže
+na otisk podkladů místa; `round` bez platné kontroly nad touto verzí nespustí. **Vlastní známky výrobce se nepíšou**
+(P118: v pilotu vždy „9“, role 4,9-8,8 - nic nerozhodovaly).
+
+**Nezávislý ověřovatel běží s rolemi, ne před nimi** (PM 21. 10. 2026, 1A; H5 běh 2: smyčka „ověřovatel dočista, pak
+role“ stála hodinu bez jediného kola). `round` ho pustí sám souběžně s rolemi, pokud nad touto verzí ještě neběžel
+(`aid-ui-client.py verify <projekt> --place <místo> --web <adresa verze>` jde pustit i ručně, třeba po opravě). Nástroj
+nafotí, co člověk na každé adrese verze vidí (i vypnuté akce, obsah polí a potvrzení řečené slovy), a Codex (záskok
+Claude Opus) to porovná s modelem, fakty a podklady projektu: ověří opravy minulého kola a hledá rozpory v celé verzi.
+Výsledek je podepsaný záznam mimo projekt, který píše jen nástroj (podpis brání omylu a ruční úpravě, ne úmyslu toho,
+kdo zná klíč); u každého výroku stojí, kde ho ověřovatel viděl, a nástroj odmítne adresu, která neslouží právě tuhle
+verzi, i neúplné nafocení. **Jeho rozpory a opravy, které neviděl, jsou nálezy kola** (role `verify`): výrobce je
+převezme a opraví spolu s nálezy rolí, jedním průchodem. Ověřovatel bez platné odpovědi, nebo verze změněná během
+kola = kolo neproběhlo; záznam kola nese podpisy záznamů ověřovatele, ze kterých nálezy vzešly. Hodnocení nasazení
+(`launch`) ověřovatele nepouští - hodnotí ostrou adresu, ne verzi souborů.
+Role u aplikace dostanou v podkladech i výsledek rychlé kontroly (nebo předběžné brány) nad modelem teď
+(`testy-kostry.md`: řádky po kontrolách a co neprošlo) - v bězích 3 a 4 ho jinak v každém kole chtěly jako chybějící.
+
+## Smyčka bez čekání, výrobce v čerstvém kontextu (P118, PM 20. 10. 2026)
+
+- **Po kole hlas a pokračuj.** Hlášení PM (co role navrhly, co se udělalo, cena a čas) se pošle a smyčka jede dál;
+  zastaví se jen na rozhodnutí, které je PM (P116: čekání bylo 3 h 21 min ze 6 h kola).
+- **Opravy dělá podagent v čerstvém kontextu.** `aid-ui-quality.py brief <projekt> --place <místo>` napíše brief
+  (nálezy k opravě, co dodal klient, lint, otevřené body ověřovatele, červené řádky rychlé kontroly); podagent dostane
+  jen jeho cestu a vrátí u každého nálezu větu do `fixed --evidence`. Hlavní vlákno řídí a výpisy brány nečte
+  (P116: 605 tis. tokenů kontextu na tah, 92 % ceny).
+- **Plugin se během běhu studia nemění**; jeho verze se zapisuje ke kolu (`round.json` `plugin`).
+
+## Opravy po přijatém kole: delta kolo, ne znovuotevření (P118, místa kromě hotového webu)
+
+Když místo prošlo a výrobce verzi ještě opraví (nálezy přijatého kola), smyčka hlásí `delta`: jedno další kolo nad
+opravenou verzí, role mají celou paměť nálezů. Teprve pak verdikt místa, aby stál na tom, co se předává. Znovuotevření
+(`reopen`) je jen na přání PM; ani ono rolím paměť nemaže (P116 kolo 5: role bez paměti hodnotily místo jako nové).
+
+**Věcná chyba (fakt, zákon) vrací místo, dokud oprava není viděná** (D5; Trading 22. 10. 2026: každé kolo našlo novou
+drobnost v ukázkových číslech a místo se nezavřelo). Najde-li ji delta kolo a výrobce ji přijme a opraví, smyčka dá
+ještě jedno delta kolo (nejvýš dvě). Rozhodnutí místa (`place-verdict --fixed-in <kolo>`, a stejně `place-record`)
+pak věcnou chybu toho kola nepočítá, jen když je přijatá, opravená s doložením **a nezávislý ověřovatel opravu viděl**
+nad verzí teď (`verify`, verdikt `overeno`) - ruční zápis to nenahradí.
+
+## Co role nechají na klientovi, dodá klient-agent (P116, PM 19. 10. 2026, všechna místa)
+
+Nález s `owner: client` a položky readiness („musí dodat klient“) nečekají na PM. Hned po kole (po triage) je
+smyčka pošle klient-roli - nezávislému agentovi, který hraje vlastníka jako v AID runu:
+`aid-ui-client.py supply <projekt> --place <místo>` (decision `supply`; další kolo bez toho nespustí). Klient odpoví
+z podkladů projektu: fakt se zdrojem `soubor:řádek` a doslovnou citací (kód ji v souboru najde), volbu vlastníka jen
+druhu jméno / výchozí hodnota / pořadí / výběr z možností s důvodem, a co v podkladech není (peníze, termíny, právo,
+osobní údaje, dnešní postup) jako `missing`. Nález s odpovědí převezmi (triage) a oprav podle ní; role odpovědi vidí
+v podkladech místa. V závěrečném hlášení PM je výpis `aid-ui-client.py decided <projekt>`: co klient-agent rozhodl
+bez PM a co zbývá na PM.
+
+## Dvě cesty: web a webová aplikace (P116, 18. 10. 2026)
+
+Druh `webapp` vede vlastní cestou podle `references/local/aplikace-postup.md` (vrstva s předností jako ostatní
+postupy); web a `pwa` jdou beze změny. Jedno studio a tytéž nástroje s větví podle druhu, nic se pro aplikaci
+nekopíruje. Základem aplikace je model obrazovek a úloh `docs/design/screens.json` (`aid-ui-screens.py check`),
+z něhož se staví kostra, testy úloh brány a předávací balík.
+
+- **Části podle druhu:** aplikace má místo „Stránky a jejich části“ část „Obrazovky a úlohy“ a existující aplikace
+  navíc „Výchozí stav aplikace“ (`sections.json`, `when: variant.app|variant.site|variant.existing`).
+- **Co aplikace vynechá, má důvod:** slogan, hledání a logo (u `brand: existing|none`) se vynechávají volbami kroku 0
+  a každá vynechaná část má záznam `decide --title přeskočeno --outcome "<část> přeskočena" --why …`; bez něj
+  `aid-ui-state.sh step` aplikaci za krok 1 nepustí.
+- **Úlohy schvaluje vlastník produktu:** PM, nebo klient-agent, který ho hraje (PM 19. 10. 2026; odpověď PM přebije).
+  Odpověď na otázku `structure` (i `task_map`) aplikace se zapíše jen od PM nebo klient-role a s cílem
+  `docs/design/screens.json@<sha modelu teď>` (`app_tasks_need_owner`), nikdy od agenta studia. Výjimky `baseline@…`
+  a `task@…` (výchozí stav existující aplikace a zrušení její dnešní úlohy) schvaluje jen PM (`app_owner_only`).
+- **Předání aplikace:** balík verze 2 nese schválený model a výsledky úloh (`verified_on: skeleton`); `aid-ui-package.py zadani`
+  z něj napíše zadání změn kódu (bod za úlohu a za cestu selhání) a brána běhu `check_ui_handover` pustí scénáře úloh
+  proti běžící aplikaci projektu (`docs/ui/nasazeni.json`).
+
 ## Kroky a části (jak o nich mluvit)
 
 Jediný zdroj číslování a smyslu je mapa `sections.json`: šest kroků studia
@@ -334,7 +419,7 @@ Jediný způsob, jak se PM na cokoli ptát nebo mu dát cokoli ke schválení:
 |---|---|
 | 0 | `steps/0-start.md` - varianta, inventura, kontrola pokrytí |
 | 1 | `steps/1-product.md` (+ `steps/1p-sources.md`, `steps/1v-vision.md`, `steps/1i-identity.md`, `steps/1s-seo.md`) |
-| 2 | `steps/2-structure.md` - stránky, role, toky |
+| 2 | `steps/2-structure.md` - stránky, role, toky; aplikace: obrazovky a úlohy (`references/local/aplikace-postup.md`) |
 | 3 | `steps/3-content-plan.md` - obsah a fakta |
 | 4 | `steps/4-references.md` - vzory |
 | 5 | `steps/5-directions.md` - tři směry jako stránky |

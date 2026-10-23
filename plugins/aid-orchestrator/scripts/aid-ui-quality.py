@@ -9,8 +9,18 @@ audited. At most three repair rounds. Everything lives in <project>/.aid-ui/crit
 rounds/<n>/{owner,tech}/ (the ratings), rounds/<n>/history-<role>.json (the memory each got), audits/<site sha>/a1..a3/
 {owner,tech}/, loop.json (the summary the studio shows, with every round's cost and time), verdict.json.
 
+  self <project> [--place <p>] --file <kontrola.json>
+      The check before the roles (P118): kontrola.json {requirements: [{id, source "<file>:<line>" in the project, text,
+      covered_by: [where] | out_of_scope: <why>}]} - every requirement of the brief with its source, covered or out of
+      scope (a webapp's structure: covered_by names task:<id> | screen:<id>); a webapp's struktura and vzhled also a
+      green quick check (or precheck) of the skeleton on the model now (aid-ui-verify.sh --quick) and a clean lint.
+      No marks of the producer (they never matched the roles), no verifier run first (PM 21. 10. 2026, 1A: the round
+      runs it with the roles). Refused naming each gap; recorded
+      in .aid-ui/critic/self/<place>.json bound to the place's bundle and frozen critic.
   round <project> --web <url>
-      One round on the current site. Refused while the previous round has a finding without a state, an accepted
+      One round on the current site; the independent verifier (aid-ui-client.py verify) runs alongside the roles when
+      no record of it is over this version, its open points and the fixes it did not see are findings (role verify). Refused without a self record over the bundle and the critic now (not in the
+      launch loop: it rates the deployment of a handed-over web). Refused while the previous round has a finding without a state, an accepted
       finding without --evidence, or the site fails `aid-ui-state.sh gate-check` (also for round 1), or when status
       says stop/audit. Books the agent's own work since the last round first (aid_ui_costs.book_agent: the Claude
       Code transcript of CLAUDE_CODE_SESSION_ID and its subagents). Findings get ids r<n>-<role>-<id>; findings a
@@ -22,9 +32,18 @@ rounds/<n>/{owner,tech}/ (the ratings), rounds/<n>/history-<role>.json (the memo
   fixed <project> <finding> --evidence <t> --method <t>
       An accepted finding is fixed; the evidence names what changed and where (the role sees it next round), the
       method which procedure made it (a step, an adopted skill) or "z hlavy: <why none>" - the round report to the PM.
+  brief <project> [--place <p>]
+      (P118) The brief for the producer of the fixes in a fresh, small context: the findings to fix, what the client
+      supplied, the model's lint, the verifier's open points over this version and the quick check's red rows.
+      Writes .aid-ui/critic/fix-brief[-<place>].md and prints its path; the main thread hands only that over.
   status <project>
       {decision, why, rounds, repair_rounds, scores, best} with decision one of
-      triage | fix | round | close | audit | stop:conflict | stop:stagnation | stop:round_cap | done.
+      triage | supply | fix | round | delta | close | audit | verdict | stop:conflict | stop:stagnation | stop:round_cap | done.
+      delta (P118, a place other than web): the round after acceptance was fixed and the version changed - one more
+      round over it is allowed (the roles keep their memory), then the verdict over what is handed over.
+      supply (P116, not in the launch loop): after the triage, an item the last round left to the client has no
+      answer of the client role yet (aid-ui-client.py supply); a client finding the client answered (supplied or
+      decided) goes back to triage - the agent takes it up; a missing one stays blocked for the PM.
       Round 1 is the first rating, rounds 2-4 the repair rounds (ROUND_CAP 3); an audit is no round. The best round:
       the higher lower-role score, then the lowest criterion, then the mean (best_key). Accepted, or the rounds
       spent with an accepted web -> `close` first asks to set accepted findings not fixed yet to superseded, then
@@ -128,6 +147,179 @@ def site_sha(p):
     return m.site_sha(os.path.join(p, "site"))
 
 
+# ---------------------------------------------------------------- the producer's own check before every round (PM 18. 10. 2026)
+PLUGIN_AT_START = None   # P118: the plugin's version when the round began
+LAUNCH = False   # set only by this command line (launch | --launch), never by the environment
+REQ_ID = re.compile(r"[A-Za-z0-9._-]{1,64}")
+
+
+def self_path(p):
+    return os.path.join(cdir(p), "self", PLACE + ".json")
+
+
+def frozen_rec(p):
+    f = os.path.join(cdir(p), "frozen.json" if PLACE == "web" else os.path.join("frozen", PLACE + ".json"))
+    try:
+        return json.load(open(f, encoding="utf-8"))
+    except (OSError, ValueError):
+        die("no frozen critic of place %s (aid-ui-critic.py freeze --place %s first)" % (PLACE, PLACE))
+
+
+def criteria_ids(rec, role):
+    out = []
+    for e in rec["roles"][role]["rubrics"]:
+        pre = "" if e["key"] == PLACE else e["key"] + "."
+        out += [pre + c["id"] for c in e["rubric"]["criteria"]]
+    return out
+
+
+def model_of(p):
+    try:
+        st = json.load(open(os.path.join(p, "docs", "design", "brand-state.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        st = {}
+    if (st.get("variant") or {}).get("type") != "webapp":
+        return None
+    try:
+        return json.load(open(os.path.join(p, "docs", "design", "screens.json"), encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
+def self_problems(p, doc):
+    """Why the producer's own check does not let the version go to the roles (empty = it does)."""
+    bad = []
+    model = model_of(p)
+    reqs = doc.get("requirements") if isinstance(doc, dict) else None
+    if not reqs and model:   # an app keeps its trace in the model (screens.json requirements), the one place of it
+        reqs = model.get("requirements")
+    if not isinstance(reqs, list) or not reqs:
+        return ["requirements: soupis požadavků ze zadání chybí (každý bod se zdrojem soubor:řádek)"]
+    refs = set()
+    if model is not None:
+        refs = {"task:" + t.get("id", "") for t in model.get("tasks") or []} | {"screen:" + x.get("id", "") for x in model.get("screens") or []}
+    seen = set()
+    for i, r in enumerate(reqs):
+        at = f"requirements[{i}]"
+        if not isinstance(r, dict) or not REQ_ID.fullmatch(str(r.get("id") or "")) or r["id"] in seen:
+            bad.append(f"{at}: id chybí, není písmena/číslice/._- nebo se opakuje"); continue
+        seen.add(r["id"])
+        src = str(r.get("source") or "")
+        m = re.fullmatch(r"(.+):([0-9]+)", src)
+        f = os.path.realpath(os.path.join(p, m.group(1))) if m else ""
+        if not m or not f.startswith(os.path.realpath(p) + os.sep) or not os.path.isfile(f) \
+                or not 1 <= int(m.group(2)) <= len(open(f, encoding="utf-8", errors="replace").read().splitlines()):
+            bad.append(f"{r['id']}: zdroj {src!r} není soubor:řádek v projektu"); continue
+        if not str(r.get("text") or "").strip():
+            bad.append(f"{r['id']}: chybí text požadavku")
+        cov, oos = r.get("covered_by"), str(r.get("out_of_scope") or "").strip()
+        if bool(cov) == bool(oos):
+            bad.append(f"{r['id']}: buď covered_by (kde je pokrytý), nebo out_of_scope (proč ne), právě jedno"); continue
+        if cov and (not isinstance(cov, list) or not all(isinstance(x, str) and x.strip() for x in cov)):
+            bad.append(f"{r['id']}: covered_by je seznam míst"); continue
+        if cov and model is not None and PLACE == "struktura":   # an app's requirement lands on a task or a screen of the model
+            miss = [x for x in cov if x not in refs]
+            if miss:
+                bad.append(f"{r['id']}: {', '.join(miss)} není úloha ani obrazovka modelu (task:<id> | screen:<id>)")
+    # P118: no marks of the producer - they never matched the roles (always 9, roles 4.9-8.8); the machine checks decide
+    if model is not None and PLACE in ("struktura", "vzhled", "web"):   # an app passed its quick gate on this model and this site first
+        # (PM 1A 23. 10. 2026: also the finished app - the full gate (15-25 min) runs once before the handover, not before every round)
+        msha = hashlib.sha256(open(os.path.join(p, "docs", "design", "screens.json"), "rb").read()).hexdigest() if model else ""
+        res, res_f = None, None
+        for pre in ("quick", "precheck"):   # the quick check (widest width, ~3 min) is enough before the roles; the full gate decides the handover
+            f_ = os.path.join(p, ".aid-ui", pre, "result.json")
+            try:
+                r_ = json.load(open(f_, encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if r_.get("model_sha256") == msha:
+                res, res_f = r_, f_; break
+            if res is None:
+                res, res_f = r_, f_
+        site = os.path.join(p, "site")
+        newest = max((os.path.getmtime(os.path.join(d, f)) for d, _, fs in os.walk(site) for f in fs), default=0)
+        if res and newest > os.path.getmtime(res_f):   # the site changed after it
+            bad.append("rychlá kontrola běžela nad starší verzí webu; pusť ji znovu (aid-ui-verify.sh <projekt> --quick)"); res = None
+        elif not res:
+            bad.append("rychlá kontrola kostry neproběhla (aid-ui-verify.sh <projekt> --quick)")
+        elif res.get("model_sha256") != msha:
+            bad.append("rychlá kontrola běžela nad jiným modelem; pusť ji znovu (aid-ui-verify.sh <projekt> --quick)")
+        else:   # every row of the model's matrix present and passing, nothing else red
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("aid_ui_screens", os.path.join(HERE, "aid-ui-screens.py"))
+            mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+            rows = [r for r in res.get("rows") or [] if isinstance(r, dict)]
+            have = {(r.get("check"), r.get("page"), r.get("state")) for r in rows}
+            miss = [f"{x['check']} {x['page']} {x['state']}" for x in mod.matrix(model) if (x["check"], x["page"], x["state"]) not in have]
+            red = [f"{r.get('check')} {r.get('page')} {r.get('state')}" for r in rows if r.get("status") != "pass"]
+            if miss:
+                bad.append("rychlá kontrola kostry je neúplná, chybí řádky: " + "; ".join(miss[:5]))
+            if red:
+                bad.append("rychlá kontrola kostry není zelená: " + "; ".join(red[:5]))
+    if model is not None and os.path.isfile(os.path.join(p, "docs", "design", "screens.json")):   # the lint of the model (P118)
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("aid_ui_screens", os.path.join(HERE, "aid-ui-screens.py"))
+        smod = importlib.util.module_from_spec(spec); spec.loader.exec_module(smod)
+        lint = smod.violations(json.load(open(os.path.join(p, "docs", "design", "screens.json"), encoding="utf-8")), p)
+        if lint:
+            bad.append("lint modelu: " + "; ".join(lint[:5]) + (f" (+{len(lint) - 5})" if len(lint) > 5 else ""))
+    return bad   # P118 1A (PM 21. 10. 2026): the verifier runs with the roles in the round, its points are findings
+
+
+def verify_findings(p, n, art):
+    """P118 1A: the verifier's open points over this version and the fixes it did not see become findings of the round,
+    triaged and fixed with the roles' findings (role verify, by the agent). Its signed records, never the producer's."""
+    out, seen = [], set()
+    recs = memory.verify_records(p, PLACE, art)
+    for r in recs:
+        for o in r.get("open") if isinstance(r.get("open"), list) else []:
+            k = (str(o.get("where")), str(o.get("what"))) if isinstance(o, dict) else None
+            if k and k not in seen:
+                seen.add(k)
+                out.append({"id": f"r{n}-verify-f{len(out) + 1}", "role": "verify", "criterion": "verify", "severity": "major", "owner": "agent",
+                            "kind": "rozpor", "blocking": False, "text": k[1], "where": k[0], "fix": str(o.get("why") or "odstranit rozpor"), "state": None})
+    rs = rounds(p)
+    mine = [r for r in recs if r.get("round") == (rs[-1]["n"] if rs else 0) and isinstance(r.get("fixes"), dict)]
+    for f in (rs[-1]["findings"] if rs else []):
+        if f.get("state") == "accepted" and f.get("evidence"):
+            v = next((r["fixes"][f["id"]] for r in reversed(mine) if isinstance(r["fixes"].get(f["id"]), dict)), None)
+            if not v or v.get("verdict") != "overeno":
+                out.append({"id": f"r{n}-verify-f{len(out) + 1}", "role": "verify", "criterion": "verify", "severity": "major", "owner": "agent", "kind": "oprava",
+                            "blocking": False, "where": str((v or {}).get("where") or f.get("where") or ""), "fix": "dokončit opravu " + f["id"], "state": None,
+                            "text": f"oprava {f['id']} ve verzi {'není vidět' if not v else str(v.get('verdict')) + ': ' + str(v.get('seen'))[:120]}"})
+    return out
+
+
+def self_record(p, f):
+    """aid-ui-quality.py self: the producer's own check of the version about to go to the roles, bound to the bundle."""
+    try:
+        doc = json.load(open(f, encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        die(f"self: {f} není čitelný JSON ({e})", 2)
+    bad = self_problems(p, doc)
+    if bad:
+        die("self refused (verze ještě nejde ke kritikovi):\n  " + "\n  ".join(bad))
+    rec = {"place": PLACE, "bundle_sha": site_sha(p), "frozen_sha": frozen_sha(p), "requirements": doc.get("requirements") or (model_of(p) or {}).get("requirements"),
+           "at": now()}
+    os.makedirs(os.path.dirname(self_path(p)), exist_ok=True)
+    wj(self_path(p), rec)
+    print(f"SELF {PLACE}: {len(rec['requirements'])} požadavků, lint a rychlá kontrola bez nálezu; kolo smí běžet nad {rec['bundle_sha'][:12]} (ověřovatel poběží s rolemi)")
+
+
+def self_ok(p):
+    """The round's precondition: a self record of this place over the bundle and the frozen critic now, still valid."""
+    try:
+        rec = json.load(open(self_path(p), encoding="utf-8"))
+    except (OSError, ValueError):
+        return "vlastní kontrola chybí (aid-ui-quality.py self <projekt> --place %s --file <kontrola.json>)" % PLACE
+    if rec.get("bundle_sha") != site_sha(p):
+        return "vlastní kontrola je nad jinou verzí podkladů místa; po opravě ji udělej znovu"
+    if rec.get("frozen_sha") != frozen_sha(p):
+        return "vlastní kontrola je nad jinými měřítky; udělej ji znovu"
+    bad = self_problems(p, rec)
+    return "; ".join(bad[:5]) if bad else ""
+
+
 def verdict(p):
     if PLACE != "web":   # a place is decided by its place verdict (aid-ui-state.sh place-record), not by an audit
         try:
@@ -189,6 +381,16 @@ def status(p):
     open_ = [f["id"] for f in last["findings"] if not f.get("state")]
     if open_:
         return dict(out, decision="triage", why="findings without a state: " + ", ".join(open_))
+    if not LAUNCH:   # P116: what a role left to the client goes to the client role first (aid-ui-client.py supply)
+        todo_c = memory.unsupplied(p, PLACE)
+        if todo_c:
+            return dict(out, decision="supply", why="the client has not answered %d item(s) of round %d: aid-ui-client.py supply %s --place %s"
+                        % (len(todo_c), last["n"], p, PLACE))
+        rec, keys = memory.supply_records(p, PLACE), {i["id"]: i["key"] for i in memory.supply_items(p, PLACE) if i["kind"] == "finding"}
+        answered = [f["id"] for f in last["findings"] if f.get("state") == "blocked" and (f.get("blocked_by") == "client_supply"
+                    or f.get("reason") == "client supplies it (readiness)") and (rec.get(keys.get(f["id"])) or {}).get("status") in ("supplied", "decided")]
+        if answered:
+            return dict(out, decision="triage", why="the client answered, take it up (accepted + fix, or a reason): " + ", ".join(answered))
     todo = [f["id"] for f in last["findings"] if f.get("state") == "accepted" and not f.get("evidence")]
     accepted_any = any(f.get("state") == "accepted" for f in last["findings"])
     cap = out["repair_rounds"] >= ROUND_CAP
@@ -198,6 +400,15 @@ def status(p):
             return dict(out, decision="close", why="%s (best: round %d, owner %.1f, tech %.1f); set %s superseded with the reason, then audit"
                         % ("both roles reached the goal" if last["score"]["accepted"] else "%d repair rounds done" % ROUND_CAP,
                            target["n"], target["score"]["owner"], target["score"]["tech"], ", ".join(todo)))
+        fact_fix = any(f.get("state") == "accepted" and f.get("evidence") and f.get("kind") in ("fakt", "zakon") for f in rs[-1]["findings"])
+        deltas = sum(1 for r in rs if r.get("delta"))
+        if PLACE != "web" and (not rs[-1].get("delta") or (fact_fix and deltas < 2)) and site_sha(p) != rs[-1]["site_sha"] \
+                and any(f.get("state") == "accepted" and f.get("evidence") for f in rs[-1]["findings"]):   # once per accepted round, after real fixes;
+            # a fact or law finding a delta round found and that was fixed returns the place by D5 until a role confirms it - one more (run 5, 22. 10.)
+            # P118: the version was fixed after the accepted round - one delta round over it (the roles keep their
+            # memory), never a reopen that forgets; the verdict then stands on what is handed over
+            return dict(out, decision="delta", why="place %s: the version changed after the accepted round %d (its fixes); rate it once (round), then the verdict"
+                        % (PLACE, rs[-1]["n"]))
         if PLACE != "web":
             return dict(out, decision="verdict", why="place %s: decide it from round %d - aid-ui-critic.py place-verdict, then aid-ui-state.sh place-record"
                         % (PLACE, rs[-1]["n"]))
@@ -210,8 +421,9 @@ def status(p):
     if todo:
         return dict(out, decision="fix", why="accepted findings not fixed yet: " + ", ".join(todo))
     if not accepted_any:
+        wait = [f["id"] for f in last["findings"] if f.get("state") == "blocked" and f.get("blocked_by") == "client_supply"]
         return dict(out, decision="stop:stagnation", why=("the audit did not confirm the web and " if last.get("audit") else "below acceptance and ")
-                    + "no finding was accepted for a fix")
+                    + "no finding was accepted for a fix" + ("; the rest waits on what the client has not supplied (%s): aid-ui-client.py decided" % ", ".join(wait) if wait else ""))
     return dict(out, decision="round", why="fixes recorded; rate again")
 
 
@@ -228,7 +440,25 @@ def round_costs(p, rs):
         for x in rows:
             k = "agent" if x.get("provider") == "agent" else (x.get("purpose") or "?").split(":")[0]
             by[k] = round(by.get(k, 0) + (x.get("usd") or 0), 4)
-        out.append({"usd": round(sum(by.values()), 2), "by": by, "minutes": round((end - a) / 60),
+        # P118: where the time went - the roles' calls, the verifier's runs, the gate's runs; the rest is the producer
+        clip = lambda s0, e0: (max(a, s0), min(end, e0))   # every interval inside this round's window, never negative
+        crit = [costs.ts(x.get("at")) for x in rows if (x.get("purpose") or "").startswith("critic") and costs.ts(x.get("at")) - a < 3600]
+        iv = [("roles",) + clip(a, max(crit))] if crit else []
+        iv += [("verify",) + clip(costs.ts(v["started"]), costs.ts(v.get("at"))) for v in memory.verify_records_all(p, PLACE) if v.get("started")]
+        try:
+            iv += [("gate",) + clip(costs.ts(g["started"]), costs.ts(g["ended"])) for g in (json.loads(x) for x in open(os.path.join(p, ".aid-ui", "gate-times.jsonl"), encoding="utf-8")) if g.get("started") and g.get("ended")]
+        except (OSError, ValueError):
+            pass
+        ph, taken = {"roles": 0.0, "verify": 0.0, "gate": 0.0}, []
+        for k, s0, e0 in sorted(iv, key=lambda x: x[1]):   # overlaps counted once, to the phase that started first
+            for ts0, te0 in taken:
+                if s0 < te0 and e0 > ts0:
+                    s0 = max(s0, te0)
+            if e0 > s0:
+                ph[k] += (e0 - s0) / 60; taken.append((s0, e0))
+        total = (end - a) / 60
+        out.append({"usd": round(sum(by.values()), 2), "by": by, "minutes": round(total),
+                    "phases": {k: round(v, 1) for k, v in ph.items()} | {"producer_and_waiting": round(max(0, total - sum(ph.values())), 1)},
                     "agent_measured": any(x.get("provider") == "agent" for x in rows)})
     return out
 
@@ -296,7 +526,7 @@ def usd_since(p, at):
 
 def mark_client(f):
     if f["owner"] == "client":
-        f.update(state="blocked", reason="client supplies it (readiness)")
+        f.update(state="blocked", reason="client supplies it (readiness)", blocked_by="client_supply")
     return f
 
 
@@ -358,13 +588,22 @@ def merge(runs):
 
 
 def do_round(p, web):
+    global PLUGIN_AT_START
+    try:
+        PLUGIN_AT_START = json.load(open(os.path.join(HERE, "..", ".claude-plugin", "plugin.json"), encoding="utf-8")).get("version")
+    except (OSError, ValueError):
+        PLUGIN_AT_START = None
     st = status(p)
-    if st["decision"] != "round":
+    if st["decision"] not in ("round", "delta"):
         die("no round now: %s (%s)" % (st["decision"], st["why"]))
     if PLACE in ("web", "struktura") and not web:
         die("--web <url>: the %s is rated live (%s)" % (LABEL_URL[PLACE], "the served site" if PLACE == "web" else "the skeleton address"), 2)
     same_loop(p, web)
-    if PLACE == "web":   # the regression check guards the built site; earlier places have no build yet
+    if not LAUNCH:   # every version goes to the roles complete: the producer's own check first (the launch rates a deployment)
+        why = self_ok(p)
+        if why:
+            die("no round: the version is not ready for the roles - " + why)
+    if PLACE == "web" and model_of(p) is None:   # the regression check guards a built web; an app's quick gate is in self (PM 1A 23. 10.)
         ok, msg = gate_ok(p)
         if not ok:
             die("the site does not pass the regression check (aid-ui-state.sh gate-check); rebuild, build-record and run the gate first:\n" + msg)
@@ -373,8 +612,16 @@ def do_round(p, web):
     os.makedirs(d, exist_ok=True)
     costs.book_agent(p, "agent:before-round-%d" % n)   # the agent's own work since the last round (fixes, rebuilds)
     at = now()
+    art = site_sha(p)
+    vproc = None
+    if web and not LAUNCH and not memory.verify_records(p, PLACE, art):   # (the launch rates a deployment, not a version of the files)   # P118 1A: the independent verifier alongside the roles, not a loop before them
+        vlog = open(os.path.join(d, "verify.log"), "w")
+        vproc = subprocess.Popen([sys.executable, CLIENT, "verify", p, "--place", PLACE, "--web", web], stdout=vlog, stderr=subprocess.STDOUT, text=True)
     res = rate(p, web, d, hist={role: history(p, role) for role in ROLES})
+    if vproc is not None and vproc.wait() not in (0, 3):
+        res["verify"] = (1, d)
     bad = [role for role, (rc, _) in res.items() if rc]
+    res.pop("verify", None)
     if bad:
         os.rename(d, d + "-failed-" + at.replace(":", ""))   # a failed rating is kept for the record but is no round
         die("no rating from %s (record in %s-failed-*/<role>/run.json)" % (", ".join(bad), d))
@@ -387,11 +634,23 @@ def do_round(p, web):
     for role, (_, out) in res.items():
         ans = json.load(open(os.path.join(out, "answer.json"), encoding="utf-8"))
         finds += [mark_client(dict(f, id="r%d-%s-%s" % (n, role, bare(f["id"], [x["id"] for x in ans["findings"]])), role=role, state=None)) for f in ans["findings"]]
+    vrecs = memory.verify_records(p, PLACE, art) if web and not LAUNCH else []
+    if runs["owner"]["site_sha"] != art or (web and not LAUNCH and not vrecs):   # roles, verifier and the round over one version
+        os.rename(d, d + "-failed-" + at.replace(":", ""))
+        die(f"the version changed during the round or the verifier left no record over it ({art[:12]} -> roles {runs['owner']['site_sha'][:12]}); nothing recorded")
+    finds += verify_findings(p, n, art)
     score = merge(runs)
     shas = {role: hashlib.sha256(open(os.path.join(out, "answer.json"), "rb").read()).hexdigest() for role, (_, out) in res.items()}
-    rec = {"n": n, "at": at, "place": PLACE, "answers": shas, "web": web, "site_sha": runs["owner"]["site_sha"], "frozen_sha": runs["owner"]["frozen_sha"],
+    try:   # P118: the plugin does not change during a run - its version is part of the round's record
+        plug = json.load(open(os.path.join(HERE, "..", ".claude-plugin", "plugin.json"), encoding="utf-8")).get("version")
+    except (OSError, ValueError):
+        plug = None
+    if PLUGIN_AT_START is not None and plug != PLUGIN_AT_START:
+        die(f"the plugin changed during the round ({PLUGIN_AT_START} -> {plug}); nothing recorded - run the round again on one version")
+    rec = {"n": n, "at": at, "place": PLACE, "delta": st["decision"] == "delta", "plugin": plug, "answers": shas, "web": web, "site_sha": runs["owner"]["site_sha"], "frozen_sha": runs["owner"]["frozen_sha"],
            "provider": {r: runs[r].get("provider") for r in ROLES}, "score": score, "findings": finds, "readiness": score["readiness"],
-           "task_test": task_row(p), "usd_equiv": usd_since(p, at)}
+           "task_test": task_row(p), "usd_equiv": usd_since(p, at),
+           "verify": [{"at": r.get("at"), "started": r.get("started"), "provider": r.get("provider"), "sig": r.get("sig")} for r in vrecs]}   # which signed records the verify findings come from
     save_round(p, rec)
     st = write_loop(p)
     top = {role: [f["text"] for f in finds if f["role"] == role and f["owner"] == "agent"][:3] for role in ROLES}   # the critics rank by impact
@@ -435,7 +694,7 @@ def triage(p, fid, state, opts):
             die("--%s %s: no other finding of round %d with that id" % (k, opts[k], last["n"]))
     if opts.get("conflict-with") and state != "blocked":
         die("--conflict-with goes with blocked only (the finding cannot be fixed without making the other worse)", 2)
-    for k in ("reason", "expected", "of", "conflict_with", "evidence"):
+    for k in ("reason", "expected", "of", "conflict_with", "evidence", "blocked_by"):   # a triaged client finding is the agent's now
         f.pop(k, None)
     f["state"] = state
     for k in ("reason", "expected", "of"):
@@ -613,13 +872,55 @@ def launch_status(p, pkg):
     print("launch rating accepted: %s (owner %s, tech %s)" % (v.get("url"), v.get("owner"), v.get("tech")))
 
 
+def brief(p):
+    """P118: what the producer of the fixes needs and nothing more (a fresh, small context instead of the whole
+    session): the findings to fix, what the client supplied, the model's lint, the verifier's open points and the
+    quick check's red rows, with the paths to read. Writes .aid-ui/critic/fix-brief[-<place>].md and prints its path."""
+    rs = rounds(p)
+    last = rs[-1] if rs else {"n": 0, "findings": []}
+    todo = [f for f in last["findings"] if f.get("state") == "accepted" and not f.get("evidence")]
+    sup = memory.supply_records(p, PLACE)
+    L = [f"# Opravy místa {PLACE} po kole {last['n']} (P118: výrobce v čerstvém kontextu)", "",
+         "Oprav jen tyto věci. Model `docs/design/screens.json`, fakta `docs/design/app-facts.json` (je-li) a postup",
+         "`skills/ui-design/references/local/aplikace-postup.md`. Po každé úpravě `aid-ui-screens.py check` a `aid-ui-verify.sh --quick`.",
+         "Na konci vrať u každého nálezu jednu větu, co se změnilo a kde (ta jde do `aid-ui-quality.py fixed --evidence`).", "",
+         "## Nálezy k opravě", ""]
+    L += [f"- **{f['id']}** ({f.get('role')}, {f.get('criterion')}, {f.get('severity')}): {f['text']}" + (f" - očekávání: {f['expected']}" if f.get("expected") else "") for f in todo] or ["- žádné"]
+    L += ["", "## Co dodal klient", ""] + ([f"- {r.get('text')}: {r.get('status')} - {r.get('answer') or r.get('missing')}" + (f" ({r.get('source')})" if r.get("source") else "") for r in sup.values()] or ["- nic"])
+    model = os.path.join(p, "docs", "design", "screens.json")
+    if os.path.isfile(model):
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("aid_ui_screens", os.path.join(HERE, "aid-ui-screens.py"))
+        smod = importlib.util.module_from_spec(spec); spec.loader.exec_module(smod)
+        lint = smod.violations(json.load(open(model, encoding="utf-8")), p)
+        L += ["", "## Lint modelu", ""] + ([f"- {x}" for x in lint] or ["- bez nálezu"])
+    art = site_sha(p)
+    opn = [o for r in memory.verify_records(p, PLACE, art) for o in (r.get("open") or []) if isinstance(o, dict)]
+    L += ["", "## Otevřené body ověřovatele nad touto verzí", ""] + ([f"- {o.get('where')}: {o.get('what')} ({o.get('why') or ''})" for o in opn] or ["- žádné (nebo ověřovatel nad touto verzí neběžel)"])
+    try:
+        q = json.load(open(os.path.join(p, ".aid-ui", "quick", "result.json"), encoding="utf-8"))
+        msha = hashlib.sha256(open(model, "rb").read()).hexdigest() if os.path.isfile(model) else None
+        if q.get("model_sha256") != msha:
+            raise ValueError("the quick check ran on another model")   # never red rows of an older version
+        red = [r for r in q.get("rows") or [] if r.get("status") != "pass"]
+        L += ["", "## Červené řádky rychlé kontroly", ""] + ([f"- {r['check']} {r['page']} {r.get('state') or ''}: {str(r.get('detail') or '')[:160]}" for r in red[:30]] or ["- žádné"])
+    except (OSError, ValueError):
+        pass
+    f = os.path.join(cdir(p), "fix-brief.md" if PLACE == "web" else f"fix-brief-{PLACE}.md")
+    with open(f, "w", encoding="utf-8") as fh:
+        fh.write("\n".join(L) + "\n")
+    print(f)
+
+
 def main(a):
     if len(a) < 2:
         die("usage: round|triage|fixed|status|audit <project> ... (see the header)", 2)
     global PLACE
     cmd, p = a[0], os.path.abspath(a[1])
+    global LAUNCH
     if cmd == "launch" or "--launch" in a:   # P115: the launch loop in its own directory, for this script and every one it starts
         a = [x for x in a if x != "--launch"]
+        LAUNCH = True
         os.environ["AID_UI_CRITIC_DIR"] = memory.LAUNCH_DIR
     if "--place" in a:
         i = a.index("--place")
@@ -627,10 +928,22 @@ def main(a):
         a = a[:i] + a[i + 2:]
         if PLACE not in PLACES:
             die("--place must be one of " + ", ".join(PLACES), 2)
+    elif cmd in ("triage", "fixed") and len(a) > 2:   # H5 run 3: 40 refusals without --place - the place whose rounds hold the finding
+        fid, hit = a[2], []
+        for pl in PLACES:   # only a place that is the one holding it: r1-owner-f1 is at every place (Codex review)
+            try:
+                if any(f.get("id") == fid for r in memory.rounds(p, pl) for f in r.get("findings") or []):
+                    hit.append(pl)
+            except (OSError, ValueError):
+                continue
+        if len(hit) == 1:
+            PLACE = hit[0]
+        elif len(hit) > 1:
+            die(f"{fid} is at several places ({', '.join(hit)}); say which with --place", 2)
     opts, rest, i = {}, [], 2
     while i < len(a):
-        if a[i].startswith("--") and i + 1 < len(a):
-            opts[a[i][2:]] = a[i + 1]
+        if a[i].startswith("--") and i + 1 < len(a):   # a broken character (a cut in the shell) never breaks the write
+            opts[a[i][2:]] = a[i + 1].encode("utf-8", "surrogateescape").decode("utf-8", "replace")
             i += 2
         else:
             rest.append(a[i])
@@ -639,6 +952,8 @@ def main(a):
         print(json.dumps(write_loop(p) if rounds(p) else status(p), ensure_ascii=False))
     elif cmd == "round":
         do_round(p, opts.get("web"))
+    elif cmd == "self" and opts.get("file"):
+        self_record(p, opts["file"])
     elif cmd == "audit" and opts.get("web"):
         audit(p, opts["web"])
     elif cmd == "triage" and len(rest) == 2:
@@ -649,6 +964,8 @@ def main(a):
         launch_status(p, opts.get("package"))
     elif cmd == "reopen":
         reopen(p, opts.get("reason"))
+    elif cmd == "brief":
+        brief(p)
     elif cmd == "fixed" and len(rest) == 1:
         fixed(p, rest[0], opts.get("evidence"), opts.get("method"))
     else:

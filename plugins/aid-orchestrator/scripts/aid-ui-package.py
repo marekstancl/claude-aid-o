@@ -51,6 +51,17 @@ handover: the deployment writes its own docs/ui/nasazeni.json.
       .aid-o/config/execution.yaml does not define the gate check_ui_handover or a profile lacks it ("spusť /aid-init");
       the brief file exists; the written brief fails aid-plan-lint.sh --zadani (it is removed, the lint's lines shown).
 
+P116 - a web application (variant.type webapp) gets package version 2: kind webapp, screens {path, sha256,
+approved_sha256} (the model the owner approved; build refuses a model changed since or never approved) and task_results
+(each task's app_flows rows in the recorded gate, of that model; verified_on skeleton - the studio's gate is a design
+check; build refuses results of another model and a gate where no task passed); an existing app's compare
+(aid-ui-baseline.py) must pass, the tasks the PM dropped go to removed_tasks. check --project also wants the model
+now. zadani writes a code-change brief: the run gate against the project's running app first, the build contract
+(data-aid-action, data-aid-screen, ?aid-test=1&stav=), a point per task (its result, also by keyboard) and per failure
+variant, the regression for an existing app, the open items. gate compares no files with a hosting for an app (its
+code is new): with docs/ui/nasazeni.json {url} it runs aid-ui-verify.sh <project> --base-url <url> (the task rows over
+the running app); live-row checks the live result is of the package's model. Version 1 packages stay valid (kind web).
+
 Exit: 0 ok, 1 refused, 2 usage.
 """
 import datetime, hashlib, json, os, re, subprocess, sys
@@ -176,6 +187,46 @@ def handover_of(state):
     return {"verdict": hv.get("verdict"), "rating": hv.get("rating"), "answer": hv.get("answer"), "comment": a.get("comment") or ""}
 
 
+def app_part(proj, state, g):
+    """P116: kind webapp - the model the owner approved and each task's result in the recorded gate (verified_on skeleton:
+    the studio's gate is a design check; only the run gate in the project's code yields code)."""
+    mp = os.path.join(proj, "docs", "design", "screens.json")
+    if not os.path.isfile(mp):
+        raise Refused("chybí model obrazovek a úloh (docs/design/screens.json)")
+    sha, appr = sha_file(mp), (state.get("app") or {}).get("approved_model_sha")
+    if not appr:
+        raise Refused("chybí schválený model (PM neschválil docs/design/screens.json)")
+    if appr != sha:
+        raise Refused("zastaralý (model docs/design/screens.json se změnil od schválení PM)")
+    model = load_json(mp, "docs/design/screens.json")
+    res = load_json(g["result_file"], "výsledek brány")
+    rows = [r for r in res.get("rows") or [] if isinstance(r, dict) and r.get("check") == "app_flows" and r.get("state") == "normal"]
+    old = sorted({str(r.get("page")) for r in rows if r.get("model_sha256") != sha})
+    if old:
+        raise Refused(f"zastaralý (výsledky úloh {', '.join(old)} jsou z jiného modelu než schváleného; brána znovu)")
+    results = []
+    for t in model.get("tasks") or []:
+        mine = [r for r in rows if r.get("page") == t["id"]]
+        results.append({"task": t["id"], "passed": bool(mine) and all(r.get("status") == "pass" for r in mine),
+                        "run_at": g["run_at"], "model_sha256": sha, "verified_on": "skeleton"})
+    APP = ("app_flows", "app_states", "keyboard_flows", "task_recovery")
+    red = sorted({f"{r.get('check')} {r.get('page')} {r.get('state')}" for r in res.get("rows") or []
+                  if isinstance(r, dict) and r.get("check") in APP and r.get("status") != "pass"})
+    if red:   # a lost input, a missing state or a keyboard dead end in the gate never reaches a package
+        raise Refused("úlohy aplikace v bráně neprošly: " + "; ".join(red[:6]))
+    if not results or not all(r["passed"] for r in results):   # every task of the model, never a partial set
+        raise Refused("chybí úloha, která prošla bránou (app_flows): " + (", ".join(r["task"] for r in results if not r["passed"]) or "model nemá úlohy"))
+    removed = []
+    if os.path.isfile(os.path.join(proj, ".aid-ui", "baseline", "tasks.json")):   # an existing app keeps today's tasks
+        r = subprocess.run([sys.executable, os.path.join(HERE, "aid-ui-baseline.py"), "compare", proj], capture_output=True, text=True)
+        if r.returncode != 0:
+            raise Refused("regrese existující aplikace: " + ((r.stderr or r.stdout).strip().splitlines() or ["compare"])[-1])
+        removed = [{"id": ln.split()[1].rstrip(":"), "reason": ln.split("(", 1)[1].rstrip(")") if "(" in ln else ""}
+                   for ln in r.stdout.splitlines() if ln.startswith("ZRUŠENA ")]
+    return {"kind": "webapp", "screens": {"path": "docs/design/screens.json", "sha256": sha, "approved_sha256": appr},
+            "task_results": results} | ({"removed_tasks": removed} if removed else {})
+
+
 def make(proj, dry):
     proj = os.path.realpath(proj)
     state = load_json(os.path.join(proj, "docs", "design", "brand-state.json"), "docs/design/brand-state.json")
@@ -226,8 +277,9 @@ def make(proj, dry):
     if not launch and type_needs_launch_inputs(proj):   # the type asks them right after the brief (aid-ui-launch.py card)
         raise Refused("chybí podklady ke spuštění (.aid-ui/launch.json; aid-ui-launch.py card a confirm)")
     inputs = [dict(i, critical=bool(i.get("critical"))) for i in (launch.get("items") or []) if isinstance(i, dict)]
+    app = app_part(proj, state, g) if (state.get("variant") or {}).get("type") == "webapp" else {}
     return {
-        "version": 1,
+        "version": 2 if app else 1,
         "project": os.path.basename(proj),
         "created_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "site": {"dir": site_dir, "build_id": bid, "sha256": dirsha(site_dir), "files": site_files(site_dir)},
@@ -238,7 +290,7 @@ def make(proj, dry):
         "open_items": ois,
         "launch_inputs": inputs,
         "launch_only": launch_only_of(proj, launch),
-    } | ({} if dry else {"handover": handover_of(state)})   # --dry runs before the PM's answer is used: no verdict yet
+    } | app | ({} if dry else {"handover": handover_of(state)})   # --dry runs before the PM's answer is used: no verdict yet
 
 
 def schema_errors(pkg):
@@ -259,6 +311,11 @@ def markdown(pkg):
                                           for o in pkg["open_items"]] or ["- žádné"])
     L += ["", "## Podklady ke spuštění", ""] + ([f"- {i['id']}: {i['name']} ({i['status']})" for i in pkg["launch_inputs"]] or ["- žádné"])
     L += ["", "## Hodnotí se až po nasazení", ""] + ([f"- {x}" for x in pkg["launch_only"]] or ["- nic"])
+    if pkg.get("kind") == "webapp":
+        L += ["", "## Model obrazovek a úloh", "", f"- `{pkg['screens']['path']}`, otisk `{pkg['screens']['sha256'][:16]}…` (schválený PM)", "",
+              "## Výsledky úloh (ověření návrhu na kostře)", ""]
+        L += [f"- {r['task']}: {'prošla' if r['passed'] else 'neprošla'} ({r['verified_on']})" for r in pkg["task_results"]]
+        L += [f"- zrušeno se schválením PM: {r['id']} ({r['reason']})" for r in pkg.get("removed_tasks") or []]
     return "\n".join(L) + "\n"
 
 
@@ -298,6 +355,19 @@ def check(path, proj=None):
     errs = schema_errors(pkg)
     if errs:
         return errs
+    if pkg.get("kind") == "webapp":   # P116: what the schema cannot bind
+        tr = pkg["task_results"]
+        ids = [r["task"] for r in tr]
+        bad = [r["task"] for r in tr if not r["passed"] or r["model_sha256"] != pkg["screens"]["sha256"]]
+        if bad or len(set(ids)) != len(ids) or pkg["screens"]["sha256"] != pkg["screens"]["approved_sha256"]:
+            return [f"task_results: každá úloha jednou, prošlá, nad schváleným modelem (vadné: {', '.join(bad) or 'opakovaná úloha nebo neschválený model'})"]
+        if proj:
+            try:
+                want = [t["id"] for t in json.load(open(os.path.join(proj, pkg["screens"]["path"]), encoding="utf-8")).get("tasks") or []]
+            except (OSError, ValueError):
+                want = None
+            if want is not None and sorted(want) != sorted(ids):
+                return [f"task_results nejsou úlohy modelu (balík {sorted(ids)}, model {sorted(want)})"]
     paths = [f["path"] for f in pkg["site"]["files"]]
     bad = [x for x in paths if x.startswith("/") or "\\" in x or ".." in x.split("/") or "" in x.split("/")]
     if bad or len(set(paths)) != len(paths):
@@ -316,6 +386,10 @@ def check(path, proj=None):
         g = state.get("gate") or {}
         if any(g.get(k) != pkg["gate"][k] for k in ("run_at", "result_file", "result_sha256", "build_id", "customer_page_sha256")):
             why.append("zaznamenaná brána není ta z předání")
+        if pkg.get("kind") == "webapp":   # P116: the code is built from exactly the approved model of the package
+            mp = os.path.join(proj, "docs", "design", "screens.json")
+            if not os.path.isfile(mp) or sha_file(mp) != pkg["screens"]["sha256"]:
+                why.append("model docs/design/screens.json není ten z předání")
         return ["zastaralý (" + "; ".join(why) + ")"] if why else []
     except Refused as e:
         return [str(e)]
@@ -491,6 +565,85 @@ def brief_text(pkg, pkg_rel, pkg_sha, plan_id, pts):
     return "\n".join(L) + "\n"
 
 
+def app_points(pkg, proj):
+    """P116: the code-change brief of a web application - the run of the task scenarios against the project's running
+    app first, the build contract, then a point per task (its result, also by keyboard) and per failure variant."""
+    plugin = os.path.realpath(os.path.join(HERE, ".."))
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("aid_ui_screens", os.path.join(HERE, "aid-ui-screens.py"))
+    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+    model = mod.resolved(json.load(open(os.path.join(proj, pkg["screens"]["path"]), encoding="utf-8")))
+    row = lambda check, *det: f"python3 {plugin}/scripts/aid-ui-package.py live-row docs/ui/predani.json {check}" + "".join(f" --detail '{d}'" for d in det)
+    pts = [{"text": "Aplikace běží na adrese z docs/ui/nasazeni.json a brána běhu nad ní pustila scénáře úloh z modelu (aid-ui-verify.sh --package-gate --launch)",
+            "owner": "run", "blocks": True, "kind": "launch", "timeout": 1800, "cmd": f"bash {plugin}/scripts/aid-ui-verify.sh --package-gate @BRIEF --launch"},
+           {"text": "Smlouva stavby: každá akce modelu nese data-aid-action=\"<obrazovka>.<akce>\", každá obrazovka data-aid-screen a v testovacím režimu "
+                    "(?aid-test=1) ukáže stav podle ?stav= (prázdno, načítání, chyba, naplněno); na tom stojí všechny další body",
+            "owner": "run", "blocks": True, "kind": "contract", "cmd": row("app_states")}]
+    done = {r["task"] for r in pkg["task_results"]}
+    for t in model.get("tasks") or []:
+        if t["id"] not in done:
+            continue
+        dw = t["done_when"]
+        pts.append({"text": f"Úloha „{t['title']}“ projde včetně výsledku (obrazovka {dw['screen']} ukáže „{dw['expect']}“), myší i jen klávesnicí",
+                    "owner": "run", "blocks": True, "kind": "task",
+                    "cmd": row("app_flows", f"{t['id']} / normal: výsledek nastal") + " && " + row("keyboard_flows", f"{t['id']} / keyboard: výsledek nastal")})
+        for v in mod.failure_variants(model, t):
+            pts.append({"text": f"Selhání {v['kind']} v kroku {v['at_step']} úlohy „{t['title']}“ zachová obrazovku i vstup a obnova ({v['recover']}) dojde k výsledku",
+                        "owner": "run", "blocks": True, "kind": "recovery", "cmd": row("task_recovery", f"{t['id']} / {v['state']}: výsledek nastal")})
+    if os.path.isfile(os.path.join(proj, ".aid-ui", "baseline", "tasks.json")):
+        pts.append({"text": "Každá úloha dnešní aplikace má v kódu náhradu se stejným výsledkem (nebo zrušení schválené PM)", "owner": "run",
+                    "blocks": True, "kind": "regression", "cmd": f"python3 {plugin}/scripts/aid-ui-baseline.py compare . --result .aid-ui/verify-live/result.json"})
+    for o in pkg["open_items"]:
+        d = '.status == "done"' + (' and ((.done_evidence // "") != "")' if o["critical"] else "")
+        pts.append({"text": f"Otevřený bod {o['id']} uzavřený{' s dokladem' if o['critical'] else ''}: {o['text']}",
+                    "owner": OWNER.get(o["owner"], "pm"), "blocks": o["critical"], "kind": "open_item",
+                    "cmd": f"jq -e '.open_items[] | select(.id == \"{o['id']}\") | {d}' docs/design/brand-state.json"})
+    return pts
+
+
+def app_brief_text(pkg, pkg_rel, pkg_sha, plan_id, pts):
+    today = datetime.date.today().isoformat()
+    hv = pkg.get("handover") or {}
+    name = one_line(pkg["project"])
+    res = pkg["task_results"]
+    L = ["---", f"zadani: {plan_id}", "verze: 1", f"datum: {today}", "autor: PM + AI (z předávacího balíku studia)",
+         "roadmapa: " + json.dumps(f"změny kódu aplikace {name} podle modelu obrazovek a úloh ze studia /aid-ui", ensure_ascii=False),
+         f"ui_package: {pkg_rel}", f"ui_package_sha256: {pkg_sha}", "---", "",
+         f"# {plan_id} - změny kódu aplikace {name} z předávacího balíku", "", "## 1. Co PM chce", "",
+         f"> Převzetí ve studiu {pkg['created_at'][:10]} ({hv.get('verdict') or 'převzato'}): „{one_line(hv.get('comment')) or '(bez komentáře)'}“",
+         "> PM 18. 10. 2026 (P116): úlohy a toky schvaluje vlastník produktu; kód UI staví plán projektu ze zadání studia.", "",
+         "Jak jsem to pochopil: postavit v kódu aplikace obrazovky a úlohy přesně podle schváleného modelu tak, aby každá úloha "
+         "došla ke svému výsledku, každá obrazovka měla své stavy a vnucená chyba nikdy nesmazala rozdělanou práci.", "",
+         "**Co je v sázce:** Uživatel aplikace pracuje s penězi a daty; úloha, kterou nejde dokončit, nebo chyba, která smaže "
+         "rozdělaný vstup, stojí ztracenou práci a důvěru, a nikdo ji neuvidí před nasazením, pokud ji neověří brána.", "",
+         "## 2. Změřený výchozí stav", "", f"(z balíku `{pkg_rel}`, sha256 {pkg_sha})", "",
+         f"- model: `{pkg['screens']['path']}`, otisk {pkg['screens']['sha256']} (schválený PM)",
+         f"- úlohy: {len(res)}; prošly v bráně studia: {sum(r['passed'] for r in res)} - výsledky jsou `verified_on: skeleton`, "
+         "tj. ověření návrhu na kostře; projít v kódu projektu je podmínka tohoto zadání",
+         f"- kostra / ověřovací stavba studia: `{pkg['site']['dir']}`",
+         f"- zrušené úlohy výchozího stavu (schválil PM): {', '.join(r['id'] + ' (' + one_line(r['reason']) + ')' for r in pkg.get('removed_tasks') or []) or 'žádné'}",
+         f"- otevřené body: {len(pkg['open_items'])} (kritických {sum(o['critical'] for o in pkg['open_items'])})", "",
+         "## 3. Co udělat", "",
+         "**(1) Smlouva stavby.** `data-aid-action`, `data-aid-screen` a testovací režim `?aid-test=1&stav=`.",
+         "**(2) Obrazovky a úlohy podle modelu.** Každá úloha s výsledkem, stavy a cestami selhání.",
+         "**(3) Spuštění a brána.** Aplikace běží na adrese `docs/ui/nasazeni.json`; brána běhu pustí scénáře úloh.", "",
+         "**Co do tohohle zadání nepatří:** změna modelu (jiný model = nové schválení PM ve studiu a nový balík).", "",
+         "## 4. Kde co je", "", "| Co | Kde |", "|---|---|",
+         f"| předávací balík | `{pkg_rel}` (nikdy se nemění) |", f"| model obrazovek a úloh | `{pkg['screens']['path']}` |",
+         "| adresa běžící aplikace | `docs/ui/nasazeni.json` (`url`) |", "| výsledky brány nad aplikací | `.aid-ui/verify-live/result.json` |", "",
+         "## 5. Pravidla práce", "",
+         "- Model se nemění; kód ho jen naplní. Smlouva stavby je první a stojí na ní všechny další body.",
+         "- Brána běhu `check_ui_handover` hlídá plán z balíku; plán musí nést `ui_package` a `ui_package_sha256` z tohoto zadání.",
+         "- Bod s vlastníkem client nebo pm čeká na doklad od něj; agent ho nevyplňuje sám.", "", "## 6. Hotovo, když", ""]
+    for n, p in enumerate(pts, 1):
+        L.append(f"- [ ] AC{n}: {one_line(p['text'])} (vlastník: {p['owner']}; {'blokuje spuštění' if p['blocks'] else 'neblokuje spuštění'})")
+        L += ["  ```yaml", "  verification_pattern:", "    type: cmd", f"    cmd: {q(p['cmd'])}", "    expected_exit: 0"]
+        if p.get("timeout"):
+            L.append(f"    timeout: {p['timeout']}")
+        L.append("  ```")
+    return "\n".join(L) + "\n"
+
+
 def cmd_zadani(pkg_path, plan_id, out):
     import re
     if not re.fullmatch(r"P[0-9]{3,}", plan_id or ""):
@@ -509,15 +662,23 @@ def cmd_zadani(pkg_path, plan_id, out):
         die(f"zadani refused: {out} exists; name another file with --out")
     pkg = json.load(open(pkg_path, encoding="utf-8"))
     rel = lambda x: os.path.relpath(x, proj)
-    pts = points(pkg, proj, rel(out))
+    if pkg.get("kind") == "webapp":   # P116: a code-change brief, one point per task and per failure path
+        pts = [dict(x, cmd=x["cmd"].replace("@BRIEF", rel(out))) for x in app_points(pkg, proj)]
+        text = app_brief_text(pkg, rel(pkg_path), sha_file(pkg_path), plan_id, pts)
+    else:
+        pts = points(pkg, proj, rel(out))
+        text = brief_text(pkg, rel(pkg_path), sha_file(pkg_path), plan_id, pts)
     os.makedirs(os.path.dirname(out), exist_ok=True)
-    write_pair([(out, brief_text(pkg, rel(pkg_path), sha_file(pkg_path), plan_id, pts))])
+    write_pair([(out, text)])
     r = subprocess.run(["bash", os.path.join(HERE, "aid-plan-lint.sh"), "--zadani", out], capture_output=True, text=True)
     if r.returncode != 0:
         os.remove(out)
         die("zadani refused: the brief fails aid-plan-lint.sh --zadani (removed):\n" + (r.stdout + r.stderr).strip())
-    kinds = {k: sum(p["kind"] == k for p in pts) for k in ("task", "launch", "open_item", "rating")}
-    print(f"ZADANI: {out} ({len(pts)} bodů: úkoly {kinds['task']}, spuštění {kinds['launch']}, otevřené body {kinds['open_item']}, hodnocení {kinds['rating']})")
+    kinds = {k: sum(p["kind"] == k for p in pts) for k in ("task", "launch", "open_item", "rating", "recovery", "contract", "regression")}
+    if pkg.get("kind") == "webapp":
+        print(f"ZADANI: {out} ({len(pts)} bodů: úlohy {kinds['task']}, selhání {kinds['recovery']}, smlouva {kinds['contract']}, spuštění {kinds['launch']}, regrese {kinds['regression']}, otevřené body {kinds['open_item']})")
+    else:
+        print(f"ZADANI: {out} ({len(pts)} bodů: úkoly {kinds['task']}, spuštění {kinds['launch']}, otevřené body {kinds['open_item']}, hodnocení {kinds['rating']})")
     return 0
 
 
@@ -669,6 +830,8 @@ def gate(plan, launch):
     if crit:
         die(f"{GATE}: otevřený kritický bod: " + "; ".join(f"{o['id']} ({o.get('owner')}): {str(o.get('text'))[:80]}" for o in crit))
     nf = os.path.join(proj, "docs", "ui", "nasazeni.json")
+    if pkg.get("kind") == "webapp":   # P116: the code is new - no file comparison; the task scenarios run against the app
+        return app_gate(proj, pkg, nf, launch, say)
     if not os.path.isfile(nf):
         if launch:
             die(f"{GATE}: --launch bez docs/ui/nasazeni.json: web ještě není nasazený")
@@ -734,6 +897,25 @@ def gate(plan, launch):
     return 0
 
 
+def app_gate(proj, pkg, nf, launch, say):
+    if not os.path.isfile(nf):
+        if launch:
+            die(f"{GATE}: --launch bez docs/ui/nasazeni.json: aplikace ještě neběží na adrese, kterou brána zná")
+        say(f"před nasazením: balík, model ({pkg['screens']['sha256'][:12]}) a otevřené body sedí; úlohy se ověří po zápisu docs/ui/nasazeni.json")
+        return 0
+    try:
+        url = json.load(open(nf, encoding="utf-8")).get("url") or ""
+    except ValueError as e:
+        die(f"{GATE}: docs/ui/nasazeni.json není JSON ({e})")
+    if not re.fullmatch(r"https?://[^\s/]+(/\S*)?", url):
+        die(f"{GATE}: docs/ui/nasazeni.json url není http(s) adresa: {url!r}")
+    tool = subprocess.run(["bash", os.path.join(HERE, "aid-ui-verify.sh"), proj, "--base-url", url])
+    if tool.returncode != 0:
+        die(f"{GATE}: úlohy aplikace nad {url} neprošly (exit {tool.returncode}; .aid-ui/verify-live/result.json)")
+    say(f"PASS: úlohy modelu {pkg['screens']['sha256'][:12]} prošly v aplikaci na {url}")
+    return 0
+
+
 def cmd_live_row(pkg_path, check_id, details):
     """The live result (.aid-ui/verify-live) is of the deployment and the package now, and its rows of check_id
     pass and name every detail. Run from the project root."""
@@ -746,7 +928,10 @@ def cmd_live_row(pkg_path, check_id, details):
         die(f"live-row: no live result ({e}); the launch point runs the gate over the live address first")
     if (lv.get("url") or "").rstrip("/") != live_url("."):
         die(f"live-row: the live result is of {lv.get('url')}, the deployment is {live_url('.')}")
-    if lv.get("site_sha256") != pkg["site"]["sha256"]:
+    if pkg.get("kind") == "webapp":   # P116: the app's code is not the package's site; the result must be of its model
+        if lv.get("model_sha256") != pkg["screens"]["sha256"]:
+            die("live-row: the live result is of another model than the package")
+    elif lv.get("site_sha256") != pkg["site"]["sha256"]:
         die("live-row: the live result is of another web than the package")
     rows = [r for r in res.get("rows") or [] if r.get("check") == check_id]
     if not rows or any(r.get("status") != "pass" for r in rows):

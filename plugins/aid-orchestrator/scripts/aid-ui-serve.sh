@@ -25,7 +25,11 @@
 #   preview <dir>          python3 -m http.server on AID_UI_HOST:AID_UI_PREVIEW_PORT
 #                          for a built site (the gate, aid-ui-verify.sh): the dir
 #                          must hold index.html and no symlink; idempotent like brand.
-#   skeleton <project>     (P113) builds the live skeleton from <project>/.aid-ui/structure.json into
+#   skeleton <project>     (P116) a webapp (variant.type webapp in docs/design/brand-state.json, else
+#                          .aid-ui/variant.json): the app skeleton from docs/design/screens.json (every screen with
+#                          its states, actions and the draft banner until the PM approved the model), same job,
+#                          port and address; a model failing aid-ui-screens.py check -> exit 2 with its lines.
+#                          (P113) builds the live skeleton from <project>/.aid-ui/structure.json into
 #                          <project>/site (lib/aid-ui-skeleton.py build: marked pages only, built pages kept)
 #                          and serves site/ as its own job on AID_UI_HOST:AID_UI_SKELETON_PORT - a fixed
 #                          address the gate's preview start/stop never touches; idempotent like preview
@@ -178,10 +182,14 @@ case "$1" in
     ;;
   skeleton)
     dir="$(realpath -e "$2" 2>/dev/null || true)"
-    [[ -d "$dir" && -f "$dir/.aid-ui/structure.json" ]] || refuse "$2 has no .aid-ui/structure.json; the skeleton is built from the approved structure"
+    [[ -d "$dir" ]] || refuse "$2 is not a project directory"
+    # P116: a webapp's skeleton is built from docs/design/screens.json (the builder decides the kind and refuses itself)
+    app="$(jq -r '.variant.type // empty' "$dir/docs/design/brand-state.json" 2>/dev/null || true)"
+    [[ -n "$app" ]] || app="$(jq -r '.type // empty' "$dir/.aid-ui/variant.json" 2>/dev/null || true)"
+    [[ "$app" == webapp || -f "$dir/.aid-ui/structure.json" ]] || refuse "$2 has no .aid-ui/structure.json; the skeleton is built from the approved structure"
     [[ ! -L "$dir/site" ]] || refuse "$dir/site is a symlink; the skeleton serves and writes only inside the project"
     PROJECT="$dir"; JOBS="${AID_UI_JOBS_DIR:-$PROJECT/.aid-ui/jobs}"
-    rc=0; python3 "$SKELETON_PY" build "$dir" >/dev/null || rc=$?
+    rc=0; python3 "$SKELETON_PY" build "$dir" >/dev/null || rc=$?   # stderr (why refused) stays visible
     (( rc != 2 )) || exit 2   # a refused target (symlink, colliding urls, bad structure): refused, nothing written
     (( rc == 0 )) || die "the skeleton could not be built (see above)"
     site="$dir/site"

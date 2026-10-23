@@ -9,7 +9,7 @@
 # every round, the agent's own work included (13. 10. 2026).
 
 setup() {
-  SC="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  SC="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"; export SC
   Q="$SC/aid-ui-quality.py"; K="$SC/../skills/ui-design/critic"
   T="$BATS_TEST_TMPDIR"; P="$T/p"; mkdir -p "$P/docs/content" "$P/site" "$T/bin"
   printf '# Pekárna U Mlýna\nKváskový chleba v Brně.\n' > "$P/docs/content/product-context.md"
@@ -25,6 +25,7 @@ setup() {
   # P113: role calls go to Claude Opus first; these cases stub Codex, so Codex goes first and a real Claude is never
   # reachable from a test (a stub that fails loudly: no model call in any test, llm-test-cost-control)
   export AID_UI_ROLE_FIRST=codex
+  export AID_UI_VERIFY_HOME="$T/verify-home" AID_UI_VERIFY_KEY="$T/verify.key"   # P118: verify records never in the real home
   printf '#!/usr/bin/env bash\necho "a real claude was called from a test" >&2; exit 1\n' > "$T/bin/claude"
   printf '#!/usr/bin/env bash\n[[ -e "$BATS_TEST_TMPDIR/gate-red" ]] && { echo "ERROR: gate-check refused: fail row" >&2; exit 1; }; echo GATE OK\n' > "$T/bin/state"
   cat > "$T/bin/tool" <<'SH'
@@ -37,14 +38,72 @@ SH
 #!/usr/bin/env bash
 [[ "\$1" == --version ]] && exit 0
 p="\$(cat)"; role=owner; grep -q "$(yq -r '.criteria[0].id' "$K/web-local.tech.yaml")" <<<"\$p" && role=tech
+grep -q "# Co po tobě studio chce" <<<"\$p" && role=supply
+grep -q "nezávislý ověřovatel verze" <<<"\$p" && role=verify
+grep -q "^Jsi soudce" <<<"\$p" && role=judge
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":100000,"cached_input_tokens":0,"output_tokens":1000}}))' "$T/ans-\$role.json"
 SH
   chmod +x "$T/bin/"*
-  WPORT=$(( 38000 + RANDOM % 900 )); python3 -m http.server "$WPORT" --bind 127.0.0.1 --directory "$P/site" >/dev/null 2>&1 & WEBSRV=$!
-  W="http://127.0.0.1:$WPORT/"; for _ in $(seq 50); do curl -s "$W" >/dev/null && break; sleep 0.1; done
+  WPORT=$(( 38000 + RANDOM % 900 )); while ss -ltnH "sport = :$WPORT" | grep -q .; do WPORT=$(( 38000 + RANDOM % 900 )); done   # a port another process holds answers 404
+  python3 -m http.server "$WPORT" --bind 127.0.0.1 --directory "$P/site" >/dev/null 2>&1 & WEBSRV=$!
+  W="http://127.0.0.1:$WPORT/"; for _ in $(seq 200); do curl -s "$W" >/dev/null && break; sleep 0.1; done
 }
 
 teardown() { kill "$WEBSRV" 2>/dev/null || true; }
+
+# selfdoc [score] [place] - the producer's own check of the place (every criterion of both frozen roles at the score)
+selfdoc() {
+  python3 - "$P" "${1:-9}" "${2:-web}" > "$T/self.json" <<'PY2'
+import json, os, sys
+p, sc, pl = sys.argv[1], float(sys.argv[2]), sys.argv[3]
+f = os.path.join(p, ".aid-ui/critic", "frozen.json" if pl == "web" else "frozen/%s.json" % pl)
+rec = json.load(open(f)); out = {}
+for r in ("owner", "tech"):
+    out[r] = {("" if e["key"] == pl else e["key"] + ".") + c["id"]: {"score": sc, "evidence": "úvod: nadpis a cena chleba"}
+              for e in rec["roles"][r]["rubrics"] for c in e["rubric"]["criteria"]}
+doc = {"requirements": [{"id": "r1", "source": "docs/content/product-context.md:2", "text": "Kváskový chleba v Brně", "covered_by": ["index.html"]}]}
+print(json.dumps(doc))
+PY2
+}
+# verified [place] - the signed record a verifier run over the version now would write (FIXCHECK=nepravda: a fix not
+# seen; WHOLE_OPEN=<text>: an open point; FIXCHECK=none: no record); the real command has its own case below
+verified() {
+  [[ "${FIXCHECK:-}" == none ]] && return 0
+  python3 - "$P" "${1:-web}" <<'PY2'
+import importlib.util, json, os, sys
+sys.path.insert(0, os.environ["SC"] + "/lib"); import aid_ui_memory as m
+spec = importlib.util.spec_from_file_location("c", os.environ["SC"] + "/aid-ui-client.py"); c = importlib.util.module_from_spec(spec); spec.loader.exec_module(c)
+p, pl = sys.argv[1], sys.argv[2]
+art = c.site_sha(os.path.join(p, "site")) if pl == "web" else c.place_bundle(p, pl)[1]
+rs = m.rounds(p, pl)
+fx = {f["id"]: {"verdict": os.environ.get("FIXCHECK", "overeno"), "where": "page /", "seen": "úvod: nová věta je vidět"} for f in (rs[-1]["findings"] if rs else []) if f.get("state") == "accepted" and f.get("evidence")}
+m.verify_append(p, pl, {"artifact": art, "at": "t", "provider": "test", "round": rs[-1]["n"] if rs else 0, "fixes": fx, "open": [{"where": "index", "what": os.environ["WHOLE_OPEN"]}] if os.environ.get("WHOLE_OPEN") else []})
+PY2
+}
+# qround <project> [args] - a round after the producer's own check of the current version (PM 18. 10. 2026)
+qround() {
+  local pl=web a; for a in "$@"; do [[ "${prev:-}" == --place ]] && pl="$a"; prev="$a"; done; prev=""
+  [[ -f "$P/.aid-ui/critic/$([[ $pl == web ]] && echo frozen.json || echo frozen/$pl.json)" ]] && selfdoc 9 "$pl" && verified "$pl" && { python3 "$Q" self "$P" --place "$pl" --file "$T/self.json" >/dev/null || return; }
+  python3 "$Q" round "$@" || return
+  supply_missing "$pl"
+}
+# supply_missing [place] - the client role answered every item of the last round as missing (what the loop did
+# before P116: client findings stay blocked); the real supply has its own cases below
+supply_missing() {
+  python3 - "$P" "${1:-web}" <<'PY2'
+import json, os, sys
+sys.path.insert(0, os.environ["SC"] + "/lib"); import aid_ui_memory as m
+p, pl = sys.argv[1], sys.argv[2]
+items = m.unsupplied(p, pl)
+if items:
+    t = ".aid-ui/client/turns/supply-%s-r%d-1" % (pl.replace("-", ""), items[0]["round"]); os.makedirs(os.path.join(p, t), exist_ok=True)
+    json.dump({"answer": {"items": [{"key": i["key"], "status": "missing", "missing": "klient dodá později"} for i in items]}}, open(os.path.join(p, t, "turn.json"), "w"))
+    f = m.supply_file(p, pl); os.makedirs(os.path.dirname(f), exist_ok=True)
+    cur = m.supply_records(p, pl)
+    cur.update({i["key"]: dict(i, status="missing", missing="klient dodá později", turn=t) for i in items})
+    json.dump({"place": pl, "items": cur}, open(f, "w"))
+PY2
+}
 
 # ans <owner score> [<tech score>] [<severity of f1>]: every criterion of a role at its score, f1 by the agent, f2 by the client
 ans() {
@@ -77,7 +136,7 @@ work() {   # the agent works: one assistant turn in its transcript, now
 
 @test "a round: both roles at once with their own findings; triage, fix with evidence, client findings to readiness; memory and cost" {
   [ "$(dec)" = round ]
-  ans 6 7; run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  ans 6 7; run qround "$P" --web "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.round == 1 and .owner == 6 and .tech == 7 and .decision == "triage"' <<<"${lines[-1]}" >/dev/null
   R1="$P/.aid-ui/critic/rounds/1"
   jq -e '.score.quality_score == 6 and .score.owner == 6 and .score.tech == 7 and .provider == {"owner":"codex","tech":"codex"}
@@ -86,7 +145,7 @@ work() {   # the agent works: one assistant turn in its transcript, now
   jq -e '.role == "owner"' "$R1/owner/run.json" >/dev/null; jq -e '.role == "tech"' "$R1/tech/run.json" >/dev/null
   [ -d "$R1/owner/bundle/podklady/konkurence" ]; [ ! -e "$R1/tech/bundle/podklady/konkurence" ]
   jq -e '(.top3.owner | length) == 1 and (.loop_usd | type) == "number"' <<<"${lines[-1]}" >/dev/null
-  run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"triage"* ]]
+  run qround "$P" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"triage"* ]]
   run python3 "$Q" triage "$P" r1-owner-f1 accepted; [ "$status" -eq 2 ]; [[ "$output" == *"--expected"* ]]
   run python3 "$Q" fixed "$P" r1-owner-f1 --evidence x --method "steps/6-build.md"; [ "$status" -eq 1 ]
   python3 "$Q" triage "$P" r1-owner-f1 accepted --expected "+1" >/dev/null
@@ -97,9 +156,9 @@ work() {   # the agent works: one assistant turn in its transcript, now
   run python3 "$Q" fixed "$P" r1-owner-f1 --evidence "úvod přepsán" --method "hotovo"; [ "$status" -eq 2 ]    # neither a procedure nor a why
   python3 "$Q" fixed "$P" r1-owner-f1 --evidence "úvod přepsán: konkrétní věta o kvásku" --method "z hlavy: krok 6 nemá postup pro přepis úvodu" >/dev/null; [ "$(dec)" = round ]
   jq -e '.history[0].findings[] | select(.id == "r1-owner-f1") | .method | startswith("z hlavy")' "$P/.aid-ui/critic/loop.json" >/dev/null
-  touch "$T/gate-red"; run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"regression check"* ]]; rm "$T/gate-red"
+  touch "$T/gate-red"; run qround "$P" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"regression check"* ]]; rm "$T/gate-red"
   work; work
-  ans 7; run python3 "$Q" round "$P" --web "$W"
+  ans 7; run qround "$P" --web "$W"
   jq -e '.fixed_before[0].id == "r1-owner-f1" and (.fixed_before[0].method | startswith("z hlavy"))' <<<"${lines[-1]}" >/dev/null
   # memory: each role got its own findings of round 1 with what happened to them, and nothing of the other role
   jq -e '(.findings | map(.id) | sort) == ["r1-owner-f1","r1-owner-f2"] and (.findings[] | select(.id == "r1-owner-f1") | .state == "fixed" and (.evidence | contains("kvásku")))
@@ -111,33 +170,33 @@ work() {   # the agent works: one assistant turn in its transcript, now
   run python3 "$SC/aid-ui-critic.py" freeze "$P" --type web-local --force; [ "$status" -eq 1 ]
   # the owner never rates without the current competitors at both widths
   echo '[{"name":"X","url":"https://x.example/"},{"name":"B","url":"https://b.example/"},{"name":"C","url":"https://c.example/"}]' > "$P/.aid-ui/critic/competitors.json"
-  cycle; run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"no rating from owner"* ]]
+  cycle; run qround "$P" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"no rating from owner"* ]]
   grep -q "competitors.json are missing" "$(ls -d "$P/.aid-ui/critic/rounds/3-failed-"*)/owner/run.json" 2>/dev/null || [[ "$output" == *"competitors"* ]]
 }
 
 @test "stops: a conflict between the roles, nothing accepted to fix, three repair rounds" {
-  ans 6; python3 "$Q" round "$P" --web "$W" >/dev/null
+  ans 6; qround "$P" --web "$W" >/dev/null
   python3 "$Q" triage "$P" r1-owner-f1 blocked --reason "větší fotka zpomalí web" --conflict-with r1-tech-f1 >/dev/null
   python3 "$Q" triage "$P" r1-tech-f1 accepted --expected "+1" >/dev/null
   [ "$(dec)" = stop:conflict ]; python3 "$Q" status "$P" | jq -e '.why | contains("r1-owner-f1") and contains("r1-tech-f1")' >/dev/null
-  run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 1 ]
+  run qround "$P" --web "$W"; [ "$status" -eq 1 ]
 }
 
 @test "nothing accepted below acceptance stops; three repair rounds below 8.5 stop with the best round" {
-  ans 6; python3 "$Q" round "$P" --web "$W" >/dev/null
+  ans 6; qround "$P" --web "$W" >/dev/null
   for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f1" rejected_with_reason --reason "v podkladech" >/dev/null; done
   [ "$(dec)" = stop:stagnation ]
   rm -r "$P/.aid-ui/critic/rounds"
-  for s in 6 7 8 7; do ans 9 $s; python3 "$Q" round "$P" --web "$W" >/dev/null || return 1; cycle; done
+  for s in 6 7 8 7; do ans 9 $s; qround "$P" --web "$W" >/dev/null || return 1; cycle; done
   python3 "$Q" status "$P" | jq -e '.decision == "stop:round_cap" and .repair_rounds == 3 and (.why | contains("3 repair rounds") and contains("best round 3"))' >/dev/null
-  run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 1 ]
+  run qround "$P" --web "$W"; [ "$status" -eq 1 ]
 }
 
 @test "acceptance: both roles at 8.5 stop the repairs; three blind ratings per role of the same web; a failed audit is triaged" {
-  ans 9 8; python3 "$Q" round "$P" --web "$W" >/dev/null; cycle
+  ans 9 8; qround "$P" --web "$W" >/dev/null; cycle
   [ "$(dec)" = round ]   # tech under 8.5: repair on
   run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 1 ]
-  ans 9 9 minor; python3 "$Q" round "$P" --web "$W" >/dev/null
+  ans 9 9 minor; qround "$P" --web "$W" >/dev/null
   for r in owner tech; do python3 "$Q" triage "$P" "r2-$r-f1" rejected_with_reason --reason "slovo je v podkladech" >/dev/null; done
   [ "$(dec)" = audit ]
   run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -146,7 +205,7 @@ work() {   # the agent works: one assistant turn in its transcript, now
   [ ! -e "$A/a1/owner/bundle/podklady/historie.json" ]   # an audit is blind
   [ "$(dec)" = done ]
   # an audit that does not confirm the web: the auditors' findings become an audit round to triage, no repair round
-  rm "$P/.aid-ui/critic/verdict.json"; ans 9 7; run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 3 ] || { echo "$output"; return 1; }
+  rm "$P/.aid-ui/critic/verdict.json"; ans 9 7; run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 3 ] || { echo "$output"; return 1; }; supply_missing
   [ "$(dec)" = triage ]
   jq -e '.audit == true and .n == 3 and (.findings | length) == 12 and (.findings | map(.id) | index("r3-a1-tech-f1")) != null and .score.tech == 7' "$P/.aid-ui/critic/rounds/3/round.json" >/dev/null
   python3 "$Q" status "$P" | jq -e '.repair_rounds == 1' >/dev/null
@@ -155,7 +214,7 @@ work() {   # the agent works: one assistant turn in its transcript, now
 }
 
 @test "close and best: accepted with fixes open -> close; the audit rates the accepted web; a later accepted web is audited after a failed audit; reopen" {
-  ans 9; python3 "$Q" round "$P" --web "$W" >/dev/null
+  ans 9; qround "$P" --web "$W" >/dev/null
   python3 "$Q" triage "$P" r1-owner-f1 accepted --expected "+1" >/dev/null
   python3 "$Q" triage "$P" r1-tech-f1 rejected_with_reason --reason x >/dev/null
   [ "$(dec)" = close ]; python3 "$Q" status "$P" | jq -e '.best.round == 1 and (.why | contains("r1-owner-f1"))' >/dev/null
@@ -163,38 +222,38 @@ work() {   # the agent works: one assistant turn in its transcript, now
   python3 "$Q" fixed "$P" r1-owner-f1 --evidence x --method "steps/6-build.md" >/dev/null; [ "$(dec)" = audit ]   # a fix is allowed, the audit still rates round 1's web
   run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"not the best accepted web (round 1"* ]]
   cp "$T/best.html" "$P/site/index.html"
-  ans 9 7; run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 3 ]
+  ans 9 7; run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 3 ]; supply_missing
   for k in 1 2 3; do for r in owner tech; do python3 "$Q" triage "$P" "r2-a$k-$r-f1" accepted --expected "+1" >/dev/null; python3 "$Q" fixed "$P" "r2-a$k-$r-f1" --evidence y --method "steps/6-build.md" >/dev/null; done; done
   [ "$(dec)" = round ]; echo '<html lang="cs"><body>chleba, lepší</body></html>' > "$P/site/index.html"
-  ans 9 9 minor; python3 "$Q" round "$P" --web "$W" >/dev/null
+  ans 9 9 minor; qround "$P" --web "$W" >/dev/null
   for r in owner tech; do python3 "$Q" triage "$P" "r3-$r-f1" rejected_with_reason --reason x >/dev/null; done
   python3 "$Q" status "$P" | jq -e '.decision == "audit" and .best.round == 3' >/dev/null   # round 1's web failed its audit
   run python3 "$Q" audit "$P" --web "$W"; [ "$status" -eq 0 ]; [ "$(dec)" = done ]
   run python3 "$Q" reopen "$P"; [ "$status" -eq 2 ]
   python3 "$Q" reopen "$P" --reason "PM: odstup od čar" >/dev/null; [ "$(dec)" = round ]; ls "$P/.aid-ui/critic/verdicts/"*.json >/dev/null
   echo '<html lang="cs"><body>chleba, znovu</body></html>' > "$P/site/index.html"
-  ans 9 9 minor; python3 "$Q" round "$P" --web "$W" >/dev/null
-  jq -e '(.findings | length) == 0 and (.ratings | length) == 0' "$P/.aid-ui/critic/rounds/4/history-owner.json" >/dev/null   # the memory restarts at the reopen
+  ans 9 9 minor; qround "$P" --web "$W" >/dev/null
+  jq -e '(.findings | length) > 0 and (.ratings | length) > 0' "$P/.aid-ui/critic/rounds/4/history-owner.json" >/dev/null   # P118: the memory survives the reopen
   for r in owner tech; do python3 "$Q" triage "$P" "r4-$r-f1" rejected_with_reason --reason x >/dev/null; done
   python3 "$Q" status "$P" | jq -e '.decision == "audit" and .best.round == 4 and .repair_rounds == 0' >/dev/null
 }
 
 @test "one loop, one critic, one address; links between findings must point at another finding of the round" {
-  ans 6; python3 "$Q" round "$P" --web "$W" >/dev/null
+  ans 6; qround "$P" --web "$W" >/dev/null
   run python3 "$Q" triage "$P" r1-owner-f1 duplicate --of r1-owner-f9; [ "$status" -eq 1 ]
   run python3 "$Q" triage "$P" r1-owner-f1 duplicate --of r1-owner-f1; [ "$status" -eq 1 ]
   run python3 "$Q" triage "$P" r1-owner-f1 accepted --expected x --conflict-with r1-tech-f1; [ "$status" -eq 2 ]
   cycle
-  run python3 "$Q" round "$P" --web "${W}cennik/"; [ "$status" -eq 1 ]; [[ "$output" == *"another address"* ]]
+  run qround "$P" --web "${W}cennik/"; [ "$status" -eq 1 ]; [[ "$output" == *"another address"* ]]
   jq '.frozen_sha = "0000"' "$P/.aid-ui/critic/rounds/1/round.json" > "$T/r.json" && mv "$T/r.json" "$P/.aid-ui/critic/rounds/1/round.json"
-  run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"frozen critic changed"* ]]
+  run qround "$P" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"frozen critic changed"* ]]
 }
 
 @test "what the client has not delivered is no criterion of the studio's work: the round is accepted on the studio's score" {
   mkdir -p "$P/docs/design"; echo '{"open_items": [{"id": "oi-4", "text": "vlastné fotky", "owner": "klient", "status": "open", "critical": true}]}' > "$P/docs/design/brand-state.json"
   ans 9 9 minor
   jq '.criteria[0] |= (.score = 5 | .anchor = 4 | .studio_score = 9 | .studio_anchor = 8 | .limited_by = ["oi-4"] | .to_ten.client = ["vlastné fotky"])' "$T/ans-owner.json" > "$T/x" && mv "$T/x" "$T/ans-owner.json"
-  run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  run qround "$P" --web "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   jq -e '.owner == 9 and .owner_now < 9 and .limited_by == ["oi-4"]' <<<"${lines[-1]}" >/dev/null
   jq -e '.score.accepted == true and .score.min_criterion == 9' "$P/.aid-ui/critic/rounds/1/round.json" >/dev/null
   jq -e '.history[0].owner_now < .history[0].owner' "$P/.aid-ui/critic/loop.json" >/dev/null
@@ -210,7 +269,7 @@ work() {   # the agent works: one assistant turn in its transcript, now
   ans 6
   jq '.findings[0].id = "r1-owner-r1-01" | .findings[1].id = "r1-owner-r1-02"' "$T/ans-owner.json" > "$T/x" && mv "$T/x" "$T/ans-owner.json"
   jq '.findings[0].id = "r1-01" | .findings[1].id = "r2-01"' "$T/ans-tech.json" > "$T/x" && mv "$T/x" "$T/ans-tech.json"
-  python3 "$Q" round "$P" --web "$W" >/dev/null
+  qround "$P" --web "$W" >/dev/null
   jq -e '([.findings[].id] | sort) == ["r1-owner-01", "r1-owner-02", "r1-tech-r1-01", "r1-tech-r2-01"]' "$P/.aid-ui/critic/rounds/1/round.json" >/dev/null
 }
 
@@ -244,14 +303,14 @@ SH
   chmod +x "$T/bin/codex"
   pans sdeleni 6
   for i in 1 2 3 4; do
-    run python3 "$Q" round "$P" --place sdeleni; [ "$status" -eq 0 ] || { echo "round $i: $output"; return 1; }
+    run qround "$P" --place sdeleni; [ "$status" -eq 0 ] || { echo "round $i: $output"; return 1; }
     jq -e --argjson i "$i" '.round == $i and .place == "sdeleni"' <<<"${lines[-1]}" >/dev/null
     [ -f "$P/.aid-ui/critic/rounds/sdeleni/$i/round.json" ]
     [ "$i" -eq 4 ] || pcycle sdeleni
   done
   pcycle sdeleni
   [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = "stop:round_cap" ]
-  run python3 "$Q" round "$P" --place sdeleni; [ "$status" -eq 1 ]; [[ "$output" == *"round_cap"* ]]
+  run qround "$P" --place sdeleni; [ "$status" -eq 1 ]; [[ "$output" == *"round_cap"* ]]
   # the finished web has its own count: no round yet, nothing of sdeleni in rounds/<n>
   [ "$(python3 "$Q" status "$P" | jq -r '.decision + " " + (.rounds | tostring)')" = "round 0" ]
   [ ! -e "$P/.aid-ui/critic/rounds/1" ]
@@ -268,7 +327,7 @@ p="\$(cat)"; role=owner; grep -q "### $(yq -r '.criteria[0].id' "$K/web-local.te
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
 SH
   chmod +x "$T/bin/codex"
-  pans sdeleni 6; for i in 1 2 3 4; do python3 "$Q" round "$P" --place sdeleni >/dev/null; pcycle sdeleni; done
+  pans sdeleni 6; for i in 1 2 3 4; do qround "$P" --place sdeleni >/dev/null; pcycle sdeleni; done
   # the web place goes on in its own folder meanwhile
   cat > "$T/bin/codex" <<SH
 #!/usr/bin/env bash
@@ -276,7 +335,7 @@ SH
 p="\$(cat)"; role=owner; grep -q "$(yq -r '.criteria[0].id' "$K/web-local.tech.yaml")" <<<"\$p" && role=tech
 python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
 SH
-  ans 6 7; python3 "$Q" round "$P" --web "$W" >/dev/null
+  ans 6 7; qround "$P" --web "$W" >/dev/null
   run python3 "$Q" reopen "$P" --place sdeleni --reason "PM chce jiný slogan"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   [ -f "$P/.aid-ui/critic/rounds/sdeleni/reopened.json" ]; [ ! -e "$P/.aid-ui/critic/loop-reopened.json" ]
   [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r '.decision + " " + (.repair_rounds | tostring)')" = "round 0" ]
@@ -304,7 +363,7 @@ print("ok")' "$BATS_TEST_DIRNAME/../../aid-ui-quality.py"
 snap() { (cd "$P/.aid-ui/critic" && find . -path ./launch -prune -o -type f -print | sort | xargs sha256sum); }
 
 @test "launch: the launch loop writes only under launch/ and leaves the build loop's files byte-identical; frozen in phase launch rates the launch-only criteria" {
-  ans 6 7; python3 "$Q" round "$P" --web "$W" >/dev/null
+  ans 6 7; qround "$P" --web "$W" >/dev/null
   before="$(snap)"
   ANS_LAUNCH=1 ans 9 9 minor
   run python3 "$Q" launch "$P" --url "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -359,4 +418,298 @@ snap() { (cd "$P/.aid-ui/critic" && find . -path ./launch -prune -o -type f -pri
   printf '#!/usr/bin/env bash\necho "a role was called" >&2; exit 1\n' > "$T/bin/codex"
   run python3 "$Q" launch "$P" --url "http://127.0.0.1:9/"; [ "$status" -eq 1 ]; [[ "$output" == *"does not answer"* ]]
   [ ! -e "$P/.aid-ui/critic/launch/frozen.json" ]
+}
+
+
+@test "self: no round without the check of this version; a requirement without a source or cover, a stale check refuse it" {
+  ans 9; selfdoc 9; verified web
+  run python3 "$Q" round "$P" --web "$W"
+  [ "$status" -eq 1 ]; [[ "$output" == *"no round: the version is not ready for the roles - vlastní kontrola chybí"* ]]
+  jq '.requirements[0].source = "docs/content/product-context.md:99"' "$T/self.json" > "$T/s2.json"
+  run python3 "$Q" self "$P" --file "$T/s2.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"není soubor:řádek v projektu"* ]]
+  jq 'del(.requirements[0].covered_by)' "$T/self.json" > "$T/s2.json"
+  run python3 "$Q" self "$P" --file "$T/s2.json"
+  [ "$status" -eq 1 ]; [[ "$output" == *"buď covered_by"*"nebo out_of_scope"* ]]
+  jq '.requirements[0] |= (del(.covered_by) | .out_of_scope = "pekárna neprodává po internetu")' "$T/self.json" > "$T/s2.json"
+  run python3 "$Q" self "$P" --file "$T/s2.json"; [ "$status" -eq 0 ]
+  # a check over another version of the site does not let the round run
+  python3 "$Q" self "$P" --file "$T/self.json" >/dev/null
+  echo '<html lang="cs"><body>chleba a rohlíky</body></html>' > "$P/site/index.html"
+  run python3 "$Q" round "$P" --web "$W"
+  [ "$status" -eq 1 ]; [[ "$output" == *"nad jinou verzí podkladů místa"* ]]
+}
+
+@test "self: a fix whose evidence carries a cut character is recorded, not crashed on" {
+  ans 6; qround "$P" --web "$W" >/dev/null
+  id="$(jq -r '.findings[0].id' "$P/.aid-ui/critic/rounds/1/round.json")"
+  python3 "$Q" triage "$P" "$id" accepted --expected x >/dev/null
+  run python3 "$Q" fixed "$P" "$id" --evidence "$(printf 'oprava \xc3')" --method "steps/6-build.md 3a"
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+}
+
+# supply_ans <how> - the client's answer to the last round's items: the owner's f2 a fact (good | badquote | studio
+# source), the tech's f2 an owner's choice, the readiness missing
+supply_ans() {
+  python3 - "$P" "$1" > "$T/ans-supply.json" <<'PY2'
+import json, os, sys
+sys.path.insert(0, os.environ["SC"] + "/lib"); import aid_ui_memory as m
+p, how = sys.argv[1], sys.argv[2]
+out = []
+for i in m.supply_items(p, "web"):
+    if i["kind"] == "readiness":
+        out.append({"key": i["key"], "status": "missing", "missing": "fotky dodá majitel"})
+    elif i["role"] == "tech":
+        out.append({"key": i["key"], "status": "decided", "decided_kind": "naming", "answer": "Galerie", "reason": "tak tomu říkají zákazníci"})
+    else:
+        src = {"good": ("docs/content/product-context.md:2", "Kváskový chleba v Brně"), "badquote": ("docs/content/product-context.md:2", "Rohlíky z Prahy a okolí"),
+               "studio": ("site/index.html:1", "chleba</body>"), "dotted": ("./site/index.html:1", "chleba</body>")}[how]
+        out.append({"key": i["key"], "status": "supplied", "answer": "pečeme kváskový chleba", "source": src[0], "quote": src[1]})
+print(json.dumps({"items": out}))
+PY2
+}
+
+@test "supply: what the roles left to the client is answered by the client role before the next round - a fact with its quoted source, an owner's choice, or missing" {
+  ans 6 7; selfdoc 9 web; verified web; python3 "$Q" self "$P" --place web --file "$T/self.json" >/dev/null
+  python3 "$Q" round "$P" --web "$W" >/dev/null
+  for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f1" accepted --expected "+1" >/dev/null; done
+  [ "$(dec)" = supply ]; python3 "$Q" status "$P" | jq -r .why | grep -q "aid-ui-client.py supply"
+  run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 1 ]; [[ "$output" == *"supply"* ]]
+  # a quote that is not on the cited line, or the studio's own output as the source: refused, nothing recorded
+  for how in badquote studio dotted; do
+    supply_ans "$how"; run python3 "$SC/aid-ui-client.py" supply "$P" --place web
+    [ "$status" -eq 1 ]; [ ! -e "$P/.aid-ui/client/supplied/web.json" ]
+  done
+  grep -q "the quote is not on docs/content/product-context.md:2" "$P"/.aid-ui/client/turns/supply-web-r1-1/turn.json
+  grep -q "what the studio wrote" "$P"/.aid-ui/client/turns/supply-web-r1-2/turn.json
+  # a record typed in by hand (no client run behind it) is no record
+  mkdir -p "$P/.aid-ui/client/supplied"; python3 -c 'import json,sys,os; sys.path.insert(0, os.environ["SC"]+"/lib"); import aid_ui_memory as m
+json.dump({"items": {i["key"]: dict(i, status="decided", answer="x", turn="ruka") for i in m.supply_items(sys.argv[1], "web")}}, open(sys.argv[1]+"/.aid-ui/client/supplied/web.json", "w"))' "$P"
+  [ "$(dec)" = supply ]; rm "$P/.aid-ui/client/supplied/web.json"
+  supply_ans good; run python3 "$SC/aid-ui-client.py" supply "$P" --place web; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '[.items[] | .status] | sort == ["decided","missing","supplied"]' "$P/.aid-ui/client/supplied/web.json" >/dev/null
+  jq -e '[.items[] | select(.status == "supplied")][0] | .source == "docs/content/product-context.md:2" and .provider == "codex" and (.turn | startswith(".aid-ui/client/turns/supply-web-r1-"))' "$P/.aid-ui/client/supplied/web.json" >/dev/null
+  # a record edited by hand (the client's run said otherwise) or a fact whose quote left its source is no record
+  F="$P/.aid-ui/client/supplied/web.json"; cp "$F" "$T/sup.json"
+  jq '(.items[] | select(.status == "supplied") | .answer) = "pečeme rohlíky"' "$T/sup.json" > "$F"; [ "$(dec)" = supply ]; cp "$T/sup.json" "$F"
+  cp "$P/docs/content/product-context.md" "$T/pc.md"; sed -i 's/Kváskový/Pšeničný/' "$P/docs/content/product-context.md"; [ "$(dec)" = supply ]
+  cp "$T/pc.md" "$P/docs/content/product-context.md"
+  # answered client findings go back to the agent; the missing readiness stays the PM's and stops nothing
+  [ "$(dec)" = triage ]; python3 "$Q" status "$P" | jq -r .why | grep -q "r1-owner-f2"
+  run python3 "$SC/aid-ui-client.py" supply "$P" --place web; [[ "$output" == *"nothing left"* ]]
+  for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f2" accepted --expected "+1" >/dev/null; python3 "$Q" fixed "$P" "r1-$r-f2" --evidence "o nás: kváskový chleba" --method "steps/6-build.md" >/dev/null; done
+  for r in owner tech; do python3 "$Q" fixed "$P" "r1-$r-f1" --evidence "úvod přepsán" --method "steps/6-build.md" >/dev/null; done
+  [ "$(dec)" = round ]
+  # the roles see what the client supplied
+  ans 7; qround "$P" --web "$W" >/dev/null
+  jq -e '.items | length == 3' "$P/.aid-ui/critic/rounds/2/owner/bundle/podklady/klient-dodal.json" >/dev/null
+  grep -q "klient-dodal.json" "$P/.aid-ui/critic/rounds/2/tech/prompt.md"
+  # what the client decided without the PM, and what is left to the PM
+  run python3 "$SC/aid-ui-client.py" decided "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"Dodal z podkladů"*"zdroj docs/content/product-context.md:2: „Kváskový chleba v Brně“"* ]]
+  [[ "$output" == *"Rozhodl jako vlastník"*"Galerie (naming; tak tomu říkají zákazníci)"* ]]
+  [[ "$output" == *"Zbývá na PM"*"vlastní fotky → fotky dodá majitel"* ]]
+}
+
+@test "supply: a client finding the client could not supply stays blocked; with nothing else to fix the loop stops and says it waits on the client" {
+  ans 6 7; qround "$P" --web "$W" >/dev/null   # qround: the client answered every item as missing
+  for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f1" rejected_with_reason --reason "úvod je konkrétní" >/dev/null; done
+  run python3 "$Q" status "$P"
+  jq -e '.decision == "stop:stagnation" and (.why | contains("waits on what the client has not supplied (r1-owner-f2, r1-tech-f2)"))' <<<"$output" >/dev/null || { echo "$output"; return 1; }
+}
+
+@test "round (P118 1A): the verifier runs with the roles when no record is over this version; its open points and the fixes it did not see are findings of the round" {
+  ans 6 7; qround "$P" --web "$W" >/dev/null; cycle
+  echo '<p>opraveno</p>' >> "$P/site/index.html"   # the fixed version: no verifier record over it yet
+  selfdoc 9 web; python3 "$Q" self "$P" --place web --file "$T/self.json" >/dev/null   # no verifier record is needed before the round
+  echo '{"fixes": {"r1-owner-f1": {"verdict": "nepravda", "seen": "věta je pořád obecná", "where": "site/index.html:1"}, "r1-tech-f1": {"verdict": "overeno", "seen": "opraveno", "where": "site/index.html:1"}},
+    "open": [{"where": "site/index.html:1", "what": "cena 10 na úvodu, 12 v ceníku", "why": "dvě čísla"}]}' > "$T/ans-verify.json"
+  ans 7 7; run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ -f "$P/.aid-ui/critic/rounds/2/verify.log" ]; supply_missing web
+  jq -e '(.verify | length) >= 1 and (.verify[0].sig | length) > 10' "$P/.aid-ui/critic/rounds/2/round.json" >/dev/null   # the signed records the verify findings come from
+  H="$(python3 "$Q" status "$P")"
+  jq -e '[.history[-1].findings[] | select(.role == "verify") | .text] | (index("cena 10 na úvodu, 12 v ceníku") != null) and (map(test("^oprava r1-owner-f1 ve verzi nepravda")) | any) and (map(test("r1-tech-f1")) | any | not)' <<<"$H" >/dev/null || { jq -c '[.history[-1].findings[] | select(.role == "verify")]' <<<"$H"; return 1; }
+  # a verifier that gives no valid answer: no round
+  cycle; for f in $(jq -r '.history[-1].findings[] | select(.role == "verify") | .id' <<<"$H"); do python3 "$Q" triage "$P" "$f" rejected_with_reason --reason "test" >/dev/null; done
+  echo 'nic' > "$T/ans-verify.json"; printf 'x' >> "$P/site/index.html"
+  selfdoc 9 web; python3 "$Q" self "$P" --place web --file "$T/self.json" >/dev/null
+  run python3 "$Q" round "$P" --web "$W"; [ "$status" -eq 1 ] || { echo "$output" | tail -3; return 1; }; [[ "$output" == *"no rating from verify"* ]] || { echo "$output" | tail -3; return 1; }
+}
+
+@test "verify (P118): the command captures the version, asks the verifier, signs the record; open points and unseen fixes exit 3" {
+  ans 6 7; qround "$P" --web "$W" >/dev/null; cycle
+  ids="$(python3 "$Q" status "$P" | jq -c '[.history[-1].findings[] | select(.state == "accepted" and .evidence) | .id]')"
+  jq -n --argjson i "$ids" '{fixes: ([$i[] | {key: ., value: {verdict: "overeno", where: "page /", seen: "index: nová věta"}}] | from_entries), open: []}' > "$T/ans-verify.json"
+  run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"VERIFY web over"*"0 open, fixes 2/2 seen"* ]]
+  d="$(ls -d "$P"/.aid-ui/verify/*-web | tail -1)"; jq -e '."page /" | contains("chleba")' "$d/capture.json" >/dev/null
+  grep -q "nezávislý ověřovatel verze" "$d/prompt.md"; grep -q "r1-owner-f1" "$d/prompt.md"
+  selfdoc 9 web; run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq '.open = [{where: "page /", what: "cena 10 tady, 12 jinde"}]' "$T/ans-verify.json" > "$T/a2" && mv "$T/a2" "$T/ans-verify.json"
+  run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 3 ]
+  run python3 "$Q" self "$P" --place web --file "$T/self.json"; [ "$status" -eq 0 ]   # P118 1A: an open point does not stop the round, it is its finding
+  jq '.open = [] | .fixes[] .where = "nikde"' "$T/ans-verify.json" > "$T/a2" && mv "$T/a2" "$T/ans-verify.json"   # a place that is neither a capture key nor file:line
+  run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 1 ]
+  mkdir -p "$T/old"; echo '<html lang="cs"><body>stará verze</body></html>' > "$T/old/index.html"   # an address serving another version than the files
+  OP=$(( 38900 + RANDOM % 90 )); python3 -m http.server $OP --bind 127.0.0.1 --directory "$T/old" >/dev/null 2>&1 & OS=$!
+  for _ in $(seq 50); do curl -s "http://127.0.0.1:$OP/" >/dev/null && break; sleep 0.1; done
+  run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "http://127.0.0.1:$OP/"; kill $OS
+  [ "$status" -eq 1 ]; [[ "$output" == *"serves another version"* ]]
+  echo '{"fixes": {}, "open": []}' > "$T/ans-verify.json"   # a fix without a verdict is no valid answer (twice, then the stand-in fails)
+  run python3 "$SC/aid-ui-client.py" verify "$P" --place web --web "$W"; [ "$status" -eq 1 ]
+}
+
+@test "facts (P118): two independent readers at once; the judge pairs the same claim at any lines, a contradiction blocks the lint, one reader's fact only informs; agreed facts persist; a stale quote fails" {
+  mkdir -p "$P/src" "$P/docs/design"
+  printf 'def on_rejected_sl(p):\n    close_market(p)\n    pause()\n' > "$P/src/execute.py"
+  printf '# Roadmapa\nOdmítnutý SL → okamžité zavření marketem + alert.\n' > "$P/docs/content/roadmap.md"
+  F1='{"id": "sl-odmitnut", "kind": "observed_current", "statement": "Odmítnutý SL appka zavře trhem a pozastaví se.", "conditions": "SL nejde nastavit", "result": "zavření a pauza", "unwanted": "pozice bez SL", "sources": [{"source": "src/execute.py:1-3", "quote": "close_market(p)", "source_kind": "code"}]}'
+  F2='{"id": "zavreni-sl", "kind": "observed_current", "statement": "Když SL nejde nastavit, appka pozici zavře trhem a pozastaví se.", "sources": [{"source": "src/execute.py:2", "quote": "close_market(p)", "source_kind": "code"}]}'
+  F3='{"id": "jen-codex", "kind": "assumption", "statement": "Alert jde i do Telegramu.", "sources": [{"source": "docs/content/roadmap.md:2", "quote": "zavření marketem + alert", "source_kind": "roadmap"}]}'
+  echo "{\"facts\": [$F1, $F3]}" > "$T/ans-owner.json"   # the Codex stub answers what the owner file holds for a prompt without the tech rubric
+  printf '#!/usr/bin/env bash\ncat >/dev/null; python3 -c '"'"'import json,sys; print(json.dumps({"result": open(sys.argv[1]).read(), "usage": {}}))'"'"' "%s"\n' "$T/ans-claude.json" > "$T/bin/claude"
+  echo "{\"facts\": [$F2]}" > "$T/ans-claude.json"
+  echo '{"same": [], "conflict": []}' > "$T/ans-judge.json"   # nothing paired: all three only inform, nothing blocks
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '(.facts | length) == 0 and (.open | length) == 0 and ([.unconfirmed[].fact.id] | sort) == ["jen-codex", "sl-odmitnut", "zavreni-sl"]' "$P/docs/design/app-facts.json" >/dev/null
+  echo '{"same": [{"a": 0, "b": 0}]}' > "$T/ans-judge.json"   # the same claim under other ids and other lines
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '(.facts | map(.id)) == ["sl-odmitnut"] and .facts[0].agreed_by == ["codex", "opus"] and (.unconfirmed | map(.fact.id)) == ["jen-codex"]' "$P/docs/design/app-facts.json" >/dev/null || { jq -c '[.facts[].id, [.unconfirmed[].fact.id]]' "$P/docs/design/app-facts.json"; return 1; }
+  # a pair the judge calls both the same and a contradiction is no valid answer: nothing written
+  echo '{"same": [{"a": 1, "b": 0}], "conflict": [{"a": 1, "b": 0, "why": "x"}]}' > "$T/ans-judge.json"
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 1 ]
+  # a pair of different kinds is no agreement even when the judge says so; the fact agreed before stays (it is in O)
+  echo '{"same": [{"a": 1, "b": 0}]}' > "$T/ans-judge.json"
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '(.facts | map(.id)) == ["sl-odmitnut"] and (.open | length) == 0' "$P/docs/design/app-facts.json" >/dev/null
+  # restated by a fact agreed now: replaced, not kept twice
+  echo '{"same": [{"a": 0, "b": 0}], "restated": [{"o": 0, "a": 0}]}' > "$T/ans-judge.json"
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ]; jq -e '(.facts | map(.id)) == ["sl-odmitnut"]' "$P/docs/design/app-facts.json" >/dev/null
+  # a contradiction is open; a fact agreed before that a reader now contradicts leaves the facts and is open too
+  echo '{"same": [], "conflict": [{"a": 1, "b": 0, "why": "alert vs pauza"}], "disputed": [{"o": 0, "b": 0, "why": "jiný výsledek"}]}' > "$T/ans-judge.json"
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '(.facts | length) == 0 and ([.open[].fact.id] | sort) == ["spor-jen-codex", "spor-sl-odmitnut"]' "$P/docs/design/app-facts.json" >/dev/null || { jq -c '[.facts[].id, [.open[].fact.id]]' "$P/docs/design/app-facts.json"; return 1; }
+  jq -e '[.unconfirmed[].fact.id] == ["sl-odmitnut"]' "$P/docs/design/app-facts.json" >/dev/null   # the disputed facts are open, not "one reader only"
+  echo '{"same": [{"a": 0, "b": 0}]}' > "$T/ans-judge.json"   # agreed again; the open contradictions stay until dropped
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 0 ]
+  jq -e '(.facts | map(.id)) == ["sl-odmitnut"] and ([.open[].fact.id] | sort) == ["spor-jen-codex", "spor-sl-odmitnut"]' "$P/docs/design/app-facts.json" >/dev/null
+  python3 "$SC/aid-ui-client.py" facts "$P" --drop spor-sl-odmitnut --reason "kód zavírá trhem" >/dev/null
+  # an open question of the format before (one reader) is not lost by a rerun: it stays unconfirmed until dropped
+  jq '.open += [{"from": "codex", "fact": {"id": "stara", "kind": "assumption", "statement": "Stará otázka.", "sources": []}}]' "$P/docs/design/app-facts.json" > "$T/f.json" && mv "$T/f.json" "$P/docs/design/app-facts.json"
+  echo '{"same": [{"a": 0, "b": 0}]}' > "$T/ans-judge.json"
+  for _ in 1 2; do python3 "$SC/aid-ui-client.py" facts "$P" >/dev/null; done
+  jq -e '[.unconfirmed[] | select(.fact.id == "stara") | .from] == ["before P118 H5: codex"]' "$P/docs/design/app-facts.json" >/dev/null
+  python3 "$SC/aid-ui-client.py" facts "$P" --drop stara --reason "nahrazeno" >/dev/null
+  jq -e '[.unconfirmed[] | select(.fact.id == "stara")] == []' "$P/docs/design/app-facts.json" >/dev/null
+  echo '{"same": [], "conflict": [], "x": "' > "$T/ans-judge.json"   # no valid judge: nothing written
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 1 ]; jq -e '(.open | map(.fact.id)) == ["spor-jen-codex"]' "$P/docs/design/app-facts.json" >/dev/null
+  # the model of an existing app: an open question and a writing task without facts are refused
+  mkdir -p "$P/docs/design"; cp "$SC/tests/fixtures/aid-ui/app/docs/design/screens.json" "$P/docs/design/screens.json"
+  run python3 "$SC/aid-ui-screens.py" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }   # an app without a UI today: facts are not required
+  echo '{"type": "webapp", "brand": "none", "local": false, "existing": true}' > "$P/.aid-ui/variant.json"
+  run python3 "$SC/aid-ui-screens.py" check "$P"; [ "$status" -eq 1 ]
+  [[ "$output" == *"1 otevřených otázek"*"spor-jen-codex"* ]]; [[ "$output" == *"úloha zalozit zapisuje, ale neodkazuje na fakta appky"* ]]
+  jq '.tasks[0].new = "R9"' "$P/docs/design/screens.json" > "$T/m.json" && mv "$T/m.json" "$P/docs/design/screens.json"   # new behaviour needs a real requirement
+  run python3 "$SC/aid-ui-screens.py" check "$P"; [[ "$output" == *"/tasks/0/new: R9 není id požadavku"* ]]
+  jq '.requirements = [{"id": "R9", "source": "docs/content/roadmap.md:2", "text": "zavření a alert", "covered_by": ["task:zalozit"]}]' "$P/docs/design/screens.json" > "$T/m.json" && mv "$T/m.json" "$P/docs/design/screens.json"
+  run python3 "$SC/aid-ui-screens.py" check "$P"; [[ "$output" != *"/tasks/0/"* ]]; [[ "$output" == *"úloha smazat zapisuje, ale neodkazuje na fakta appky"* ]]
+  jq 'del(.tasks[0].new) | del(.requirements)' "$P/docs/design/screens.json" > "$T/m.json" && mv "$T/m.json" "$P/docs/design/screens.json"
+  run python3 "$SC/aid-ui-client.py" facts "$P" --drop spor-jen-codex; [ "$status" -eq 2 ]
+  python3 "$SC/aid-ui-client.py" facts "$P" --drop spor-jen-codex --reason "Telegram se v UI neřeší" >/dev/null
+  jq '(.tasks[] | .facts) = ["sl-odmitnut"]' "$P/docs/design/screens.json" > "$T/m.json" && mv "$T/m.json" "$P/docs/design/screens.json"
+  run python3 "$SC/aid-ui-screens.py" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  sed -i 's/close_market(p)/close_limit(p)/' "$P/src/execute.py"   # the code changed under the fact
+  run python3 "$SC/aid-ui-screens.py" check "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"/app-facts/sl-odmitnut: zdroj zestárl"* ]]
+  # a quote that is not in the file is no valid answer; with no stand-in the run stops
+  sed -i 's/close_limit(p)/close_market(p)/' "$P/src/execute.py"; echo '{"facts": [{"id": "x", "kind": "unknown", "statement": "y", "sources": [{"source": "src/execute.py:1", "quote": "nic takového tu není", "source_kind": "code"}]}]}' > "$T/ans-claude.json"
+  run python3 "$SC/aid-ui-client.py" facts "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"no valid answer from opus"* ]]
+}
+
+@test "delta (P118): fixes after an accepted place round give one more round over the fixed version, no reopen; the roles keep their memory" {
+  python3 "$SC/aid-ui-critic.py" freeze "$P" --type web-local --place sdeleni >/dev/null
+  cat > "$T/bin/codex" <<SH
+#!/usr/bin/env bash
+[[ "\$1" == --version ]] && exit 0
+p="\$(cat)"; role=owner; grep -q "### $(yq -r '.criteria[0].id' "$K/web-local.tech.sdeleni.yaml") " <<<"\$p" && role=tech
+python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
+SH
+  chmod +x "$T/bin/codex"
+  pans sdeleni 9
+  run qround "$P" --place sdeleni; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  pcycle sdeleni
+  [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = verdict ]   # accepted, the version unchanged
+  f="$(python3 "$SC/aid-ui-critic.py" bundle-files "$P" --place sdeleni | head -1)"; echo "Doplněno podle nálezu." >> "$P/$f"
+  run python3 "$Q" status "$P" --place sdeleni; jq -e '.decision == "delta" and (.why | contains("rate it once"))' <<<"$output" >/dev/null || { echo "$output"; return 1; }
+  run qround "$P" --place sdeleni; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.round == 2' <<<"${lines[-1]}" >/dev/null
+  jq -e '[.findings[].id] | index("r1-owner-f1") != null' "$P/.aid-ui/critic/rounds/sdeleni/2/history-owner.json" >/dev/null
+  jq -e '.delta == true' "$P/.aid-ui/critic/rounds/sdeleni/2/round.json" >/dev/null
+  # after the delta round no second one: fixed again and changed again, the place goes to its verdict
+  pcycle sdeleni; echo "Ještě jedna věta." >> "$P/$f"
+  [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = verdict ]
+  run qround "$P" --place sdeleni; [ "$status" -eq 1 ]
+}
+
+@test "delta (P118, run 5): a fact the delta round found and that was fixed gets one more delta round to be confirmed; a third never" {
+  python3 "$SC/aid-ui-critic.py" freeze "$P" --type web-local --place sdeleni >/dev/null
+  cat > "$T/bin/codex" <<SH
+#!/usr/bin/env bash
+[[ "\$1" == --version ]] && exit 0
+p="\$(cat)"; role=owner; grep -q "### $(yq -r '.criteria[0].id' "$K/web-local.tech.sdeleni.yaml") " <<<"\$p" && role=tech
+python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
+SH
+  chmod +x "$T/bin/codex"
+  pans sdeleni 9
+  run qround "$P" --place sdeleni; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  pcycle sdeleni
+  [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = verdict ]   # accepted, the version unchanged
+  f="$(python3 "$SC/aid-ui-critic.py" bundle-files "$P" --place sdeleni | head -1)"; echo "Doplněno podle nálezu." >> "$P/$f"
+  run python3 "$Q" status "$P" --place sdeleni; jq -e '.decision == "delta" and (.why | contains("rate it once"))' <<<"$output" >/dev/null || { echo "$output"; return 1; }
+  for r in owner tech; do jq '.findings[0].kind = "fakt"' "$T/ans-$r.json" > "$T/a" && mv "$T/a" "$T/ans-$r.json"; done   # the delta round finds a fact
+  run qround "$P" --place sdeleni; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.round == 2' <<<"${lines[-1]}" >/dev/null
+  jq -e '[.findings[].id] | index("r1-owner-f1") != null' "$P/.aid-ui/critic/rounds/sdeleni/2/history-owner.json" >/dev/null
+  jq -e '.delta == true' "$P/.aid-ui/critic/rounds/sdeleni/2/round.json" >/dev/null
+  # a fact fixed after the delta round: one more delta round confirms it; after it, fixed again, the verdict
+  pcycle sdeleni; echo "Ještě jedna věta." >> "$P/$f"
+  [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = delta ]
+  run qround "$P" --place sdeleni; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  pcycle sdeleni; echo "A ještě jedna." >> "$P/$f"
+  [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = verdict ]
+}
+
+
+@test "delta (P118): a changed version without accepted and fixed findings gives no delta round" {
+  python3 "$SC/aid-ui-critic.py" freeze "$P" --type web-local --place sdeleni >/dev/null
+  cat > "$T/bin/codex" <<SH
+#!/usr/bin/env bash
+[[ "\$1" == --version ]] && exit 0
+p="\$(cat)"; role=owner; grep -q "### $(yq -r '.criteria[0].id' "$K/web-local.tech.sdeleni.yaml") " <<<"\$p" && role=tech
+python3 -c 'import json,sys; print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":open(sys.argv[1]).read()}})); print(json.dumps({"type":"turn.completed","usage":{"input_tokens":10,"cached_input_tokens":0,"output_tokens":10}}))' "$T/ans-\$role.json"
+SH
+  chmod +x "$T/bin/codex"
+  pans sdeleni 9; qround "$P" --place sdeleni >/dev/null
+  for r in owner tech; do python3 "$Q" triage "$P" "r1-$r-f1" rejected_with_reason --reason "věta je přesná" >/dev/null; done   # no --place: the finding's place (H5 run 3)
+  f="$(python3 "$SC/aid-ui-critic.py" bundle-files "$P" --place sdeleni | head -1)"; echo "Nesouvisející úprava." >> "$P/$f"
+  [ "$(python3 "$Q" status "$P" --place sdeleni | jq -r .decision)" = verdict ]
+}
+
+@test "brief (P118): the producer's brief holds the findings to fix, what the client supplied and the verifier's open points - nothing else" {
+  ans 6 7; qround "$P" --web "$W" >/dev/null
+  python3 "$Q" triage "$P" r1-owner-f1 accepted --expected "+1" >/dev/null
+  python3 "$Q" triage "$P" r1-tech-f1 rejected_with_reason --reason "už je konkrétní" >/dev/null
+  WHOLE_OPEN="cena na úvodu nesedí s ceníkem" verified web
+  run python3 "$Q" brief "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  B="$output"; [ -f "$B" ]
+  grep -q '^- \*\*r1-owner-f1\*\*' "$B"; ! grep -q 'r1-tech-f1' "$B"            # only what is accepted and not fixed
+  grep -q 'vlastní fotky: missing' "$B"                                         # the client's answers (qround: missing)
+  grep -q 'cena na úvodu nesedí s ceníkem' "$B"
+}
+
+@test "status (P118): every round shows where its time went - roles, verifier, gate, producer" {
+  ans 6 7; qround "$P" --web "$W" >/dev/null
+  mkdir -p "$P/.aid-ui"; now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  echo "{\"mode\": \"precheck\", \"started\": \"$now\", \"ended\": \"$now\", \"open\": 0}" >> "$P/.aid-ui/gate-times.jsonl"
+  run python3 "$Q" status "$P"
+  jq -e '.history[0].cost.phases | (keys | sort) == ["gate", "producer_and_waiting", "roles", "verify"] and all(.[]; type == "number" and . >= 0)' <<<"$output" >/dev/null || { echo "$output" | jq -c '.history[0].cost'; return 1; }
 }

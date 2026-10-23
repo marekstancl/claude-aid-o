@@ -1,0 +1,12 @@
+role: tech
+place: web
+gates:
+  - {criterion: verified_task_completion, min: 7, why: "Hotová aplikace nesmí projít, pokud podstatná nebo nahrazovaná dnešní úloha nedoběhne k ověřitelnému výsledku ve svých relevantních stavech."}
+  - {criterion: resilience_recovery, min: 7, why: "Chyba nebo přerušení nesmí smazat práci, vytvořit duplicitu ani ponechat uživatele bez bezpečné cesty dál."}
+  - {criterion: states_permissions, min: 7, why: "Každý stav, zákaz role a nevratná akce musí mít srozumitelné, bezpečné a funkční chování."}
+  - {criterion: navigation_data_operations, min: 7, why: "Zpět, přímé odkazy a operace nad daty musí zachovat kontext a nezamlčet dopad ani dílčí selhání."}
+  - {criterion: accessibility_keyboard, min: 7, why: "Podstatná úloha musí být dokončitelná klávesnicí a bez bariér odporujících WCAG 2.2 AA."}
+  - {criterion: performance_feedback, min: 7, why: "Ovládání musí reagovat, bránit dvojímu odeslání a při čekání udržet stabilní a srozumitelný stav."}
+  - {criterion: engineering_readiness, min: 7, why: "Před předáním musí být chování reprodukovatelné, smlouvy testovatelné a klientské závislosti výslovně oddělené."}
+weighted_min: 8.5
+audit: {median_min: 8.5, any_min: 8.0, criterion_median_min: 7.0}

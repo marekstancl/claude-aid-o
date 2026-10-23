@@ -1,0 +1,11 @@
+role: owner
+place: vzhled
+# Každý ze tří směrů má vlastní skóre; brány musí splnit směr navržený k pokračování, ostatní směry smí neprojít.
+gates:
+  - {criterion: stavy_navrzene, min: 7, why: "Směr bez navržených stavů skončí v provozu prázdnou stránkou nebo nekonečným kolečkem a ztraceným vstupem."}
+  - {criterion: nebezpecne_akce_odlisene, min: 7, why: "Spletené nebezpečné tlačítko je nevratná chyba u dat nebo peněz."}
+  - {criterion: cisla_a_data_citelna, min: 6.5, why: "Špatně přečtená částka je chyba u peněz; zbytek se doladí ve stavbě."}
+  - {criterion: hlavni_obrazovka_pro_praci, min: 6, why: "Bez viditelné práce na hlavní obrazovce se aplikace denně nepoužívá."}
+  - {criterion: telefon_kde_ho_potrebuju, min: 6, why: "Úloha z terénu musí jít na telefonu, ale rozvržení se dá ve stavbě upravit."}
+  - {criterion: chci_v_tom_pracovat, min: 6, why: "Odpor k aplikaci znamená, že se k ní lidé budou nutit; ladí se levně."}
+weighted_min: 7.5

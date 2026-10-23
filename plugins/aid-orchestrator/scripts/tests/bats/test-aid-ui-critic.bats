@@ -257,6 +257,12 @@ verdict_of() {   # verdict_of <place> [args]: both roles' scores of $T/owner.jso
   python3 "$C" freeze "$P" --type web-local --place logo >/dev/null; logo_inputs a b
   DIRS="a" mk logo tech 8; run sc logo tech; [ "$status" -eq 1 ]; [[ "$output" == *"bundle has ['a', 'b']"* ]]
   DIRS="a b x" mk logo tech 8; run sc logo tech; [ "$status" -eq 1 ]
+  # the expert left the flag out (Trading 22. 10.): its own severity says it - blocking takes the direction out, major does not
+  DIRS="a b" mk logo owner 8 '.choice = "a"'
+  DIRS="a b" mk logo tech 8 '.findings = [{"id": "t1", "criterion": "remeslo_tvaru", "severity": "blocking", "owner": "agent", "kind": "remeslo", "direction": "a", "text": "kóta přes obrys", "fix": "odsadit", "where": "značka 512"}]'
+  run verdict_of logo; [ "$status" -eq 3 ]; jq -e '.passing == ["b"]' <<<"$output" >/dev/null
+  DIRS="a b" mk logo tech 8 '.findings = [{"id": "t1", "criterion": "remeslo_tvaru", "severity": "major", "owner": "agent", "kind": "remeslo", "direction": "a", "text": "kóta přes obrys", "fix": "odsadit", "where": "značka 512"}]'
+  run verdict_of logo; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
   # a craft finding without blocking: true does not take the direction out
   DIRS="a b" mk logo owner 8 '.choice = "a"'
   DIRS="a b" mk logo tech 8 '.findings = [{"id": "t1", "criterion": "remeslo_tvaru", "severity": "blocking", "owner": "agent", "kind": "remeslo", "blocking": false, "direction": "a", "text": "drobná nerovnost", "fix": "srovnat", "where": "značka 512"}]'

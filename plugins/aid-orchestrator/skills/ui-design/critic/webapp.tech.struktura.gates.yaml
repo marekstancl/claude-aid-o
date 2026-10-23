@@ -1,0 +1,10 @@
+role: tech
+place: struktura
+gates:
+  - {criterion: task_model, min: 7, why: "Chybějící úloha, výsledek, stav nebo náhrada dnešní úlohy se v implementaci mění na nedokončitelnou práci či neodhalenou regresi."}
+  - {criterion: failure_recovery, min: 7, why: "Ztráta rozepsaných dat a slepá cesta po selhání jsou před implementací nepřijatelné."}
+  - {criterion: information_architecture, min: 7, why: "Nevratná nebo hromadná akce bez ochrany a nepředvídatelný návrat mohou způsobit neobnovitelnou škodu."}
+  - {criterion: skeleton_testability, min: 6, why: "Bez prokliknutí a vyvolání stavů nelze ověřit, že model skutečně drží pohromadě."}
+  - {criterion: interaction_accessibility, min: 6, why: "Zásadní úloha musí mít už v kostře proveditelnou klávesovou a sémantickou cestu."}
+  - {criterion: implementation_readiness, min: 6, why: "Nejasná smlouva nutí vývojáře doplňovat produktová rozhodnutí bez podkladu."}
+weighted_min: 7.5

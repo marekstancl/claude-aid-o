@@ -8,6 +8,10 @@ user_invocable: false
 
 **Vrstva dílny (P113):** `references/local/struktura-postup.md` má přednost před postupem stromu a sekcí (úkoly zákazníka první, rozsah obsahu je volba klienta - výchozí výběr 8–12 s detailem + úplný seznam). Ze `structure.json` staví živou kostru `aid-ui-serve.sh skeleton <projekt>` na stálé adrese. Místo: `struktura`, kolo `aid-ui-quality.py round <projekt> --place struktura --web <adresa kostry>`.
 
+**Webová aplikace (P116):** u `type: webapp` platí místo bodů 2-6 níže `references/local/aplikace-postup.md` (oddíly 1 a 2):
+model obrazovek a úloh `docs/design/screens.json`, kostra z něj a otázka `structure` s cílem
+`docs/design/screens.json@<sha>`, kterou zodpoví vlastník: klient-agent (hraje PM, jako nezávislý agent v AID runu), PM ho může přebít.
+
 **Last Updated:** 2026-09-28
 
 ## Cíl

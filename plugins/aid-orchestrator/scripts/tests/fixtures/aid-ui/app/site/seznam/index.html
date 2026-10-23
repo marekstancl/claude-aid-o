@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Poznámky · Poznámky</title><link rel="stylesheet" href="/app.css"></head>
+<body><header><a class="skip" href="#obsah">Přeskočit na obsah</a><nav aria-label="Aplikace"><a href="/seznam/">Poznámky</a></nav></header>
+<main id="obsah" data-aid-screen="seznam"><h1>Poznámky</h1>
+<p data-zprava role="status"></p>
+<section data-aid-task-state="zalozit.empty" hidden><h2>Založit poznámku: prázdno</h2><p>První poznámka: seznam nabízí Novou poznámku.</p></section>
+<section data-aid-task-state="smazat.empty" hidden><h2>Smazat poznámku: prázdno</h2><p>Bez poznámek není co mazat; seznam nabízí Novou poznámku.</p></section>
+<section data-aid-state="empty"><p>Zatím žádná poznámka. Založte první.</p></section>
+<section data-aid-state="loading" aria-busy="true"><p>Načítám poznámky…</p></section>
+<section data-aid-state="error" role="alert"><p>Poznámky se nepodařilo načíst. <a href="/seznam/">Zkusit znovu</a></p></section>
+<section data-aid-state="filled"><ul data-list></ul></section>
+<p><a class="tlacitko" href="/formular/" data-aid-action="seznam.novy">Nová poznámka</a></p>
+</main><script src="/app.js"></script></body></html>

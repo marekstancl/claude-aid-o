@@ -326,3 +326,326 @@ import json, sys; p = sys.argv[1] + "/.aid-ui/structure.json"; s = json.load(ope
 PY
   run python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$Q"; [ "$status" -eq 2 ]; [[ "$output" == *"both become sluzby/index.html"* ]]; [ ! -e "$Q/site" ]
 }
+
+# ---------------------------------------------------------------- P116: the app skeleton from the model of screens
+app_skel() {   # app_skel <dir>: a webapp project with the fixture model (not approved)
+  local p="$1"; mkdir -p "$p/.aid-ui" "$p/docs/design"
+  cp "$BATS_TEST_DIRNAME/../fixtures/aid-ui/app/docs/design/screens.json" "$p/docs/design/"
+  echo '{"type": "webapp", "brand": "none", "local": false}' > "$p/.aid-ui/variant.json"
+}
+# states_seen <url> - the data-aid-state blocks a browser shows at <url> (JS on), comma-joined
+states_seen() {
+  local js="$BATS_TEST_TMPDIR/states.mjs"
+  cat > "$js" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); await pg.goto(process.argv[2]);
+console.log((await pg.\$\$eval('[data-aid-state]', es => es.filter(e => !e.hidden && e.offsetParent !== null).map(e => e.dataset.aidState))).join(','));
+await b.close();
+J
+  node "$js" "$1"
+}
+
+@test "app-skeleton: every screen at the fixed address with the navigation and its actions leading to their target screens" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  run "$SERVE" skeleton "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [[ "$output" == *"URL: http://127.0.0.1:39918/"* ]]
+  for s in seznam formular detail; do
+    curl -sf --max-time 3 "http://127.0.0.1:39918/$s/" > "$BATS_TEST_TMPDIR/$s.html"
+    grep -q "data-aid-screen=\"$s\"" "$BATS_TEST_TMPDIR/$s.html"
+    grep -q '<nav aria-label="Aplikace"><ul><li><a href="/seznam/"' "$BATS_TEST_TMPDIR/$s.html"   # nav: only nav screens
+    ! grep -q 'aria-label="Aplikace"><ul>.*href="/detail/"' "$BATS_TEST_TMPDIR/$s.html"
+  done
+  grep -q 'href="/formular/" data-aid-action="seznam.novy"' "$BATS_TEST_TMPDIR/seznam.html"
+  grep -q 'href="/detail/" data-aid-action="seznam.otevrit"' "$BATS_TEST_TMPDIR/seznam.html"
+  grep -q 'formaction="/detail/" name="vysledek" value="zalozit" data-aid-action="formular.ulozit"' "$BATS_TEST_TMPDIR/formular.html"
+  grep -q 'name="nazev" aria-describedby="f-formular-nazev-chyba">' "$BATS_TEST_TMPDIR/formular.html"
+  grep -q 'data-aid-result="zalozit">Nákup na sobotu' "$BATS_TEST_TMPDIR/detail.html"   # where the task ends, its result
+  [ "$(curl -sf --max-time 3 http://127.0.0.1:39918/ | grep -c 'data-aid-screen="seznam"')" -eq 1 ]   # home = first nav screen
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: each screen shows its four states - one at a time by ?stav=, all of them without JavaScript" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  "$SERVE" skeleton "$P" >/dev/null
+  for s in seznam formular detail; do
+    [ "$(grep -o 'data-aid-state="[a-z]*"' "$P/site/$s/index.html" | tr '\n' ' ')" = 'data-aid-state="empty" data-aid-state="loading" data-aid-state="error" data-aid-state="filled" ' ]   # the model's order
+    ! grep -qE 'data-aid-state="[a-z]+"[^>]*hidden' "$P/site/$s/index.html"   # hidden only by the script: without JS all show
+  done
+  [ "$(states_seen http://127.0.0.1:39918/seznam/)" = filled ]
+  [ "$(states_seen 'http://127.0.0.1:39918/seznam/?stav=empty')" = empty ]
+  [ "$(states_seen 'http://127.0.0.1:39918/detail/?stav=error')" = error ]
+  [ "$(states_seen 'http://127.0.0.1:39918/detail/?stav=nesmysl')" = filled ]
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: a destructive action stands behind its confirm question; the draft banner goes once the PM approved this model" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  "$SERVE" skeleton "$P" >/dev/null
+  grep -q '<button type="button" data-aid-action="detail.smazat" data-aid-hide-in="empty error loading" aria-haspopup="dialog">Smazat</button><dialog open class="potvrzeni" data-aid-confirm="detail.smazat"' "$P/site/detail/index.html"
+  grep -q '<a href="/seznam/?vysledek=smazat" data-aid-confirm-yes="detail.smazat">Smazat poznámku</a>' "$P/site/detail/index.html"
+  ! grep -q 'data-aid-action="detail.smazat" href' "$P/site/detail/index.html"   # never a plain link
+  # in a browser: the action opens the dialog (closed before), Potvrdit leads to the target screen
+  cat > "$BATS_TEST_TMPDIR/del.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); await pg.goto('http://127.0.0.1:39918/detail/');
+const before = await pg.locator('[data-aid-confirm-yes="detail.smazat"]').isVisible();
+await pg.click('[data-aid-action="detail.smazat"]'); await pg.click('[data-aid-confirm-yes="detail.smazat"]'); await pg.waitForURL(/seznam/);
+console.log(before + ' ' + await pg.getAttribute('main', 'data-aid-screen')); await b.close();
+J
+  [ "$(node "$BATS_TEST_TMPDIR/del.mjs")" = "false seznam" ]
+  for s in seznam formular detail; do grep -q 'data-aid-draft' "$P/site/$s/index.html"; done
+  # approved: the state names this model's sha -> no banner; a changed model -> the banner again
+  sha="$(sha256sum "$P/docs/design/screens.json" | cut -d' ' -f1)"
+  echo "{\"variant\": {\"type\": \"webapp\"}, \"app\": {\"approved_model_sha\": \"$sha\"}}" > "$P/docs/design/brand-state.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  ! grep -q 'data-aid-draft' "$P/site/detail/index.html"
+  jq '.tasks[0].title = "Jinak"' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  grep -q 'data-aid-draft' "$P/site/detail/index.html"
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: a screen removed from the model leaves the fixed address; a page the build replaced is kept" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  "$SERVE" skeleton "$P" >/dev/null
+  echo '<html><main data-aid-screen="seznam">postaveno</main></html>' > "$P/site/seznam/index.html"
+  jq '(.screens[0].actions) |= map(select(.id != "otevrit")) | del(.screens[2]) | .tasks = [.tasks[0] | .done_when = {screen: "formular", expect: "x"} | .steps[1].action = "zpet" | .steps |= .[:1] | .done_when.screen = "formular" | .failure_paths = [] | .states.failure = "nenastává, protože bez odeslání"]
+      | (.screens[1].actions) |= map(select(.to != "detail"))' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  run python3 "$BATS_TEST_DIRNAME/../../aid-ui-screens.py" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  run "$SERVE" skeleton "$P"
+  [ "$status" -eq 0 ]; [[ "$output" == *"built pages kept without the draft banner"*"seznam/index.html"* ]]   # the model is not approved
+  [ ! -e "$P/site/detail/index.html" ]; [ -f "$P/.aid-ui/skeleton/removed/detail/index.html" ]
+  grep -q postaveno "$P/site/seznam/index.html"
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: a task's result shows only after its last action; the confirm dialog opens on Zrušit; the bar is on every screen; each screen lists its tasks' states" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '.screens += [{id: "lista", title: "Lišta", purpose: "Na každé obrazovce.", nav: false, shell: true,
+        actions: [{id: "obnovit", label: "Obnovit", to: "seznam", kind: "navigate"}],
+        states: {empty: "nenastává, protože lišta je vždy", loading: "nenastává, protože lišta je vždy", error: "nenastává, protože lišta je vždy", filled: "Lišta."}}]' \
+    "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  run python3 "$BATS_TEST_DIRNAME/../../aid-ui-screens.py" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  "$SERVE" skeleton "$P" >/dev/null
+  # the bar: on every screen's page, no page of its own
+  for s in seznam formular detail; do grep -q 'data-aid-screen="lista"' "$P/site/$s/index.html"; grep -q 'data-aid-action="lista.obnovit"' "$P/site/$s/index.html"; done
+  [ ! -e "$P/site/lista" ]
+  # the actions that end a task carry it; its result is hidden until then
+  grep -q 'name="vysledek" value="zalozit" data-aid-action="formular.ulozit"' "$P/site/formular/index.html"
+  grep -q 'name="vysledek" value="zalozit" data-aid-action="formular.znovu"' "$P/site/formular/index.html"
+  grep -q 'href="/seznam/?vysledek=smazat" data-aid-confirm-yes="detail.smazat"' "$P/site/detail/index.html"
+  grep -q '<summary>Stavy úloh na této obrazovce</summary>' "$P/site/formular/index.html"; grep -q 'chyba validace: Prázdný název' "$P/site/formular/index.html"
+  cat > "$BATS_TEST_TMPDIR/res.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); const r = [];
+await pg.goto('http://127.0.0.1:39918/detail/'); r.push(await pg.locator('[data-aid-result="zalozit"]').isVisible());
+await pg.goto('http://127.0.0.1:39918/detail/?vysledek=zalozit'); r.push(await pg.locator('[data-aid-result="zalozit"]').isVisible());
+await pg.click('[data-aid-action="detail.smazat"]'); r.push(await pg.evaluate(() => document.activeElement.hasAttribute('data-aid-confirm-no')));
+console.log(r.join(' ')); await b.close();
+J
+  [ "$(node "$BATS_TEST_TMPDIR/res.mjs")" = "false true true" ]
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: in a browser - an action outside its mode is disabled with its reason, an invalid field stops the send with its message, a task's state shows on call" {
+  P="$BATS_TEST_DIRNAME/../../../.."; P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '.modes = [{id: "bezi", label: "Běží"}, {id: "pauza", label: "Pauza"}] | .screens[0].actions[0].modes = ["bezi"]
+      | .screens[0].actions[0].disabled_reason = "V pauze nové poznámky nejdou." | .screens[0].actions[0].kind = "navigate"
+      | .screens[1].fields = [{name: "nazev", label: "Název", required: true, error: "Název je povinný."}]' \
+    "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/modes.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); const r = [];
+await pg.goto('http://127.0.0.1:39918/seznam/?rezim=pauza'); const a = pg.locator('[data-aid-action="seznam.novy"]');
+r.push(await a.getAttribute('aria-disabled')); r.push(await pg.locator('#proc-seznam-novy').isVisible());
+await pg.goto('http://127.0.0.1:39918/seznam/?rezim=bezi'); r.push(await pg.locator('[data-aid-action="seznam.novy"]').getAttribute('aria-disabled'));
+await pg.goto('http://127.0.0.1:39918/formular/'); await pg.click('[data-aid-action="formular.ulozit"]');
+r.push(new URL(pg.url()).pathname); r.push(await pg.locator('#f-formular-nazev-chyba').isVisible());
+await pg.goto('http://127.0.0.1:39918/formular/?stav=zalozit.validation'); r.push(await pg.locator('[data-aid-task-state="zalozit.validation"]').isVisible());
+console.log(r.join(' ')); await b.close();
+J
+  [ "$(node "$BATS_TEST_TMPDIR/modes.mjs")" = "true true false /formular/ true true" ]
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: a link outside its mode cannot be followed; a submit with a deep link keeps both its parameters and the input" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '.modes = [{id: "bezi", label: "Běží"}, {id: "pauza", label: "Pauza"}] | .screens[0].actions[0].modes = ["bezi"] | .screens[0].actions[0].disabled_reason = "V pauze ne."
+      | .screens[1].actions[0].query = "id=n1"' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/q.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); const r = [];
+await pg.goto('http://127.0.0.1:39918/seznam/?rezim=pauza'); await pg.locator('[data-aid-action="seznam.novy"]').click({ force: true }).catch(() => {});
+await pg.waitForTimeout(300); r.push(new URL(pg.url()).pathname);
+await pg.goto('http://127.0.0.1:39918/formular/'); await pg.fill('[name="nazev"]', 'Nákup'); await pg.click('[data-aid-action="formular.ulozit"]'); await pg.waitForURL(/detail/);
+const u = new URL(pg.url()); r.push(u.searchParams.get('id') + ' ' + u.searchParams.get('nazev'));
+console.log(r.join(' | ')); await b.close();
+J
+  [ "$(node "$BATS_TEST_TMPDIR/q.mjs")" = "/seznam/ | n1 Nákup" ]
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: Zkusit znovu in the error state keeps the screen's deep link and drops only the error" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  "$SERVE" skeleton "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/r.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage();
+await pg.goto('http://127.0.0.1:39918/detail/?id=n7&stav=error');
+console.log(await pg.locator('[data-aid-retry]').first().getAttribute('href')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/r.mjs")"; [ "$out" = "/detail/?id=n7" ] || { echo "href: $out"; return 1; }
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: an action of one sample row is drawn at that row with its own inputs; the generated task walks it by mouse, keyboard and failure" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '.screens[1].sample = ["Nákup na sobotu", "Práce"] | (.screens[1].actions[] | select(.id == "ulozit" or .id == "znovu")) += {item: 1}
+      | .screens[0].sample = ["Nákup"] | (.screens[0].actions[] | select(.id == "otevrit")) += {item: 0}' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  run python3 "$BATS_TEST_DIRNAME/../../aid-ui-screens.py" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  "$SERVE" skeleton "$P" >/dev/null
+  f="$P/site/formular/index.html"
+  grep -qE '<li>Práce<div class="polozka-akce"><form [^>]*>.*name="nazev".*data-aid-action="formular.ulozit"' "$f"   # the row holds its action and its input
+  ! grep -qE '<li>Nákup na sobotu<div' "$f"; [ "$(grep -o 'name="nazev"' "$f" | wc -l)" -eq 1 ]                        # nowhere else
+  grep -qE '<li>Nákup<div class="polozka-akce"><div class="akce"><a [^>]*data-aid-action="seznam.otevrit"' "$P/site/seznam/index.html"
+  python3 "$BATS_TEST_DIRNAME/../../aid-ui-flows.py" generate "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/w.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const r = [];
+for (const st of ['normal', 'keyboard', 'fail-1']) {
+  const pg = await b.newPage(); const s = (await import('$P/.aid-ui/scenarios/zalozit.mjs?' + st)).default;
+  const o = await s({ page: pg, base: 'http://127.0.0.1:39918/', state: st }); r.push(st + ':' + o.done + (o.why ? ' ' + o.why : '')); await pg.close();
+}
+console.log(r.join(' | ')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/w.mjs")"; [ "$out" = "normal:true | keyboard:true | fail-1:true" ] || { echo "$out"; return 1; }
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: the bar says the mode now and what it means, in every mode" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '.modes = [{id: "bezi", label: "Běží", text: "zapisuje"}, {id: "pauza", label: "Pauza", text: "nic nového"}] | .screens += [{id: "lista", title: "Lišta", purpose: "stav", nav: false, shell: true, actions: [], states: {empty: "x", loading: "x", error: "x", filled: "Spojení OK"}}]' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/md.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); const r = [];
+for (const q of ['', '?rezim=pauza']) { await pg.goto('http://127.0.0.1:39918/seznam/' + q); r.push(await pg.locator('.lista-rezim').innerText()); }
+console.log(r.join(' | ')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/md.mjs")"; [ "$out" = "Běží: zapisuje | Pauza: nic nového" ] || { echo "$out"; return 1; }
+  # a sample row of one mode shows only in that mode
+  jq '.screens[0].sample = ["vždy"] | .screens[0].mode_sample = {pauza: ["jen v pauze"]}' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  sed -i "s|r.push(await pg.locator('.lista-rezim').innerText());|r.push(await pg.locator('.ukazka').innerText());|" "$BATS_TEST_TMPDIR/md.mjs"
+  out="$(node "$BATS_TEST_TMPDIR/md.mjs")"; [ "$out" = $'Ukázka (ne skutečná data)\nvždy | Ukázka (ne skutečná data)\nvždy\njen v pauze' ] || { echo "$out"; return 1; }
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: a link whose failure the model names stays on its screen when the way fails, and the recover walks on" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '(.tasks[] | select(.id == "smazat") | .failure_paths) = [{at_step: 1, kind: "network", keeps_input: true, recover: "otevrit"}, {at_step: 2, kind: "network", keeps_input: true, recover: "smazat", text: "Spojení vypadlo."}, {at_step: 2, kind: "server", keeps_input: true, recover: "smazat", text: "Server odmítl."}]' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  grep -q 'data-aid-action="seznam.otevrit" data-aid-hide-in="empty error loading" data-aid-checked' "$P/site/seznam/index.html"; ! grep -q 'data-aid-action="seznam.novy" data-aid-checked' "$P/site/seznam/index.html"
+  python3 "$BATS_TEST_DIRNAME/../../aid-ui-flows.py" generate "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/nf.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); const s = (await import('$P/.aid-ui/scenarios/smazat.mjs')).default;
+const o = await s({ page: pg, base: 'http://127.0.0.1:39918/', state: 'fail-1' }); console.log(o.done + (o.why ? ' ' + o.why : '')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/nf.mjs")"; [ "$out" = "true" ] || { echo "$out"; return 1; }
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: the mode after a task, an action shown after a task, an outside link, the action's own failure text, a draft that survives a reload, a confirm by Space" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '.modes = [{id: "bezi", label: "Běží"}, {id: "pauza", label: "Pauza"}] | (.tasks[] | select(.id == "smazat")) += {then_mode: "pauza"}
+      | .screens[0].actions += [{id: "vratit", label: "Vrátit smazanou", to: "seznam", kind: "navigate", after: "smazat"}, {id: "web", label: "Web", to: "seznam", kind: "navigate", external: "https://example.org/"}]
+      | .screens[1].fields = [{name: "nazev", label: "Název", draft: true}]' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  run python3 "$BATS_TEST_DIRNAME/../../aid-ui-screens.py" check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  "$SERVE" skeleton "$P" >/dev/null
+  grep -q 'href="/seznam/?vysledek=smazat&amp;rezim=pauza" data-aid-confirm-yes="detail.smazat"' "$P/site/detail/index.html"
+  grep -q 'href="https://example.org/" target="_blank" rel="noopener"' "$P/site/seznam/index.html"
+  FAIL="$(jq -r '.tasks[] | select(.id == "smazat") | .failure_paths[] | select(.kind == "network") | .text' "$P/docs/design/screens.json")"   # a dropped connection shows its own text
+  cat > "$BATS_TEST_TMPDIR/n.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); const B = 'http://127.0.0.1:39918'; const r = [];
+await pg.goto(B + '/seznam/'); r.push(await pg.locator('[data-aid-action="seznam.vratit"]').isVisible());
+await pg.goto(B + '/seznam/?vysledek=smazat'); r.push(await pg.locator('[data-aid-action="seznam.vratit"]').isVisible());
+await pg.goto(B + '/detail/'); await pg.click('[data-aid-action="detail.smazat"]'); await pg.route('**/seznam/**', x => x.abort());
+await pg.focus('[data-aid-confirm-yes="detail.smazat"]'); await pg.keyboard.press(' '); await pg.waitForTimeout(500);
+r.push(await pg.locator('[data-aid-fail-for="detail.smazat"]:visible').innerText()); await pg.unroute('**/seznam/**');
+await pg.goto(B + '/formular/'); await pg.fill('[name="nazev"]', 'Rozepsáno'); await pg.reload(); r.push(await pg.inputValue('[name="nazev"]'));
+console.log(r.join(' | ')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/n.mjs")"; [ "$out" = "false | true | $FAIL | Rozepsáno" ] || { echo "$out"; return 1; }
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton: a dropped connection and a server refusal each show the text the model gives that kind of failure" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  jq '(.tasks[] | select(.id == "smazat") | .failure_paths) = [{at_step: 2, kind: "network", keeps_input: true, recover: "smazat", text: "Spojení vypadlo, zkus znovu."},
+      {at_step: 2, kind: "server", keeps_input: true, recover: "smazat", text: "Server smazání odmítl."}]' "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/k.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const r = [];
+for (const how of ['abort', '500']) { const pg = await b.newPage(); await pg.goto('http://127.0.0.1:39918/detail/');
+  await pg.route('**/seznam/**', x => how === 'abort' ? x.abort() : x.fulfill({ status: 500, body: 'x' }));
+  await pg.click('[data-aid-action="detail.smazat"]'); await pg.click('[data-aid-confirm-yes="detail.smazat"]'); await pg.waitForTimeout(400);
+  r.push(await pg.locator('[data-aid-fail-for="detail.smazat"]:visible').innerText()); await pg.close(); }
+console.log(r.join(' | ')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/k.mjs")"; [ "$out" = "Spojení vypadlo, zkus znovu. | Server smazání odmítl." ] || { echo "$out"; return 1; }
+  # a second try in the same page shows only its own outcome
+  cat > "$BATS_TEST_TMPDIR/k2.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); await pg.goto('http://127.0.0.1:39918/detail/'); let how = 'abort';
+await pg.route('**/seznam/**', x => how === 'abort' ? x.abort() : x.fulfill({ status: 500, body: 'x' }));
+for (const h of ['abort', '500']) { how = h; await pg.click('[data-aid-action="detail.smazat"]'); await pg.click('[data-aid-confirm-yes="detail.smazat"]'); await pg.waitForTimeout(400); }
+console.log((await pg.locator('[data-aid-fail-for="detail.smazat"]:visible').allInnerTexts()).join(' + ')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/k2.mjs")"; [ "$out" = "Server smazání odmítl." ] || { echo "$out"; return 1; }
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton (P118 H2): an action that needs a record is not offered without one or while loading; a recover-only action shows after the failure; a task's field error is on the form with its message; what was typed stays in the error and loading states; a form's error has no reload link" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  "$SERVE" skeleton "$P" >/dev/null
+  cat > "$BATS_TEST_TMPDIR/h.mjs" <<J
+import { createRequire } from 'module';
+const { chromium } = createRequire('$(cd "$BATS_TEST_DIRNAME/../../../lib/ui-fidelity" && pwd)/x.mjs')('@playwright/test');
+const b = await chromium.launch(); const pg = await b.newPage(); const r = []; const U = 'http://127.0.0.1:39918';
+const vis = async s => (await pg.locator(s).isVisible()) ? 'v' : '-';
+await pg.goto(U + '/seznam/?stav=empty'); r.push(await vis('[data-aid-action="seznam.otevrit"]'), await vis('[data-aid-action="seznam.novy"]'));
+await pg.goto(U + '/seznam/'); r.push(await vis('[data-aid-action="seznam.otevrit"]'));
+await pg.goto(U + '/detail/?stav=error'); r.push(await vis('[data-aid-action="detail.smazat"]'));
+await pg.goto(U + '/formular/?stav=loading'); r.push(await vis('[data-aid-action="formular.ulozit"]'));
+await pg.goto(U + '/formular/'); r.push(await vis('[data-aid-action="formular.znovu"]'));
+await pg.route('**/detail/**', x => x.abort()); await pg.fill('[name="nazev"]', 'Nákup'); await pg.click('[data-aid-action="formular.ulozit"]'); await pg.waitForTimeout(400);
+r.push(await vis('[data-aid-action="formular.znovu"]'));
+await pg.unroute('**/detail/**'); await pg.goto(U + '/formular/?stav=zalozit.validation'); r.push(await vis('[data-aid-task-state="zalozit.validation"]'), await vis('#f-formular-nazev-chyba'));
+await pg.goto(U + '/formular/?stav=error'); r.push(await pg.inputValue('[name="nazev"]'), await vis('[data-aid-retry]'), await vis('[data-aid-action="formular.znovu"]'));
+await pg.goto(U + '/formular/?stav=zalozit.recovery'); r.push(await vis('[data-aid-action="formular.znovu"]'));
+await pg.goto(U + '/formular/?stav=smazat.failure'); r.push(await vis('[data-aid-action="formular.znovu"]'));   // another task's failure is not this one's
+await pg.goto(U + '/formular/?stav=zalozit.loading'); r.push(String(await pg.locator('[data-aid-action="formular.ulozit"]').isDisabled()));
+await pg.goto(U + '/detail/'); await pg.click('[data-aid-action="detail.smazat"]'); await pg.keyboard.press('Escape'); await pg.waitForTimeout(100);
+r.push(await pg.evaluate(() => document.activeElement && document.activeElement.dataset.aidAction));   // Esc: the focus is back on its button
+console.log(r.join(' ')); await b.close();
+J
+  out="$(node "$BATS_TEST_TMPDIR/h.mjs")"; [ "$out" = "- v v - - - v v v Nákup na sobotu - v v - true detail.smazat" ] || { echo "$out"; return 1; }
+  "$SERVE" stop skeleton
+}

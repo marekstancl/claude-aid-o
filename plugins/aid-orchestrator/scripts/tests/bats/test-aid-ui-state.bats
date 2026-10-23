@@ -1047,8 +1047,8 @@ PY
   ready
   st='{"pages":[{"id":"home"}],"roles":["admin"],"flows":[{"id":"checkout","steps":["a"],"states":["normal","empty"]}]}'
   ans s1 structure "$(sha_of "$st")"; "$SCRIPT" set "$PROJ" structure "$st" --answer s1 >/dev/null
-  ans v2 variant "$(sha_of '{"type":"webapp","brand":"new","local":false}')"
-  "$SCRIPT" set "$PROJ" variant '{"type":"webapp","brand":"new","local":false}' --answer v2 >/dev/null
+  ans v2 variant "$(sha_of '{"type":"pwa","brand":"new","local":false}')"
+  "$SCRIPT" set "$PROJ" variant '{"type":"pwa","brand":"new","local":false}' --answer v2 >/dev/null
   # the recorded web result has no flow rows at all
   run "$SCRIPT" finish "$PROJ"
   [ "$status" -eq 1 ]; [[ "$output" == *"missing row: axe checkout/390/chromium/admin/normal"* ]]
@@ -1066,8 +1066,8 @@ PY
   ready
   st='{"pages":[{"id":"home"}],"roles":[{"id":"admin","name":"Správce"}],"flows":[{"id":"checkout","states":[{"id":"normal","how":"a"},{"id":"empty","how":"b"}]}]}'
   ans s1 structure "$(sha_of "$st")"; "$SCRIPT" set "$PROJ" structure "$st" --answer s1 >/dev/null
-  ans v2 variant "$(sha_of '{"type":"webapp","brand":"new","local":false}')"
-  "$SCRIPT" set "$PROJ" variant '{"type":"webapp","brand":"new","local":false}' --answer v2 >/dev/null
+  ans v2 variant "$(sha_of '{"type":"pwa","brand":"new","local":false}')"
+  "$SCRIPT" set "$PROJ" variant '{"type":"pwa","brand":"new","local":false}' --answer v2 >/dev/null
   result
   run "$SCRIPT" gate-record "$PROJ" "$RES"
   [ "$status" -eq 0 ] || { echo "$output" | head -3; return 1; }

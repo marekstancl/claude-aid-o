@@ -195,6 +195,11 @@ def parse_time(s):
     return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
+# P116: parts of one kind of project. site = a web (no variant yet, or type web|pwa), app = a webapp, existing = an
+# existing webapp (variant.existing true: the baseline part). A part whose kind does not apply is skipped.
+VARIANT_WHEN = ("variant.site", "variant.app", "variant.existing")
+
+
 def load_sections():
     """The map of steps and parts (skills/ui-design/sections.json), checked once at start."""
     path = os.path.join(HERE, "..", "..", "skills", "ui-design", "sections.json")
@@ -227,7 +232,7 @@ def load_sections():
                 raise ValueError("part %s: files must name the step files" % p["id"])
             if n == 6 and not (isinstance(p.get("section"), str) and p["section"]):
                 raise ValueError("part %s: a part of step 6 names its section of 7-verify.md" % p["id"])
-            if p.get("when") not in (None, "options.vision", "options.identity", "options.seo"):
+            if p.get("when") not in (None, "options.vision", "options.identity", "options.seo") + VARIANT_WHEN:
                 raise ValueError("part %s: unknown when %r" % (p["id"], p["when"]))
             parts[p["id"]] = dict(p, step=n)
             kinds.update(p["kinds"])
@@ -265,8 +270,15 @@ except (OSError, ValueError, KeyError, TypeError) as e:
     sys.exit("ERROR: aid-ui studio: skills/ui-design/sections.json: %s" % e)
 
 
+def variant_applies(when, st):
+    v = st.get("variant") if isinstance(st.get("variant"), dict) else {}
+    app = v.get("type") == "webapp"
+    return {"variant.site": not app, "variant.app": app, "variant.existing": app and v.get("existing") is True}.get(when, True)
+
+
 def part_of(q):
-    """The question's part: its own `part`, or the one part its kind belongs to; raises ValueError."""
+    """The question's part: its own `part`, or the one part its kind belongs to (among the parts of this kind of
+    project); raises ValueError."""
     if "part" in q:
         p = PARTS.get(q["part"])
         if not p:
@@ -274,7 +286,11 @@ def part_of(q):
         if q["kind"] not in p["kinds"] and q["kind"] != "no_method":
             raise ValueError("question %s: kind %s does not belong to part %s" % (q["id"], q["kind"], q["part"]))
         return q["part"]
-    owners = [i for i, p in PARTS.items() if q["kind"] in p["kinds"]]
+    st = read_state()
+    owners = [i for i, p in PARTS.items() if q["kind"] in p["kinds"] and variant_applies(p.get("when"), st)]
+    if q["kind"] == "exception" and len(owners) > 1:   # P116: the baseline's exceptions belong to the baseline part
+        base = str(q.get("target") or "").startswith(("baseline@", "task@"))
+        owners = [i for i in owners if (i == "vychozi-stav") == base]
     if len(owners) != 1:
         raise ValueError("question %s (kind %s) must name its part: one of %s" % (q["id"], q["kind"], ", ".join(owners) or "any"))
     return owners[0]
@@ -537,7 +553,9 @@ def sections_view(questions):
     for s in SECTIONS["steps"]:
         out = []
         for p in s["parts"]:
-            if p.get("when") and opts is not None and not opts.get(p["when"].split(".")[1]):
+            if p.get("when") in VARIANT_WHEN and not variant_applies(p["when"], st):
+                status = "skipped"
+            elif p.get("when") and p["when"] not in VARIANT_WHEN and opts is not None and not opts.get(p["when"].split(".")[1]):
                 status = "skipped"
             elif p["id"] in open_parts:
                 status = "current"

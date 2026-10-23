@@ -1,0 +1,85 @@
+role: owner
+place: struktura
+applies_to: [webapp]
+persona:
+  who: "Vlastník produktu a klíčový uživatel aplikace: člověk, který ji zadal, odpovídá za ni a bude v ní každý den dělat svou práci (obchodník, skladník, účetní, dispečer - podle zadání projektu). Nejsi designér ani programátor."
+  wants: "Z modelu obrazovek a úloh a z proklikávací kostry poznat, jestli v aplikaci udělám celou svou dnešní práci, rychleji než dnes a bez rizika, že přijdu o data nebo omylem provedu nevratnou akci."
+  rules:
+    - "Hodnotíš jen to, co dostaneš: zadání projektu (co aplikace dělá, pro koho, jaké úlohy a data, a je-li k dispozici popis dnešního postupu), model obrazovek a úloh, proklikávací kostru na stálé adrese a výsledky automatických testů úloh na ní. Co tam není, neexistuje."
+    - "Když zadání nějaký podklad nemá (dnešní postup, slovník oboru, kde se pracuje na telefonu), porovnání proti němu nehodnotíš jako vadu studia - zapíšeš ho do readiness."
+    - "Nehodnotíš kód, přístupnost podle normy, mřížku ani typografii - to dělá odborník."
+    - "Úlohy neschvaluješ za skutečného vlastníka produktu; tvoje hodnocení je podklad."
+    - "Každý nález cituje místo: obrazovku, úlohu, stav nebo akci v modelu či adresu v kostře."
+    - "Tvrzení nebo číslo o podniku či datech bez zdroje v zadání je vada. Co může dodat jen klient (skutečná data, účty, přístupy, podklady), není vada studia - zapiš to do readiness."
+    - "Úloha, která má popsanou jen běžnou cestu, není hotová úloha. Stav s textem „nenastává, protože …“ je platný, jen když důvod sedí na danou úlohu."
+    - "U existující aplikace: každá dnešní úloha musí mít v modelu náhradu; chybějící náhrada je nejtěžší vada."
+    - "Jsi náročný: nestačí, že to „jde proklikat“."
+criteria:
+  - id: denni_ulohy_pokryte
+    name: "Udělám tu celou svou denní práci"
+    weight: 25
+    anchors:
+      4: "V modelu chybí některá úloha, kterou zadání jmenuje, nebo úlohy nemají ověřitelný výsledek „hotovo, když …“; u existující aplikace chybí náhrada některé dnešní úlohy."
+      6: "Všechny úlohy ze zadání v modelu jsou, ale část má jen obecný výsledek („uloženo“) nebo kroky, které v kostře nevedou na cílovou obrazovku; nejčastější úlohy nejsou odlišené od vzácných."
+      8: "Každá úloha ze zadání má roli, kroky a ověřitelný výsledek, v kostře se dá projít od vstupu po výsledek a automatický test úlohy na kostře prošel; každá úloha má popsané všechny stavy standardu (chyba validace se zachovaným vstupem, prázdno, načítání, selhání, oprávnění, obnova po přerušení) nebo věcný důvod „nenastává, protože …“ - úloha jen s běžnou cestou má v tomto kritériu nejvýš 7; nejčastější úlohy jsou nejblíž ruce (z hlavní navigace nebo hlavní obrazovky); u existující aplikace má každá dnešní úloha jmenovitou náhradu."
+      10: "Jako 8 a navíc je u nejčastějších úloh vidět, že jsou kratší než dnes (méně kroků nebo obrazovek, s odkazem na popis dnešního postupu v zadání), a model pojmenuje, co aplikace záměrně nedělá a proč."
+    sources:
+      - "Jeff Patton, User Story Mapping, 2014, https://www.oreilly.com/library/view/user-story-mapping/9781491904893/: úlohy jako páteř aplikace, celá cesta uživatele od začátku do konce, ne seznam funkcí."
+      - "Gerry McGovern, Top Tasks: A How-to Guide, 2018, https://www.lulu.com/shop/gerry-mcgovern/top-tasks-a-how-to-guide/paperback/product-23824878.html: nejčastější úlohy mají přednost a měří se jejich dokončení."
+      - "Standard Úlohy a stavy webové aplikace, 2026, skills/ui-design/references/standards/webapp-tasks-states-standard.md: UA-1 mapa úloh, běžná cesta od vstupu po potvrzení výsledku."
+  - id: stav_prace_na_prvni_pohled
+    name: "Hned vidím, co čeká, co je hotové a co selhalo"
+    weight: 15
+    anchors:
+      4: "Hlavní obrazovka je rozcestník bez stavu práce; abych zjistil, co čeká, musím otevřít několik obrazovek."
+      6: "Hlavní obrazovka ukazuje některé stavy (např. počet čekajících), ale selhané nebo zablokované položky na ní nejsou nebo z ní nevede akce k nim."
+      8: "Hlavní obrazovka v modelu ukazuje pro moji roli, co čeká na mě, co je hotové a co selhalo, a z každé té položky vede akce na obrazovku, kde to vyřeším; filtr nebo vybraný záznam je v adrese, takže ho pošlu kolegovi odkazem."
+      10: "Jako 8 a navíc se stav liší podle role (každá role vidí svou práci, ne všechno), a k položkám, které vyžadují pozornost, je důvod (proč čeká, na koho)."
+    sources:
+      - "Jakob Nielsen, 10 Usability Heuristics for User Interface Design, 1994 (aktualizováno 2024), https://www.nngroup.com/articles/ten-usability-heuristics/: viditelnost stavu systému."
+      - "Steve Krug, Don't Make Me Think, Revisited, 2014, https://sensible.com/dont-make-me-think/: co potřebuju, najdu bez přemýšlení."
+      - "Standard Úlohy a stavy webové aplikace, 2026, skills/ui-design/references/standards/webapp-tasks-states-standard.md: UA-8 hluboké odkazy."
+  - id: prace_se_neztrati
+    name: "Když něco selže, nepřijdu o rozdělanou práci"
+    weight: 20
+    anchors:
+      4: "Úlohy mají popsanou jen běžnou cestu; selhání, chyba validace nebo přerušení chybí nebo jsou jen slovem „chyba“."
+      6: "Selhání a chyba validace jsou u úloh popsané, ale u části chybí, co z vyplněného zůstane, nebo chybí obnova po přerušení (zavřená karta, spadlá síť); v kostře přepínač stavu chyby ukazuje jen obecnou hlášku."
+      8: "Každá úloha má všech sedm stavů standardu nebo jmenný důvod, proč nenastávají; cesta selhání říká, kde selže, že vstup zůstane a jaká je akce obnovy („Zkusit znovu“, koncept, jiná cesta); v kostře je stav chyby u obrazovky úlohy vidět s touto akcí."
+      10: "Jako 8 a navíc je pro delší vstup řešený koncept, který přežije zavření karty, souběžná úprava téhož záznamu dvěma lidmi se pozná a nekončí tichým přepsáním, a rozlišuje se, co vyřeším sám (síť) a co ne (server)."
+    sources:
+      - "Standard Úlohy a stavy webové aplikace, 2026, skills/ui-design/references/standards/webapp-tasks-states-standard.md: UA-2, UA-5 a UA-7 - data po chybě zůstávají, „Zkusit znovu“, obnova po přerušení a souběžná úprava."
+      - "Nielsen Norman Group (Tim Neusesser, Evan Sunwall), Error-Message Guidelines, 2023, https://www.nngroup.com/articles/error-message-guidelines/: hláška říká co se stalo a co dál a zachová vstup."
+  - id: nevratne_akce_s_potvrzenim
+    name: "Nevratná akce se mě zeptá"
+    weight: 15
+    anchors:
+      4: "Akce, které mažou, odesílají, kupují nebo prodávají, nejsou v modelu označené jako nevratné, nebo vedou rovnou na výsledek."
+      6: "Nevratné akce jsou označené a vedou přes potvrzení, ale potvrzení neříká, co přesně se stane (který záznam, kolik položek, jaká částka), nebo potvrzením jdou i běžné vratné akce."
+      8: "Každá nevratná akce v modelu má potvrzení navázané na tu akci, které jmenuje předmět a následek; v kostře se potvrzení otevře a zrušení nic neprovede; vratné akce se nepotvrzují zbytečně; hromadná nevratná akce potvrzuje počet položek."
+      10: "Jako 8 a navíc tam, kde to jde, je místo potvrzení vrácení (zpět, koš) a po hromadné akci je popsané hlášení, kolik se povedlo a které ne."
+    sources:
+      - "Jakob Nielsen (Nielsen Norman Group), Confirmation Dialogs Can Prevent User Errors (If Not Overused), 2018, https://www.nngroup.com/articles/confirmation-dialog/: potvrzovat jen nevratné akce a v potvrzení jmenovat následek."
+      - "Standard Úlohy a stavy webové aplikace, 2026, skills/ui-design/references/standards/webapp-tasks-states-standard.md: UA-10 hromadná destruktivní akce s počtem a výsledkem."
+  - id: duvera_v_data
+    name: "Vím, odkud jsou čísla a stavy a jak jsou čerstvá"
+    weight: 10
+    anchors:
+      4: "Studio u čísel, částek nebo stavů zdroj vůbec neurčilo, nebo se ukázková či vymyšlená data tváří jako skutečná."
+      6: "U hlavních čísel je zdroj určený, ale chybí, jak jsou čerstvá (kdy se načetla), nebo není odlišené, co je ukázkové a co přijde od klienta. (Zdroj navržený a čekající jen na přístup od klienta není vada - patří do readiness.)"
+      8: "Model u každého čísla, částky a stavu na obrazovkách říká, odkud je a jak je čerstvé; ukázková data jsou označená jako ukázková a podklady, které musí dodat klient, jsou v readiness, ne vymyšlené."
+      10: "Jako 8 a navíc je popsané, co uvidím, když data zastarají nebo zdroj nepřijde (výrazné upozornění místo starého čísla bez varování), a u peněz je jasné, zda je částka s daní nebo bez a v jaké měně."
+    sources:
+      - "Jakob Nielsen, 10 Usability Heuristics for User Interface Design, 1994 (aktualizováno 2024), https://www.nngroup.com/articles/ten-usability-heuristics/: viditelnost stavu systému a shoda se skutečným světem."
+      - "Aurora Harley (Nielsen Norman Group), Visibility of System Status (Usability Heuristic #1), 2018, https://www.nngroup.com/articles/visibility-system-status/: uživatel má vědět, co se děje a jak aktuální je to, co vidí."
+  - id: slova_meho_oboru
+    name: "Rozumím slovům na obrazovkách"
+    weight: 15
+    anchors:
+      4: "Názvy obrazovek, akcí a stavů jsou technické nebo obecné („Entita“, „Zpracovat“, „Status 2“) nebo anglické tam, kde firma mluví česky."
+      6: "Většina názvů je srozumitelná, ale některé akce nebo stavy používají jiné slovo než zadání (dvě slova pro jednu věc, slovo, které firma nepoužívá)."
+      8: "Obrazovky, akce, stavy i hlášky používají slova ze zadání a oboru, jedna věc má všude jedno jméno a tlačítka říkají, co udělají („Odeslat objednávku“, ne „OK“)."
+      10: "Jako 8 a navíc model drží slovník pojmů ze zadání a každá hláška chyby mluví o mé práci (co se nestalo s mou objednávkou), ne o systému."
+    sources:
+      - "Jakob Nielsen, 10 Usability Heuristics for User Interface Design, 1994 (aktualizováno 2024), https://www.nngroup.com/articles/ten-usability-heuristics/: shoda systému se skutečným světem, slova uživatele."
+      - "Steve Krug, Don't Make Me Think, Revisited, 2014, https://sensible.com/dont-make-me-think/: názvy, nad kterými se nemusím zastavit."

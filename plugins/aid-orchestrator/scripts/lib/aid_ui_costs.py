@@ -160,6 +160,15 @@ def agent_transcripts(session=None):
     return glob.glob(os.path.join(base, "*", sid + ".jsonl")) + glob.glob(os.path.join(base, "*", sid, "subagents", "*.jsonl"))
 
 
+def studio_start(project):
+    """P116 (pilot Trading, kolo 1): with no row in the book yet, the agent's work counts from the project's studio start
+    (its oldest file under .aid-ui/), never from the session's start - one session can build the plugin first."""
+    import datetime
+    d = os.path.join(project, ".aid-ui")
+    t = [os.stat(os.path.join(r, f)).st_mtime for r, _, fs in os.walk(d) for f in fs] if os.path.isdir(d) else []
+    return datetime.datetime.fromtimestamp(min(t), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if t else iso_now()
+
+
 def book_agent(project, purpose, session=None):
     """The agent's own work since the last agent row of this project (or the first row of the book) up to now,
     one row per model, at list-price equivalent. None when no transcript is known (then status says 'neměřeno')."""
@@ -167,7 +176,7 @@ def book_agent(project, purpose, session=None):
     if not files:
         return None
     rs = rows(project)
-    since = max([r.get("until") for r in rs if r.get("provider") == "agent" and r.get("until")] or [rs[0]["at"] if rs else ""], key=ts)
+    since = max([r.get("until") for r in rs if r.get("provider") == "agent" and r.get("until")] or [rs[0]["at"] if rs else studio_start(project)], key=ts)
     until = iso_now()
     t0, t1 = ts(since), ts(until)
     seen, use = set(), {}

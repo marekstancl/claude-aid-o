@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sklad (dnešní aplikace)</title></head>
+<body>
+<!-- Fixture of P116: today's app an existing-app redesign must not break. Two tasks: the overview and the search.
+     Logged in = the cookie prihlasen=1 (a stored browser login, Playwright storageState). -->
+<nav><a href="/">Přehled</a> <a href="/?hledat=1">Hledání</a></nav>
+<main>
+<p id="login" hidden>Přihlaste se.</p>
+<section id="prehled" hidden><h1>Dnešní souhrn</h1><p>3 objednávky čekají.</p></section>
+<section id="hledani" hidden><h1>Hledání</h1>
+<form id="f"><label for="q">Hledaný výraz</label> <input id="q" name="q"> <button type="submit">Hledat</button></form>
+<p id="vysledek" role="status"></p></section>
+</main>
+<script>
+(function () {
+  var inn = /(^|; )prihlasen=1/.test(document.cookie), q = new URLSearchParams(location.search);
+  if (!inn) { document.getElementById('login').hidden = false; return; }
+  var s = document.getElementById(q.get('hledat') ? 'hledani' : 'prehled'); s.hidden = false;
+  document.getElementById('f').addEventListener('submit', function (e) {
+    e.preventDefault(); document.getElementById('vysledek').textContent = 'Nalezeno: ' + document.getElementById('q').value;
+  });
+})();
+</script>
+</body></html>

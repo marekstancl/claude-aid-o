@@ -136,6 +136,25 @@
      "text": "Aby vás našli i lidé, kteří vaše jméno neznají a hledají třeba „zubař Trenčín“. Potvrdíte seznam stránek. Vznikne seznam stránek webu a to, jak se každá ukáže ve výsledcích Googlu; podle toho se stránky postaví a pojmenují."
     },
     {
+     "id": "vychozi-stav",
+     "title": "Výchozí stav aplikace",
+     "when": "variant.existing",
+     "why": "Aplikace už běží a lidé v ní dnes něco dělají. Nová podoba nesmí vzít žádnou úlohu, která dnes funguje.",
+     "goal": "Seznam dnešních úloh (co se zadá, kdo je přihlášený a co má vyjít), zaznamenaný na běžící aplikaci.",
+     "feeds": "Na konci se každá dnešní úloha zkusí v nové podobě; bez náhrady se stejným výsledkem kontrola neprojde.",
+     "you": "Potvrdíte seznam dnešních úloh; zrušit některou může jen vaše výslovné rozhodnutí.",
+     "kinds": [
+      "exception"
+     ],
+     "files": [
+      "2-structure.md"
+     ],
+     "done": {
+      "state": "app_baseline"
+     },
+     "text": "Aplikace už běží a lidé v ní dnes něco dělají; nová podoba nesmí vzít žádnou úlohu, která dnes funguje. Potvrdíte seznam dnešních úloh (co se zadá, kdo je přihlášený a co má vyjít) a ten se zaznamená na běžící aplikaci. Na konci se každá dnešní úloha zkusí v nové podobě; zrušit některou může jen vaše výslovné rozhodnutí."
+    },
+    {
      "id": "stranky",
      "title": "Stránky a jejich části",
      "why": "Než se cokoli napíše, rozvrhneme, jaké stránky web bude mít a co na které najdete.",
@@ -153,7 +172,28 @@
      "done": {
       "state": "structure"
      },
-     "text": "Než se cokoli napíše, rozvrhneme, jaké stránky web bude mít a co na které najdete. Řeknete, co chybí, co je navíc nebo co dát jinam. Vznikne seznam stránek a u každé, o čem budou její části; podle toho se navrhuje vzhled a píšou texty."
+     "text": "Než se cokoli napíše, rozvrhneme, jaké stránky web bude mít a co na které najdete. Řeknete, co chybí, co je navíc nebo co dát jinam. Vznikne seznam stránek a u každé, o čem budou její části; podle toho se navrhuje vzhled a píšou texty.",
+     "when": "variant.site"
+    },
+    {
+     "id": "obrazovky",
+     "title": "Obrazovky a úlohy",
+     "when": "variant.app",
+     "why": "Aplikace se pozná podle toho, jestli v ní člověk dokončí svou práci, i když se něco pokazí. Proto začínáme úlohami, ne obrázky.",
+     "goal": "Popis aplikace: obrazovky s akcemi a úlohy se sedmi stavy (běžná cesta, chybné zadání, prázdno, načítání, selhání, oprávnění, obnova) a s výsledkem, podle kterého se pozná hotovo.",
+     "feeds": "Z popisu se hned postaví proklikávací kostra a z úloh testy, které na konci ověří, že úloha jde dokončit.",
+     "you": "Úlohy schvalujete vy jako vlastník produktu; hodnocení klient-role je jen podklad.",
+     "kinds": [
+      "structure",
+      "task_map"
+     ],
+     "files": [
+      "2-structure.md"
+     ],
+     "done": {
+      "state": "app"
+     },
+     "text": "Aplikace se pozná podle toho, jestli v ní člověk dokončí svou práci, i když se něco pokazí, proto začínáme úlohami. Vznikne popis obrazovek s akcemi a úloh se sedmi stavy a s výsledkem, podle kterého se pozná hotovo; z něj se hned postaví proklikávací kostra a testy. Úlohy schvalujete vy jako vlastník produktu, hodnocení klient-role je jen podklad."
     },
     {
      "id": "obsah",
@@ -367,7 +407,8 @@
  "methods": {
   "variant": {
    "files": [
-    "skills/ui-design/steps/0-start.md"
+    "skills/ui-design/steps/0-start.md",
+    "skills/ui-design/references/local/aplikace-postup.md"
    ],
    "receipt": false
   },
@@ -464,7 +505,10 @@
     "skills/ui-design/references/adopted/marketingskills/cro/SKILL.md",
     "skills/ui-design/references/local/struktura-postup.md",
     "skills/ui-design/critic/web-local.tech.struktura.yaml",
-    "skills/ui-design/critic/web-local.owner.struktura.yaml"
+    "skills/ui-design/critic/web-local.owner.struktura.yaml",
+    "skills/ui-design/references/local/aplikace-postup.md",
+    "skills/ui-design/critic/webapp.tech.struktura.yaml",
+    "skills/ui-design/critic/webapp.owner.struktura.yaml"
    ],
    "receipt": true
   },
@@ -473,7 +517,10 @@
     "skills/ui-design/steps/2-structure.md",
     "skills/ui-design/references/local/struktura-postup.md",
     "skills/ui-design/critic/web-local.tech.struktura.yaml",
-    "skills/ui-design/critic/web-local.owner.struktura.yaml"
+    "skills/ui-design/critic/web-local.owner.struktura.yaml",
+    "skills/ui-design/references/local/aplikace-postup.md",
+    "skills/ui-design/critic/webapp.tech.struktura.yaml",
+    "skills/ui-design/critic/webapp.owner.struktura.yaml"
    ],
    "receipt": true
   },
@@ -528,7 +575,9 @@
     "skills/ui-design/references/local/vzhled-vzor/tokens.css",
     "skills/ui-design/references/local/pohyb-znacky.md",
     "skills/ui-design/critic/web-local.tech.vzhled.yaml",
-    "skills/ui-design/critic/web-local.owner.vzhled.yaml"
+    "skills/ui-design/critic/web-local.owner.vzhled.yaml",
+    "skills/ui-design/critic/webapp.tech.vzhled.yaml",
+    "skills/ui-design/critic/webapp.owner.vzhled.yaml"
    ],
    "receipt": true
   },
@@ -543,7 +592,8 @@
   },
   "exception": {
    "files": [
-    "skills/ui-design/steps/7-verify.md"
+    "skills/ui-design/steps/7-verify.md",
+    "skills/ui-design/references/local/aplikace-postup.md"
    ],
    "receipt": false
   },
@@ -582,7 +632,9 @@
     "skills/ui-design/critic/web-local.tech.vzhled.yaml",
     "skills/ui-design/critic/web-local.owner.vzhled.yaml",
     "skills/ui-design/critic/web-local.tech.struktura.yaml",
-    "skills/ui-design/critic/web-local.owner.struktura.yaml"
+    "skills/ui-design/critic/web-local.owner.struktura.yaml",
+    "skills/ui-design/critic/webapp.tech.yaml",
+    "skills/ui-design/critic/webapp.owner.yaml"
    ],
    "receipt": false
   },

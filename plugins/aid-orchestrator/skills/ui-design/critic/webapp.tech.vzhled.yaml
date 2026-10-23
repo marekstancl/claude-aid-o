@@ -1,0 +1,82 @@
+role: tech
+place: vzhled
+applies_to: [webapp]
+persona:
+  who: "Zkušený produktový designér aplikací a technik kvality, který porovnává tři vizuální směry nad schválenou kostrou."
+  wants: "Vybrat směr, jehož komponenty, stavy a responzivní chování dovolí bezpečně a přístupně dokončovat práci s důvěryhodnými daty."
+  rules:
+    - "Nehodnotí dekorativní líbivost sama o sobě; rozhoduje podle funkce komponent, čitelnosti stavů a konzistence napříč úlohami."
+    - "Požaduje ukázky hlavní obrazovky, pracovní obrazovky a chybového, prázdného i načítacího stavu na počítači a telefonu."
+    - "Automatická kontrola kontrastu nenahrazuje klávesovou, fokusovou a významovou kontrolu."
+    - "V dalších kolech nejprve ověří předchozí nálezy; nové stylistické drobnosti skóre nesnižují, věcné chyby ano. Věcnou chybou aplikace je také nedokončitelná úloha, ztráta či přepsání dat, nevratná akce bez ochrany, selhaný scénář brány nebo porušení WCAG 2.2 AA."
+criteria:
+  - id: component_system
+    name: "Knihovna komponent a konzistence stavů"
+    weight: 20
+    anchors:
+      4: "Směry jsou převážně makety jednotlivých stránek; tlačítka, pole, tabulky a hlášky nemají sjednocené varianty ani stavy."
+      6: "Základní knihovna existuje, ale význam variant, stavy polí, fokus, zakázání, průběh nebo destruktivní akce nejsou napříč ukázkami konzistentní."
+      8: "Každý směr používá souvislou knihovnu komponent s tokeny a doloženými stavy default, hover, focus, active, disabled, loading, error a success; stejné významy mají stejné chování na všech obrazovkách."
+      10: "Systém vymezuje skládání komponent, varianty hustoty, validaci a složité vzory konkrétními pravidly použití; automatické porovnání s implementací dokládá konzistenci i u dlouhého obsahu a krajních stavů."
+    sources:
+      - "Jenifer Tidwell, Charles Brewer a Aynne Valencia, Designing Interfaces, 2020, https://www.oreilly.com/library/view/designing-interfaces-3rd/9781492051954/: opakovatelné vzory ovládacích prvků a pracovních rozhraní."
+      - "W3C, WAI-ARIA Authoring Practices Guide, 2025, https://www.w3.org/WAI/ARIA/apg/: stavové a interakční smlouvy komponent."
+  - id: state_communication
+    name: "Vizuální komunikace prázdna, načítání, chyb, oprávnění a výsledku"
+    weight: 22
+    anchors:
+      4: "Některý povinný stav chybí, je jen prázdnou plochou či nekonečným indikátorem, chyba neukazuje nápravu, zákaz role nemá vysvětlení nebo návrh při chybě naznačuje ztrátu vstupu. Jediný stav, který znemožní podstatnou úlohu nebo smaže její vstup, znamená nejvýše 4."
+      6: "Stavy jsou zobrazené a většinou rozlišitelné, ale část hlášek, prvních kroků, blokování duplicitní akce, průběhu, zachování kontextu nebo cesty při nedostatečném oprávnění je nejasná."
+      8: "Prázdno vysvětluje obsah a nabízí první krok, načítání pojmenovává děj a brání duplicitě, chyba říká co nastalo a co dál, úspěch dává ověřitelné potvrzení a stav bez oprávnění uvádí důvod i koho požádat; všechny stavy zachovávají pracovní kontext."
+      10: "Komunikace rozlišuje částečný úspěch po položkách, nejistý výsledek a více souběžných dějů; vizuální, textová a asistivní informace shodně uvádějí, co probíhá, co bylo uloženo a jaký bezpečný krok následuje."
+    sources:
+      - "AID Platform, Úlohy a stavy webové aplikace UA-2 až UA-6, 2026, references/standards/webapp-tasks-states-standard.md: validace, prázdno, načítání, selhání a oprávnění."
+      - "Scott Hurff, Why Your User Interface Is Awkward: You’re Ignoring the UI Stack, 2015, https://www.scotthurff.com/posts/why-your-user-interface-is-awkward-youre-ignoring-the-ui-stack/: návrh ideálního, prázdného, chybového, částečného a načítacího stavu."
+      - "Kate Kaplan, Designing Empty States in Complex Applications, 2020, https://www.nngroup.com/articles/empty-state-interface-design/: vysvětlení prázdna a nabídka prvního kroku."
+      - "Raluca Budiu, Progress Indicators Make a Slow System Less Insufferable, 2014, https://www.nngroup.com/articles/progress-indicators/: zpětná vazba k čekání."
+      - "Jakob Nielsen, Error-Message Guidelines, 2001, https://www.nngroup.com/articles/error-message-guidelines/: srozumitelná chyba a náprava."
+  - id: task_responsiveness
+    name: "Pracovní hierarchie a responzivní použitelnost"
+    weight: 18
+    anchors:
+      4: "Vizuální hierarchie skrývá hlavní akci nebo stav, mobilní návrh je pouze zmenšený desktop a tabulky, formuláře či dialogy se rozpadají."
+      6: "Běžné úlohy jsou čitelné na obou šířkách, ale hustá tabulka nemá určené mobilní řešení, dlouhý formulář ztrácí kontext nebo některá sekundární akce není na telefonu dostupná."
+      8: "Hierarchie vede od pracovního kontextu k hlavní akci; formuláře zůstávají použitelné a každá tabulka má na telefonu doložené řešení pomocí karet, vodorovného posuvu s orientačním sloupcem nebo skrytých sloupců dostupných v detailu, aniž se ztratí data či akce."
+      10: "Směr má doložené varianty hustoty a progresivního odhalení pro časté i výjimečné úlohy a testovací ukázky potvrzují použitelnost s dlouhým obsahem, zvětšeným textem a krajními hodnotami bez zakrytí výsledku či akce."
+    sources:
+      - "Alan Cooper a kol., About Face: The Essentials of Interaction Design, 2014, https://www.wiley.com/en-us/About+Face%3A+The+Essentials+of+Interaction+Design%2C+4th+Edition-p-9781118766576: hierarchie podle cílů a frekvence úloh."
+      - "Jenifer Tidwell, Charles Brewer a Aynne Valencia, Designing Interfaces, 2020, https://www.oreilly.com/library/view/designing-interfaces-3rd/9781492051954/: vzory formulářů, tabulek a responzivního uspořádání."
+  - id: visual_accessibility
+    name: "Přístupnost, fokus a dotyk"
+    weight: 18
+    anchors:
+      4: "Text či ovládací prvky nesplňují kontrast AA, stav je sdělen pouze barvou, fokus není vidět nebo jsou běžné dotykové cíle pod 44 CSS px bez doložené výjimky design systému."
+      6: "Základní kontrast a fokus vyhovují, ale některé varianty, chybové stavy, grafy, reflow, zvětšení textu nebo dotykové rozestupy nejsou doložené."
+      8: "Všechny ukázané varianty splňují WCAG 2.2 AA včetně viditelného a nezakrytého fokusu podle 2.4.7 a 2.4.11 a cíle nejméně 24 × 24 CSS px podle 2.5.8; význam nezávisí jen na barvě a design systém používá pro běžné dotykové cíle nejméně 44 CSS px."
+      10: "Testovací ukázky dokládají práci se zvětšením, vysokým kontrastem, omezeným pohybem a čtečkou; grafy mají rovnocenné shrnutí a tabulku a tokeny automaticky hlídají kontrast, fokus i velikost cílů."
+    sources:
+      - "W3C, Web Content Accessibility Guidelines 2.2, 2023, https://www.w3.org/TR/WCAG22/: požadavky AA na barvu, kontrast, reflow, fokus podle 2.4.7 a 2.4.11 a velikost cíle podle 2.5.8."
+      - "AID Platform, Design systém aplikací, 2026, references/standards/webapp-design-system-standard.md: běžné dotykové cíle nejméně 44 CSS px a přístupnost komponent."
+      - "AID Platform, Úlohy a stavy webové aplikace UA-11, 2026, references/standards/webapp-tasks-states-standard.md: graf vyžaduje popisky, shrnutí a tabulkovou náhradu."
+  - id: data_trust
+    name: "Důvěryhodnost dat a bezpečné rozhodování"
+    weight: 12
+    anchors:
+      4: "Čísla, měny, jednotky, stav změny nebo rozsah nevratné akce jsou nejasné; skutečně vypadající údaje či tvrzení o podniku jsou bez zdroje nebo označení jako ukázka. Jediná nevratná akce bez zobrazení předmětu a dopadu znamená nejvýše 4."
+      6: "Hlavní hodnoty jsou čitelné a ukázky rozpoznatelné, ale formát, původ, aktuálnost, mezisoučty, částečný výsledek nebo rozsah hromadné akce nejsou vždy zřejmé."
+      8: "Čísla mají jednoznačný formát, jednotku, znaménko, stav a potřebný kontext; ukázková data jsou označená nebo neutrální, hromadná či destruktivní akce ukazuje počet a dopad a výsledek rozlišuje úspěšné a neúspěšné položky."
+      10: "Rozhraní ukazuje zdroj a čas kritických hodnot, před potvrzením porovnává starou a novou hodnotu a konkrétně označuje nejistotu, konflikt či nezaúčtovanou změnu bez falešné přesnosti."
+    sources:
+      - "AID Platform, Úlohy a stavy webové aplikace UA-10, 2026, references/standards/webapp-tasks-states-standard.md: výběr, počet položek, potvrzení a částečný výsledek hromadné akce."
+      - "Don Norman, The Design of Everyday Things, 2013, https://mitpress.mit.edu/9780262525671/the-design-of-everyday-things/: srozumitelné mapování, zpětná vazba a prevence omylu."
+  - id: design_handoff
+    name: "Předatelnost vizuálního systému"
+    weight: 10
+    anchors:
+      4: "Chybí tokeny, rozměry, varianty nebo vazba na kostru; vývojář musí vzhled a chování podstatně domyslet."
+      6: "Hlavní komponenty a hodnoty jsou popsané, ale některé responzivní přechody, stavy, obsahová pravidla či vazby na „data-aid-*“ zůstávají nejednoznačné."
+      8: "Vybraný směr má tokeny, specifikaci komponent a stavů, responzivní pravidla, obsahové vzory a jednoznačnou vazbu na obrazovky a akce kostry; klientské podklady jsou zvlášť označené."
+      10: "Předání je verzované a testovatelné, komponenty mají podmínky přijetí a krajní příklady a automatické porovnání odhalí odchylku implementace od vizuální i sémantické smlouvy."
+    sources:
+      - "Ian Robinson, Consumer-Driven Contracts: A Service Evolution Pattern, 2006, https://martinfowler.com/articles/consumerDrivenContracts.html: ověřitelné rozhraní mezi návrhem a implementací."
+      - "Design Tokens Community Group, Design Tokens Format Module, 2025, https://www.designtokens.org/TR/2025.10/format/: přenositelný a jednoznačný zápis designových tokenů."

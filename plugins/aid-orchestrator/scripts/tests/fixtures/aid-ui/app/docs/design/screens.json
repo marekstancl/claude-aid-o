@@ -1,0 +1,188 @@
+{
+  "version": 1,
+  "app": "Poznámky (fixture P116)",
+  "screens": [
+    {
+      "id": "seznam",
+      "title": "Poznámky",
+      "purpose": "Přehled všech poznámek, odsud se zakládá a otevírá.",
+      "nav": true,
+      "actions": [
+        {
+          "id": "novy",
+          "label": "Nová poznámka",
+          "to": "formular",
+          "kind": "navigate"
+        },
+        {
+          "id": "otevrit",
+          "label": "Otevřít",
+          "to": "detail",
+          "kind": "navigate"
+        }
+      ],
+      "states": {
+        "empty": "Zatím žádná poznámka. Založte první.",
+        "loading": "Načítám poznámky…",
+        "error": "Poznámky se nepodařilo načíst. Zkusit znovu.",
+        "filled": "Seznam poznámek s názvem a datem."
+      }
+    },
+    {
+      "id": "formular",
+      "title": "Nová poznámka",
+      "purpose": "Zápis nové poznámky.",
+      "nav": false,
+      "actions": [
+        {
+          "id": "ulozit",
+          "label": "Uložit",
+          "to": "detail",
+          "kind": "submit"
+        },
+        {
+          "id": "znovu",
+          "label": "Zkusit znovu",
+          "to": "detail",
+          "kind": "submit"
+        },
+        {
+          "id": "zpet",
+          "label": "Zpět na seznam",
+          "to": "seznam",
+          "kind": "navigate"
+        }
+      ],
+      "states": {
+        "empty": "Prázdný formulář s polem Název.",
+        "loading": "Ukládám…",
+        "error": "Uložení selhalo, text zůstal ve formuláři. Zkusit znovu.",
+        "filled": "Vyplněný formulář."
+      }
+    },
+    {
+      "id": "detail",
+      "title": "Poznámka",
+      "purpose": "Jedna poznámka, odsud se maže.",
+      "nav": false,
+      "actions": [
+        {
+          "id": "smazat",
+          "label": "Smazat",
+          "to": "seznam",
+          "kind": "destructive",
+          "confirm": "Opravdu smazat poznámku?",
+          "confirm_yes": "Smazat poznámku",
+          "confirm_no": "Nechat poznámku"
+        },
+        {
+          "id": "zpet",
+          "label": "Zpět na seznam",
+          "to": "seznam",
+          "kind": "navigate"
+        }
+      ],
+      "states": {
+        "empty": "nenastává, protože detail se otevírá jen z existující poznámky",
+        "loading": "Načítám poznámku…",
+        "error": "Poznámku se nepodařilo načíst. Zpět na seznam.",
+        "filled": "Název a text poznámky."
+      }
+    }
+  ],
+  "tasks": [
+    {
+      "id": "zalozit",
+      "title": "Založit poznámku",
+      "roles": [
+        "uživatel"
+      ],
+      "steps": [
+        {
+          "screen": "seznam",
+          "action": "novy"
+        },
+        {
+          "screen": "formular",
+          "action": "ulozit",
+          "input": {
+            "nazev": "Nákup na sobotu"
+          }
+        }
+      ],
+      "done_when": {
+        "screen": "detail",
+        "expect": "Nákup na sobotu"
+      },
+      "states": {
+        "validation": "Prázdný název: hláška u pole, formulář zůstane vyplněný.",
+        "empty": "První poznámka: seznam nabízí Novou poznámku.",
+        "loading": "Tlačítko Uložit je během ukládání zablokované.",
+        "failure": "Síť selže: text zůstane, tlačítko Zkusit znovu.",
+        "permission": "Bez přihlášení je aplikace jen ke čtení: tlačítko je vidět, ale neaktivní s větou „Zápis jen po přihlášení“.",
+        "recovery": "Rozepsaný název přežije obnovení stránky (koncept)."
+      },
+      "failure_paths": [
+        {
+          "at_step": 2,
+          "kind": "network",
+          "keeps_input": true,
+          "recover": "znovu",
+          "text": "Spojení vypadlo: nic se neztratilo, Zkusit znovu."
+        },
+        {
+          "at_step": 2,
+          "kind": "server",
+          "keeps_input": true,
+          "recover": "znovu",
+          "text": "Server poznámku odmítl: text zůstal v poli, uprav ho a ulož znovu."
+        }
+      ]
+    },
+    {
+      "id": "smazat",
+      "title": "Smazat poznámku",
+      "roles": [
+        "uživatel"
+      ],
+      "steps": [
+        {
+          "screen": "seznam",
+          "action": "otevrit"
+        },
+        {
+          "screen": "detail",
+          "action": "smazat"
+        }
+      ],
+      "done_when": {
+        "screen": "seznam",
+        "expect": "Poznámka smazána"
+      },
+      "states": {
+        "validation": "nenastává, protože smazání nemá vstup",
+        "empty": "Bez poznámek není co mazat; seznam nabízí Novou poznámku.",
+        "loading": "Mažu…",
+        "failure": "Smazání selže: poznámka zůstane, hláška a Zkusit znovu.",
+        "permission": "Bez přihlášení je aplikace jen ke čtení: tlačítko je vidět, ale neaktivní s větou „Zápis jen po přihlášení“.",
+        "recovery": "Přerušené smazání: poznámka buď je, nebo není; nic napůl."
+      },
+      "failure_paths": [
+        {
+          "at_step": 2,
+          "kind": "network",
+          "keeps_input": true,
+          "recover": "smazat",
+          "text": "Spojení vypadlo: nic se neztratilo, Zkusit znovu."
+        },
+        {
+          "at_step": 2,
+          "kind": "server",
+          "keeps_input": true,
+          "recover": "smazat",
+          "text": "Server akci odmítl: důvod u tlačítka, opakování nepomůže."
+        }
+      ]
+    }
+  ]
+}

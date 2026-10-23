@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v3.8.0** (current) — plán dojede v `--auto` bez PM: registr odmítnutí (kdo jedná), nezávislý zástupce na technická rozhodnutí, chráněné dopady (data, peníze, zadání, tajemství) poznané kódem a poslané PM, předejití zastávek v kontrole plánu a startu běhu, uzávěr opakuje jen to, co oprava zasáhla
+- **v3.9.0** (current) — studio `/aid-ui` umí webové aplikace a je svižné a přesné: obrazovky a úlohy, kostra a testy úloh z jednoho modelu, předání jako zadání změn kódu; bez vlastních známek výrobce, nezávislý ověřovatel s rolemi v kole, kolo kolem 15 minut; ověřeno na aplikaci Trading (P116, P118)
+- **v3.8.0** — plán dojede v `--auto` bez PM: registr odmítnutí (kdo jedná), nezávislý zástupce na technická rozhodnutí, chráněné dopady (data, peníze, zadání, tajemství) poznané kódem a poslané PM, předejití zastávek v kontrole plánu a startu běhu, uzávěr opakuje jen to, co oprava zasáhla
 - **v3.7.0** — companion jako hotová stavebnice (`aid-companion.sh`: kopie aplikace, focení nad smyšlenými daty, pevná stránka s panelem vlevo, odpovědi PM; agent dodá jen varianty ze sdílených komponent) a 20 oprav z projektů (uzávěr plánu nesmaže neuložené soubory, delegace sporů, citace nálezů, `--bump none`, `Delete:`)
 - **v3.6.0** — studio /aid-ui předává plánu a běhu: předávací balík, zadání plánu nasazení z balíku, brána běhu `check_ui_handover` (jen předaný web bez otevřeného kritického bodu), hodnocení po nasazení ve vlastní smyčce, Codex a ceník AIDu ve studiu
 - **v3.5.0** — studio /aid-ui podle dílny: šest míst rozhodnutí, klient a odborník na Opusu s pamětí, brány v kódu, živá kostra, brána přes všechny stránky a šířky jedním průchodem, `cycle`, nástroje značky a pohybu loga

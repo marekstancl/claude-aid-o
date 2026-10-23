@@ -3,6 +3,11 @@
 # aid-ui-verify.sh — the /aid-ui verification gate (step 7) on the recorded build.
 #
 #   aid-ui-verify.sh <project>
+#   aid-ui-verify.sh <project> --precheck   (P116) a web application's skeleton (<project>/site) over the model now, before
+#     any role round: the app rows (app_flows, app_states, keyboard_flows, task_recovery) with axe and keyboard, on the
+#     unapproved model too; nothing recorded in the state; .aid-ui/precheck/result.json; exit 0 green, 3 open rows
+#   aid-ui-verify.sh <project> --quick   (P118) the same rows at the widest app width only, after every edit (about a
+#     minute); .aid-ui/quick/result.json; never taken by self or a round
 #   aid-ui-verify.sh <project> --copy-subject <out.json>   (P108) serves the recorded build and writes
 #     only the copy of every page for the copy review; the gate result in .aid-ui/verify stays untouched
 #   aid-ui-verify.sh --package-gate <plan or brief> [--launch]   (P115) the run gate check_ui_handover:
@@ -23,6 +28,9 @@
 #    and full-page screenshots under .aid-ui/verify/shots/. A browser that cannot launch
 #    (WebKit not installed) -> its rows not_covered with the install hint.
 # 4. `aid-ui-state.sh gate-record <project> <result.json>`.
+# A webapp (P116) first: `aid-ui-state.sh model-approved` (exit 1 on a model the PM did not approve or that changed
+# since) and `aid-ui-flows.py generate` (the task scenarios from that model); its rows app_flows, app_states,
+# keyboard_flows and task_recovery come from docs/design/screens.json (aid-ui-screens.py matrix).
 #
 # Inputs the checks read (all optional; missing -> the check's rows are not_covered):
 # docs/content/facts.yaml, docs/content/tasks.yaml (P113a task test), docs/content/photos.yaml (P113a photo slots), docs/design/brand-package/, .aid-ui/scenarios/<flow id>.mjs,
@@ -38,13 +46,37 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COVERAGE_MAP="${AID_UI_COVERAGE_MAP:-$HERE/../skills/ui-design/coverage/map.yaml}"
 die() { echo "ERROR: aid-ui-verify.sh: $1" >&2; exit 1; }
 
-USAGE="usage: aid-ui-verify.sh <project> [--copy-subject <out.json> | --base-url <url>] | --package-gate <plan> [--launch]"
+USAGE="usage: aid-ui-verify.sh <project> [--copy-subject <out.json> | --base-url <url> | --precheck | --quick] | --package-gate <plan> [--launch]"
 TOOL="${AID_UI_TOOL:-$HERE/aid-ui-tool.sh}"   # tests point it at a stub (no browser on the merge path)
 if [[ "${1:-}" == --package-gate ]]; then   # P115: the run gate; parsed before the <project> forms
   (( $# == 2 )) || { (( $# == 3 )) && [[ "$3" == --launch ]]; } || { echo "$USAGE" >&2; exit 2; }
   exec python3 "$HERE/aid-ui-package.py" gate "${@:2}"
 fi
 subject=""; live=""
+if (( $# == 2 )) && [[ "$2" == --precheck || "$2" == --quick ]]; then   # P116: the app skeleton's own gate before any role round
+  MODE="${2#--}"   # P118: --quick = the same rows at one width (the desktop), after every edit; never what self takes
+  PROJECT="$(realpath "$1")"; STATE="$PROJECT/docs/design/brand-state.json"
+  [[ "$(jq -r '.variant.type // ""' "$STATE" 2>/dev/null)" == webapp ]] || die "--$MODE is for a web application (variant.type webapp)"
+  site="$PROJECT/site"; [[ -f "$site/index.html" ]] || die "no skeleton in $site (aid-ui-serve.sh skeleton <project>)"
+  python3 "$HERE/aid-ui-flows.py" generate "$PROJECT" >/dev/null || die "the task scenarios could not be generated from docs/design/screens.json (see above)"
+  OUT="$PROJECT/.aid-ui/$MODE"; rm -rf "$OUT"; mkdir -p "$OUT"; STARTED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  jq --argjson b "$(bash "$HERE/aid-ui-state.sh" build-json "$site")" --arg d "$site" '.build = ($b + {dir: $d})' "$STATE" > "$OUT/state.json"
+  yq -o=json . "$(dirname "$COVERAGE_MAP")/checks.yaml" | jq '.checks |= with_entries(select(.key | IN("app_flows", "app_states", "keyboard_flows", "task_recovery", "axe", "keyboard")))
+    | .viewports = (.app_rows.viewports // .viewports) | .browsers = (.app_rows.browsers // .browsers)
+    | if $q then .viewports = [.viewports | max] | .app_rows.viewports = [.viewports[0]] else . end' --argjson q "$([[ $MODE == quick ]] && echo true || echo false)" > "$OUT/checks.json"   # a design check: the app rows' widths
+  export AID_UI_PROJECT="$PROJECT"
+  srv="$(bash "$HERE/aid-ui-serve.sh" preview "$site")" || exit 1
+  trap 'AID_UI_PROJECT="$PROJECT" bash "$HERE/aid-ui-serve.sh" stop preview >/dev/null 2>&1 || true' EXIT
+  bash "$TOOL" verify --state "$OUT/state.json" --checks "$OUT/checks.json" --site "$site" --base "$(sed -n 's/^URL: //p' <<<"$srv")" \
+    --out "$OUT" --project "$PROJECT" --seo "$HERE/aid-ui-seo-check.py" || die "the $MODE run failed; no result"
+  open="$(jq '[.rows[] | select(.status != "pass")] | length' "$OUT/result.json")"
+  # P118: the gate's time per run, for the phases of a round (aid-ui-quality.py status)
+  jq -cn --arg m "$MODE" --arg s "$STARTED" --arg e "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson o "$open" '{mode: $m, started: $s, ended: $e, open: $o}' >> "$PROJECT/.aid-ui/gate-times.jsonl"
+  echo "${MODE^^}: $OUT/result.json ($open open rows)"
+  jq -r '.rows[] | select(.status != "pass") | "  \(.status) \(.check) \(.page) \(.state) \(.viewport): \((.detail // "")[0:160])"' "$OUT/result.json" | head -20
+  (( open == 0 )) || exit 3
+  exit 0
+fi
 if (( $# == 3 )) && [[ "$2" == --copy-subject ]]; then subject="$(realpath -m "$3")"
 elif (( $# == 3 )) && [[ "$2" == --base-url ]]; then live="$3"
   [[ "$live" =~ ^https?://[^[:space:]]+$ ]] || { echo "$USAGE (--base-url is an http(s) address)" >&2; exit 2; }
@@ -61,11 +93,21 @@ if [[ -z "$live" ]]; then   # binds the LOCAL gate to the recorded build; the ru
   [[ "$now_id" == "$id" ]] || die "the site in $dir changed since build-record (build id $now_id, recorded $id); rebuild and run build-record again"
 fi
 
+# P116: a webapp is gated only on the model the owner approved, with its task scenarios generated from that model now
+if [[ "$(jq -r '.variant.type // ""' "$STATE")" == webapp ]]; then   # every mode: the copy subject and the live rows too
+  bash "$HERE/aid-ui-state.sh" model-approved "$PROJECT" >/dev/null || die "the gate of an app runs only on the model the owner approved (see above)"
+  python3 "$HERE/aid-ui-flows.py" generate "$PROJECT" >/dev/null || die "the task scenarios could not be generated from docs/design/screens.json (see above)"
+fi
+
 OUT="$PROJECT/.aid-ui/verify"
 [[ -z "$live" ]] || OUT="$PROJECT/.aid-ui/verify-live"
 if [[ -n "$subject" ]]; then OUT="$(mktemp -d)"; trap 'rm -rf "$OUT"' EXIT   # subject only: the gate result stays
 else rm -rf "$OUT"; mkdir -p "$OUT"; fi
 yq -o=json . "$(dirname "$COVERAGE_MAP")/checks.yaml" > "$OUT/checks.json" || die "cannot read checks.yaml"
+if [[ "$(jq -r '.variant.type // ""' "$STATE")" == webapp ]]; then   # an app is not a company's public web (Trading 22. 10.: 5586 rows asked
+  # for an IČO, a brand font, a favicon and a search snippet): the web_only checks of checks.yaml are out, the app's quality rows stay
+  jq '. as $r | .checks |= with_entries(select(.key as $k | ($k | IN(($r.web_only // [])[])) | not))' "$OUT/checks.json" > "$OUT/checks.json.t" && mv "$OUT/checks.json.t" "$OUT/checks.json"
+fi
 facts=()
 if [[ -f "$PROJECT/docs/content/facts.yaml" ]]; then
   yq -o=json . "$PROJECT/docs/content/facts.yaml" > "$OUT/facts.json" || die "cannot read docs/content/facts.yaml"
@@ -86,7 +128,8 @@ if [[ -n "$live" ]]; then   # P115: the rows over the live address - no preview,
     --base "$live" --out "$OUT" --project "$PROJECT" --seo "$HERE/aid-ui-seo-check.py" --live 1 "${facts[@]}" \
     || die "aid-ui-verify.mjs failed over $live; no live result"
   jq -n --arg u "$live" --arg s "$(python3 "$HERE/aid-ui-motion.py" dirsha "$dir")" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{url: $u, site_sha256: $s, run_at: $at}' > "$OUT/live.json"
+    --arg m "$(jq -r '.model_sha256 // ""' "$OUT/result.json")" \
+    '{url: $u, site_sha256: $s, run_at: $at} + (if $m != "" then {model_sha256: $m} else {} end)' > "$OUT/live.json"   # P116: an app's live rows are of its model
   wo="$(jq -c '.warn_only // []' "$OUT/checks.json")"
   openf='[.rows[] | select(.status == "fail" or .status == "not_covered" or (.status == "warn" and (.check | IN($wo[]) | not)))]'
   open="$(jq --argjson wo "$wo" "$openf | length" "$OUT/result.json")"
