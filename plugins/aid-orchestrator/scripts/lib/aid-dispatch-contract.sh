@@ -556,6 +556,7 @@ aid_dispatch_contract_commit() {
     else rc_wt=""; [[ -n "$rc_pj" ]] && IFS=$'\t' read -r rc_wt _ < <(aid_rr_resolve "$rc_pj" "$rc_repo"); fi
     [[ -n "$rc_wt" ]] && done_repos+="$(git -C "$rc_wt" rev-parse --show-toplevel 2>/dev/null)"$'\n'
   done < <(jq -r '.repo_commits[]?.repo // empty' "$r" 2>/dev/null)
+  local declared_del; declared_del="$(jq -r '.deleted_files[]? // empty' "$r")"
   # Present on disk, or tracked and deleted — a declared deletion is a
   # change like any other and is staged as one. An accepted absolute path is
   # another repository's (validation holds this tree's to relative paths): it
@@ -584,10 +585,10 @@ aid_dispatch_contract_commit() {
       return 1
     fi
     if [[ -f "${root}/${f}" ]]; then forced+=("$f")
-    # a deletion staged with `git rm` is in HEAD but neither on disk nor in the index — still the step's
-    # (WAN P113 krok 7: the commit left it out while validation accepted it)
+    # a DECLARED deletion staged with `git rm` is in HEAD but neither on disk nor in the index — still the
+    # step's (WAN P113 krok 7: the commit left it out while validation accepted it)
     elif [[ -e "${root}/${f}" ]] || git -C "$root" ls-files --error-unmatch -- "$f" >/dev/null 2>&1 \
-         || git -C "$root" cat-file -e "HEAD:${f}" 2>/dev/null; then files+=("$f"); fi
+         || { [[ $'\n'"$declared_del"$'\n' == *$'\n'"$f"$'\n'* ]] && git -C "$root" cat-file -e "HEAD:${f}" 2>/dev/null; }; then files+=("$f"); fi
   done < <(jq -r '.changed_files[]?, .deleted_files[]? // empty' "$r")
   if [[ "$(( ${#files[@]} + ${#forced[@]} ))" -eq 0 ]]; then
     echo "nothing to commit"
@@ -616,9 +617,13 @@ aid_dispatch_contract_commit() {
   rm -f "$tidx"
   local head _p; head="$(git -C "$root" rev-parse HEAD)"; local -a stale=()
   for _p in "${forced[@]}" "${files[@]}"; do git -C "$root" reset -q HEAD -- "$_p" >/dev/null 2>&1 || stale+=("$_p"); done
-  # the commit stands (a retry would make a second one); an index left behind is said, with its repair
-  (( ${#stale[@]} == 0 )) || echo "contract: committed ${head:0:12}, but your index still holds the old state of: ${stale[*]} — bring it to HEAD: git -C ${root} reset -q HEAD -- ${stale[*]}" >&2
   local rec; rec="$(_aid_dc_step_record "$root" "$c")"; mkdir -p "${rec%/*}"
   jq -n --arg c "$head" --arg k "$(realpath "$c")" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{commit: $c, contract: $k, at: $at}' > "$rec"
+  # the commit stands (a retry would make a second one); an index that still differs from HEAD on a path of
+  # the step (the reset failed, or a staged deletion stayed behind) is refused aloud, with its repair
+  if (( ${#stale[@]} > 0 )) || ! git -C "$root" diff --cached --quiet -- "${forced[@]}" "${files[@]}" 2>/dev/null; then
+    echo "contract: committed ${head:0:12}, but your index still differs from it on the step's paths — bring it to HEAD: git -C ${root} reset -q HEAD -- ${forced[*]} ${files[*]}" >&2
+    return 1
+  fi
   echo "$head"
 }

@@ -192,6 +192,24 @@ _return() {
   [ "$(git show --name-status --format= HEAD)" = "$(printf 'D\tREADME.md')" ]
 }
 
+@test "contract: a change and a staged deletion go in one commit and the index ends clean on the step's paths (a foreign staged file: case transaction below)" {
+  git init -q -b main . 2>/dev/null || git init -q .
+  git config user.email t@t; git config user.name T
+  git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
+  echo change >> src/thing.sh; git rm -q README.md
+  _return '{changed_files: ["src/thing.sh"], deleted_files: ["README.md"]}'
+  run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1: change and drop"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(git show --name-status --format= HEAD | sort | tr '\t\n' ' ;')" = "D README.md;M src/thing.sh;" ]
+  git diff --cached --quiet
+  # a path only in changed_files that vanished is no declared deletion: HEAD alone does not make it the step's
+  git reset -q --hard HEAD; git checkout -q -- . ; echo x > tests/test-thing.bats; git add tests/test-thing.bats; git commit -qm t
+  git rm -q --cached tests/test-thing.bats; rm tests/test-thing.bats
+  _return '{changed_files: ["tests/test-thing.bats"]}'
+  run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1: vanished"
+  [[ "$output" == *"nothing to commit"* || "$status" -ne 0 ]]
+}
+
 @test "contract: a declared file the project gitignores is committed; another repository's file is named, not dropped" {
   git init -q -b main . 2>/dev/null || git init -q .
   git config user.email t@t; git config user.name T
