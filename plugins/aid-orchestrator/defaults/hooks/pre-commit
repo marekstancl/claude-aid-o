@@ -94,13 +94,23 @@ _aid_emit() {
 # the other copy, and test-commit-guard.bats keeps the two equal.
 _AID_ALWAYS_ALLOWED=(".aid-o/work/backlog.md" ".aid-o/work/aid-plugin-issues.md" "docs/plans/BACKLOG.md")
 
-# _aid_in_scope <file> — true if <file> matches any entry of _AID_SCOPE[]
-# (exact path or directory-prefix match).
+# _aid_path_covers <pattern> <path> — THE scope rule: an exact path, a glob, or a directory (with or without a
+# trailing /) covering what is under it. Two copies by design (the hook cannot load the plugin):
+# defaults/hooks/pre-commit and scripts/lib/aid-dispatch-contract.sh; test-commit-guard.bats keeps them equal.
+_aid_path_covers() {
+  local _p="$1" _f="$2"
+  # shellcheck disable=SC2254
+  case "$_f" in $_p) return 0 ;; esac
+  [[ "$_f" == "${_p%/}/"* ]]
+}
+
+# _aid_in_scope <file> — true if <file> is covered by any entry of _AID_SCOPE[] (_aid_path_covers: a directory
+# declared as `dir/` used to be compared as `dir//…` and refused its own files, WAN P110/P112, 3.8.1)
 _aid_in_scope() {
   local _f="$1" _s
   for _s in "${_AID_SCOPE[@]}"; do
     [[ -z "$_s" ]] && continue
-    [[ "$_f" == "$_s" || "$_f" == "$_s"/* ]] && return 0
+    _aid_path_covers "$_s" "$_f" && return 0
   done
   return 1
 }

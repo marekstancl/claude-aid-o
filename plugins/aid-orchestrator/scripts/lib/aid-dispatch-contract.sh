@@ -279,6 +279,16 @@ aid_dispatch_repo_range_ok() {
 # _aid_dc_path_allowed <path> <allowed-json> <own_evidence_suffix> — bash glob
 # match, the same way scripts/gates/scope-check.sh decides. A step's own
 # evidence directory is always allowed: that is where its output is meant to go.
+# _aid_path_covers <pattern> <path> — THE scope rule: an exact path, a glob, or a directory (with or without a
+# trailing /) covering what is under it. Two copies by design (the hook cannot load the plugin):
+# defaults/hooks/pre-commit and scripts/lib/aid-dispatch-contract.sh; test-commit-guard.bats keeps them equal.
+_aid_path_covers() {
+  local _p="$1" _f="$2"
+  # shellcheck disable=SC2254
+  case "$_f" in $_p) return 0 ;; esac
+  [[ "$_f" == "${_p%/}/"* ]]
+}
+
 _aid_dc_path_allowed() {
   local path="$1" allowed="$2" evidence="$3" pattern
   # The evidence dir matches as a whole path segment, never as a substring:
@@ -286,10 +296,7 @@ _aid_dc_path_allowed() {
   case "$path" in "$evidence"|"$evidence"/*|*/"$evidence"|*/"$evidence"/*) return 0 ;; esac
   while IFS= read -r pattern; do
     [[ -n "$pattern" ]] || continue
-    # shellcheck disable=SC2254
-    case "$path" in $pattern) return 0 ;; esac
-    # A declared directory covers what is under it.
-    [[ "$path" == "${pattern%/}/"* ]] && return 0
+    _aid_path_covers "$pattern" "$path" && return 0
   done < <(jq -r '.[]' <<< "$allowed")
   return 1
 }
