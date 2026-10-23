@@ -1661,6 +1661,13 @@ YAML
   [ "$(jq -r '.gates.beta | has("description")' "$REPORT")" = false ]
 }
 
+@test "3.9.2: execution.yaml unreadable for the descriptions ends the run loudly, never as a report without them" {
+  local real; real="$(command -v yq)"; mkdir -p "$TEST_TMPDIR/fakebin"
+  printf '#!/usr/bin/env bash\n[[ "$*" == *map_values* ]] && exit 1\nexec %q "$@"\n' "$real" > "$TEST_TMPDIR/fakebin/yq"; chmod +x "$TEST_TMPDIR/fakebin/yq"
+  PATH="$TEST_TMPDIR/fakebin:$PATH" run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"
+  [ "$status" -ne 0 ]; [[ "$output" == *"could not be read for the gates' descriptions"* ]]
+}
+
 @test "P097 rows: no script reads a gate row's result directly — every reader goes through gate_row_normalize (grep guard)" {
   run grep -rn '\.gates\[[^]]*\]\.result\|\.gates\[\]\.result\|\.value\.result\|gates_rows/[^ ]*\.json[^|]*\.result' \
     "$AID_PLUGIN_PATH/scripts" --exclude-dir=tests --exclude=aid-gate-row.sh
