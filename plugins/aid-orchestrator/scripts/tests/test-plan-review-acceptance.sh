@@ -53,6 +53,11 @@ echo "TEST: the recorded flow replays to a gate PASS"
 cp "$FX/acta-p025.md" "$PLAN"; _legacy; _check
 aid_fixture_seed_critic_check "$PWD" "$PLAN"
 _round 1 && ok "round 1 replayed" || bad "round 1 did not replay"
+# a round that leaves a blocker or major open does not read "pass" (ACTA P027: timeline "pass" over 15 blockers)
+r1="$(jq -r '[.findings[] | select((.severity == "blocker" or .severity == "major") and (.status == "open" or .status == "disputed"))] | length' "$CP1/round-1/merged.json" 2>/dev/null)"
+r1v="$(jq -r '.verdict' "$CP1/round-1/round.json" 2>/dev/null)"
+if [[ "${r1:-0}" -gt 0 ]]; then [[ "$r1v" == fail ]] && ok "round 1: ${r1} open blocker/major, verdict fail" || bad "round 1: ${r1} open blocker/major but verdict ${r1v}"
+else bad "round 1 of the recorded flow should leave findings open (fixture changed?)"; fi
 cp "$FX/recorded/plan-round-2.md" "$PLAN"; _legacy
 bash "$ROUND" fix-check --plan "$PLAN" --round 1 >/dev/null 2>&1 && ok "the round-1 fix passes fix-check" || bad "fix-check refused the recorded fix"
 _check

@@ -98,9 +98,10 @@ _load_step() { aid_review_config_load "$ROOT" step_review "$STEP_SKILL" && aid_r
 }
 
 # ── the step and EPIC blocks ───────────────────────────────────────────────
-@test "step_review: the plugin default asks both roles on every reviewed step (2.109.0); a gated role lowers the floor to the unconditional count" {
+@test "step_review: the plugin default asks both roles on every reviewed step (2.109.0) and the claims role on a documentation step (3.8.0); a gated role lowers the floor to the unconditional count" {
   aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
-  [ "${#RC_ROLE[@]}" -eq 2 ]; [ "${RC_WHEN[0]}" = "" ]; [ "${RC_WHEN[1]}" = "" ]
+  [ "${#RC_ROLE[@]}" -eq 3 ]; [ "${RC_WHEN[0]}" = "" ]; [ "${RC_WHEN[1]}" = "" ]
+  [ "${RC_ROLE[2]}" = final_claims ]; [ "${RC_WHEN[2]}" = docs_surface ]
   [ "$RC_MIN_ANSWERS" = 2 ]
   _project '.review_checkpoints.step_review.reviewers[1].when = "review+security"'
   aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
@@ -168,7 +169,7 @@ _load_step() { aid_review_config_load "$ROOT" step_review "$STEP_SKILL" && aid_r
 
 @test "effort: read into RC_EFFORT, medium when unset, a value outside low|medium|high refused" {
   _load_step
-  [ "${RC_EFFORT[*]}" = "low low" ]   # P110: both step roles light, security full via full_when
+  [ "${RC_EFFORT[*]}" = "low low low" ]   # P110: the step roles light, security full via full_when (claims: 3.8.0)
   _load_cp1
   [ "${RC_EFFORT[0]}" = medium ]
   _project '.review_checkpoints.step_review.reviewers[0].effort = "extreme"'
