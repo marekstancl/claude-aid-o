@@ -50,6 +50,12 @@ teardown() {
   [[ "$output" =~ ^aid-run-gates\.sh@v ]]
 }
 
+@test "run-all: a gate's description from execution.yaml rides on its row; a gate without one has none (3.9.2)" {
+  yq -i '.gates.alpha.description = "Unit tests of the API pass"' "$EXEC_YAML"
+  "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" >/dev/null 2>&1
+  [ "$(jq -r '.gates.alpha.description' "$REPORT")" = "Unit tests of the API pass" ]
+  [ "$(jq -r '.gates | to_entries | map(select(.key != "alpha")) | .[0].value | has("description")' "$REPORT")" = false ]
+}
 @test "run-all: timeline.jsonl has gate_runner_start with report_path + gate_count + command_list" {
   "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" >/dev/null 2>&1
   [ -f "$TIMELINE" ]

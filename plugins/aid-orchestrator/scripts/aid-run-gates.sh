@@ -1632,6 +1632,8 @@ run_all_gates() {
     max_retries=$(yq ".gates.\"${gate_name}\".max_retries // 1" "$execution_yaml")
     timeout_s=$(yq ".gates.\"${gate_name}\".timeout_seconds // 60" "$execution_yaml")
     pass_criteria=$(yq ".gates.\"${gate_name}\".pass_criteria // \"\"" "$execution_yaml")
+    # what the gate checks, in the project's words — on the row, so a failure reads as more than a name (3.9.2)
+    local gate_description; gate_description=$(yq -r ".gates.\"${gate_name}\".description // \"\"" "$execution_yaml")
     # P076 Step 2 — already validated for every gate above; re-read here as the
     # per-gate dispatch input. Absent → "foreground" → the untouched code path.
     run_mode=$(resolve_run_mode "$execution_yaml" "$gate_name")
@@ -1854,8 +1856,9 @@ run_all_gates() {
     # was not) required — `explicit` or `legacy_default`.
     merged_row=$(echo "$gate_result" | jq \
       --argjson req "$([[ "${required:-false}" == "true" ]] && echo true || echo false)" \
-      --arg reqsrc "${required_source:-legacy_default}" \
-      ". + {\"attempts\":${attempt}, \"required\": \$req, \"required_source\": \$reqsrc}")
+      --arg reqsrc "${required_source:-legacy_default}" --arg desc "${gate_description:-}" \
+      ". + {\"attempts\":${attempt}, \"required\": \$req, \"required_source\": \$reqsrc}
+         + (if \$desc == \"\" then {} else {\"description\": \$desc} end)")
     # The checkpoint file is a row too, so the contract is applied BEFORE it
     # is written; a row outside the vocabulary ends the run here, by name.
     merged_row="$(_gate_row_finalize "$gate_name" "$merged_row")" || return 1

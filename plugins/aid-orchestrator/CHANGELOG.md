@@ -3,6 +3,12 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+- **Popis brány je ve výsledku brány**: `description` z `execution.yaml` se zapíše do řádku brány (`gates_report.json`), takže selhaná brána říká lidsky, co hlídá. Dosud ho šablona psala a nic nečetlo (noční sada `test-execution-yaml-readers` červená od 3.7.0).
+- Kontrola plánu čte projektové kontroly (`plan_checks`) ve dvou krocích, takže je kontrola čtenářů klíčů nepovažuje za čtení klíče `command` z nejvyšší úrovně konfigurace (ten skutečně nikdo nečte).
+
 ## [3.9.1] — 2026-10-23
 
 Opravy z hlášení projektů (ACTA, agents, WAN, Trading) a noční běh zase zelený tam, kde ho rozbila 3.7.0 a 3.8.0. Každá oprava má test, který bez ní padá.
