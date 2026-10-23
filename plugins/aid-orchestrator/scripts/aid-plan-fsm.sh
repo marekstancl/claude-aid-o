@@ -9665,6 +9665,31 @@ _pr_main() {
       "/aid-run --resume ${plan_id}; when the run made no step: aid-plan-fsm.sh plan-run ${plan_id} --restart --reason \"<why, 20+ chars>\"; else close the plan administratively: aid-plan-fsm.sh plan-close ${plan_id} --administrative --reason \"<why>\"" 1
   fi
 
+  # ── 3.8.1: what can refuse the plan is asked BEFORE the first durable change. The first plan-run of a plan
+  #    used to write the transaction and commit the plan (plan-start) and only then meet the page, readiness
+  #    and the CP1 gate — ACTA P027: a refused CP1 left a sealed transaction of the old plan and a committed old
+  #    plan, the repaired plan then could not run (plan_changed_since_seal). Read-only: nothing here writes.
+  #    A run resumed from its transaction is past this point; --force leaves the CP1 verdict to the seal,
+  #    which classifies what --force may cover.
+  if [[ ! -f "$tx" && ! -f "$(plan_state_path "$plan_id")" ]]; then
+    if [[ -f "${SCRIPT_DIR}/aid-turn-gate.sh" ]]; then
+      bash "${SCRIPT_DIR}/aid-turn-gate.sh" --plan "$plan" \
+        || _pr_refuse plan_page_missing "${plan_id} has no current PM page — the page is what the PM reads instead of the plan" \
+             "render it with the command in the line above, then run plan-run again (nothing was written)" 1
+    fi
+    local pf_out pf_rc=0
+    pf_out="$(bash "${SCRIPT_DIR}/aid-generation-readiness.sh" "$plan" --total 1 --project-root "$PR_ROOT" 2>&1)" || pf_rc=$?
+    if [[ "$pf_rc" -ne 0 ]]; then printf '%s\n' "$pf_out" >&2; echo "ERROR: plan-run: readiness failed for ${plan} — repair the plan; nothing was written." >&2; exit 7; fi
+    if [[ "$force" != true && -f "${SCRIPT_DIR}/aid-cp1-gate.sh" ]]; then
+      pf_rc=0; pf_out="$(bash "${SCRIPT_DIR}/aid-cp1-gate.sh" --plan "$plan" --project-root "$PR_ROOT" 2>&1)" || pf_rc=$?
+      if [[ "$pf_rc" -ne 0 ]]; then
+        printf '%s\n' "$pf_out" >&2
+        _pr_refuse cp1_not_passed "the CP1 gate refuses ${plan} (rc ${pf_rc}, above) — nothing was written: no transaction, no commit, no plan state" \
+          "repair the plan and close another CP1 round (aid-review-round.sh prepare --plan …), then run plan-run again" 1
+      fi
+    fi
+  fi
+
   # ── the transaction file (kind: plan_run) ─────────────────────────────────
   local plan_sha
   plan_sha="$(sha256sum "$plan" | awk '{print $1}')"

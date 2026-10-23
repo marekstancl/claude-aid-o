@@ -276,8 +276,36 @@ _page() { ( source "$PLUGIN_DIR/scripts/lib/aid-plan-summary.sh" && aid_plan_sum
   _seed "$R" "$BATS_TEST_TMPDIR/bad.md"
   _run
   [ "$status" -eq 7 ]
-  [[ "$output" == *"nothing was sealed"* ]]
+  [[ "$output" == *"nothing was written"* ]]
   [ ! -f "$GEN/generation-authority.json" ] && [ ! -f "$EV/fsm-state.yaml" ]
+}
+
+# _snap — what a refused first plan-run must leave exactly as it was (3.8.1, ACTA P027)
+_snap() {
+  _snapraw | sha256sum
+}
+_snapraw() {
+  git -C "$R" rev-parse HEAD; git -C "$R" for-each-ref --format='%(refname) %(objectname)'; git -C "$R" worktree list --porcelain
+  local d; for d in "$R/.aid-o/work/plan-state" "$R/.aid-lifecycle/manifests" "$GEN" "$R/.aid-o/work/evidence/E-900-1_1"; do
+    echo "== $d"; [[ -d "$d" ]] && ls -A "$d" | grep -v '\.lock$'; done; return 0   # an flock file stays by design (gitignored, C13)
+}
+
+@test "direct: a plan the CP1 gate refuses changes nothing — no transaction, no commit, no plan state, no branch (ACTA P027)" {
+  rm -rf "$R/.aid-o/work/evidence/P900/cp1"            # no CP1 round: the gate refuses
+  local before; before="$(_snap)"
+  _run
+  echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"cp1_not_passed"* ]]
+  [ "$(_snap)" = "$before" ]
+  [ ! -f "$GEN/transaction.json" ]
+}
+
+@test "direct: a plan whose PM page is missing changes nothing either (3.8.1)" {
+  rm -f "$R/.aid-o/work/evidence/P900/plan-summary-artifact.html"
+  local before; before="$(_snap)"
+  _run
+  echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"plan_page_missing"* ]]
+  [ "$(_snap)" = "$before" ]
 }
 
 @test "direct: a failing D5 contract check stops plan-run before init and keeps its evidence" {

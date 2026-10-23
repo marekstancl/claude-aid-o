@@ -93,6 +93,7 @@ codes:
   plan_manifest_missing: {class: prevent, how: "start běhu"}
   plan_names_no_brief: {class: not_in_run, how: "psaní plánu"}
   plan_not_found: {class: prevent, how: "start běhu"}
+  cp1_not_passed: {class: not_in_run, how: "plan-run (3.8.1): CP1 brána plán odmítla, nic se nezapsalo; oprava plánu a další kolo CP1"}
   plan_not_ready: {class: not_in_run, how: "CP1 (oprava 3)"}
   plan_page_missing: {class: agent_fix, how: "plan-run: vykreslí stránku plánu a pokračuje"}
   plan_run_already_started: {class: prevent, how: "start běhu"}
