@@ -312,16 +312,23 @@ _snapraw() {
   [ "$status" -eq 7 ]; [ "$(_snap)" = "$before" ]
 }
 
-@test "direct: --force over a CP1 refusal — a hard one changes nothing, a forceable one goes on to the seal (3.9.1)" {
-  rm -rf "$R/.aid-o/work/evidence/P900/cp1"
+@test "direct: --force over a HARD CP1 refusal (unreadable round evidence) changes nothing (3.9.1)" {
+  echo '{not json' > "$R/.aid-o/work/evidence/P900/cp1/rounds.json"
   local before; before="$(_snap)"
   run bash "$PFSM" plan-run P900 --force --reason "test: the PM overrides the CP1 gate for this plan"
+  echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"aid_cp1_blocked"* && "$output" == *"cp1_not_passed"* ]]
+  [ "$(_snap)" = "$before" ]; [ ! -f "$GEN/transaction.json" ]
+}
+
+@test "direct: --force over a FORCEABLE CP1 refusal (no round) goes on to the seal, which records the override (3.9.1)" {
+  rm -rf "$R/.aid-o/work/evidence/P900/cp1"
+  run bash "$PFSM" plan-run P900 --force --reason "test: the PM overrides the CP1 gate for this plan"
   echo "$output"
-  if [[ "$output" == *"aid_cp1_blocked"* ]]; then
-    [ "$status" -ne 0 ]; [ "$(_snap)" = "$before" ]
-  else
-    [[ "$output" != *"cp1_not_passed"* ]]       # not refused before the seal: the seal records the override
-  fi
+  [[ "$output" != *"cp1_not_passed"* ]]
+  [ -f "$GEN/transaction.json" ]                                # past the read-only check
+  [ -f "$GEN/generation-authority.json" ]
+  grep -rqs "test: the PM overrides the CP1 gate" "$GEN"        # the seal recorded the PM's reason
 }
 
 @test "direct: a plan started earlier (plan-start, no plan-run transaction) is checked before plan-run writes anything (3.9.1)" {
