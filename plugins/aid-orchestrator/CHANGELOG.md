@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [3.9.1] — 2026-10-23
 
 Opravy z hlášení projektů (ACTA, agents, WAN, Trading) a noční běh zase zelený tam, kde ho rozbila 3.7.0 a 3.8.0. Každá oprava má test, který bez ní padá.
 
