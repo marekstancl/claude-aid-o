@@ -103,9 +103,9 @@ _check() {
   while IFS= read -r code; do
     grep -qP "\t${code}$" "$tsv" || missing+=" fixture:$code"
     grep -q "\`${code}" "$table" || missing+=" row:$code"
-  done < <({ grep -ohE 'When AID refuses: [a-z_]+\)' "${sites[@]}" | sed -E 's/.*: ([a-z_]+)\)/\1/'
+  done < <({ grep -ohE 'When AID refuses: [a-z][a-z0-9_]+\)' "${sites[@]}" | sed -E 's/.*: ([a-z][a-z0-9_]+)\)/\1/'
               # a code handed to a refusal helper (_pr_refuse / _dlg_refuse <code> …) prints through "$1" (AID 12. 10. 2026)
-              grep -ohE '_(pr|dlg)_refuse [a-z][a-z_]+' "${sites[@]}" | sed -E 's/.* //'; } | sort -u)
+              grep -ohE '_(pr|dlg)_refuse [a-z][a-z0-9_]+' "${sites[@]}" | sed -E 's/.* //'; } | sort -u)
   [[ -z "$missing" ]] || { echo "missing:$missing"; false; }
 }
 @test "a disabled checkpoint passes with the audit line; the master switch disables too" {
