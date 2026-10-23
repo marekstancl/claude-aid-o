@@ -313,6 +313,15 @@ _plan_role() { # <file> <role>
   [[ "$output" != *"names another repository"* ]]
 }
 
+@test "lint advisory: an API route or a docs URL path in prose is no file; a missing file with an extension and an existing directory still are (WAN P113, 3.8.1)" {
+  _plan p.md strict '- Modify: `src/a.ts` — edit'
+  printf '\n**Implementation Detail:** endpoints `/month` and `/partner-facets`, page `/wan/provize`; also `/opt/eco/nowhere/x.md` and `%s`.\n' "$BATS_TEST_TMPDIR" >> p.md
+  run "$LINT" p.md
+  [[ "$output" != *'`/month`'* && "$output" != *'`/partner-facets`'* && "$output" != *'`/wan/provize`'* ]]
+  [[ "$output" == *'`/opt/eco/nowhere/x.md` names another repository'* ]]
+  [[ "$output" == *"\`${BATS_TEST_TMPDIR}\` names another repository"* ]]
+}
+
 @test "lint advisory: another step's declaration does not cover a step's prose mention" {
   _plan p.md strict '- Modify: `src/a.ts` — edit'
   printf '\n**Error Handling:** see `/opt/eco/docs/x.md`.\n\n### Step 2: docs\n\n**Files:**\n- Modify: `/opt/eco/docs/x.md` — page\n' >> p.md
