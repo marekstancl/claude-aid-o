@@ -13,6 +13,7 @@ Stránky AID pro PM přes share (PM 22.–24. 10. 2026: PM přepíná účty Cla
 
 ### Changed
 - **Jeden pokyn ke zveřejnění** na všech místech, kde řadič stránku zveřejňuje (`communication.md`, `pipeline.md`, `brainstorming.md`, `aid-plan.md` ×2, `aid-run.md`); `test-communication-wiring.sh` hlídá všech pět míst a že stará věta nikde nezůstala.
+- **Schválení brainstormu chce jeho stránku** (`brainstorm-summary-artifact.html`), ne libovolný `.html` v adresáři běhu.
 
 ## [3.9.2] — 2026-10-23
 
