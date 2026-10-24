@@ -3,6 +3,17 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+Stránky AID pro PM přes share (PM 22.–24. 10. 2026: PM přepíná účty Claude a artefakt vidí jen v jednom).
+
+### Added
+- **`scripts/aid-pm-page-publish.sh`** zveřejní stránku, kterou AID vyrobí pro PM (plán po CP1, uzávěr, brainstorm). Bez nastavení vypíše `artifact <stránka>` a stránka je claude.ai artefaktem jako dosud. S nastavením `AID_PM_PAGE_PUBLISHER` (cesta ke spustitelnému souboru, nikdy příkaz pro shell; nepovinně `AID_PM_PAGE_PUBLISHER_SUBCOMMAND`) pošle stránku té službě s klíčem `<projekt>-<otisk>/<plán>/<druh>`, názvem, jménem projektu a logem a vypíše `link <odkaz>`; řadič přidá pod kartu řádek `Stránka: <odkaz>`, při selhání `Stránka se nezveřejnila: <důvod>` (nikdy tiše artefakt). Protokol pro vlastní službu je v hlavičce skriptu.
+- **Záznam o doručení** `<stránka>.published.json` (otisk stránky, klíč, druh, čas — nikdy odkaz, ten nese klíč PM a patří jen do chatu). S nastavenou službou ho chtějí kontrola stránky plánu, stránky uzávěru i `aid-brainstorm-state.sh approve`: vykreslená, ale nedoručená stránka se nepočítá.
+
+### Changed
+- **Jeden pokyn ke zveřejnění** na všech místech, kde řadič stránku zveřejňuje (`communication.md`, `pipeline.md`, `brainstorming.md`, `aid-plan.md` ×2, `aid-run.md`); `test-communication-wiring.sh` hlídá všech pět míst a že stará věta nikde nezůstala.
+
 ## [3.9.2] — 2026-10-23
 
 ### Fixed
