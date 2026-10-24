@@ -44,7 +44,7 @@ _pub() { run bash "$PUB" "$PAGE" --plan P900 --kind plan --title "P900 · plán"
   [[ "$output" == *"publisher: brand logo is shown"* ]]           # stderr relayed, apart from the link line
   cmp "$PAGE" "$FAKE_LOG.stdin"
   [ "$(sed -n 1p "$FAKE_LOG.argv")" = publish-for-pm ]
-  grep -qx -- "--key" "$FAKE_LOG.argv"; grep -qx "my-proj/P900/plan" "$FAKE_LOG.argv"
+  grep -qx -- "--key" "$FAKE_LOG.argv"; grep -qxE "my-proj-[0-9a-f]{8}/P900/plan" "$FAKE_LOG.argv"
   grep -qx "P900 · plán" "$FAKE_LOG.argv"; grep -qx "Lisa pro WAN" "$FAKE_LOG.argv"
   grep -qx "$(realpath "$R/ui/public/favicon.svg")" "$FAKE_LOG.argv"
   # delivered: the record matches the page, and holds no link
@@ -101,4 +101,20 @@ _pub() { run bash "$PUB" "$PAGE" --plan P900 --kind plan --title "P900 · plán"
   _pub
   [ "$status" -eq 1 ]; [[ "$output" == *"over the 2097152"* ]]
   [ ! -e "$FAKE_LOG.argv" ]
+}
+
+@test "pm page: two projects with the same directory name get different keys; a project's key is stable and follows its repo_id" {
+  export AID_PM_PAGE_PUBLISHER="$FAKE"
+  _pub; local k1; k1="$(grep -A1 -x -- --key "$FAKE_LOG.argv" | tail -1)"
+  local R2="$BATS_TEST_TMPDIR/other/My Proj"; mkdir -p "$R2/.aid-o/config"; git -C "$R2" init -q
+  run bash "$PUB" "$PAGE" --plan P900 --kind plan --title t --project-root "$R2"; [ "$status" -eq 0 ]
+  local k2; k2="$(grep -A1 -x -- --key "$FAKE_LOG.argv" | tail -1)"
+  [ "$k1" != "$k2" ]
+  _pub; [ "$(grep -A1 -x -- --key "$FAKE_LOG.argv" | tail -1)" = "$k1" ]
+  # with a lifecycle repo_id the key follows it, wherever the checkout lives
+  mkdir -p "$R/.aid-lifecycle" "$R2/.aid-lifecycle"
+  printf 'repo_id: f3058814-3cfe-4685-bcd2-a64820d30b22\n' | tee "$R/.aid-lifecycle/repo-identity.yaml" > "$R2/.aid-lifecycle/repo-identity.yaml"
+  _pub; k1="$(grep -A1 -x -- --key "$FAKE_LOG.argv" | tail -1)"
+  run bash "$PUB" "$PAGE" --plan P900 --kind plan --title t --project-root "$R2"
+  [ "$(grep -A1 -x -- --key "$FAKE_LOG.argv" | tail -1)" = "$k1" ]
 }

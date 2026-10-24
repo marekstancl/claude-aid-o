@@ -13,7 +13,7 @@
 # THE PUBLISHER PROTOCOL (for anyone wiring their own service):
 #   AID_PM_PAGE_PUBLISHER              path to an executable (never evaluated by a shell)
 #   AID_PM_PAGE_PUBLISHER_SUBCOMMAND   optional single word passed first (e.g. publish-for-pm)
-#   argv  [<subcommand>] --key <project-id>/<plan>/<kind> --title <title> --project <display name> [--logo <svg>]
+#   argv  [<subcommand>] --key <project-id>/<plan>/<kind> (project-id = <dir slug>-<8 hex of repo_id or root path>) --title <title> --project <display name> [--logo <svg>]
 #   stdin the page exactly as the renderer wrote it (an HTML body with inline CSS, no external assets)
 #   stdout exit 0 and exactly one line, the https:// link the PM opens; anything on stderr is relayed to stderr
 #   The same key must give the same link: the page is replaced, the PM keeps one link per page.
@@ -73,9 +73,16 @@ size="$(wc -c < "$page")"
 root="$(realpath "$root")"
 pyaml="${root}/.aid-o/config/project.yaml"
 
-# the key's project id: the state root's directory (stable), narrowed; the display name may change freely
-pid="$(basename "$root" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-60)"
-[[ -n "$pid" ]] || pid="project"
+# the key's project id: a readable slug of the state root's directory AND a short digest of what identifies the
+# project uniquely — its lifecycle repo_id (.aid-lifecycle/repo-identity.yaml, tracked, never created here), else the
+# root's real path. A slug alone let two projects of the same directory name overwrite each other's page (security
+# review, 24. 10. 2026). The display name may change freely; the key does not.
+slug="$(basename "$root" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+//; s/-+$//' | cut -c1-48)"
+[[ -n "$slug" ]] || slug="project"
+ident=""
+[[ -f "${root}/.aid-lifecycle/repo-identity.yaml" ]] && ident="$(yq -r '.repo_id // ""' "${root}/.aid-lifecycle/repo-identity.yaml" 2>/dev/null || true)"
+[[ -n "$ident" && "$ident" != null ]] || ident="$root"
+pid="${slug}-$(printf '%s' "$ident" | sha256sum | cut -c1-8)"
 name=""
 [[ -f "$pyaml" ]] && name="$(yq -r '.project_name // .name // ""' "$pyaml" 2>/dev/null || true)"
 [[ -n "$name" && "$name" != null ]] || name="$(basename "$root")"
