@@ -154,6 +154,10 @@ opponent_ran() { dispute '{"opponent":"answered","plan_id":"P900","agree":[],"di
   local fake="$TMP/pub"; printf '#!/usr/bin/env bash\ncat >/dev/null; echo https://share.example/p/b#k=K\n' > "$fake"; chmod +x "$fake"
   AID_PM_PAGE_PUBLISHER="$fake" run bash "$BS" approve P900
   [ "$status" -ne 0 ]; [[ "$output" == *"has not reached the PM"* ]]
+  # pages off: the rendered page is enough for the acceptance (checked in a copy so this run stays unapproved)
+  cp -a "$AID_PROJECT_ROOT" "$TMP/offcopy"
+  AID_PROJECT_ROOT="$TMP/offcopy" AID_PM_PAGES=off AID_PM_PAGE_PUBLISHER="$fake" run bash "$BS" approve P900
+  echo "$output"; [ "$status" -eq 0 ]
   AID_PM_PAGE_PUBLISHER="$fake" run bash "$PLUGIN_ROOT/scripts/aid-pm-page-publish.sh" "$RUN_DIR/brainstorm-summary-artifact.html" --plan P900 --kind brainstorm --title P900 --project-root "$AID_PROJECT_ROOT"
   echo "$output"; [ "$status" -eq 0 ]
   AID_PM_PAGE_PUBLISHER="$fake" run bash "$BS" approve P900

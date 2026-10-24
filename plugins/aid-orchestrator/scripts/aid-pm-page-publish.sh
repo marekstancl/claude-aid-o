@@ -25,7 +25,7 @@
 # On success a delivery record <page>.published.json (page_sha256, key, kind, at — never the link, which carries the
 # PM's key and goes to the chat only) is written next to the
 # page; the obligations that ask for the page (lib/aid-artifact-obligation.sh, aid-brainstorm-state.sh approve)
-# ask for this record when a publisher is configured (lib/aid-pm-page.sh).
+# ask for this record when a publisher is configured and the pages are not off (lib/aid-pm-page.sh).
 # =============================================================================
 set -euo pipefail
 

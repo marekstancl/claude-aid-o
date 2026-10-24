@@ -247,6 +247,16 @@ _close_page() {
   printf '<h1>close</h1>\n' > "$ROOT/.aid-o/work/evidence/P900/R-P900-final-1/plan-close-artifact.html"
 }
 
+@test "3.10.0: a closing page with a publisher needs its delivery record; with AID_PM_PAGES=off the rendered page is enough" {
+  local ps; ps="$(_closed_plan CLOSED)"
+  sleep 1; _close_page
+  local fake="$BATS_TEST_TMPDIR/pub"; printf '#!/usr/bin/env bash\ncat >/dev/null; echo https://share.example/p/c#k=K\n' > "$fake"; chmod +x "$fake"
+  AID_PM_PAGE_PUBLISHER="$fake" run aid_artifact_obligation_close_check "$ROOT" "$ps"
+  [ "$status" -eq 1 ]; [[ "$output" == *"was not published to the PM"* ]]
+  AID_PM_PAGES=off AID_PM_PAGE_PUBLISHER="$fake" run aid_artifact_obligation_close_check "$ROOT" "$ps"
+  [ "$status" -eq 0 ]
+}
+
 @test "a closed plan with no closing page stops the turn" {
   local ps; ps="$(_closed_plan CLOSED)"
   run aid_artifact_obligation_close_check "$ROOT" "$ps"
