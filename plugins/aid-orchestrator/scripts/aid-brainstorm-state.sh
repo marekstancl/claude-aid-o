@@ -348,7 +348,7 @@ cmd_approve() {
   # A run cannot be accepted before the PM has been given something to read.
   # Without this, "accepted" could mean a state field was set while the page the
   # decision rests on was never rendered.
-  if ! compgen -G "${dir}/*.html" > /dev/null; then
+  if [[ ! -f "${dir}/brainstorm-summary-artifact.html" ]]; then   # THE page, not any .html (3.10.0)
     echo "REFUSED: ${plan_id} has no rendered page in ${dir} — there is nothing the acceptance could be based on. Render it first: source scripts/lib/aid-brainstorm-summary.sh && aid_brainstorm_summary_render ${plan_id} ${dir}/brainstorm-summary-artifact.html" >&2
     return 1
   fi
@@ -356,8 +356,6 @@ cmd_approve() {
   # shellcheck source=lib/aid-pm-page.sh
   source "${PLUGIN_ROOT}/scripts/lib/aid-pm-page.sh"
   if aid_pm_page_publisher_set; then
-    [[ -f "${dir}/brainstorm-summary-artifact.html" ]] \
-      || { echo "REFUSED: ${plan_id} has no brainstorm page (${dir}/brainstorm-summary-artifact.html) to publish — render it with aid_brainstorm_summary_render" >&2; return 1; }
     aid_pm_page_delivered "${dir}/brainstorm-summary-artifact.html" || { echo "REFUSED: ${plan_id}'s page has not reached the PM — the acceptance rests on a page the PM read" >&2; return 1; }
   fi
 

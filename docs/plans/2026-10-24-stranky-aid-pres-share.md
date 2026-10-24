@@ -11,7 +11,7 @@ Ostatní artefakty se nemění. AID je veřejný plugin: výchozí zůstává ar
    - Bez nastavení vypíše `artifact <cesta k tělu>` a skončí 0: řadič stránku zveřejní nástrojem Artifact jako dnes.
    - S nastavením `AID_PM_PAGE_PUBLISHER` (příkaz, např. `/opt/eco/projects/aidlab-apps/share/scripts/share-admin.sh publish-for-pm`)
      zabalí tělo stránky do úplného HTML dokumentu (doctype, `<meta charset>`, viewport, `<title>`), zavolá příkaz
-     s `--key <projekt>/<plán>/<druh> --title <název> --project <projekt> [--logo <svg>]` a stránkou na stdin a vypíše
+     s `--key <projekt>-<otisk>/<plán>/<druh> --title <název> --project <projekt> [--logo <svg>]` a stránkou na stdin a vypíše
      `link <odkaz>` (jeden řádek). Stejný klíč = stejný odkaz, přepsání stránky ho zachová.
    - Jméno projektu: `project_name` z `.aid-o/config/project.yaml` (klíč, který píše `/aid-init`; `name` jako záloha), jinak jméno adresáře kořene stavu. Logo: `pm_page.logo`
      z `project.yaml` (cesta v repu), jinak první existující z běžných míst (`frontend/public/favicon.svg`,
@@ -29,7 +29,7 @@ Ostatní artefakty se nemění. AID je veřejný plugin: výchozí zůstává ar
 ## Hotovo, když
 
 - [ ] Bez nastavení skript vypíše `artifact <cesta>` a nic nevolá (test).
-- [ ] S nastavením (v testu falešný publisher) dostane publisher úplný HTML dokument, klíč `<projekt>/<plán>/<druh>`, název, projekt a logo; skript vypíše `link <odkaz>`; druhé volání se stejným klíčem vypíše týž odkaz (test).
+- [ ] S nastavením (v testu falešný publisher) dostane publisher úplný HTML dokument, klíč `<projekt>-<otisk>/<plán>/<druh>`, název, projekt a logo; skript vypíše `link <odkaz>`; druhé volání se stejným klíčem vypíše týž odkaz (test).
 - [ ] Logo z `project.yaml`, jinak z běžných míst, jinak žádné (test); jméno projektu z `project.yaml`, jinak adresář.
 - [ ] Selhání publisheru = nenulový návrat, žádný artefakt, věta pro kartu (test).
 - [ ] Všech 6 míst nese nový pokyn doslova; `test-communication-wiring.sh` zelený.

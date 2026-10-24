@@ -125,8 +125,9 @@ _pub() { run bash "$PUB" "$PAGE" --plan P900 --kind plan --title "P900 · plán"
   [ "$status" -eq 1 ]; [[ "$output" == *"lines on stdout"* ]]
   FAKE_OUT='https://share.example/p/a b' _pub
   [ "$status" -eq 1 ]; [[ "$output" == *"no https:// link"* ]]
-  run bash -c "AID_PM_PAGE_PUBLISHER='$FAKE' bash '$PUB' '$PAGE' --plan P900 --kind plan --title t --project-root '$R' 2>/dev/null"
-  [ "$status" -eq 0 ]; [ "$output" = "link https://share.example/p/lisa-p900-plan#k=SECRETKEY" ]   # stdout: the one line, no publisher noise
+  AID_PM_PAGE_PUBLISHER="$FAKE" bash "$PUB" "$PAGE" --plan P900 --kind plan --title t --project-root "$R" > "$BATS_TEST_TMPDIR/so" 2> "$BATS_TEST_TMPDIR/se"
+  [ "$(cat "$BATS_TEST_TMPDIR/so")" = "link https://share.example/p/lisa-p900-plan#k=SECRETKEY" ]   # stdout: the one line
+  grep -q "publisher: brand logo is shown" "$BATS_TEST_TMPDIR/se"; ! grep -q "link https" "$BATS_TEST_TMPDIR/se"   # stderr: the noise only
 }
 
 @test "pm page: a valid pm_page.logo is sent (a link inside the project too); no logo anywhere sends none; no project_name falls back to the directory" {
@@ -138,6 +139,8 @@ _pub() { run bash "$PUB" "$PAGE" --plan P900 --kind plan --title "P900 · plán"
   grep -qx "My Proj" "$FAKE_LOG.argv"                                     # no project_name: the directory
   : > "$R/.aid-o/config/project.yaml"
   _pub; [ "$status" -eq 0 ]; ! grep -qx -- "--logo" "$FAKE_LOG.argv"
+  printf 'name: "Jen name"\n' > "$R/.aid-o/config/project.yaml"     # the fallback key
+  _pub; [ "$status" -eq 0 ]; grep -qx "Jen name" "$FAKE_LOG.argv"
 }
 
 @test "pm page: a page of exactly 2 MiB goes, one byte more does not" {
