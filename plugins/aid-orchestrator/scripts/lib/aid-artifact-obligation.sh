@@ -55,6 +55,8 @@ _AID_AO_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${_AID_AO_LIB_DIR}/aid-roots.sh"
 # shellcheck source=aid-plan-summary.sh
 source "${_AID_AO_LIB_DIR}/aid-plan-summary.sh"
+# shellcheck source=aid-pm-page.sh
+source "${_AID_AO_LIB_DIR}/aid-pm-page.sh"   # with a publisher, a page counts once it reached the PM (3.10.0)
 
 # _aid_ao_yaml <state_file> <key> — one scalar, the same grep the rest of the
 # FSM tooling uses on these files. yq is not required here.
@@ -118,7 +120,7 @@ aid_artifact_obligation_check() {
   }
 
   if [[ ! -f "$page" ]]; then
-    echo "${plan_id} was written but its PM page was not rendered — expected ${page}. Render it: source \"\$AID_PLUGIN_PATH/scripts/lib/aid-plan-summary.sh\" && aid_plan_summary_render \"${plan}\" \"${page}\" (then publish it with the Artifact tool)." >&2
+    echo "${plan_id} was written but its PM page was not rendered — expected ${page}. Render it: source \"\$AID_PLUGIN_PATH/scripts/lib/aid-plan-summary.sh\" && aid_plan_summary_render \"${plan}\" \"${page}\" (then publish it: bash \"\$AID_PLUGIN_PATH/scripts/aid-pm-page-publish.sh\" <page> --plan <Pnnn> --kind plan|close --title \"<title>\")." >&2
     return 1
   fi
   local recorded=""
@@ -126,7 +128,7 @@ aid_artifact_obligation_check() {
   if [[ -n "$recorded" ]]; then
     # A page that recorded the plan it was rendered from is fresh exactly when
     # the plan's bytes are the same; mtime is only for older pages.
-    [[ "$recorded" == "$(sha256sum "$plan" | awk '{print $1}')" ]] && return 0
+    [[ "$recorded" == "$(sha256sum "$plan" | awk '{print $1}')" ]] && { aid_pm_page_delivered "$page"; return; }
     echo "${plan_id}'s PM page ${page} was rendered from a different version of the plan — every figure on it may be one the plan no longer holds. Re-render it." >&2
     return 1
   fi
@@ -134,7 +136,7 @@ aid_artifact_obligation_check() {
     echo "${plan_id}'s PM page ${page} is OLDER than the plan — the plan changed after it was summarised, so every figure on the page is a number the plan no longer holds. Re-render it." >&2
     return 1
   fi
-  return 0
+  aid_pm_page_delivered "$page"
 }
 
 # ---------------------------------------------------------------------------
@@ -186,14 +188,14 @@ aid_artifact_obligation_close_check() {
 
   local page
   if ! page="$(aid_artifact_obligation_close_page "$root" "$plan_id")"; then
-    echo "${plan_id} was closed but its closing page was not rendered — expected .aid-o/work/evidence/${plan_id}/R-${plan_id}-final-<N>/plan-close-artifact.html. Render it: source \"\$AID_PLUGIN_PATH/scripts/lib/aid-plan-close-summary.sh\" && aid_plan_close_render \"<evidence>/pm-decision-brief.json\" \"<evidence>/release-decision.json\" \"${plan_id}\" \"<evidence>\" (then publish it with the Artifact tool)." >&2
+    echo "${plan_id} was closed but its closing page was not rendered — expected .aid-o/work/evidence/${plan_id}/R-${plan_id}-final-<N>/plan-close-artifact.html. Render it: source \"\$AID_PLUGIN_PATH/scripts/lib/aid-plan-close-summary.sh\" && aid_plan_close_render \"<evidence>/pm-decision-brief.json\" \"<evidence>/release-decision.json\" \"${plan_id}\" \"<evidence>\" (then publish it: bash \"\$AID_PLUGIN_PATH/scripts/aid-pm-page-publish.sh\" <page> --plan <Pnnn> --kind plan|close --title \"<title>\")." >&2
     return 1
   fi
   if [[ "$state" -nt "$page" ]]; then
     echo "${plan_id}'s closing page ${page} is OLDER than the close itself — it describes a state the plan has already left. Re-render it." >&2
     return 1
   fi
-  return 0
+  aid_pm_page_delivered "$page"
 }
 
 # ---------------------------------------------------------------------------

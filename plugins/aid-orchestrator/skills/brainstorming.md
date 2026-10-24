@@ -220,7 +220,7 @@ aid_brainstorm_summary_render P{NNN} \
   ".aid-o/work/brainstorm/P{NNN}/brainstorm-summary-artifact.html"
 ```
 
-Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+Publish the page with `scripts/aid-pm-page-publish.sh <page> --plan <Pnnn> --kind plan|close|brainstorm --title "<title>"`, then present the chat card verbatim: on `artifact <page>` publish that body via the Artifact tool; on `link <url>` add one line `Stránka: <url>` under the card; on a failure add one line `Stránka se nezveřejnila: <reason>` and publish nothing else.
 
 **Working artifacts stay working until the PM accepts the run.** Everything
 lives in `.aid-o/work/brainstorm/P{NNN}/` while it is being made; `approve`

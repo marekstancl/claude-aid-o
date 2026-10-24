@@ -148,6 +148,18 @@ opponent_ran() { dispute '{"opponent":"answered","plan_id":"P900","agree":[],"di
   grep -q "V1: One rule" "$AID_PROJECT_ROOT/.aid-o/plans/P900-vision.md"
 }
 
+@test "3.10.0: with a publisher configured, approve waits until the page reached the PM" {
+  start_run; approve_vision; opponent_ran
+  aid_brainstorm_summary_render P900 "$RUN_DIR/brainstorm-summary-artifact.html" >/dev/null
+  local fake="$TMP/pub"; printf '#!/usr/bin/env bash\ncat >/dev/null; echo https://share.example/p/b#k=K\n' > "$fake"; chmod +x "$fake"
+  AID_PM_PAGE_PUBLISHER="$fake" run bash "$BS" approve P900
+  [ "$status" -ne 0 ]; [[ "$output" == *"has not reached the PM"* ]]
+  AID_PM_PAGE_PUBLISHER="$fake" run bash "$PLUGIN_ROOT/scripts/aid-pm-page-publish.sh" "$RUN_DIR/brainstorm-summary-artifact.html" --plan P900 --kind brainstorm --title P900 --project-root "$AID_PROJECT_ROOT"
+  echo "$output"; [ "$status" -eq 0 ]
+  AID_PM_PAGE_PUBLISHER="$fake" run bash "$BS" approve P900
+  echo "$output"; [ "$status" -eq 0 ]
+}
+
 @test "AC28: an unaccepted run's page may not be written outside its working directory" {
   # Otherwise "artifacts leave the working directory only once the PM accepts"
   # is a sentence the renderer walks past by being handed another path.

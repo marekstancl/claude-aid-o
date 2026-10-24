@@ -104,7 +104,7 @@ specialization owned by `commands/aid-run.md`.
   off that list it is unchecked. Publication is the controller's act.
 
 ```text
-Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+Publish the page with `scripts/aid-pm-page-publish.sh <page> --plan <Pnnn> --kind plan|close|brainstorm --title "<title>"`, then present the chat card verbatim: on `artifact <page>` publish that body via the Artifact tool; on `link <url>` add one line `Stránka: <url>` under the card; on a failure add one line `Stránka se nezveřejnila: <reason>` and publish nothing else.
 ```
 
 ## MUST Rules

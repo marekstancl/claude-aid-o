@@ -66,6 +66,17 @@ render_page() {
   [ "$status" -eq 0 ]
 }
 
+@test "3.10.0: with a publisher configured, a rendered page counts only once it was published (a delivery record over these bytes)" {
+  render_page
+  local fake="$BATS_TEST_TMPDIR/pub"; printf '#!/usr/bin/env bash\ncat >/dev/null; echo https://share.example/p/x#k=K\n' > "$fake"; chmod +x "$fake"
+  AID_PM_PAGE_PUBLISHER="$fake" run bash "$GATE" --plan "$PLAN"
+  [ "$status" -eq 1 ]; [[ "$output" == *"was not published to the PM"*"aid-pm-page-publish.sh"* ]]
+  AID_PM_PAGE_PUBLISHER="$fake" run bash "$PLUGIN_ROOT/scripts/aid-pm-page-publish.sh" "$PAGE" --plan P900 --kind plan --title P900 --project-root "$ROOT"
+  echo "$output"; [ "$status" -eq 0 ]
+  AID_PM_PAGE_PUBLISHER="$fake" run bash "$GATE" --plan "$PLAN"
+  [ "$status" -eq 0 ]
+}
+
 @test "AC11: a plan with no page is stopped, and the refusal names how to render it" {
   run bash "$GATE" --plan "$PLAN"
   [ "$status" -eq 1 ]
