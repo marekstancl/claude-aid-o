@@ -715,8 +715,7 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
     aid_plan_summary_render <plan> .aid-o/work/evidence/<plan_id>/plan-summary-artifact.html
     ```
 
-    Publish the rendered body with the Artifact tool (the renderer never
-    publishes). Every figure on the page is counted from the plan, so do NOT
+    Publish the page with `scripts/aid-pm-page-publish.sh <page> --plan <Pnnn> --kind plan|close|brainstorm --title "<title>"`, then present the chat card verbatim: on `none <page>` publish nothing; on `artifact <page>` publish that body via the Artifact tool; on `link <url>` add one line `Stránka: <url>` under the card; on a failure add one line `Stránka se nezveřejnila: <reason>` and publish nothing else. (The renderer never publishes.) Every figure on the page is counted from the plan, so do NOT
     restate it in prose and do NOT write a summary section into the plan —
     `plan-writing.md` MUST rule 17 forbids it and `aid-plan-lint.sh` reports it.
     The `Stop` rule `milestone_artifact_rendered` refuses to end a turn while a
@@ -789,7 +788,7 @@ aid_plan_close_render "$evidence_dir/pm-decision-brief.json" \
                       "$evidence_dir/release-decision.json" "$plan_id" "$evidence_dir"
 ```
 
-Publish the artifact body via the Artifact tool, then present the chat card verbatim.
+Publish the page with `scripts/aid-pm-page-publish.sh <page> --plan <Pnnn> --kind plan|close|brainstorm --title "<title>"`, then present the chat card verbatim: on `none <page>` publish nothing; on `artifact <page>` publish that body via the Artifact tool; on `link <url>` add one line `Stránka: <url>` under the card; on a failure add one line `Stránka se nezveřejnila: <reason>` and publish nothing else.
 
 Card shapes come from `skills/communication.md`: Decision-required when the plan
 is not release-ready or `merge_mode` is not `auto`, Finished when recording a

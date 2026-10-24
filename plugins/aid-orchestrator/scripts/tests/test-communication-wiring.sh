@@ -44,7 +44,9 @@ CONTRACT="skills/communication.md"
 # The canonical publish-before-present literal. Defined in communication.md and
 # reused verbatim by every renderer wiring site. Keep these two in sync — the
 # first case below fails loudly if the contract file stops carrying it.
-PUBLISH_CLAUSE='Publish the artifact body via the Artifact tool, then present the chat card verbatim.'
+PUBLISH_CLAUSE='Publish the page with `scripts/aid-pm-page-publish.sh <page> --plan <Pnnn> --kind plan|close|brainstorm --title "<title>"`, then present the chat card verbatim: on `none <page>` publish nothing; on `artifact <page>` publish that body via the Artifact tool; on `link <url>` add one line `Stránka: <url>` under the card; on a failure add one line `Stránka se nezveřejnila: <reason>` and publish nothing else.'
+# the old clause (before 3.10.0) is gone from every surface
+OLD_PUBLISH_CLAUSE='Publish the artifact body via the Artifact tool, then present the chat card verbatim.'
 
 # The distinctive Decision-required card line. Exactly one file may DEFINE it.
 CARD_LINE='Potřebuji tvoje rozhodnutí:'
@@ -173,7 +175,10 @@ done
 case_ "every renderer site carries the publish-before-present clause verbatim"
 RENDERER_SITES=(
   'commands/aid-plan.md|aid-plan-close-summary.sh|plan-close boundary'
+  'commands/aid-plan.md|aid-plan-summary.sh|plan page after CP1'
   'skills/pipeline.md|aid-plan-close-summary.sh|plan-boundary section'
+  'skills/brainstorming.md|aid-brainstorm-summary.sh|brainstorm page'
+  'commands/aid-run.md|aid-plan-close-summary.sh|end of the close in /aid-run'
 )
 for site in "${RENDERER_SITES[@]}"; do
   IFS='|' read -r rel anchor label <<<"$site"
@@ -262,6 +267,11 @@ for rel in commands/aid-verify-implementation.md commands/aid-verify-plan.md; do
     done <<<"$hits"
   fi
 done
+
+# ─── Case: the pre-3.10.0 publish clause is gone (the page goes through aid-pm-page-publish.sh) ───
+case_ "no surface still tells the controller to publish straight with the Artifact tool"
+_old_hits="$(grep -rlF -- "$OLD_PUBLISH_CLAUSE" "${PLUGIN_ROOT}/skills" "${PLUGIN_ROOT}/commands" 2>/dev/null || true)"
+if [[ -z "$_old_hits" ]]; then ok "the old clause is in no skill or command"; else bad "the old publish clause is still in: ${_old_hits//$'\n'/ }"; fi
 
 # ─── Case 6: exactly one file defines a card skeleton ───────────────────────
 #
