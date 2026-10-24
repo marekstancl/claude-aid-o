@@ -160,6 +160,14 @@ opponent_ran() { dispute '{"opponent":"answered","plan_id":"P900","agree":[],"di
   echo "$output"; [ "$status" -eq 0 ]
 }
 
+@test "3.10.0: with a publisher configured, another .html in the run's directory is no brainstorm page" {
+  start_run; approve_vision; opponent_ran
+  mkdir -p "$RUN_DIR"; printf '<p>notes</p>' > "$RUN_DIR/notes.html"
+  local fake="$TMP/pub"; printf '#!/usr/bin/env bash\ncat >/dev/null; echo https://share.example/p/b#k=K\n' > "$fake"; chmod +x "$fake"
+  AID_PM_PAGE_PUBLISHER="$fake" run bash "$BS" approve P900
+  [ "$status" -ne 0 ]; [[ "$output" == *"has no brainstorm page"* ]]
+}
+
 @test "AC28: an unaccepted run's page may not be written outside its working directory" {
   # Otherwise "artifacts leave the working directory only once the PM accepts"
   # is a sentence the renderer walks past by being handed another path.

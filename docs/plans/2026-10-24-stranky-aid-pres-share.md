@@ -13,7 +13,7 @@ Ostatní artefakty se nemění. AID je veřejný plugin: výchozí zůstává ar
      zabalí tělo stránky do úplného HTML dokumentu (doctype, `<meta charset>`, viewport, `<title>`), zavolá příkaz
      s `--key <projekt>/<plán>/<druh> --title <název> --project <projekt> [--logo <svg>]` a stránkou na stdin a vypíše
      `link <odkaz>` (jeden řádek). Stejný klíč = stejný odkaz, přepsání stránky ho zachová.
-   - Jméno projektu: `name` z `.aid-o/config/project.yaml`, jinak jméno adresáře kořene stavu. Logo: `pm_page.logo`
+   - Jméno projektu: `project_name` z `.aid-o/config/project.yaml` (klíč, který píše `/aid-init`; `name` jako záloha), jinak jméno adresáře kořene stavu. Logo: `pm_page.logo`
      z `project.yaml` (cesta v repu), jinak první existující z běžných míst (`frontend/public/favicon.svg`,
      `ui/public/favicon.svg`, `public/favicon.svg`, `src/app/favicon.svg`); nic = bez loga (share dá logo značky).
    - Selže-li příkaz (share neběží, odmítne stránku), skončí nenulově s jednou větou a výpisem; **nepřepadne
@@ -55,7 +55,7 @@ Přijato (mění body výš):
 - **Výstup publisheru (7):** stdout a stderr zvlášť; úspěch = exit 0 a právě jeden řádek `https://…`; jinak selhání.
   Upozornění ze stderr (logo) skript vypíše na stderr, nikdy do karty.
 - **Klíč (8):** `<id projektu>/<plán>/<druh>`, id projektu = jméno adresáře kořene stavu (stabilní, ne zobrazované
-  jméno), zúžené na `[a-z0-9-]`, nejvýš 60 znaků; zobrazované jméno z `project.yaml` `name`, jinak adresář.
+  jméno), zúžené na `[a-z0-9-]`, nejvýš 60 znaků; zobrazované jméno z `project.yaml` `project_name`, jinak adresář. Klíč stránky je `<adresář>-<8 hex otisku repo_id, jinak cesty>/<plán>/<druh>` (bezpečnostní kontrola 24. 10.: samotné jméno adresáře mohlo kolidovat).
   Dokumentace řekne, že jméno a logo vidí i ten, kdo zná adresu stránky bez klíče.
 - **Logo (9):** jen soubor uvnitř kořene projektu (po vyřešení odkazů), běžný soubor, nejvýš 8 KiB, obsahuje `<svg`;
   neplatné `pm_page.logo` = chyba, neplatný nalezený kandidát se přeskočí s větou na stderr.

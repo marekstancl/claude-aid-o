@@ -352,10 +352,12 @@ cmd_approve() {
     echo "REFUSED: ${plan_id} has no rendered page in ${dir} — there is nothing the acceptance could be based on. Render it first: source scripts/lib/aid-brainstorm-summary.sh && aid_brainstorm_summary_render ${plan_id} ${dir}/brainstorm-summary-artifact.html" >&2
     return 1
   fi
-  # with a publisher, the page the PM accepts on is one that reached the PM (3.10.0)
-  if [[ -f "${dir}/brainstorm-summary-artifact.html" ]]; then
-    # shellcheck source=lib/aid-pm-page.sh
-    source "${PLUGIN_ROOT}/scripts/lib/aid-pm-page.sh"
+  # with a publisher, the page the PM accepts on is THE brainstorm page, and it reached the PM (3.10.0)
+  # shellcheck source=lib/aid-pm-page.sh
+  source "${PLUGIN_ROOT}/scripts/lib/aid-pm-page.sh"
+  if aid_pm_page_publisher_set; then
+    [[ -f "${dir}/brainstorm-summary-artifact.html" ]] \
+      || { echo "REFUSED: ${plan_id} has no brainstorm page (${dir}/brainstorm-summary-artifact.html) to publish — render it with aid_brainstorm_summary_render" >&2; return 1; }
     aid_pm_page_delivered "${dir}/brainstorm-summary-artifact.html" || { echo "REFUSED: ${plan_id}'s page has not reached the PM — the acceptance rests on a page the PM read" >&2; return 1; }
   fi
 

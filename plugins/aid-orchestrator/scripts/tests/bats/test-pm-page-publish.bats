@@ -118,3 +118,32 @@ _pub() { run bash "$PUB" "$PAGE" --plan P900 --kind plan --title "P900 · plán"
   run bash "$PUB" "$PAGE" --plan P900 --kind plan --title t --project-root "$R2"
   [ "$(grep -A1 -x -- --key "$FAKE_LOG.argv" | tail -1)" = "$k1" ]
 }
+
+@test "pm page: stdout is the link alone — a blank extra line or a space inside is a failure; stderr stays apart" {
+  export AID_PM_PAGE_PUBLISHER="$FAKE"
+  FAKE_OUT=$'https://share.example/p/x#k=K\n' _pub
+  [ "$status" -eq 1 ]; [[ "$output" == *"lines on stdout"* ]]
+  FAKE_OUT='https://share.example/p/a b' _pub
+  [ "$status" -eq 1 ]; [[ "$output" == *"no https:// link"* ]]
+  run bash -c "AID_PM_PAGE_PUBLISHER='$FAKE' bash '$PUB' '$PAGE' --plan P900 --kind plan --title t --project-root '$R' 2>/dev/null"
+  [ "$status" -eq 0 ]; [ "$output" = "link https://share.example/p/lisa-p900-plan#k=SECRETKEY" ]   # stdout: the one line, no publisher noise
+}
+
+@test "pm page: a valid pm_page.logo is sent (a link inside the project too); no logo anywhere sends none; no project_name falls back to the directory" {
+  export AID_PM_PAGE_PUBLISHER="$FAKE"
+  mkdir -p "$R/brand"; printf '<svg xmlns="http://www.w3.org/2000/svg"/>' > "$R/brand/mark.svg"; ln -s mark.svg "$R/brand/link.svg"
+  printf 'pm_page:\n  logo: brand/link.svg\n' > "$R/.aid-o/config/project.yaml"
+  _pub; [ "$status" -eq 0 ]
+  grep -qx "$(realpath "$R/brand/mark.svg")" "$FAKE_LOG.argv"
+  grep -qx "My Proj" "$FAKE_LOG.argv"                                     # no project_name: the directory
+  : > "$R/.aid-o/config/project.yaml"
+  _pub; [ "$status" -eq 0 ]; ! grep -qx -- "--logo" "$FAKE_LOG.argv"
+}
+
+@test "pm page: a page of exactly 2 MiB goes, one byte more does not" {
+  export AID_PM_PAGE_PUBLISHER="$FAKE"
+  head -c $((2 * 1024 * 1024)) /dev/zero | tr '\0' 'a' > "$PAGE"
+  _pub; [ "$status" -eq 0 ]
+  printf 'a' >> "$PAGE"
+  _pub; [ "$status" -eq 1 ]; [[ "$output" == *"over the 2097152"* ]]
+}

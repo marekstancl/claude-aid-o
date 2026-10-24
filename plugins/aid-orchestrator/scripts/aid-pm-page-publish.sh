@@ -92,7 +92,7 @@ name="$(printf '%s' "$name" | tr -d '\000-\037' | cut -c1-60)"
 _logo_ok() {   # <path> — inside the root, a regular file, at most 8 KiB, an SVG
   local p="$1" real
   real="$(realpath -e -- "$p" 2>/dev/null)" || return 1
-  [[ "$real" == "$root"/* && -f "$real" && ! -L "$p" ]] || return 1
+  [[ "$real" == "$root"/* && -f "$real" ]] || return 1   # decided on the resolved path: a link inside the project is fine
   (( $(wc -c < "$real") <= LOGO_MAX )) || return 1
   grep -qi '<svg' "$real" || return 1
   printf '%s' "$real"
@@ -125,10 +125,10 @@ rc=0
 if (( rc != 0 )); then
   _die "the publisher refused the page (exit ${rc}): $(grep -m1 . "$err" | cut -c1-200)"
 fi
-link="$(grep -c . "$out" || true)"
-[[ "$link" == 1 ]] || _die "the publisher printed $(grep -c . "$out" || echo 0) lines on stdout, not exactly one link"
-link="$(grep -m1 . "$out" | tr -d '[:space:]')"
-[[ "$link" =~ ^https://[^[:space:]]+$ ]] || _die "the publisher printed no https:// link: $(cut -c1-120 "$out")"
+# exactly one physical line, the whole of it a link — nothing normalised away
+nl="$(wc -l < "$out")"; link="$(cat "$out")"
+[[ "$nl" == 1 && "$link" != *$'\n'* ]] || _die "the publisher printed ${nl} lines on stdout, not exactly one link"
+[[ "$link" =~ ^https://[^[:space:]]+$ ]] || _die "the publisher printed no https:// link: ${link:0:120}"
 
 rec="$(aid_pm_page_receipt "$page")"
 # the link carries the PM's key: it goes to the chat only, never into a file (the share rule) — the record holds
