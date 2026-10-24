@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v3.9.2** (current) — popis brány z `execution.yaml` je ve výsledku každé brány (i neproběhlé a obnovené); noční sada čtenářů konfigurace zase zelená
+- **v3.10.0** (current) — stránky AID pro PM jdou vypnout (`AID_PM_PAGES=off`: jen soubor, nic se neposílá) a na požádání poslat přes nastavitelnou službu (share) se záznamem o doručení; bez nastavení artefakt jako dosud
+- **v3.9.2** — popis brány z `execution.yaml` je ve výsledku každé brány (i neproběhlé a obnovené); noční sada čtenářů konfigurace zase zelená
 - **v3.9.1** — opravy z hlášení projektů: smazání přes `git rm` v commitu kroku, konec výstupu brány, kolo kontroly plánu s otevřeným nálezem není „pass“, `plan-run` nic nezapíše před průchodem plánu, verze z CHANGELOGu mimo ukázky, méně falešných upozornění kontroly plánu, uzavření starých plánů se smazanou větví, úplný `.gitignore`; noční běh zase zelený
 - **v3.9.0** — studio `/aid-ui` umí webové aplikace a je svižné a přesné: obrazovky a úlohy, kostra a testy úloh z jednoho modelu, předání jako zadání změn kódu; bez vlastních známek výrobce, nezávislý ověřovatel s rolemi v kole, kolo kolem 15 minut; ověřeno na aplikaci Trading (P116, P118)
 - **v3.8.0** — plán dojede v `--auto` bez PM: registr odmítnutí (kdo jedná), nezávislý zástupce na technická rozhodnutí, chráněné dopady (data, peníze, zadání, tajemství) poznané kódem a poslané PM, předejití zastávek v kontrole plánu a startu běhu, uzávěr opakuje jen to, co oprava zasáhla

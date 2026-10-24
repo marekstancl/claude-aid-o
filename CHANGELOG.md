@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [3.10.0] — 2026-10-24
 
 Automatické stránky AID jdou vypnout a na požádání poslat přes share (PM 22.–24. 10. 2026: stránky po sepsání plánu a na konci PM nechce dostávat sám od sebe; když je chce, přepíná účty Claude a artefakt vidí jen v jednom).
 
