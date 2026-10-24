@@ -71,3 +71,10 @@ Odmítnuto s důvodem:
   služba PM na jeho hostu a odkaz s klíčem dostane jen PM, takže share není horší cesta než dnešní. Renderery už
   před vykreslením tajemství redigují (`_aid_artifact_redact`). Nová vrstva klasifikace by byla nová funkce mimo
   zadání PM; dokumentace řekne, co se kam posílá a na jak dlouho (30 dní, přepsání obnoví).
+
+## Verze 3 (PM 24. 10. 2026: „já ale chtěl ty automaticky generovaný artifacty v AID vypnout“, volba 1A)
+
+Cíl se změnil: stránky AID se PM **automaticky nezveřejňují vůbec**. `AID_PM_PAGES=off` → skript vypíše `none <stránka>`,
+řadič nic nezveřejní, do chatu jde jen karta; kontroly stránky (vykreslený soubor) platí dál, doručení se nevyžaduje.
+Když PM o stránku požádá, zveřejní se s `--on-request` (přes share, pokud je nastavený, jinak artefakt). Na hostech PM:
+`AID_PM_PAGES=off` + nastavení share pro požádání. Vše ostatní z verze 2 platí.

@@ -22,7 +22,7 @@ echo "brand logo is shown" >&2
 printf '%s\n' "${FAKE_OUT:-https://share.example/p/lisa-p900-plan#k=SECRETKEY}"
 SH
   chmod +x "$FAKE"; export FAKE_LOG="$BATS_TEST_TMPDIR/fake"
-  unset AID_PM_PAGE_PUBLISHER AID_PM_PAGE_PUBLISHER_SUBCOMMAND FAKE_FAIL FAKE_OUT
+  unset AID_PM_PAGE_PUBLISHER AID_PM_PAGE_PUBLISHER_SUBCOMMAND AID_PM_PAGES FAKE_FAIL FAKE_OUT
 }
 
 _pub() { run bash "$PUB" "$PAGE" --plan P900 --kind plan --title "P900 · plán" --project-root "$R"; }
@@ -149,4 +149,19 @@ _pub() { run bash "$PUB" "$PAGE" --plan P900 --kind plan --title "P900 · plán"
   _pub; [ "$status" -eq 0 ]
   printf 'a' >> "$PAGE"
   _pub; [ "$status" -eq 1 ]; [[ "$output" == *"over the 2097152"* ]]
+}
+
+@test "pm page: AID_PM_PAGES=off — nothing goes out on its own and nothing is owed; --on-request publishes the page the PM asked for" {
+  export AID_PM_PAGES=off AID_PM_PAGE_PUBLISHER="$FAKE"
+  _pub
+  [ "$status" -eq 0 ]; [ "$output" = "none $PAGE" ]
+  [ ! -e "$FAKE_LOG.argv" ] && [ ! -e "$PAGE.published.json" ]
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-pm-page.sh' && aid_pm_page_delivered '$PAGE'"
+  [ "$status" -eq 0 ]                                              # off: no delivery owed
+  run bash "$PUB" "$PAGE" --plan P900 --kind plan --title t --project-root "$R" --on-request
+  [ "$status" -eq 0 ]; [[ "$output" == *"link https://share.example/"* ]]
+  cmp "$PAGE" "$FAKE_LOG.stdin"
+  unset AID_PM_PAGE_PUBLISHER                                      # off, asked for, no publisher: the artifact
+  run bash "$PUB" "$PAGE" --plan P900 --kind plan --title t --project-root "$R" --on-request
+  [ "$output" = "artifact $PAGE" ]
 }

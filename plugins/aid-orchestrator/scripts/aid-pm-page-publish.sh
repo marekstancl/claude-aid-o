@@ -3,8 +3,10 @@
 # aid-pm-page-publish.sh — publish a page AID rendered for the PM (AID 3.10.0)
 #
 #   aid-pm-page-publish.sh <page.html> --plan <Pnnn> --kind plan|close|brainstorm --title "<title>" [--project-root <r>]
+#                          [--on-request]   the PM asked for this page: publish it even when AID_PM_PAGES=off
 #
 # Prints ONE line for the controller:
+#   none <page>         AID_PM_PAGES=off and not --on-request: publish nothing, the card alone goes to the chat (exit 0)
 #   artifact <page>     no publisher configured: publish the page with the Artifact tool, as before (exit 0)
 #   link <https://…>    published; the controller adds "Stránka: <link>" under the chat card (exit 0)
 # and on failure exits 1 with one sentence on stderr — never "artifact": a page a configured publisher refused is
@@ -38,7 +40,7 @@ LOGO_MAX=8192
 
 _die() { echo "aid-pm-page-publish: $1" >&2; exit "${2:-1}"; }
 
-page="" plan="" kind="" title="" root=""
+page="" plan="" kind="" title="" root="" on_request=0
 [[ $# -ge 1 && "$1" != --* ]] && { page="$1"; shift; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -46,6 +48,7 @@ while [[ $# -gt 0 ]]; do
     --kind) kind="${2:-}"; shift 2 ;;
     --title) title="${2:-}"; shift 2 ;;
     --project-root) root="${2:-}"; shift 2 ;;
+    --on-request) on_request=1; shift ;;
     *) _die "unknown argument: $1" 2 ;;
   esac
 done
@@ -54,6 +57,12 @@ done
 [[ "$kind" =~ ^(plan|close|brainstorm)$ ]] || _die "--kind must be plan, close or brainstorm, got '${kind}'" 2
 title="${title//[$'\t\r\n']/ }"
 [[ -n "${title// /}" ]] || _die "--title is required" 2
+
+# the PM switched the automatic pages off: nothing goes out unless the PM asked for this page
+if aid_pm_pages_auto_off && (( ! on_request )); then
+  printf 'none %s\n' "$page"
+  exit 0
+fi
 
 # no publisher: the page stays a claude.ai artifact, exactly as before
 if ! aid_pm_page_publisher_set; then

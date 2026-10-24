@@ -75,6 +75,10 @@ render_page() {
   echo "$output"; [ "$status" -eq 0 ]
   AID_PM_PAGE_PUBLISHER="$fake" run bash "$GATE" --plan "$PLAN"
   [ "$status" -eq 0 ]
+  # pages off (PM 24. 10.): the rendered page is enough, nothing is owed to the PM
+  rm -f "$PAGE.published.json"
+  AID_PM_PAGES=off AID_PM_PAGE_PUBLISHER="$fake" run bash "$GATE" --plan "$PLAN"
+  [ "$status" -eq 0 ]
 }
 
 @test "AC11: a plan with no page is stopped, and the refusal names how to render it" {

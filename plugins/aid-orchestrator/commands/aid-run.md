@@ -1017,7 +1017,7 @@ fix path once first; escalate when it does not apply or did not help.
 
 **At the end.** `decide` prints `READY` and the plan is `AWAITING_PM`. Render the
 page and the card from the two files it wrote (`aid-plan-close-summary.sh`, `commands/aid-plan.md`, "Plan-final
-/ close boundary"). Publish the page with `scripts/aid-pm-page-publish.sh <page> --plan <Pnnn> --kind plan|close|brainstorm --title "<title>"`, then present the chat card verbatim: on `artifact <page>` publish that body via the Artifact tool; on `link <url>` add one line `Stránka: <url>` under the card; on a failure add one line `Stránka se nezveřejnila: <reason>` and publish nothing else. State no number yourself. MERGE runs
+/ close boundary"). Publish the page with `scripts/aid-pm-page-publish.sh <page> --plan <Pnnn> --kind plan|close|brainstorm --title "<title>"`, then present the chat card verbatim: on `none <page>` publish nothing; on `artifact <page>` publish that body via the Artifact tool; on `link <url>` add one line `Stránka: <url>` under the card; on a failure add one line `Stránka se nezveřejnila: <reason>` and publish nothing else. State no number yourself. MERGE runs
 `<fsm> plan-record-decision <plan> MERGE --by pm` (it writes the decision into the
 attempt's directory and prints the path), then
 `<fsm> plan-merge-to-main <plan> --decision <that path>`; FIX is the fix path; ABORT is
