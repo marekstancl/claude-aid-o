@@ -2215,3 +2215,99 @@ _dep() {
   echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq -r '.findings[0].resolution' "$(FD 1)/merged.json")" = accepted_risk ]
 }
+
+# ── 3.12.0: a decision holds for the thing, in later rounds and attempts ──────────
+_MAJOR='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "major", claim: "the changelog claims an import the app never makes", command: "grep -n import src/app.py", evidence: "src/app.py:1", fix: "import new", rule: "every change the changelog claims is in the code"}] | del(.no_findings_reason)'
+# _second_attempt — the next attempt's run directory, ready for its own round 1
+_second_attempt() {
+  local E1="$E"; E="$R/.aid-o/work/evidence/P901/R-P901-final-2"; mkdir -p "$E"
+  cp "$E1/gates_report.json" "$E1/plan-diff.json" "$E/"; : > "$E/timeline.jsonl"
+  [[ -d "$E1/cp7" ]] && { mkdir -p "$E/cp7"; cp "$E1"/cp7/*.md "$E1"/cp7/*.json "$E/cp7/" 2>/dev/null || true; }
+  _fsc
+}
+_pm_card() {  # <fingerprint> — a rendered card quoting it, answered by the PM
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-decision-card.sh"
+  jq -n --arg f "$1" '{lang: "cs", question: "Je to vada?", options: [{key: "A", text: "není, zúžení zadání", recommended: true, reason: "PM"}, {key: "B", text: "opravit"}], quotes: [$f]}' \
+    | aid_decision_card_render - "$ROOT/card.md" >/dev/null
+  touch -d '-10 seconds' "$ROOT/card.md"; export AID_HOOK_AUDIT="$ROOT/audit.jsonl"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
+}
+
+@test "decisions: the PM's answer goes to the plan's ledger; the next attempt settles the same thing reworded; decide checks the record" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_MAJOR"
+  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null || true
+  local fp; fp="$(jq -r '.findings[0].fingerprint' "$(FD 1)/merged.json")"; _pm_card "$fp"
+  run _F dispute --round 1 --fingerprint "$fp" --pm accepted --finding-card "$ROOT/card.md" --reason "PM: není to vada, zúžení zadání v plánu"
+  echo "$output"; [ "$status" -eq 0 ]
+  L="$R/.aid-o/work/evidence/P901/pm-decisions.jsonl"
+  [ "$(jq -r '"\(.source) \(.fingerprint) \(.first_citation)"' "$L")" = "pm ${fp} src/app.py:1" ]
+  # attempt 2: the same thing in other words (same first citation, same claim start → same match) is settled
+  _second_attempt; _F prepare --round 1 >/dev/null
+  grep -q "Decisions already taken in this plan" "$(FD 1)/prompt-final_generalist.md"
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "$(sed 's/claim: "the changelog claims an import the app never makes"/claim: "the changelog claims an import the app never makes, again"/' <<< "$_MAJOR")"
+  run _F collect --round 1; [[ "$output" == *"settled by an earlier decision"* ]]
+  [ "$(jq -r '.findings[0] | "\(.status) \(.settled_by != null) \(.dispute.pm.answer)"' "$(FD 1)/merged.json")" = "fixed true accepted" ]
+  # a second collect (a stand-in, a missing answer) keeps the settlement and its mark
+  run _F collect --round 1; [ "$status" -eq 0 ]
+  [ "$(jq -r '.findings[0].settled_by != null' "$(FD 1)/merged.json")" = true ]
+  # decide's check holds it; an edited card does not
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-decision-ledger.sh'; aid_decision_ledger_verify '$E'"; [ "$status" -eq 0 ]
+  echo extra >> "$ROOT/card.md"
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-decision-ledger.sh'; aid_decision_ledger_verify '$E'"; [ "$status" -eq 1 ]; [[ "$output" == *"changed after it was given"* ]]
+}
+
+@test "decisions: settling rules — same match yes; same brief line only for the PM, not a blocker, not more severe" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-decision-ledger.sh"
+  L="$BATS_TEST_TMPDIR/l.jsonl"; M="$BATS_TEST_TMPDIR/m.json"
+  printf '%s\n' '{"id":"d1","source":"pm","match":"m-1","severity":"major","first_citation":"zadani.md:84","words":"PM","at":"t","ref":"c"}' \
+                '{"id":"d2","source":"delegate","match":"m-2","severity":"minor","first_citation":"zadani.md:90","words":"D","at":"t","ref":"v"}' > "$L"
+  jq -n '{findings: [
+    {fingerprint: "f1", match: "m-1", severity: "major", status: "open", evidence: "src/x.py:3"},
+    {fingerprint: "f2", match: "x2", severity: "major", status: "open", evidence: "zadani.md:84; src/y.py:1"},
+    {fingerprint: "f3", match: "x3", severity: "blocker", status: "open", evidence: "zadani.md:84"},
+    {fingerprint: "f4", match: "x4", severity: "minor", status: "open", evidence: "zadani.md:85"},
+    {fingerprint: "f5", match: "x5", severity: "minor", status: "open", evidence: "zadani.md:90"},
+    {fingerprint: "f6", match: "m-2", severity: "major", status: "open", evidence: "src/z.py:1"}]}' > "$M"
+  run aid_decision_ledger_settle "$M" "$L"; [ "$output" = 2 ]
+  # f6: the delegate decided a MINOR; the same match as a major is not settled by it
+  [ "$(jq -r '[.findings[] | "\(.fingerprint)=\(.status)"] | join(" ")' "$M")" = "f1=fixed f2=fixed f3=open f4=open f5=open f6=open" ]
+  [ "$(jq -r '.findings[0].dispute.pm.settled_by' "$M")" = d1 ]
+}
+
+@test "decisions: a later NO revokes; an answered finding is never rewritten; a delegate's settlement stays the delegate's" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-decision-ledger.sh"
+  L="$BATS_TEST_TMPDIR/l.jsonl"; M="$BATS_TEST_TMPDIR/m.json"
+  printf '%s\n' '{"id":"d1","source":"pm","match":"m-1","severity":"major","first_citation":"src/a.py:1","words":"PM","at":"2026-10-25T10:00:00Z","ref":"c"}' \
+                '{"id":"d2","source":"delegate","match":"m-2","severity":"major","first_citation":"src/b.py:1","words":"D","at":"2026-10-25T10:00:00Z","ref":"v","ref_sha256":"s"}' \
+                '{"id":"r-1","source":"pm","revokes":"m-1","at":"2026-10-25T11:00:00Z","words":"teď je to vada"}' > "$L"
+  jq -n '{findings: [
+    {fingerprint: "f1", match: "m-1", severity: "major", status: "open", evidence: "src/a.py:1"},
+    {fingerprint: "f2", match: "m-2", severity: "major", status: "open", evidence: "src/b.py:1"},
+    {fingerprint: "f3", match: "m-2", severity: "major", status: "open", evidence: "src/b.py:1", dispute: {pm: {answer: "rejected"}}}]}' > "$M"
+  run aid_decision_ledger_settle "$M" "$L"; [ "$output" = 1 ]
+  [ "$(jq -r '[.findings[] | "\(.fingerprint)=\(.status)"] | join(" ")' "$M")" = "f1=open f2=fixed f3=open" ]
+  [ "$(jq -r '.findings[1] | "\(.dispute.pm == null) \(.dispute.delegated.settled_by)"' "$M")" = "true d2" ]
+}
+
+@test "decisions: decide refuses a hand-written line — a card the PM answered NO on, or a JSON file posing as the delegate's verdict" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_MAJOR"
+  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null || true
+  local fp m; fp="$(jq -r '.findings[0].fingerprint' "$(FD 1)/merged.json")"; m="$(jq -r '.findings[0].match' "$(FD 1)/merged.json")"
+  _pm_card "$fp"
+  run _F dispute --round 1 --fingerprint "$fp" --pm rejected --finding-card "$ROOT/card.md" --reason "PM: je to vada, opravit"
+  [ "$status" -eq 0 ]
+  L="$R/.aid-o/work/evidence/P901/pm-decisions.jsonl"; [ ! -s "$L" ]
+  _ver() { run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-decision-ledger.sh'; aid_decision_ledger_verify '$E'"; }
+  # forged: a PM line on the card the PM said NO on, settling the finding
+  jq -nc --arg f "$fp" --arg m "$m" --arg c "$ROOT/card.md" --arg s "$(sha256sum "$ROOT/card.md" | cut -d' ' -f1)" \
+    '{id: "dX", plan: "P901", source: "pm", fingerprint: $f, match: $m, severity: "major", first_citation: "src/app.py:1", ref: $c, ref_sha256: $s, words: "x", at: "t"}' > "$L"
+  jq --arg f "$fp" '.findings |= map(if .fingerprint == $f then .status = "fixed" | .settled_by = "dX" else . end)' "$(FD 1)/merged.json" > "$ROOT/m" && cp "$ROOT/m" "$(FD 1)/merged.json"
+  _ver; [ "$status" -eq 1 ]; [[ "$output" == *"no cp7 round of the plan decided that way"* ]]
+  # forged: a delegate line pointing at some JSON file
+  echo '{"answer":"accepted","class":"technical"}' > "$ROOT/adjudicator-delegated-x.json"
+  jq -nc --arg f "$fp" --arg m "$m" --arg c "$ROOT/adjudicator-delegated-x.json" --arg s "$(sha256sum "$ROOT/adjudicator-delegated-x.json" | cut -d' ' -f1)" \
+    '{id: "dX", plan: "P901", source: "delegate", fingerprint: $f, match: $m, severity: "major", first_citation: "src/app.py:1", ref: $c, ref_sha256: $s, words: "x", at: "t"}' > "$L"
+  _ver; [ "$status" -eq 1 ]
+}

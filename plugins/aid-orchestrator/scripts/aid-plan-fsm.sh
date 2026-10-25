@@ -5294,6 +5294,15 @@ _pfsm_finalize_decide() {
     echo "next: render a new Decision card for the current candidate and its open findings; the PM answers with aid-review-round.sh accept-risk" >&2
     echo "(pipeline.md §When AID refuses: accepted_risk_stale)" >&2; return 1
   fi
+  # 3.12.0: a finding settled by an earlier decision of the plan is settled by a real one — in the plan's ledger,
+  # this plan's, its card (or the delegate's verdict) unchanged, the card quoting what it decided
+  declare -F aid_decision_ledger_verify >/dev/null || source "${SCRIPT_DIR}/lib/aid-decision-ledger.sh"
+  local _pd_bad=""
+  if ! _pd_bad="$(aid_decision_ledger_verify "$run_dir_abs")"; then
+    echo "REFUSED (pm_decision_unverified): plan-finalize --stage decide: ${_pd_bad}" >&2
+    echo "next: collect the round again (aid-review-round.sh collect --checkpoint cp7 …) so the finding is judged without the decision, and ask the PM on a card with its fingerprint in quotes if it stays open" >&2
+    echo "(pipeline.md §When AID refuses: pm_decision_unverified)" >&2; return 1
+  fi
 
   local tampered=""
   if ! tampered="$(aid_stage_writes_verify "$run_dir_abs")"; then

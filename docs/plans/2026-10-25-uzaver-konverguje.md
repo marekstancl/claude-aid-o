@@ -24,7 +24,7 @@ na něj, rozhoduje nezávislý revizor; ráno hotovo a nasazeno.
 ## Co se staví
 
 Verze 3 – zapracováno 11 nálezů první revize zadání a 3 druhé (Claude agent místo Codexu, 25. 10. 2026); značky
-`[R<n>]` a `[S<n>]`.
+`[R<n>]` a `[S<n>]`; `[T<n>]` = nálezy revize kroku 2.
 
 ### Z1 – Po opravě potvrzovací kolo, ne plná revize (1A)
 
@@ -76,13 +76,24 @@ Verze 3 – zapracováno 11 nálezů první revize zadání a 3 druhé (Claude a
    přenáší se jen podle `match`, nikdy podle citace zadání [R10].
 3. **Automatické uzavření v dalších kolech a pokusech** (`aid-review-adjudicate.sh`, CP7): otevřený nález dostane
    `fixed` + `dispute.pm` z rozhodnutí + `settled_by: <id>`, když:
-   - jeho `match` je `match` některého rozhodnutí; NEBO
+   - jeho `match` je `match` některého rozhodnutí a nález není závažnější než rozhodnutý (blocker jen rozhodnutím
+     o blockeru) [T3]; NEBO
    - (jen rozhodnutí PM) jeho **první** citace je `zadani.md:N` a je shodná s první citací rozhodnutí, nález
      **není blocker** a jeho závažnost **není vyšší** než u rozhodnutého nálezu [R4].
-   Zadání je během uzávěru zamčené (`cp7_brief_sha_mismatch`), řádky se nemění.
-4. **Ochrana proti podvrhu** [R5]: `plan-finalize --stage decide` u každého nálezu se `settled_by` ověří, že
-   rozhodnutí v `pm-decisions.jsonl` existuje, patří tomuto plánu, jeho karta má stále `card_sha256` a cituje původní
-   otisk (u delegáta: verdikt má zapsané sha); jinak odmítne (`pm_decision_unverified`, řádek v tabulce odmítnutí).
+   Zadání je během uzávěru zamčené (`cp7_brief_sha_mismatch`), řádky se nemění. Pro `match` platí POSLEDNÍ záznam:
+   pozdější `dispute --pm rejected` zapíše odvolání a rozhodnutí přestane platit [T4]. Nález, který už nese odpověď
+   PM nebo verdikt delegáta, se nikdy nepřepisuje; uzavření rozhodnutím delegáta se zapíše jako delegátovo
+   (`dispute.delegated`), ne jako PM [T5].
+   Opakovaný sběr kola značku `settled_by` zachová [U-A]; pozdější NE (PM `--pm rejected`, delegátův technický
+   verdikt `rejected`/`fix`) odvolá rozhodnutí podle `match` i podle první citace zadání [U-C, U-D]; `decide` odmítne
+   rozhodnutí, na které kolo plánu později řeklo NE, i kdyby někdo smazal řádek odvolání [U-B].
+4. **Ochrana proti podvrhu** [R5, T1, T2]: `plan-finalize --stage decide` u každého nálezu se `settled_by` ověří, že
+   rozhodnutí v `pm-decisions.jsonl` existuje, patří tomuto plánu, karta / verdikt se nezměnily, A ŽE rozhodnutý nález
+   je v některém kole CP7 tohoto plánu se stejnou odpovědí (PM: `dispute.pm.answer accepted` s touž kartou; delegát:
+   touž cestou a sha verdiktu), stejným `match`, závažností a první citací; karta PM cituje jeho otisk; verdikt
+   delegáta je jeho soubor pro ten nález (`adjudicator-delegated-<fp16>.json`), třída `technical`, odpověď `accepted`
+   nebo `dismiss`. Ručně dopsaný řádek tak neprojde (test: karta s odpovědí NE, cizí JSON jako verdikt). Záznam
+   `../pm-decisions.jsonl` do `stage-writes.jsonl` se nedělá – kontrola zapsaných souborů vidí jen adresář běhu.
 5. **Revizor to ví předem.** Balík kola CP7 ukáže „Rozhodnutí v tomto plánu“ (slova, čeho se týká) s pokynem: nehlásit
    znovu; nesouhlas jen s novým faktem a jinou citací.
 6. **Viditelnost** [R4]: závěrečná stránka ukáže „Uzavřeno dřívějším rozhodnutím: N nálezů (rozhodnutí X: …)“.

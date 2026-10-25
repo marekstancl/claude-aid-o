@@ -228,6 +228,8 @@ aid_final_review_packet_build() {
     done < <(jq -r '.epics[].epic' "$dir/epic-findings.json")
   fi
   _aid_sr_foreign_final "$dir" "$run" || return 1
+  # 3.12.0: what the PM (or the delegate) already decided in this plan — the reviewer is told before it reports
+  [[ -s "$(dirname "$run")/pm-decisions.jsonl" ]] && { cp "$(dirname "$run")/pm-decisions.jsonl" "$dir/pm-decisions.jsonl" || return 1; }
   _aid_sr_packet_finish "$root" "$dir" "$prev"
 }
 
@@ -341,6 +343,14 @@ aid_step_review_prompt_render() {
       echo
     fi
     if [[ "$cp" == cp7 ]]; then
+      if [[ -s "${dir}/packet/pm-decisions.jsonl" ]]; then
+        echo "## Decisions already taken in this plan (do not report these again)"
+        echo "The PM (or, for technical disputes, the independent delegate) settled the findings below. Do not report the same"
+        echo "thing again in other words: it is settled by code against this list. Disagree only with a NEW fact, and cite a"
+        echo "different place than the decided finding did."
+        jq -r '"- [\(.severity)] \(.claim) (first citation: \(.first_citation)) — \(if .source == "pm" then "PM" else "delegate" end): \(.words)"' "${dir}/packet/pm-decisions.jsonl"
+        echo
+      fi
       echo "## What the step reviews already judged (do not repeat; read ACROSS the steps)"
       jq -r '.epics[] | "- \(.epic): its steps were reviewed one by one — \(.findings | length) finding(s) the step rounds left open" + ((.findings | map("\n  - [\(.severity), \(.status)] \(.claim) (\(.evidence))") | join("")))' "${dir}/packet/epic-findings.json"
       echo

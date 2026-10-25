@@ -493,7 +493,12 @@ agent type. A project keeps the old budget (two rounds, 1/50) in its own
    settles a whole-plan (cp7) finding — one the author refuted by measurement,
    one the PM deferred to the backlog, or one the adjudicator kept as
    `form_invalid` because its evidence lies outside the candidate's repository:
-   `dispute --checkpoint cp7 --evidence-dir <final run> --round K …`. The
+   `dispute --checkpoint cp7 --evidence-dir <final run> --round K …`. **AID 3.12.0:** a cp7 `--pm accepted` (and a
+   technical delegate verdict that settles a finding) also goes to the plan's `evidence/<plan>/pm-decisions.jsonl`;
+   every later cp7 round of the plan — this attempt or the next — settles the same thing with it on collect
+   (`settled_by`; same `match`, or for a PM answer the same first `zadani.md:N` citation on a finding that is not a
+   blocker and not more severe), the round's prompt lists the decisions, and `decide` refuses a settlement it cannot
+   verify (`pm_decision_unverified`). Do not ask the PM again about a finding marked `settled_by`. The
    dispute records its writes as a stage (`cp7-dispute-accepted` in
    `stage-writes.jsonl`), so `plan-finalize --stage decide` reads it as the
    PM's decision, not as tampering. A plan is never merged by hand around an

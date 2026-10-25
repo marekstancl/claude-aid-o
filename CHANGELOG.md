@@ -7,6 +7,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 Uzávěr plánu konverguje a neptá se PM dvakrát na totéž (PM 25. 10. 2026, volby 1A, 2A, 3A: WAN P115 pět pokusů o uzávěr, Trading P004 sedm, PM odsouhlasil tutéž věc třikrát). Zadání: `docs/plans/2026-10-25-uzaver-konverguje.md`.
 
+### Added
+- **Rozhodnutí v uzávěru platí pro věc, ne pro jedno znění nálezu.** Odpověď PM `dispute --pm accepted` v celkové revizi (CP7) a technický verdikt delegáta, který nález uzavře, se zapíšou do `evidence/<plán>/pm-decisions.jsonl` (`lib/aid-decision-ledger.sh`). Další kola i další pokusy téhož plánu stejnou věc uzavřou samy (`settled_by`): stejný klíč `match`, nebo u rozhodnutí PM stejná první citace zadání (`zadani.md:N`) u nálezu, který není blocker a není závažnější. Revizor dostane rozhodnutí v balíku kola s pokynem je znovu nehlásit. `plan-finalize --stage decide` každé takové uzavření ověří (rozhodnutí existuje, patří plánu, karta / verdikt nezměněné, karta cituje rozhodnutý nález) a jinak odmítne (`pm_decision_unverified`). Přijaté riziko (`accept-risk`) se dál nepřenáší, platí jen pro svého kandidáta. Závěrečná karta a stránka uvádějí, kolik nálezů se takto uzavřelo.
+
 ### Fixed
 - **Karta pro PM nese otisky nálezů, které odpověď uzavírá** (pole `quotes` v datech karty; `aid_decision_card_render` je vypíše na řádek „Týká se:“). Zápis odpovědi (`dispute --pm accepted`, `accept-risk`) kontroluje, že karta každý otisk cituje; dřív ho tam musel řadič opsat ručně, a když ho vynechal, PM dostal tutéž otázku znovu (Trading P004, 16:31 a 16:36). Platí pro `dispute --pm accepted` i pro `accept-risk` (ten dřív hledal jen zkrácený otisk). Odmítnutí teď říká, jak kartu vyrobit správně.
 

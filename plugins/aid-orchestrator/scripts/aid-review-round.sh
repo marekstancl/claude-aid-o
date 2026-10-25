@@ -86,6 +86,7 @@ source "${SCRIPT_DIR}/lib/aid-obligations.sh"
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"
 # shellcheck source=lib/aid-decision-card.sh
 source "${SCRIPT_DIR}/lib/aid-decision-card.sh"   # aid_pm_card_check (dispute --pm accepted; P110)
+source "${SCRIPT_DIR}/lib/aid-decision-ledger.sh"  # decisions that hold for the thing across CP7 rounds (3.12.0)
 # shellcheck source=lib/aid-lifecycle.sh
 source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"       # _aid_lc_frontmatter_depends, aid_target_branch (P117 (3))
 # shellcheck source=lib/aid-plan-dependency.sh
@@ -1005,6 +1006,12 @@ cmd_collect() {
   (( ROUND >= 2 )) && [[ -f "$(_round_dir $((ROUND - 1)))/merged.json" ]] && prev=(--previous "$(_round_dir $((ROUND - 1)))")
   if [[ "$MODE" == plan ]]; then extra=(--plan "${dir}/packet/plan.md"); else extra=(--step-check "$STEPCHECK"); fi
   "${SCRIPT_DIR}/aid-review-adjudicate.sh" "$dir" --project-root "$ROOT" --namespace "$NS" "${extra[@]}" "${prev[@]}" >/dev/null || exit 1
+  # 3.12.0: what the PM (or the delegate) already decided in this plan is settled again, not asked again
+  if [[ "$CHECKPOINT" == cp7 ]]; then
+    local settled; settled="$(aid_decision_ledger_settle "${dir}/merged.json" "$(aid_decision_ledger_path "$EVID")")" \
+      || _die "cannot apply the plan's earlier decisions to ${dir}/merged.json"
+    (( settled > 0 )) && echo "round ${ROUND}: ${settled} finding(s) settled by an earlier decision of this plan ($(aid_decision_ledger_path "$EVID"))"
+  fi
   echo "round ${ROUND}: ${#valid[@]} of $(jq '.reviewers_expected | length' "${dir}/round.json") answered$( (( ${#absent[@]} )) && echo ", provider absent: ${absent[*]}"), missing: $(jq -r '[.missing[], .invalid[].role] | if length == 0 then "none" else join(", ") end' "${dir}/collect.json"), $(jq '.blockers_open' "${dir}/merged.json") blockers open, $(jq 'length' "${dir}/rejected.json") findings rejected"
 }
 
@@ -1494,6 +1501,15 @@ cmd_dispute() {
     .findings |= map(if .fingerprint == \$f then (${filter}) else . end)
     | .blockers_open = ([.findings[] | select(.severity == \"blocker\" and (.status == \"open\" or .status == \"disputed\"))] | length)
   " "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
+  # 3.12.0: the PM's answer holds for the thing in the plan's later rounds and attempts, not for this wording
+  if [[ "$CHECKPOINT" == cp7 && "$PM_ANSWER" == accepted ]]; then
+    aid_decision_ledger_append "$EVID" "$dir" "$FINGERPRINT" pm "$REASON" "$CARD" \
+      || _die "the PM's answer is recorded on the finding, but not in $(aid_decision_ledger_path "$EVID"); run the dispute again"
+  elif [[ "$CHECKPOINT" == cp7 && "$PM_ANSWER" == rejected ]]; then
+    # a later NO revokes an earlier yes about the same thing
+    aid_decision_ledger_revoke "$EVID" "$dir" "$FINGERPRINT" "$REASON" "$CARD" \
+      || _die "the PM's answer is recorded on the finding, but its revocation not in $(aid_decision_ledger_path "$EVID"); run the dispute again"
+  fi
   # A closed step round carries its verdict in four places; the FSM reads the index.
   if [[ "$MODE" == step && -f "${dir}/measurement.json" ]]; then
     local v f index="${BASE}/rounds.json"
@@ -1790,6 +1806,15 @@ cmd_delegate() {
   fi
   jq --arg f "$FINGERPRINT" --argjson e "$entry" ".findings |= map(if .fingerprint == \$f then (${filter}) else . end)" \
     "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
+  # 3.12.0: a technical verdict that settles the finding holds for the same thing (its match) in later CP7 rounds
+  if [[ "$CHECKPOINT" == cp7 && "$class" == technical ]] \
+     && { [[ "$kind" == dispute && "$answer" == accepted ]] || [[ "$kind" != dispute && "$answer" == dismiss ]]; }; then
+    aid_decision_ledger_append "$EVID" "$dir" "$FINGERPRINT" delegate "$reason" "$VERDICT" \
+      || _die "the verdict is recorded on the finding, but not in $(aid_decision_ledger_path "$EVID"); record it again"
+  elif [[ "$CHECKPOINT" == cp7 && "$class" == technical && "$answer" =~ ^(rejected|fix)$ ]]; then
+    aid_decision_ledger_revoke "$EVID" "$dir" "$FINGERPRINT" "$reason" "$VERDICT" delegate \
+      || _die "the verdict is recorded on the finding, but its revocation not in $(aid_decision_ledger_path "$EVID"); record it again"
+  fi
   if [[ "$class" == technical && "$kind" == open_after_rounds && "$answer" == fix ]]; then
     # ONE more fix-and-confirm round after this round, however many findings ask for it
     local g=0 rf="${BASE}/delegate-rounds.json"
