@@ -209,6 +209,22 @@ verdict_of() {   # verdict_of <place> [args]: both roles' scores of $T/owner.jso
   mk struktura tech 8; run sc struktura tech; jq -e '.directions[0].status == "accepted" and .accepted == true' <<<"$output" >/dev/null
 }
 
+@test "gates (IMP-702): a required gate over facts or law fails when its criterion was not assessed; another gate is skipped; required is a bool" {
+  python3 "$C" freeze "$P" --type web-local --place struktura >/dev/null; mkdir -p "$P/.aid-ui"; echo '{"pages": []}' > "$P/.aid-ui/structure.json"
+  mk struktura tech 8 '(.criteria[] | select(.id == "pojmy_konvence_oboru")) |= (.score = null | .anchor = null | .not_assessable = "nejde posoudit")'
+  run sc struktura tech; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  jq -e '.directions[0].status == "failed" and ([.directions[0].gates[] | select(.ok == false) | .why] == ["kritérium nešlo posoudit; tuto bránu nejde přeskočit"])' <<<"$output" >/dev/null
+  mk struktura tech 8 '(.criteria[] | select(.id == "inventura_presun")) |= (.score = null | .anchor = null | .not_assessable = "bez předchůdce")'
+  run sc struktura tech; jq -e '.directions[0].status == "accepted"' <<<"$output" >/dev/null   # not required: skipped as before
+  printf 'gates:\n  - {criterion: a, min: 6, required: "ano", why: x}\n' > "$BATS_TEST_TMPDIR/g.yaml"
+  run python3 - "$C" "$BATS_TEST_TMPDIR/g.yaml" <<'PY'
+import importlib.util, sys
+s = importlib.util.spec_from_file_location("c", sys.argv[1]); c = importlib.util.module_from_spec(s); s.loader.exec_module(c)
+c.load_gates(sys.argv[2], ["a"])
+PY
+  [ "$status" -eq 2 ]; [[ "$output" == *"required is true or false"* ]]
+}
+
 @test "gates: motion metrics - a missing measurement fails, an animation over the limit fails, a measured one within passes" {
   python3 "$C" freeze "$P" --type web-local --place pohyb >/dev/null; mkdir -p "$P/.aid-ui/motion/v1"; echo '<html></html>' > "$P/.aid-ui/motion/v1/logo-animace.html"
   M="$BATS_TEST_TMPDIR/m"; mkdir -p "$M"

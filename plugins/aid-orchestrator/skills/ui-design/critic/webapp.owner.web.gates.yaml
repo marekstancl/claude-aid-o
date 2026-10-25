@@ -4,7 +4,7 @@ gates:
   - {criterion: ulohy_dokonceny, min: 7, why: "Hotová aplikace, ve které nejde dokončit některou úlohu, se nesmí předat."}
   - {criterion: selhani_bez_ztraty, min: 7, why: "Ztráta rozdělané práce v provozu je nevratná a bere důvěru."}
   - {criterion: nevratne_akce_hlidane, min: 7, why: "Nevratná akce bez potvrzení je chyba u dat nebo peněz, kterou nejde vzít zpět."}
-  - {criterion: duvera_v_cisla, min: 7, why: "Číslu, kterému uživatel nevěří, si bude ověřovat jinde a aplikace ztrácí smysl."}
+  - {criterion: duvera_v_cisla, min: 7, required: true, why: "Číslu, kterému uživatel nevěří, si bude ověřovat jinde a aplikace ztrácí smysl."}
   - {criterion: rychlost_denni_prace, min: 7, why: "Pomalejší než dnes znamená, že se k aplikaci lidé budou nutit."}
   - {criterion: slova_meho_oboru, min: 7, why: "Nesrozumitelný název akce nebo stavu vede k chybnému úkonu nad daty nebo penězi."}
   - {criterion: telefon_kde_ho_potrebuju, min: 7, why: "Úlohu, kterou člověk dělá v terénu, nesmí hotová aplikace na telefonu nechat nedokončenou."}

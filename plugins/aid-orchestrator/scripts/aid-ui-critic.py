@@ -28,6 +28,8 @@ so `web` has six scores. Without --place every command means `web`.
       {direction, rubric, weighted, weighted_now, gates, metrics, status accepted|reservation|failed, reservation}.
       reservation = every failing gate is held only by what the client must supply: the criterion's studio_score meets
       it and to_ten.client names the client's part (D1); a `volba` finding on it never makes a reservation.
+      A criterion the role could not assess holds no gate (no photos yet), except a gate with `required: true` (the
+      gates over facts and law, IMP-702): there it fails, never a reservation.
       accepted = no rubric of the direction failed.
   verdict <project> --role owner|tech [--place <p>] <answer.json> x3
       Three blind ratings of one place by one role (the closing audit): the `audit` block of the place's gate file
@@ -189,6 +191,8 @@ def load_gates(path, rubric_ids):
         bad = [i for i in ids if i not in rubric_ids]
         if bad or not isinstance(x.get("min"), (int, float)):
             die(f"{os.path.basename(path)}: gate {x} names {bad or 'no min'}, not criteria of its rubric", 2)
+        if "required" in x and not isinstance(x["required"], bool):
+            die(f"{os.path.basename(path)}: gate {x.get('criterion') or x.get('any_of')}: required is true or false, not {x['required']!r}", 2)
         if x.get("when") is not None and x["when"] not in WHEN:
             die(f"{os.path.basename(path)}: when {x['when']} is not one of {', '.join(WHEN)}", 2)
     for m in g.get("metrics") or []:
@@ -440,10 +444,11 @@ def apply_gates(g, crits, d, findings, metrics):
         ids = x["any_of"] if x.get("any_of") else [x["criterion"]]
         have = [k for k in ids if k in now]
         if not have:
-            if x.get("any_of"):
+            if x.get("required"):   # IMP-702: a gate over facts or law is never skipped by "nejde posoudit"
+                rows.append({"gate": name, "ok": False, "value": None, "why": "kritérium nešlo posoudit; tuto bránu nejde přeskočit"})
+            elif x.get("any_of"):
                 rows.append({"gate": name, "ok": False, "value": None, "why": "žádné kritérium nešlo posoudit"})
-            # ponytail: a criterion the role marks not_assessable does not hold its gate (by design: no photos yet);
-            # a fact or law gate that must never be skipped needs a per-gate flag (backlog, P113 whole review)
+            # else a criterion the role marks not_assessable does not hold its gate (by design: no photos yet)
             continue
         ok = any(now[k] >= x["min"] for k in have)
         row = {"gate": name, "ok": ok, "value": max(now[k] for k in have)}
