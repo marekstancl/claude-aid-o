@@ -337,6 +337,7 @@ jq -s --argjson round "$(jq '.round' "${DIR}/round.json")" --arg ns "$NS" \
         + ([$g[].rule | select(. != null)] + [$was.rule | select(. != null)] | if length > 0 then {rule: .[0]} else {} end)
         + (if $was.dispute then {dispute: $was.dispute} else {} end)
         + (if $was.settled_by then {settled_by: $was.settled_by} else {} end)
+        + (if $was.follow_up then {follow_up: $was.follow_up} else {} end)
         + (if $was.delegated then {delegated: $was.delegated} else {} end))
   | {namespace: $ns, plan_sha256: $sha, head_sha: $head, round: $round, findings: .,
      blockers_open: (map(select(.severity == "blocker" and (.status == "open" or .status == "disputed"))) | length)}

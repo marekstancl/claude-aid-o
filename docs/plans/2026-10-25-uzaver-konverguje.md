@@ -146,3 +146,16 @@ Verze 3 – zapracováno 11 nálezů první revize zadání a 3 druhé (Claude a
 3. Z1 potvrzovací kolo + `follow_up` + `follow-ups.jsonl` + stránka.
 4. Z3 viditelnost + dokumentace + návrh pro WAN/Trading.
 5. Kontrola celku, testy, testbed, vydání 3.12.0.
+
+## Stav (25. 10. 2026 večer)
+
+- Krok 1 commit 60693965, krok 2 commit bcb01022 (revize Claude místo Codexu - limit; nálezy zapracované).
+- Kroky 3 a 4: revize Claude místo Codexu (limit do 22:25). Nálezy 1-7, 9-11 opravené: testy řetězu pokusů,
+  jednotkový test značení follow-upů (citace zadání, plánu, commitu, cizího repa, rozsah přes opravu,
+  obrácený rozsah, bez fix.patch), konec uzávěru s follow-upem a ruční přepis na follow_up; čtení fix.patch
+  podle počtů hunku; soubory z kandidáta, ne z indexu; follow_up se drží i při dalším sběru; prázdné `inputs: []`
+  a EPIC tokeny u výpisu brány; počet FOLLOW-UPS bez věcí, které pozdější kolo vrátilo jinak; dokumentace
+  pro revizora a kartu. Nález 8 neopraven: `round.json` po uzavření kola hlídá stage-writes a decide nad
+  neuzavřeným kolem neprojde. Kontrola postupu v kolech 2+ (`ROUND >= 2`) u CP7 nenastane (kolo 2 CP7 se
+  odmítá, protože oprava mění kandidáta), proto bez testu s follow_upem.
+- Oprava během kroku 3: nález s citací `absent:` jq tiše vypustil (prázdný capture) - opraveno, hlídá test.

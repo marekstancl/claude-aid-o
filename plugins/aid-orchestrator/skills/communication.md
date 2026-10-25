@@ -52,6 +52,8 @@ recomputed or estimated: `Cena běhu: <usd> USD, <rounds> kol, <attempts> pokus�
 (every review round of the run and the close) and `Cena plánu: <usd> USD (CP1
 <n> kol, kritik <usd|neznámá>)`; a figure the producer could not count reads
 `nezměřeno`.
+When decide prints `FOLLOW-UPS: N` (AID 3.12.0), the card names the count in `Změnilo se` or `Další krok` and
+the controller writes each one into the project's backlog first.
 
 **2. Decision required.**
 

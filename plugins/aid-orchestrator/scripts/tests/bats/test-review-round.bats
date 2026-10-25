@@ -1068,10 +1068,11 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [ "$(jq -r '.carried_from // {} | length' "$(FD 1)/round.json")" -eq 0 ]           # a code fix carries nobody
   [ -s "$(FD 1)/packet/fix.patch" ]; [ "$(jq '.findings | length' "$(FD 1)/packet/open-findings.json")" -eq 1 ]
   grep -q "This is a confirmation round" "$(FD 1)/prompt-final_generalist.md"
-  # P117 (16): after a failing round the next attempt is a FULL round — the open findings to re-check, and the whole plan
-  [ "$(jq -r .mode "$(FD 1)/round.json")" = full ]
-  grep -q "This is a FULL round over the new candidate" "$(FD 1)/prompt-final_generalist.md"
-  ! grep -q "Do not review the rest again" "$(FD 1)/prompt-final_generalist.md"
+  # 3.12.0 (1A): after a fix the next attempt CONFIRMS — the open findings to re-check, the fix, and a new problem
+  # only on a line the fix added (anything else is a follow-up); the brief's points are judged as in a full round
+  [ "$(jq -r .mode "$(FD 1)/round.json")" = confirmation ]
+  grep -q "FIRST evidence citation must be a line the fix added" "$(FD 1)/prompt-final_generalist.md"
+  ! grep -q "This is a FULL round over the new candidate" "$(FD 1)/prompt-final_generalist.md"
 }
 
 @test "cp7: a finding of a final role validates against the finding schema's checkpoint and role lists" {
@@ -1095,17 +1096,104 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   # P117 (15): the previous candidate passed a full round and the fix is docs only — a confirmation round
   [ "$(jq -r .mode "$(FD 1)/round.json")" = confirmation ]
   grep -q "This is a confirmation round over the whole plan" "$(FD 1)/prompt-final_generalist.md"
-  grep -q "read the WHOLE candidate" "$(FD 1)/prompt-final_generalist.md"; [ -s "$(FD 1)/packet/fix.patch" ]
-  # decide accepts it only with that predecessor: the previous candidate's head, a docs-only fix
-  _conf() { run bash -c "source '$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh' >/dev/null 2>&1; _pfsm_cp7_confirmation_bad '$E'"; }
-  jq --arg h "$(jq -r .head_sha "$first/cp7/round-1/round.json")" '.previous_candidate = $h' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
-  _conf; [ "$status" -eq 0 ]
-  # a markdown file that drives behaviour (a skill) is not documentation (security review)
-  jq '.changed_paths += [{path: "plugins/x/skills/run.md", kind: "modified", feeds: ["claims"]}]' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
-  _conf; [ "$status" -eq 1 ]; [[ "$output" == *"not documentation only"* ]]
-  jq '.changed_paths |= map(select(.path == "CHANGELOG.md")) | .previous_candidate = "0000000000000000000000000000000000000000"' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
-  _conf; [ "$status" -eq 1 ]; [[ "$output" == *"not the previous candidate"* ]]
+  grep -q "FIRST evidence citation must be a line the fix added" "$(FD 1)/prompt-final_generalist.md"; [ -s "$(FD 1)/packet/fix.patch" ]
+  # decide (3.12.0): the chain of confirmed rounds is closed, ancestral and ends in a full round
+  _conf() { run bash -c "source '$AID_PLUGIN_PATH/scripts/aid-plan-fsm.sh' >/dev/null 2>&1; _pfsm_cp7_confirmation_bad '$E' '$1' '$R'"; }
+  _conf "$(git -C "$R" rev-parse HEAD)"; [ "$status" -eq 0 ]
+  _conf "$FBASE"; [ "$status" -eq 1 ]; [[ "$output" == *"not an ancestor"* ]]
+  jq '.reason = "rewritten_branch: x"' "$E/fix-class.json" > "$E/f" && mv "$E/f" "$E/fix-class.json"
+  _conf "$(git -C "$R" rev-parse HEAD)"; [ "$status" -eq 1 ]; [[ "$output" == *"rewrote the branch"* ]]
 }
+
+@test "cp7 (3.12.0): after a CODE fix the next attempt confirms; a new non-blocker outside the fix is a follow-up, everything else blocks" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_MAJOR"
+  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null || true
+  local first="$E"; printf 'import new\n' >> "$R/src/app.py"; git -C "$R" commit -qam "fix: import new"
+  E="$(dirname "$first")/R-P901-final-2"; mkdir -p "$E/cp7"; cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"
+  cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$first/cp7/brief.json" "$E/cp7/"; : > "$E/timeline.jsonl"
+  jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-1" '{previous_run_dir: $d, class: "delivery", docs_only: false, invalidated_feeds: ["diff"], reason: null}' > "$E/fix-class.json"
+  _fsc; run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .mode "$(FD 1)/round.json")" = confirmation ]
+  grep -q "Findings still open" "$(FD 1)/prompt-final_generalist.md"
+  local fixed_line; fixed_line="$(grep -c '' "$R/src/app.py")"   # the line the fix added
+  _fanswer 1 final_criteria '.findings = [{id: "k1", checkpoint: "cp7", step: null, severity: "major", claim: "a brief point is weakened somewhere old", command: "grep -n x src/app.py", evidence: "src/app.py:5", fix: "f", rule: "every brief point is delivered whole"}] | del(.no_findings_reason)'
+  _fanswer 1 final_generalist "$(jq -nc --arg fl "src/app.py:${fixed_line}" '[
+    {id: "g1", checkpoint: "cp7", step: null, severity: "minor", claim: "an old helper name is unclear in an untouched place", command: "grep -n 1 src/app.py", evidence: "src/app.py:3", fix: "rename"},
+    {id: "g2", checkpoint: "cp7", step: null, severity: "major", claim: "the new import line breaks the startup order", command: "grep -n import src/app.py", evidence: $fl, fix: "move", rule: "startup order is imports first"},
+    {id: "g3", checkpoint: "cp7", step: null, severity: "blocker", claim: "an untouched place loses customer data on save", command: "grep -n 2 src/app.py", evidence: "src/app.py:4", fix: "guard", rule: "a save never drops data"},
+    {id: "g4", checkpoint: "cp7", step: null, severity: "minor", claim: "the project has no changelog of its own", command: "ls", evidence: "absent:NO-CHANGELOG.md", fix: "write it"}]
+    | ".findings = \(tojson) | del(.no_findings_reason)"' -r)"
+  run _F collect --round 1; echo "$output"; [ "$status" -eq 0 ]
+  st() { jq -r --arg c "$1" 'first(.findings[] | select(.claim | startswith($c))) | .status' "$(FD 1)/merged.json"; }
+  [ "$(st 'an old helper name')" = follow_up ]      # new minor outside the fix
+  [ "$(st 'the new import line')" = open ]          # on a line the fix added
+  [ "$(st 'an untouched place loses')" = open ]     # a blocker always blocks
+  [ "$(st 'a brief point is weakened')" = open ]    # final_criteria never follow_up
+  [ "$(st 'the project has no changelog')" = open ] # absent: is never a follow-up, and is never dropped
+  [ "$(jq '.findings | length' "$(FD 1)/merged.json")" -eq 5 ]
+  [ "$(grep -c '' "$(dirname "$E")/follow-ups.jsonl")" -eq 1 ]
+  # collecting again neither duplicates the list nor reopens the follow-up
+  _F collect --round 1 >/dev/null; [ "$(grep -c '' "$(dirname "$E")/follow-ups.jsonl")" -eq 1 ]; [ "$(st 'an old helper name')" = follow_up ]
+}
+@test "cp7 (3.12.0): the chain passes an attempt with no round (its gates failed) and confirms the last closed round; a rewritten branch in the chain makes it full" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  [ "$(jq -r .mode "$(FD 1)/round.json")" = full ]                      # a first attempt is full
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_MAJOR"
+  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null || true
+  local first="$E" P; P="$(dirname "$E")"
+  _attempt() {   # _attempt <n> <previous n> — the attempt's run dir as freeze and produce leave it
+    E="$P/R-P901-final-$1"; mkdir -p "$E/cp7"; cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"
+    cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$first/cp7/brief.json" "$E/cp7/"; : > "$E/timeline.jsonl"
+    jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-$2" '{previous_run_dir: $d, class: "delivery", docs_only: false, invalidated_feeds: ["diff"], reason: null}' > "$E/fix-class.json"
+  }
+  printf 'import new\n' >> "$R/src/app.py"; git -C "$R" commit -qam "fix: import new"
+  _attempt 2 1; rm -rf "$E/cp7"                                          # attempt 2: its gates failed, no cp7 round
+  printf 'x = 1\n' >> "$R/src/app.py"; git -C "$R" commit -qam "fix: the gate"
+  _attempt 3 2; _fsc; run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .mode "$(FD 1)/round.json")" = confirmation ]
+  [[ "$(jq -r .confirmation_of "$(FD 1)/round.json")" == *"/R-P901-final-1/cp7/round-1" ]]
+  grep -qx '+import new' "$(FD 1)/packet/fix.patch"; grep -qx '+x = 1' "$(FD 1)/packet/fix.patch"   # cut from attempt 1's head
+  # attempt 2's fix rewrote the branch: nothing before it can be confirmed
+  jq '.reason = "range_unreadable"' "$P/R-P901-final-2/fix-class.json" > "$P/fc.t" && mv "$P/fc.t" "$P/R-P901-final-2/fix-class.json"
+  _attempt 4 2; _fsc; run _F prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .mode "$(FD 1)/round.json")" = full ]
+}
+
+@test "follow-up (3.12.0): aid_follow_up_mark — only a new non-blocker whose first citation is an unchanged line of a candidate file" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-follow-up.sh"
+  local g="$BATS_TEST_TMPDIR/repo" run rd; mkdir -p "$g"; git -C "$g" init -q
+  printf '1\n2\n3\n4\n5\n6\n7\n8\n9\n' > "$g/x.py"; git -C "$g" add -A; git -C "$g" -c user.email=t@t -c user.name=t commit -qm base
+  run="$g/.aid-o/work/evidence/P9/R-P9-final-2"; rd="$run/cp7/round-1"; mkdir -p "$rd/packet"
+  jq -n --arg h "$(git -C "$g" rev-parse HEAD)" '{mode: "confirmation", head_sha: $h}' > "$rd/round.json"
+  # the fix added line 4 (and a line that itself starts with "++ ")
+  printf -- '--- a/x.py\n+++ b/x.py\n@@ -3,2 +3,3 @@\n 3\n+++ added\n 4\n' > "$rd/packet/fix.patch"
+  [ "$(aid_follow_up_added_lines "$rd/packet/fix.patch")" = "x.py:4" ]
+  jq -n '{findings: [{match: "old", severity: "major", status: "open", evidence: "x.py:9"}]}' > "$rd/packet/open-findings.json"
+  local sha; sha="$(git -C "$g" rev-parse HEAD)"
+  jq -n --arg s "$sha" '{findings: [
+    {claim: "outside", severity: "minor", status: "open", evidence: "x.py:2; x.py:4"},
+    {claim: "fix line", severity: "minor", status: "open", evidence: "x.py:4"},
+    {claim: "range over the fix", severity: "minor", status: "open", evidence: "x.py:2-5"},
+    {claim: "inverted range", severity: "minor", status: "open", evidence: "x.py:9-3"},
+    {claim: "the brief", severity: "minor", status: "open", evidence: "zadani.md:3"},
+    {claim: "the plan", severity: "minor", status: "open", evidence: ".aid-o/plans/P9-x.md:2"},
+    {claim: "a commit", severity: "minor", status: "open", evidence: ($s + ":x.py:2")},
+    {claim: "another repo", severity: "minor", status: "open", evidence: "/opt/other/x.py:2"},
+    {claim: "untracked", severity: "minor", status: "open", evidence: "y.py:2"},
+    {claim: "absent", severity: "minor", status: "open", evidence: "absent:z.md"},
+    {claim: "a blocker", severity: "blocker", status: "open", evidence: "x.py:2"},
+    {claim: "criteria", severity: "minor", status: "open", evidence: "x.py:3", reported_by: ["final_criteria"]},
+    {claim: "still open", severity: "minor", status: "open", evidence: "x.py:9", match: "old"}]}' > "$rd/merged.json"
+  [ "$(aid_follow_up_mark "$rd" "$run" "$g")" -eq 1 ]
+  [ "$(jq -c '[.findings[] | select(.status == "follow_up") | .claim]' "$rd/merged.json")" = '["outside"]' ]
+  [ "$(jq '.findings | length' "$rd/merged.json")" -eq 13 ]
+  [ "$(grep -c '' "$run/../follow-ups.jsonl")" -eq 1 ]
+  # without a fix.patch (confirmation_fallback) nothing is a follow-up
+  rm "$rd/packet/fix.patch"; jq '.findings[0].status = "open"' "$rd/merged.json" > "$rd/m.t" && mv "$rd/m.t" "$rd/merged.json"
+  [ "$(aid_follow_up_mark "$rd" "$run" "$g")" -eq 0 ]; [ "$(jq -r '.findings[0].status' "$rd/merged.json")" = open ]
+}
+
 @test "cp7-zadani: a fix that touched only the plan's criteria asks both roles again (final_generalist reads the criteria too), never carries final_criteria" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
   local r; for r in final_criteria final_generalist; do _fanswer 1 "$r"; done
@@ -2310,4 +2398,21 @@ _pm_card() {  # <fingerprint> — a rendered card quoting it, answered by the PM
   jq -nc --arg f "$fp" --arg m "$m" --arg c "$ROOT/adjudicator-delegated-x.json" --arg s "$(sha256sum "$ROOT/adjudicator-delegated-x.json" | cut -d' ' -f1)" \
     '{id: "dX", plan: "P901", source: "delegate", fingerprint: $f, match: $m, severity: "major", first_citation: "src/app.py:1", ref: $c, ref_sha256: $s, words: "x", at: "t"}' > "$L"
   _ver; [ "$status" -eq 1 ]
+}
+
+@test "cp7 (3.12.0): a confirmation round left with only a follow-up passes, and the final record calls it deferred" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_MAJOR"
+  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null || true
+  local first="$E"; printf 'import new\n' >> "$R/src/app.py"; git -C "$R" commit -qam "fix: import new"
+  E="$(dirname "$first")/R-P901-final-2"; mkdir -p "$E/cp7"; cp "$first/gates_report.json" "$first/plan-diff.json" "$E/"
+  cp "$first/cp7/criteria.md" "$first/cp7/epic-findings.json" "$first/cp7/brief.json" "$E/cp7/"; : > "$E/timeline.jsonl"
+  jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-1" '{previous_run_dir: $d, class: "delivery", docs_only: false, invalidated_feeds: ["diff"], reason: null}' > "$E/fix-class.json"
+  _fsc; _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria
+  _fanswer 1 final_generalist '.findings = [{id: "g1", checkpoint: "cp7", step: null, severity: "minor", claim: "an old helper name is unclear in an untouched place", command: "grep -n 1 src/app.py", evidence: "src/app.py:3", fix: "rename", rule: "names say what they do"}] | del(.no_findings_reason)'
+  _F collect --round 1 >/dev/null
+  run _F close --round 1 --tokens final_criteria=5 final_generalist=5; echo "$output"
+  [ "$(jq -r .verdict "$(FD 1)/measurement.json")" = pass ]
+  [ "$(jq '[.. | objects | select(.status? == "deferred" and ((.detail // "") | contains("old helper name")))] | length' "$E/semantic-review-final.json")" -eq 1 ]
 }

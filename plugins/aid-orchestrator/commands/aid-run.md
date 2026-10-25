@@ -988,6 +988,15 @@ is round 1 of the next attempt.
    had no finding is carried. A brief point measured `absent` is a blocker
    finding of `final_criteria`. The round's packet shows the re-asked
    reviewers what stayed open and the fix diff.
+   **AID 3.12.0 — the next attempt CONFIRMS, it does not review the plan again.** Its round 1 is a
+   confirmation round (`round.json mode: confirmation`) whenever the attempt chain holds a closed cp7 round and
+   no fix rewrote the branch — after any fix, code or documentation, and even when the attempt in between failed
+   on its gates. The reviewers check the open findings everywhere, report a NEW problem with its first citation on
+   a line the fix added (fix.patch), report a blocker of their role from anywhere, and `final_criteria` judges the
+   brief points as in a full round. On collect a NEW finding that is not a blocker, not the brief's
+   (`final_criteria`, `zadani.md:*`, the plan file) and whose first citation is no line the fix added becomes
+   `follow_up`: it does not block the close and is listed in `evidence/<plan>/follow-ups.jsonl`. `decide` prints
+   `FOLLOW-UPS: N`; write each into the project's backlog and name the count in the close message.
 3. `gates` (unchanged gates are copied), `produce`, the round, `decide`.
 
 **Closing is not development** (P010, agents: twelve attempts, four of the last

@@ -61,6 +61,8 @@
 # gate without `inputs:` depends on the whole tree, so it is copied only when
 # the tree did not change at all. Declare inputs only when they are true: a
 # test gate that lists `["**", "!docs/**"]` says docs cannot break its tests.
+# A gate that runs again only for lack of `inputs:` is named at the close with its
+# last duration (3.12.0), so you see which one is worth describing.
 # `verification_env:` (optional, top level; P110) — how the close's measurer
 # (aid-plan-diff.sh --isolated, plan-finalize --stage produce and the plan_diff
 # gate) runs the brief's points. Absent or empty: every point runs in a new

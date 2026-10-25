@@ -48,6 +48,12 @@ proves which criterion), `gates_report.json` (the gates at the candidate),
 `epic-findings.json` (what the step rounds of each run left open, so it is
 not judged twice) and `claims.patch` (the CHANGELOG, README and docs hunks).
 
+**A CP7 confirmation round** (the first round of an attempt after any fix, AID 3.12.0) carries `open-findings.json`
+and `fix.patch`. Re-check every open finding wherever it lies. A NEW problem counts only when its FIRST evidence
+citation is a line the fix added or changed; a new non-blocker cited elsewhere becomes `follow_up` (it goes to the
+project's backlog and does not block the close). A blocker counts from anywhere. `final_criteria` judges the
+brief's points as in a full round — a brief point weakened by the fix is never a follow-up.
+
 Reviewers may read the repository at the reviewed commit with read-only tools
 beyond the packet; the findings worth paying for usually lie in callers and
 tests the diff does not show.
