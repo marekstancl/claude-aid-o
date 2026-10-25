@@ -30,8 +30,9 @@
 #                          its states, actions and the draft banner until the PM approved the model), same job,
 #                          port and address; a model failing aid-ui-screens.py check -> exit 2 with its lines.
 #                          (P113) builds the live skeleton from <project>/.aid-ui/structure.json into
-#                          <project>/site (lib/aid-ui-skeleton.py build: marked pages only, built pages kept)
-#                          and serves site/ as its own job on AID_UI_HOST:AID_UI_SKELETON_PORT - a fixed
+#                          <project>/site (lib/aid-ui-skeleton.py build: marked pages only, built pages kept) and
+#                          the whole tree into <project>/.aid-ui/skeleton/site (IMP-699: the skeleton alone)
+#                          and serves .aid-ui/skeleton/site/ as its own job on AID_UI_HOST:AID_UI_SKELETON_PORT - a fixed
 #                          address the gate's preview start/stop never touches; idempotent like preview
 #                          (a running skeleton job of the same site is reused after the rebuild).
 #   skeleton-check <project>  lib/aid-ui-skeleton.py check: redirect targets in the tree, one H1 per page,
@@ -192,7 +193,7 @@ case "$1" in
     rc=0; python3 "$SKELETON_PY" build "$dir" >/dev/null || rc=$?   # stderr (why refused) stays visible
     (( rc != 2 )) || exit 2   # a refused target (symlink, colliding urls, bad structure): refused, nothing written
     (( rc == 0 )) || die "the skeleton could not be built (see above)"
-    site="$dir/site"
+    site="$dir/.aid-ui/skeleton/site"   # IMP-699: the pure skeleton, not site/ (an old web or built pages there)
     l="$(find "$site" -mindepth 1 -type l -printf '%P' -quit)"
     [[ -z "$l" ]] || refuse "$site/$l is a symlink; the skeleton serves no symlinks"
     id="$(job_id skeleton)"

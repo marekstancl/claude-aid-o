@@ -17,6 +17,9 @@ Brána a klient ji kontrolují po každém kroku. Drátěné modely jako PNG odp
 Nástroj: `aid-ui-serve.sh skeleton <projekt>` postaví ze `structure.json` skutečné stránky (menu, hlavička, patička,
 bloky čekající na klienta přerušovaně, u bloku „Důkaz / zdroj“) a servíruje je na stálé adrese
 (`AID_UI_SKELETON_PORT`, výchozí 3918); `aid-ui-serve.sh skeleton-check <projekt>` ověří přesměrování a fakta.
+Adresa servíruje **čistou kostru** `.aid-ui/skeleton/site/` (IMP-699, 3.10.1): celý strom vždy znovu, nic jiného, ať je
+v `site/` cokoli (starý web, postavené stránky). Na ní role hodnotí, ověřovatel fotí a `skeleton-check` kontroluje
+každou stránku. Do `site/` se kostra píše dál jako základ stavby; stránku bez značky kostry nepřepíše ani neodsune.
 
 **Stálá adresa pro role (doplněno F7, neověřeno):** jakmile je kostra zveřejněná, každý `pro-role.md` od tohoto kroku
 dál uvádí **stálou adresu kostry** (a které stránky posoudit) jako první podklad; role kostru proklikávají, ne čtou
