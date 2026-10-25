@@ -177,6 +177,13 @@ _wave() { WT="$(aid_parallel_step_worktree "$PWD" step_1_backend HEAD .aid-workt
   [ "$(jq -r '.status, .base_sha, .landed_sha' "$REC" | tr '\n' ' ')" = "landed ${step} $(git rev-parse HEAD) " ]
 }
 
+@test "a run whose timeline cannot be written does not take over: nothing committed, nothing landed" {
+  _agent .; before="$(git rev-parse HEAD)"; mkdir "$TEST_EVIDENCE_DIR/timeline.jsonl"
+  run bash "$LAND" "$S" 0 --check '1:test -f a.txt'
+  [ "$status" -eq 1 ]; [[ "$output" == *"timeline"* ]]
+  [ "$(git rev-parse HEAD)" = "$before" ]; [ "$(jq -r .status "$REC")" != landed ]
+}
+
 @test "the script changes nothing but the commit and the merge: contract, plan, state and scope stay as they were" {
   _plan '`grep -q bye a.txt`'; _wave; _agent "$WT"
   sums() { sha256sum "$D/contract.json" "$TEST_EVIDENCE_DIR/plan.json" "$S"; }
@@ -284,6 +291,8 @@ _verify() {
 }
 _landed_wave() { _wave; _agent "$WT"; bash "$LAND" "$S" 0 --check '1:test -f a.txt' >/dev/null; }
 _edit() { jq "$1" "$REC" > "$REC.t" && mv "$REC.t" "$REC"; }
+# _forge_timeline <landed sha> — a controller that also writes the timeline line its forged record needs
+_forge_timeline() { printf '{"event":"step_takeover_result","step":0,"status":"landed","landed_sha":"%s"}\n' "$1" >> "$TEST_EVIDENCE_DIR/timeline.jsonl"; }
 
 @test "verify: a landed wave record holds" {
   _landed_wave
@@ -321,7 +330,35 @@ _edit() { jq "$1" "$REC" > "$REC.t" && mv "$REC.t" "$REC"; }
   base="$(jq -r .base_sha "$REC")"; step="$(jq -r .step_sha "$REC")"
   forged="$(git commit-tree "$(git rev-parse "$base^{tree}")" -p "$base" -p "$step" -m forged)"
   git reset -q --hard "$forged"; _edit ".landed_sha = \"$forged\""
+  run _verify; [ "$status" -eq 1 ]; [[ "$output" == *"timeline holds no landed takeover"* ]]
+  _forge_timeline "$forged"
   run _verify; [ "$status" -eq 1 ]; [[ "$output" == *"tree differs"* ]]
+}
+
+@test "verify: a serial record whose commits do not hang together, or a recheck from a commit no takeover produced, is refused" {
+  _agent .; bash "$LAND" "$S" 0 --check '1:test -f a.txt' >/dev/null; cp "$REC" "$BATS_TEST_TMPDIR/good"
+  run _verify; [ "$status" -eq 0 ]
+  _edit ".base_sha = \"$(git rev-list --max-parents=0 HEAD)\""; run _verify; [ "$status" -eq 1 ]; [[ "$output" == *"does not sit on the base"* ]]
+  cp "$BATS_TEST_TMPDIR/good" "$REC"; _edit '.base_sha = "1111111111111111111111111111111111111111"'
+  run _verify; [ "$status" -eq 1 ]; [[ "$output" == *"does not exist"* ]]
+  # a recheck claiming to start from the plan's first commit: an ancestor of HEAD, but no takeover produced it
+  git commit -q --allow-empty -m fix
+  cp "$BATS_TEST_TMPDIR/good" "$REC"
+  _edit ".path = \"recheck\" | .base_sha = \"$(git rev-list --max-parents=0 HEAD)\" | .landed_sha = \"$(git rev-parse HEAD)\""
+  _forge_timeline "$(git rev-parse HEAD)"
+  run _verify; [ "$status" -eq 1 ]; [[ "$output" == *"no takeover of step 0 produced"* ]]
+}
+
+_verify_file() {  # the bound step-0-verify.md at HEAD
+  local h ph; h="$(git rev-parse HEAD)"; ph="$(printf '%s' "$(jq -S -c '.steps[0]' "$TEST_EVIDENCE_DIR/plan.json")" | sha256sum | cut -d' ' -f1)"
+  printf '# Step 0 Verification\n\n## Acceptance Criteria\n- [x] AC1 — PASS (land.json)\n\n## Memory Used\n- N/A — none (reason: test)\n\n## Memory Written\n- N/A — none (reason: test)\n\nstep_index: 0\nstep_id: step_1_backend\nplan_step_hash: %s\nreviewed_commit: %s\nidempotency_token: t-%s\n\n## Result: PASS\n' \
+    "$ph" "$h" "${h:0:8}" > "$TEST_EVIDENCE_DIR/step-0-verify.md"
+}
+
+@test "increment-step: a step whose takeover started cannot advance once its record is deleted" {
+  _landed_wave; _verify_file; rm "$REC"
+  run bash "$FSM" increment-step "$S"
+  [ "$status" -ne 0 ]; [[ "$output" == *"(pipeline.md §When AID refuses: land_record_invalid)"* && "$output" == *"is gone"* ]]
 }
 
 @test "increment-step refuses a step whose takeover record does not hold, naming the record" {

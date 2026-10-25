@@ -4879,6 +4879,14 @@ cmd_increment_step() {
             "A blocked step, or one with a failing gate, does not advance: resume the agent or hand over with a Blocked card."
         # AID 3.11.0: a step taken over in the background (aid-step-land.sh) advances only on a record that
         # proves THIS step at THIS HEAD with every command criterion passed — the verify file cannot outvote it
+        # once a takeover of this step started (the run's timeline says so) the record is required — deleting it
+        # does not reopen the manual path
+        if [[ ! -f "${_c_dir}/land.json" ]] && grep -F '"event":"step_takeover_started"' "${evidence_dir}/timeline.jsonl" 2>/dev/null \
+             | jq -e --argjson n "$step" 'select(.step == $n)' >/dev/null 2>&1; then
+          _increment_fail land_record_invalid \
+            "PRECONDITION FAIL: step ${step} was taken over in the background (the run's timeline) and its record ${_c_dir}/land.json is gone." \
+            "Take the step over again: scripts/aid-step-land.sh"
+        fi
         if [[ -f "${_c_dir}/land.json" ]]; then
           source "${SCRIPT_DIR}/lib/aid-land-record.sh"
           local _land_why

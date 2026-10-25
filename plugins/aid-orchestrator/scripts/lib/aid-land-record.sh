@@ -57,7 +57,16 @@ aid_land_record_verify() {
   extra="$(jq -r '[.checks[].ac] | group_by(.) | map(select(length > 1)) | length' "$rec")" || extra=x
   [[ "$extra" == 0 ]] || { echo "the takeover record checks one criterion twice"; return 1; }
 
-  git cat-file -e "${lsha}^{commit}" 2>/dev/null || { echo "the landed commit ${lsha:0:8} does not exist"; return 1; }
+  local c
+  for c in "$lsha" "$bsha" "$ssha"; do
+    [[ -n "$c" ]] && git cat-file -e "${c}^{commit}" 2>/dev/null || { echo "a commit the takeover names (${c:0:8}) does not exist"; return 1; }
+  done
+  # what the run's timeline says the takeovers of this step produced (aid-step-land.sh writes it, start and result)
+  local tl; tl="$(dirname "$(dirname "$(dirname "$rec")")")/timeline.jsonl"
+  # the run's timeline holds this very result (aid-step-land.sh writes it before the record says landed)
+  grep -F '"event":"step_takeover_result"' "$tl" 2>/dev/null | jq -e --argjson n "$n" --arg l "$lsha" \
+    'select(.step == $n and .status == "landed" and .landed_sha == $l)' >/dev/null 2>&1 \
+    || { echo "the run's timeline holds no landed takeover of step ${n} at ${lsha:0:8}"; return 1; }
   case "$path" in
     wave)
       git cat-file -e "${bsha}^{commit}" 2>/dev/null && git cat-file -e "${ssha}^{commit}" 2>/dev/null \
@@ -67,9 +76,18 @@ aid_land_record_verify() {
       [[ "$(git rev-parse "${lsha}^{tree}")" == "$(git merge-tree --write-tree "$bsha" "$ssha" 2>/dev/null | head -1)" ]] \
         || { echo "the landed merge's tree differs from the merge git computes for its parents"; return 1; } ;;
     recheck)
+      # it starts from a commit a takeover of this step really produced: a landed one, or a serial step's own
+      # commit whose checks failed (the role fixed on top of it)
+      grep -F '"event":"step_takeover_result"' "$tl" 2>/dev/null | jq -e --argjson n "$n" --arg b "$bsha" \
+        'select(.step == $n and ((.status == "landed" and .landed_sha == $b) or (.path == "serial" and .status == "check_failed" and .step_sha == $b)))' >/dev/null 2>&1 \
+        || { echo "the recheck starts from ${bsha:0:8}, which no takeover of step ${n} produced (the run's timeline)"; return 1; }
       git merge-base --is-ancestor "$bsha" "$lsha" 2>/dev/null \
         || { echo "the recheck's HEAD does not descend from the commit landed before"; return 1; } ;;
-    serial) ;;
+    serial)
+      # the step's commit sits right on the base (or there was nothing to commit) and is what landed
+      [[ "$lsha" == "$ssha" ]] || { echo "a serial takeover landed ${lsha:0:8}, not the step's commit ${ssha:0:8}"; return 1; }
+      [[ "$ssha" == "$bsha" || "$(git rev-parse "${ssha}^" 2>/dev/null)" == "$bsha" ]] \
+        || { echo "the step's commit ${ssha:0:8} does not sit on the base ${bsha:0:8}"; return 1; } ;;
     *) echo "the takeover record has an unknown path '${path}'"; return 1 ;;
   esac
   return 0

@@ -73,8 +73,8 @@ _write_event() { jq -n --arg c "$ROOT" --arg p "$1" --arg tool "${2:-Write}" '{s
 }
 
 # ── AID 3.11.0: a step taken over in the background ─────────────────────────
-_bg_call() {  # <id> — a Bash call started in the background (the takeover)
-  jq -nc --arg id "$1" '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Bash",input:{command:"aid-step-land.sh …",run_in_background:true}}]}}' >> "$TRANSCRIPT"
+_bg_call() {  # <id> [command] — a Bash call started in the background (default: the takeover of step 0)
+  jq -nc --arg id "$1" --arg c "${2:-bash /p/scripts/aid-step-land.sh $EV/fsm-state.yaml 0 --check 1:true}" '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Bash",input:{command:$c,run_in_background:true}}]}}' >> "$TRANSCRIPT"
 }
 _answered() { printf '{"type":"user","message":{"content":"<task-notification><tool-use-id>%s</tool-use-id></task-notification>"}}\n' "$1" >> "$TRANSCRIPT"; }
 
@@ -88,6 +88,26 @@ _answered() { printf '{"type":"user","message":{"content":"<task-notification><t
   _bg_call toolu_land; _answered toolu_land; _say "AID-WAIT: převzetí kroku 0"
   run aid_hook_rule_turn_step_open <<< "$(_stop_event)"
   [ "$status" -eq 2 ]
+}
+
+@test "turn: AID-WAIT on an unrelated background job, another step's takeover or a foreign agent does not excuse the open step" {
+  _bg_call toolu_other "npm run build"; _say "AID-WAIT: build"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  _bg_call toolu_next "bash /p/scripts/aid-step-land.sh $EV/fsm-state.yaml 1"; _say "AID-WAIT: převzetí kroku 1"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  _bg_call toolu_otherrun "bash /p/scripts/aid-step-land.sh /x/.aid-o/work/evidence/E-9/R-9/fsm-state.yaml 0"; _say "AID-WAIT: jiný běh"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_ag",name:"Agent",input:{prompt:"another task"}}]}}' >> "$TRANSCRIPT"
+  jq -nc '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"toolu_ag",content:"Async agent launched successfully."}]}}' >> "$TRANSCRIPT"
+  _say "AID-WAIT: agent"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+}
+
+@test "turn: AID-WAIT on the step's own agent (its contract header) working in the background ends the turn" {
+  jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_step",name:"Agent",input:{prompt:"## Dispatch Contract (version abc)\nwork"}}]}}' >> "$TRANSCRIPT"
+  jq -nc '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"toolu_step",content:"Async agent launched successfully."}]}}' >> "$TRANSCRIPT"
+  _say "AID-WAIT: agent kroku 0"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 3 ]
 }
 
 @test "turn: AID-WAIT with nothing running is refused" {

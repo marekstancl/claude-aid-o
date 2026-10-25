@@ -115,11 +115,11 @@ _aid_qc_bg_pending() {
   local t="$1"
   [[ -n "$(comm -23 \
     <( { grep -F 'run_in_background' "$t" 2>/dev/null \
-           | jq -rR 'fromjson? | select(.type == "assistant") | .message.content[]? | select(.type? == "tool_use" and .input.run_in_background? == true) | .id' 2>/dev/null
+           | jq -rR 'fromjson? | select(.type == "assistant") | .message.content[]? | select(.type? == "tool_use" and .input.run_in_background? == true) | .id // empty' 2>/dev/null
          # only results of an Agent/Task call count: another tool's output may quote the phrase
          comm -12 \
            <(grep -E '"(Agent|Task)"' "$t" 2>/dev/null \
-               | jq -rR 'fromjson? | select(.type == "assistant") | .message.content[]? | select(.type? == "tool_use" and (.name == "Agent" or .name == "Task")) | .id' 2>/dev/null | sort -u) \
+               | jq -rR 'fromjson? | select(.type == "assistant") | .message.content[]? | select(.type? == "tool_use" and (.name == "Agent" or .name == "Task")) | .id // empty' 2>/dev/null | sort -u) \
            <(grep -E 'Async agent launched|working in the background' "$t" 2>/dev/null \
                | jq -rR 'fromjson? | select(.type == "user") | .message.content | arrays | .[] | select(.type? == "tool_result")
                     | select((.content | if type == "string" then . else ([.[]? | .text? // empty] | join(" ")) end)

@@ -83,11 +83,29 @@ _write() {
       env: $env, checks: $checks, measure: $m, pid: $pid, check_token: $ctok, at: $at}' > "$tmp" && mv -f "$tmp" "$REC"
 }
 HAVE_LOCK=0 OWNED=0 BACK_NOTE="" CHECK_PID="" CHECK_TOKEN=""
+# the run's timeline keeps every takeover of a step, start and result: increment-step reads it, so a step whose
+# takeover started cannot advance without its record, and a recheck can start only from a result recorded there
+# _tl <event> [jq args…] — one line in the run's timeline, the same shape log_event writes; unlike log_event
+# (which never blocks a pipeline) a line that could not be written is a failure here
+_tl() {
+  local ev="$1"; shift
+  jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg e "$ev" --argjson step "$N" --arg path "$PATHKIND" "$@" \
+    '{ts: $ts, event: $e} + ($ARGS.named | del(.ts, .e))' >> "${EV}/timeline.jsonl" 2>/dev/null
+}
+_log_result() {
+  _tl step_takeover_result --arg status "$STATUS" --arg step_sha "$STEP_SHA" --arg base_sha "$BASE_SHA" --arg landed_sha "$LANDED_SHA"
+}
 _end() {  # <status> <reason> — the record is written only by the takeover that owns it: one that holds the lock
           # AND has started (`running`). A refused second takeover, or one refused before it started, leaves the
           # record as it was (the running one's, or the landed one a --recheck starts from).
   STATUS="$1" REASON="$2${BACK_NOTE}"
-  (( HAVE_LOCK && OWNED )) && _write
+  if (( HAVE_LOCK && OWNED )); then
+    # a landed result the run's timeline does not hold is not landed (increment-step asks the timeline)
+    if ! _log_result && [[ "$STATUS" == landed ]]; then
+      STATUS=precondition_failed REASON="the result could not be written to the run's timeline ${EV}/timeline.jsonl"
+    fi
+    _write
+  fi
   echo "land: step ${N} (${SID}): ${STATUS}${REASON:+ — ${REASON}}"
   [[ "$STATUS" == landed ]] && exit 0 || exit 1
 }
@@ -114,7 +132,7 @@ _on_exit() {
   if [[ "$STATUS" == running ]] && (( HAVE_LOCK && OWNED )); then
     [[ "$PATHKIND" == wave ]] && _back
     STATUS=interrupted REASON="the takeover was stopped before it finished — take the step over again${BACK_NOTE}"
-    _write
+    _log_result || true; _write
   fi
 }
 trap _on_exit EXIT
@@ -175,6 +193,7 @@ old_tok="$(jq -r 'select(.status == "running") | .check_token // ""' "$REC" 2>/d
 [[ "$old_tok" =~ ^[0-9a-f]{32}$ ]] && _stop_group "$old_tok"
 (( RECHECK )) && BASE_SHA="$prev"
 OWNED=1; _write   # running
+_tl step_takeover_started || _end precondition_failed "the run's timeline ${EV}/timeline.jsonl cannot be written"
 
 # --- the checks ---------------------------------------------------------------------------------------------------
 _run_checks() {  # <cwd> — every --check in order; stops at the first that fails
