@@ -106,25 +106,38 @@ aid_turn_open_steps() {
   cut -f1-5 <<< "$lines" | grep -v '^$'
 }
 
-# _aid_hrt_step_call_pending <transcript> <step index> <contract version> <epic>/<run> — 0 when a call that works on
-# THIS step is unanswered: a background Bash running aid-step-land.sh on this run's state file (…/<epic>/<run>/
-# fsm-state.yaml) for this index, or an Agent/Task whose prompt carries
-# this step's contract header (`Dispatch Contract (version …)`) launched in the background. Pre-filtered by plain
-# text like _aid_qc_bg_pending; a corrupt line is skipped.
+# _aid_hrt_step_call_pending <transcript> <contract file> — 0 when something works on THIS step right now:
+#   its takeover — the step's land.json (next to the contract) says `running` and its pid is aid-step-land.sh,
+#     and this session has an unanswered background Bash that runs aid-step-land.sh (the command's text cannot
+#     name the run: controllers pass the state file through a variable, quoted or not — so the record does);
+#   or its agent — an Agent/Task launched in the background whose prompt carries this step's contract header.
 _aid_hrt_step_call_pending() {
-  local t="$1" idx="$2" ver="$3" er="${4//./\\.}"
-  [[ -n "$(comm -23 \
-    <( { grep -F 'aid-step-land.sh' "$t" 2>/dev/null \
-           | jq -rR --arg re "aid-step-land\\.sh[[:space:]]+[^[:space:]]*${er}/fsm-state\\.yaml[[:space:]]+${idx}([[:space:]]|$)" 'fromjson? | select(.type == "assistant") | .message.content[]?
-               | select(.type? == "tool_use" and .name == "Bash" and .input.run_in_background? == true
-                        and ((.input.command // "") | test($re))) | .id // empty' 2>/dev/null
-         if [[ -n "$ver" ]]; then
-           grep -F "Dispatch Contract (version ${ver})" "$t" 2>/dev/null \
-             | jq -rR --arg h "Dispatch Contract (version ${ver})" 'fromjson? | select(.type == "assistant") | .message.content[]?
-                 | select(.type? == "tool_use" and (.name == "Agent" or .name == "Task") and ((.input.prompt // "") | contains($h))) | .id // empty' 2>/dev/null
-         fi
-       } | sort -u) \
-    <(grep -o '<tool-use-id>[^<]*' "$t" | cut -d'>' -f2 | sort -u))" ]]
+  local t="$1" c="$2" ver rec pid
+  ver="$(jq -r '.version // ""' "$c" 2>/dev/null)"; rec="$(dirname "$c")/land.json"
+  local candidates answered
+  candidates="$( { grep -F 'aid-step-land.sh' "$t" 2>/dev/null \
+      | jq -rR 'fromjson? | select(.type == "assistant") | .message.content[]?
+          | select(.type? == "tool_use" and .name == "Bash" and .input.run_in_background? == true
+                   and ((.input.command // "") | contains("aid-step-land.sh")) and .id != null) | "land\t\(.id)"' 2>/dev/null
+    if [[ -n "$ver" ]]; then
+      grep -F "Dispatch Contract (version ${ver})" "$t" 2>/dev/null \
+        | jq -rR --arg h "Dispatch Contract (version ${ver})" 'fromjson? | select(.type == "assistant") | .message.content[]?
+            | select(.type? == "tool_use" and (.name == "Agent" or .name == "Task") and ((.input.prompt // "") | contains($h))
+                     and .id != null) | "agent\t\(.id)"' 2>/dev/null
+    fi; } )"
+  answered="$(grep -o '<tool-use-id>[^<]*' "$t" | cut -d'>' -f2 | sort -u)"
+  local kind id
+  while IFS=$'\t' read -r kind id; do
+    [[ -n "$id" ]] || continue
+    grep -qxF "$id" <<< "$answered" && continue
+    # an agent counts only once the harness said it went to the background (a foreground one is answered by its result)
+    [[ "$kind" == agent ]] && grep -F "\"tool_use_id\":\"${id}\"" "$t" 2>/dev/null | grep -qE 'Async agent launched|working in the background' && return 0
+    if [[ "$kind" == land && "$(jq -r '.status // ""' "$rec" 2>/dev/null)" == running ]]; then
+      pid="$(jq -r '.pid // ""' "$rec" 2>/dev/null)"
+      [[ "$pid" =~ ^[0-9]+$ ]] && tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null | grep -q 'aid-step-land\.sh' && return 0
+    fi
+  done <<< "$candidates"
+  return 1
 }
 
 # _aid_hrt_last_message <transcript> — the text of the turn's last assistant
@@ -190,12 +203,11 @@ aid_hook_rule_turn_step_open() {
       echo "step ${idx} (${sid}) of ${epic} is open, but the turn hands over explicitly with a card" >&2
       return 3
     fi
-    # AID 3.11.0: the step is being taken over in the background (aid-step-land.sh <state> <this index>) or the
-    # agent dispatched with its packet still works — a declared wait on THAT call, unanswered, ends the turn; the
+    # AID 3.11.0: the step is being taken over in the background (its record says running, its process lives) or
+    # the agent dispatched with its packet still works — a declared wait on THAT, unanswered, ends the turn; the
     # notification starts the next one. Any other background call does not excuse an open step.
     if [[ "$(printf '%s' "$last" | grep -v '^[[:space:]]*$' | tail -1)" == AID-WAIT:* ]]; then
-      local ver; ver="$(jq -r '.version // ""' "$(cut -f5 <<< "$line")" 2>/dev/null)"
-      if _aid_hrt_step_call_pending "$transcript" "$idx" "$ver" "${epic}/${run}"; then
+      if _aid_hrt_step_call_pending "$transcript" "$(cut -f5 <<< "$line")"; then
         echo "step ${idx} (${sid}) of ${epic} is open; the turn waits on a background call (AID-WAIT)" >&2
         return 3
       fi

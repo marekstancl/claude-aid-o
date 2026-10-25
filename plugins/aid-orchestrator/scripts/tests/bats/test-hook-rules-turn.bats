@@ -73,29 +73,38 @@ _write_event() { jq -n --arg c "$ROOT" --arg p "$1" --arg tool "${2:-Write}" '{s
 }
 
 # ── AID 3.11.0: a step taken over in the background ─────────────────────────
-_bg_call() {  # <id> [command] — a Bash call started in the background (default: the takeover of step 0)
-  jq -nc --arg id "$1" --arg c "${2:-bash /p/scripts/aid-step-land.sh $EV/fsm-state.yaml 0 --check 1:true}" '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Bash",input:{command:$c,run_in_background:true}}]}}' >> "$TRANSCRIPT"
+_bg_call() {  # <id> [command] — a Bash call started in the background (default: a takeover, its state file in a variable)
+  jq -nc --arg id "$1" --arg c "${2:-S=\"$EV/fsm-state.yaml\"; bash \"/p/scripts/aid-step-land.sh\" \"\$S\" 0 --check \"1:true\"}" '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Bash",input:{command:$c,run_in_background:true}}]}}' >> "$TRANSCRIPT"
 }
 _answered() { printf '{"type":"user","message":{"content":"<task-notification><tool-use-id>%s</tool-use-id></task-notification>"}}\n' "$1" >> "$TRANSCRIPT"; }
+# _takeover_running — the step's record says running and its process is aid-step-land.sh
+_takeover_running() {
+  ( exec -a aid-step-land.sh sleep 30 ) & TAKEOVER_PID=$!
+  printf '{"version":1,"status":"running","pid":%s}\n' "$TAKEOVER_PID" > "$EV/steps/step_1_backend/land.json"
+}
+_takeover_gone() { kill "$TAKEOVER_PID" 2>/dev/null; wait "$TAKEOVER_PID" 2>/dev/null || true; }
 
-@test "turn: an open step + AID-WAIT + a live background call (the takeover) — the turn may end" {
-  _bg_call toolu_land; _say "AID-WAIT: převzetí kroku 0"
+@test "turn: an open step + AID-WAIT + its takeover running (record, process, unanswered call) — the turn may end" {
+  _takeover_running; _bg_call toolu_land; _say "AID-WAIT: převzetí kroku 0"
   run aid_hook_rule_turn_step_open <<< "$(_stop_event)"
+  _takeover_gone
   [ "$status" -eq 3 ]; [[ "$output" == *"waits on a background call"* ]]
 }
 
-@test "turn: the takeover answered (its notification in the transcript) — AID-WAIT no longer ends the turn" {
-  _bg_call toolu_land; _answered toolu_land; _say "AID-WAIT: převzetí kroku 0"
-  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"
-  [ "$status" -eq 2 ]
+@test "turn: the takeover's call answered, its process gone, or its record not running — AID-WAIT does not end the turn" {
+  _takeover_running; _bg_call toolu_land; _answered toolu_land; _say "AID-WAIT: převzetí kroku 0"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  _bg_call toolu_land2; _say "AID-WAIT: převzetí kroku 0"; _takeover_gone
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  _takeover_running; printf '{"status":"landed","pid":%s}\n' "$TAKEOVER_PID" > "$EV/steps/step_1_backend/land.json"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; _takeover_gone; [ "$status" -eq 2 ]
 }
 
-@test "turn: AID-WAIT on an unrelated background job, another step's takeover or a foreign agent does not excuse the open step" {
+@test "turn: AID-WAIT on an unrelated background job, or with a takeover of another run running, does not excuse the open step" {
   _bg_call toolu_other "npm run build"; _say "AID-WAIT: build"
   run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
-  _bg_call toolu_next "bash /p/scripts/aid-step-land.sh $EV/fsm-state.yaml 1"; _say "AID-WAIT: převzetí kroku 1"
-  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
-  _bg_call toolu_otherrun "bash /p/scripts/aid-step-land.sh /x/.aid-o/work/evidence/E-9/R-9/fsm-state.yaml 0"; _say "AID-WAIT: jiný běh"
+  # another run's takeover: its call is pending, but THIS step has no running record
+  _bg_call toolu_otherrun "bash /p/scripts/aid-step-land.sh /x/E-9/R-9/fsm-state.yaml 0"; _say "AID-WAIT: jiný běh"
   run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
   jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_ag",name:"Agent",input:{prompt:"another task"}}]}}' >> "$TRANSCRIPT"
   jq -nc '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"toolu_ag",content:"Async agent launched successfully."}]}}' >> "$TRANSCRIPT"
@@ -103,7 +112,11 @@ _answered() { printf '{"type":"user","message":{"content":"<task-notification><t
   run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
 }
 
-@test "turn: AID-WAIT on the step's own agent (its contract header) working in the background ends the turn" {
+@test "turn: AID-WAIT on the step's own agent working in the background ends the turn; a foreground one does not" {
+  jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_fg",name:"Agent",input:{prompt:"## Dispatch Contract (version abc)\nwork"}}]}}' >> "$TRANSCRIPT"
+  jq -nc '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"toolu_fg",content:"step done, aid-return below"}]}}' >> "$TRANSCRIPT"
+  _say "AID-WAIT: agent kroku 0"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
   jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_step",name:"Agent",input:{prompt:"## Dispatch Contract (version abc)\nwork"}}]}}' >> "$TRANSCRIPT"
   jq -nc '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"toolu_step",content:"Async agent launched successfully."}]}}' >> "$TRANSCRIPT"
   _say "AID-WAIT: agent kroku 0"
@@ -117,8 +130,8 @@ _answered() { printf '{"type":"user","message":{"content":"<task-notification><t
 }
 
 @test "turn: a live background call without AID-WAIT is refused, and the refusal names the background takeover" {
-  _bg_call toolu_land; _say "Převzetí běží."
-  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"
+  _takeover_running; _bg_call toolu_land; _say "Převzetí běží."
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; _takeover_gone
   [ "$status" -eq 2 ]; [[ "$output" == *"aid-step-land.sh"* && "$output" == *"AID-WAIT"* ]]
 }
 
