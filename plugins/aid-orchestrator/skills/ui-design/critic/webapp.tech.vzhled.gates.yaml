@@ -5,6 +5,6 @@ gates:
   - {criterion: state_communication, min: 7, why: "Chyba, prázdno, načítání či zákaz role bez dalšího kroku může úlohu zastavit nebo vést ke ztrátě práce."}
   - {criterion: task_responsiveness, min: 6, why: "Pracovní obrazovka musí zůstat použitelná na požadovaných šířkách, ne pouze působit jako statická maketa."}
   - {criterion: visual_accessibility, min: 7, why: "Neviditelný fokus, význam jen barvou nebo nedostupný cíl přímo znemožňuje dokončení úlohy."}
-  - {criterion: data_trust, min: 7, why: "Nejasná částka, rozsah nebo nevratný dopad může způsobit chybnou práci s penězi a daty."}
+  - {criterion: data_trust, min: 7, required: true, why: "Nejasná částka, rozsah nebo nevratný dopad může způsobit chybnou práci s penězi a daty."}
   - {criterion: design_handoff, min: 6, why: "Vybraný směr musí být dost určitý, aby se při programování nerozpadl na improvizované varianty."}
 weighted_min: 7.5

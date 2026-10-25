@@ -39,4 +39,4 @@ dosazení konkurenta). Opři se o literaturu a praxi (např. April Dunford „Ob
 Christensen/Moesta jobs to be done a síly přechodu, Joanna Wiebe / Copyhackers voice of customer, Donald Miller
 „Building a StoryBrand“, Ann Handley „Everybody Writes“, David Ogilvy; Nielsen Norman Group o B2B a důvěryhodnosti)
 a o přiložená pravidla studia `copy-rules.md`. Zdroje ověř na webu. Hranice přijetí neuváděj – zapiš je do
-`web-local.<role>.sdeleni.gates.yaml` (`gates: [{criterion, min, why}]`, případně `weighted_min`). Čeština.
+`web-local.<role>.sdeleni.gates.yaml` (`gates: [{criterion, min, why}]`, případně `weighted_min`). Čeština. Brána nad pravdivostí faktů nebo právem má navíc `required: true`: kritérium, které role nemohla posoudit, ji pak nepřeskočí, ale zastaví (IMP-702).

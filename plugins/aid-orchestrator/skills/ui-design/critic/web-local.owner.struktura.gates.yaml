@@ -2,6 +2,7 @@ role: owner
 place: struktura
 gates:
   - criterion: nepodepisu_nic_neznameho
+    required: true
     min: 8
     why: "Majitel nepodepíše strukturu, ve které je služba, cena, reference nebo jiný údaj, který nezná z podkladů, podaný jinak než jako „Ke kontrole“; vymyšlená stránka nebo údaj na webu je jeho reputační i právní riziko."
   - criterion: moje_sluzby_cele

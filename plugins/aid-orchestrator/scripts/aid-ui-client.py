@@ -313,6 +313,13 @@ def site_pages(site):
     return sorted(pages, key=lambda p: (p != "", p))
 
 
+def served_root(project, place):
+    """The folder the place's live address serves: the pure skeleton at the structure (IMP-699; site/ may hold an old
+    web or built pages), else site/."""
+    pure = os.path.join(project, ".aid-ui", "skeleton", "site")
+    return pure if place == "struktura" and os.path.isdir(pure) else os.path.join(project, "site")
+
+
 def site_sha(site):
     h = hashlib.sha256()
     for root, dirs, files in os.walk(site):
@@ -456,7 +463,8 @@ def critic_place(project, web, audit, out, role, history, place, role_text, froz
         wj(os.path.join(bundle, "podklady", "historie.json"), h)
     images = [os.path.join(bundle, "podklady", rel.replace(".aid-ui/", "").replace("docs/", "")) for rel in files if rel.endswith(".png")][:MAX_IMAGES]
     if web:
-        pages = site_pages(os.path.join(project, "site")) if os.path.isdir(os.path.join(project, "site")) else [""]
+        root = served_root(project, place)
+        pages = site_pages(root) if os.path.isdir(root) else [""]
         images += shots(os.path.join(out, "shots"), [web.rstrip("/") + "/" + pg for pg in pages[:MAX_PAGES]])[:MAX_IMAGES]
     prompt = (role_text + "\n\n# Podklady místa\n\nV pracovním adresáři v `podklady/` (jen ke čtení, nic mimo něj nečti):\n"
               + "\n".join("- podklady/" + rel.replace(".aid-ui/", "").replace("docs/", "") for rel in files)
@@ -1004,13 +1012,13 @@ def decided(project):
 
 # ---------------------------------------------------------------- verify (P118)
 
-def capture_list(project, web):
+def capture_list(project, web, root=None):
     """[{key, url}]: every address a person can see in this version - an app's screens in every mode and state, its
     tasks' states and results; a web's pages."""
     base = web.rstrip("/") + "/"
     mp = os.path.join(project, "docs", "design", "screens.json")
     if not os.path.isfile(mp):
-        return [{"key": "page /" + rel, "url": base + rel} for rel in site_pages(os.path.join(project, "site"))]
+        return [{"key": "page /" + rel, "url": base + rel} for rel in site_pages(root or os.path.join(project, "site"))]
     import importlib.util
     spec = importlib.util.spec_from_file_location("aid_ui_screens", os.path.join(HERE, "aid-ui-screens.py"))
     mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
@@ -1049,10 +1057,10 @@ def verify(project, place, web):
     artifact = site_sha(os.path.join(project, "site")) if place == "web" else place_bundle(project, place)[1]
     out = os.path.join(project, ".aid-ui", "verify", time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + place)
     os.makedirs(out, exist_ok=True)
-    lst = capture_list(project, web)
+    site = served_root(project, place)
+    lst = capture_list(project, web, site)
     # the address serves this very version: every page's HTML there is the local file's (else the record would vouch
     # for a build nobody checked)
-    site = os.path.join(project, "site")
     for path in sorted({urlsplit(x["url"]).path for x in lst}):
         local = os.path.join(site, path.strip("/"), "index.html") if not path.endswith(".html") else os.path.join(site, path.strip("/"))
         try:

@@ -72,6 +72,8 @@ aplikaci nekopíruje: tytéž nástroje, větev podle druhu.
 5. Kostra: `aid-ui-serve.sh skeleton <projekt>` postaví z modelu proklikávací aplikaci na stálé adrese: navigace,
    každá obrazovka s přepínačem stavů (`?stav=empty|loading|error|filled`), akce vedou na své obrazovky, mazání přes
    potvrzení. Dokud vlastník model neschválí, nese každá stránka pruh „model čeká na schválení vlastníkem".
+   Adresa servíruje čistou kostru `.aid-ui/skeleton/site/` (každá obrazovka modelu, vždy znovu, IMP-699); `site/` je
+   základ stavby a brána měří ji.
 5a. **Lišta aplikace** (STOP, Panika, režim - co je na každé obrazovce) je obrazovka s `shell: true`: její akce kostra
    vykreslí na každé stránce, krok úlohy na ní smí stát odkudkoli.
 5a2. **Po každé úpravě modelu nebo kostry** `aid-ui-verify.sh <projekt> --quick` (stejné řádky jako předběžná brána,

@@ -439,3 +439,25 @@ PY
   run python3 -c "import sys; sys.path.insert(0, '$SC/lib'); import aid_ui_costs as c; m, r, _ = c.image_prices('$P'); print(m['gpt-image-1']['low'], m['gpt-image-1']['medium'], m['gpt-image-1']['high'], r)"
   [ "$status" -eq 0 ]; [ "$output" = "0.011 0.042 9.0 0.006" ]
 }
+
+@test "served root (IMP-699): at the structure the roles' shots and the verifier read the pure skeleton, not an old web in site/" {
+  mkdir -p "$P/site/stara" "$P/.aid-ui/skeleton/site/sluzby"
+  for f in site/index.html site/stara/index.html .aid-ui/skeleton/site/index.html .aid-ui/skeleton/site/sluzby/index.html; do echo x > "$P/$f"; done
+  run python3 - "$SC/aid-ui-client.py" "$P" <<'PY'
+import importlib.util, sys
+s = importlib.util.spec_from_file_location("c", sys.argv[1]); c = importlib.util.module_from_spec(s); s.loader.exec_module(c)
+p = sys.argv[2]
+r = c.served_root(p, "struktura")
+print(r.endswith("/.aid-ui/skeleton/site"), c.served_root(p, "web").endswith("/site"),
+      [x["url"] for x in c.capture_list(p, "http://h/", r)])
+PY
+  [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  [ "$output" = "True True ['http://h/', 'http://h/sluzby/']" ]
+  # the verifier compares what the address serves with the pure skeleton: an address serving the old site/ is refused
+  echo '{"pages": [{"id": "home", "url": "/", "h1": "x", "sections": []}]}' > "$P/.aid-ui/structure.json"
+  OP=$(( 38900 + RANDOM % 90 )); python3 -m http.server $OP --bind 127.0.0.1 --directory "$P/site" >/dev/null 2>&1 3>&- & OS=$!
+  for _ in $(seq 50); do curl -s "http://127.0.0.1:$OP/" >/dev/null && break; sleep 0.1; done
+  echo y > "$P/site/index.html"
+  run python3 "$SC/aid-ui-client.py" verify "$P" --place struktura --web "http://127.0.0.1:$OP/"; kill $OS
+  [ "$status" -eq 1 ]; [[ "$output" == *"serves another version"* ]]
+}

@@ -59,6 +59,7 @@ role: <owner|tech>
 place: <struktura|vzhled|web>
 gates:
   - {criterion: <id kritéria téhož měřítka>, min: <číslo>, why: "proč právě tady, lidsky"}
+  # brána nad fakty nebo právem navíc `required: true`: nepřeskočí ji kritérium, které role nemohla posoudit (IMP-702)
 weighted_min: <číslo>
 # jen u place web navíc:
 audit: {median_min: 8.5, any_min: 8.0, criterion_median_min: 7.0}

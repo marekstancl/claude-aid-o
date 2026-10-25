@@ -3,6 +3,16 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.10.1] — 2026-10-25
+
+Studio `/aid-ui` hodnotí strukturu na kostře, ne na starém webu.
+
+### Fixed
+- **Stálá adresa kostry servíruje jen kostru**: builder píše celý strom (u aplikace každou obrazovku modelu) vždy znovu do `.aid-ui/skeleton/site/` a `aid-ui-serve.sh skeleton` servíruje tu složku; role struktury, jejich snímky, nezávislý ověřovatel i `skeleton-check` vidí jen kostru, ať je v `site/` cokoli (Coufal 17. 10.: role hodnotily starý web). `site/` zůstává základem stavby.
+- Přestavba kostry už neodsune stránku, kterou kostra nikdy nepsala (stará stránka, která ze stromu odešla, zůstává v `site/`).
+- **Brány nad fakty a právem nejde obejít „nejde posoudit“**: brána s `required: true` (pravdivost tvrzení, nic neznámého ani vymyšleného, odborné a regulované pojmy, fakta mimo registr; u aplikace důvěra v data a čísla) při kritériu, které role nemohla posoudit, směr zastaví; ostatní brány (třeba fotky, které ještě nejsou) se přeskočí jako dřív. Platí pro nově zmrazená měřítka; běžící smyčka si nese brány ze svého zmrazení.
+- **Verdikt struktury webu stojí i na servírované kostře**: otisk místa `struktura` zahrnuje `.aid-ui/skeleton/site/`, takže přestavěná kostra s jiným obsahem (třeba po změně registru faktů) verdikt zneplatní. U aplikace ne: její kostra vzniká jen z modelu, který otisk už má, a schválení modelu kostru mění.
+
 ## [3.10.0] — 2026-10-24
 
 Automatické stránky AID jdou vypnout a na požádání poslat přes share (PM 22.–24. 10. 2026: stránky po sepsání plánu a na konci PM nechce dostávat sám od sebe; když je chce, přepíná účty Claude a artefakt vidí jen v jednom).

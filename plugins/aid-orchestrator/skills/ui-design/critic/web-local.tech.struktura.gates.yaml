@@ -14,9 +14,11 @@ gates:
     min: 7
     why: "Ztracená stránka, adresa bez přesměrování nebo vypuštěná úloha stávajícího postupu je nevratná ztráta obsahu, pozic ve vyhledávání nebo práce uživatelů (Google Search Central o přesunu webu); klient ji ve struktuře nepozná. Nehodnotí se jen bez předchůdce."
   - criterion: pojmy_konvence_oboru
+    required: true
     min: 6
     why: "Chybný název služby nebo regulovaný pojem ve štítku či adrese je věcná chyba a právní riziko; nevysvětlený termín je podle copy-rules vážný nález."
   - criterion: plan_obsahu_kostra
+    required: true
     min: 6
     why: "Zástupný text nebo fakt mimo registr je podle copy-rules blokující; bez živé kostry na stálé adrese nejde test nalezitelnosti ani zveřejnění po částech, které PM žádá."
 weighted_min: 7.5

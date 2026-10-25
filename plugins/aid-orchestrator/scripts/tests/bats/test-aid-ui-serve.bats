@@ -263,7 +263,7 @@ PY
   [ "$(grep -o 'čeká na klienta' "$P/site/sluzby/index.html" | wc -l)" -eq 2 ]
   grep -q 'peče od roku 1998' "$P/site/index.html"
   run "$SERVE" skeleton-check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
-  sed -i 's#<h1>Služby</h1>#<h1>Služby</h1><p>Volejte 602 111 222</p>#' "$P/site/sluzby/index.html"
+  sed -i 's#<h1>Služby</h1>#<h1>Služby</h1><p>Volejte 602 111 222</p>#' "$P/.aid-ui/skeleton/site/sluzby/index.html"   # IMP-699: the check reads the pure skeleton
   run "$SERVE" skeleton-check "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"not in facts.yaml: 602 111 222"* ]]
 }
 
@@ -346,6 +346,34 @@ J
   node "$js" "$1"
 }
 
+@test "skeleton (IMP-699): an old web in site/ stays untouched, the address and the check see only the pure skeleton" {
+  P="$BATS_TEST_TMPDIR/sk"; skel_project "$P"
+  mkdir -p "$P/site/sluzby" "$P/site/stara"
+  old='<!doctype html><html lang="cs"><head><title>Starý</title></head><body><h1>Starý web</h1><h1>Druhé</h1></body></html>'
+  for f in index.html sluzby/index.html stara/index.html; do echo "$old" > "$P/site/$f"; done
+  run "$SERVE" skeleton "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
+  for f in index.html sluzby/index.html stara/index.html; do grep -q 'Starý web' "$P/site/$f"; done   # A1: nothing of the old web rewritten
+  grep -q 'data-aid-skeleton' "$P/.aid-ui/skeleton/site/sluzby/index.html"
+  [ ! -e "$P/.aid-ui/skeleton/site/stara" ]                  # not in the tree: not in the pure skeleton
+  get 39918 | grep -q 'data-aid-skeleton'                    # A3: the address serves the skeleton, not the old home page
+  [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://127.0.0.1:39918/stara/)" = 404 ]
+  run "$SERVE" skeleton-check "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }   # A4: the old pages' two H1 do not count
+  # R6/R7: a foreign file in the pure skeleton goes on the next build; slipped in after it, the check fails on it
+  echo "$old" > "$P/.aid-ui/skeleton/site/stara.html"; echo 'h1{}' > "$P/.aid-ui/skeleton/site/stary.css"; mkdir -p "$P/.aid-ui/skeleton/site/x"; echo "$old" > "$P/.aid-ui/skeleton/site/x/index.html"
+  python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$P" >/dev/null
+  [ ! -e "$P/.aid-ui/skeleton/site/stara.html" ]; [ ! -e "$P/.aid-ui/skeleton/site/x" ]
+  [ -z "$(find "$P/.aid-ui/skeleton/site" -name '*.part-*' -o -name '*.css')" ]   # no temporary file left, a foreign css gone
+  mkdir -p "$P/.aid-ui/skeleton/site/x"; echo "$old" > "$P/.aid-ui/skeleton/site/x/index.html"
+  run "$SERVE" skeleton-check "$P"; [ "$status" -eq 1 ]; [[ "$output" == *"x/index.html: 2 H1"* ]]
+  # A2: a page that left the structure leaves the pure skeleton
+  python3 - "$P" <<'PY'
+import json, sys; p = sys.argv[1] + "/.aid-ui/structure.json"; s = json.load(open(p)); s["pages"] = s["pages"][:1]; s["nav"] = ["home"]; s["redirects"] = []; json.dump(s, open(p, "w"))
+PY
+  python3 "$(dirname "$SERVE")/lib/aid-ui-skeleton.py" build "$P" >/dev/null
+  [ ! -e "$P/.aid-ui/skeleton/site/sluzby" ]; grep -q 'Starý web' "$P/site/sluzby/index.html"
+  "$SERVE" stop skeleton
+}
+
 @test "app-skeleton: every screen at the fixed address with the navigation and its actions leading to their target screens" {
   P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
   run "$SERVE" skeleton "$P"; [ "$status" -eq 0 ] || { echo "$output"; return 1; }
@@ -418,6 +446,27 @@ J
   [ "$status" -eq 0 ]; [[ "$output" == *"built pages kept without the draft banner"*"seznam/index.html"* ]]   # the model is not approved
   [ ! -e "$P/site/detail/index.html" ]; [ -f "$P/.aid-ui/skeleton/removed/detail/index.html" ]
   grep -q postaveno "$P/site/seznam/index.html"
+  "$SERVE" stop skeleton
+}
+
+@test "app-skeleton (IMP-699): the pure skeleton holds every screen of the model, fresh, whatever the build put in site/" {
+  P="$BATS_TEST_TMPDIR/app"; app_skel "$P"
+  "$SERVE" skeleton "$P" >/dev/null
+  echo '<html><main data-aid-screen="seznam">postaveno</main></html>' > "$P/site/seznam/index.html"
+  "$SERVE" skeleton "$P" >/dev/null
+  grep -q postaveno "$P/site/seznam/index.html"                                 # the built page stays in site/
+  for s in seznam formular detail; do grep -q 'data-aid-skeleton' "$P/.aid-ui/skeleton/site/$s/index.html"; done
+  curl -sf --max-time 3 http://127.0.0.1:39918/seznam/ | grep -q 'data-aid-skeleton'   # the address: the skeleton
+  grep -q 'data-aid-draft' "$P/.aid-ui/skeleton/site/seznam/index.html"
+  sha="$(sha256sum "$P/docs/design/screens.json" | cut -d' ' -f1)"
+  echo "{\"variant\": {\"type\": \"webapp\"}, \"app\": {\"approved_model_sha\": \"$sha\"}}" > "$P/docs/design/brand-state.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  ! grep -q 'data-aid-draft' "$P/.aid-ui/skeleton/site/seznam/index.html"     # approved: no banner, even where site/ kept a page
+  jq 'del(.screens[2]) | (.screens[0].actions) |= map(select(.id != "otevrit")) | (.screens[1].actions) |= map(select(.to != "detail"))
+      | .tasks = [.tasks[0] | .steps[1].action = "zpet" | .steps |= .[:1] | .done_when = {screen: "formular", expect: "x"} | .failure_paths = [] | .states.failure = "nenastává, protože bez odeslání"]' \
+     "$P/docs/design/screens.json" > "$P/m.json" && mv "$P/m.json" "$P/docs/design/screens.json"
+  "$SERVE" skeleton "$P" >/dev/null
+  [ ! -e "$P/.aid-ui/skeleton/site/detail" ]                                   # a screen removed from the model is gone
   "$SERVE" stop skeleton
 }
 
