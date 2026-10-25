@@ -1119,7 +1119,8 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   local fixed_line; fixed_line="$(grep -c '' "$R/src/app.py")"   # the line the fix added
   _fanswer 1 final_criteria '.findings = [{id: "k1", checkpoint: "cp7", step: null, severity: "major", claim: "a brief point is weakened somewhere old", command: "grep -n x src/app.py", evidence: "src/app.py:5", fix: "f", rule: "every brief point is delivered whole"}] | del(.no_findings_reason)'
   _fanswer 1 final_generalist "$(jq -nc --arg fl "src/app.py:${fixed_line}" '[
-    {id: "g1", checkpoint: "cp7", step: null, severity: "minor", claim: "an old helper name is unclear in an untouched place", command: "grep -n 1 src/app.py", evidence: "src/app.py:3", fix: "rename"},
+    {id: "g1", checkpoint: "cp7", step: null, severity: "minor", claim: "an old helper name is unclear in an untouched place", command: "grep -n New CHANGELOG.md", evidence: "CHANGELOG.md:1", fix: "rename"},
+    {id: "g5", checkpoint: "cp7", step: null, severity: "minor", claim: "the import is still missing in the old place", command: "grep -n 1 src/app.py", evidence: "src/app.py:3", fix: "import"},
     {id: "g2", checkpoint: "cp7", step: null, severity: "major", claim: "the new import line breaks the startup order", command: "grep -n import src/app.py", evidence: $fl, fix: "move", rule: "startup order is imports first"},
     {id: "g3", checkpoint: "cp7", step: null, severity: "blocker", claim: "an untouched place loses customer data on save", command: "grep -n 2 src/app.py", evidence: "src/app.py:4", fix: "guard", rule: "a save never drops data"},
     {id: "g4", checkpoint: "cp7", step: null, severity: "minor", claim: "the project has no changelog of its own", command: "ls", evidence: "absent:NO-CHANGELOG.md", fix: "write it"}]
@@ -1131,7 +1132,8 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [ "$(st 'an untouched place loses')" = open ]     # a blocker always blocks
   [ "$(st 'a brief point is weakened')" = open ]    # final_criteria never follow_up
   [ "$(st 'the project has no changelog')" = open ] # absent: is never a follow-up, and is never dropped
-  [ "$(jq '.findings | length' "$(FD 1)/merged.json")" -eq 5 ]
+  [ "$(st 'the import is still missing')" = open ]   # the file of a finding still open: that finding said again
+  [ "$(jq '.findings | length' "$(FD 1)/merged.json")" -eq 6 ]
   [ "$(grep -c '' "$(dirname "$E")/follow-ups.jsonl")" -eq 1 ]
   # collecting again neither duplicates the list nor reopens the follow-up
   _F collect --round 1 >/dev/null; [ "$(grep -c '' "$(dirname "$E")/follow-ups.jsonl")" -eq 1 ]; [ "$(st 'an old helper name')" = follow_up ]
@@ -1169,7 +1171,9 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   # the fix added line 4 (and a line that itself starts with "++ ")
   printf -- '--- a/x.py\n+++ b/x.py\n@@ -3,2 +3,3 @@\n 3\n+++ added\n 4\n' > "$rd/packet/fix.patch"
   [ "$(aid_follow_up_added_lines "$rd/packet/fix.patch")" = "x.py:4" ]
-  jq -n '{findings: [{match: "old", severity: "major", status: "open", evidence: "x.py:9"}]}' > "$rd/packet/open-findings.json"
+  printf 'a\nb\n' > "$g/v.py"; git -C "$g" add -A; git -C "$g" -c user.email=t@t -c user.name=t commit -qm v
+  jq -n --arg h "$(git -C "$g" rev-parse HEAD)" '{mode: "confirmation", head_sha: $h}' > "$rd/round.json"
+  jq -n '{findings: [{match: "old", severity: "major", status: "open", evidence: "v.py:1", rule: "r-open"}]}' > "$rd/packet/open-findings.json"
   local sha; sha="$(git -C "$g" rev-parse HEAD)"
   jq -n --arg s "$sha" '{findings: [
     {claim: "outside", severity: "minor", status: "open", evidence: "x.py:2; x.py:4"},
@@ -1184,10 +1188,12 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
     {claim: "absent", severity: "minor", status: "open", evidence: "absent:z.md"},
     {claim: "a blocker", severity: "blocker", status: "open", evidence: "x.py:2"},
     {claim: "criteria", severity: "minor", status: "open", evidence: "x.py:3", reported_by: ["final_criteria"]},
-    {claim: "still open", severity: "minor", status: "open", evidence: "x.py:9", match: "old"}]}' > "$rd/merged.json"
+    {claim: "still open", severity: "minor", status: "open", evidence: "v.py:1", match: "old"},
+    {claim: "same rule reworded", severity: "minor", status: "open", evidence: "x.py:6", rule: "r-open"},
+    {claim: "same file reworded", severity: "minor", status: "open", evidence: "v.py:2"}]}' > "$rd/merged.json"
   [ "$(aid_follow_up_mark "$rd" "$run" "$g")" -eq 1 ]
   [ "$(jq -c '[.findings[] | select(.status == "follow_up") | .claim]' "$rd/merged.json")" = '["outside"]' ]
-  [ "$(jq '.findings | length' "$rd/merged.json")" -eq 13 ]
+  [ "$(jq '.findings | length' "$rd/merged.json")" -eq 15 ]
   [ "$(grep -c '' "$run/../follow-ups.jsonl")" -eq 1 ]
   # without a fix.patch (confirmation_fallback) nothing is a follow-up
   rm "$rd/packet/fix.patch"; jq '.findings[0].status = "open"' "$rd/merged.json" > "$rd/m.t" && mv "$rd/m.t" "$rd/merged.json"
@@ -2302,6 +2308,7 @@ _dep() {
   run _F accept-risk --round 1 --finding-card "$card" --reason "PM: zavřít s tímto rizikem, oprava v dalším plánu"
   echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq -r '.findings[0].resolution' "$(FD 1)/merged.json")" = accepted_risk ]
+  [ ! -s "$R/.aid-o/work/evidence/P901/pm-decisions.jsonl" ]   # a risk stays bound to its candidate: never carried (P117 (14))
 }
 
 # ── 3.12.0: a decision holds for the thing, in later rounds and attempts ──────────
@@ -2341,7 +2348,11 @@ _pm_card() {  # <fingerprint> — a rendered card quoting it, answered by the PM
   [ "$(jq -r '.findings[0].settled_by != null' "$(FD 1)/merged.json")" = true ]
   # decide's check holds it; an edited card does not
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-decision-ledger.sh'; aid_decision_ledger_verify '$E'"; [ "$status" -eq 0 ]
-  echo extra >> "$ROOT/card.md"
+  # a later card written to the same path does not unmake it (the card is kept in the evidence) …
+  echo "another card" > "$ROOT/card.md"
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-decision-ledger.sh'; aid_decision_ledger_verify '$E'"; [ "$status" -eq 0 ]
+  # … an edited kept copy does
+  echo extra >> "$(jq -r .ref "$L")"
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-decision-ledger.sh'; aid_decision_ledger_verify '$E'"; [ "$status" -eq 1 ]; [[ "$output" == *"changed after it was given"* ]]
 }
 
@@ -2378,6 +2389,17 @@ _pm_card() {  # <fingerprint> — a rendered card quoting it, answered by the PM
   [ "$(jq -r '.findings[1] | "\(.dispute.pm == null) \(.dispute.delegated.settled_by)"' "$M")" = "true d2" ]
 }
 
+@test "decisions: only decisions in force reach the reviewer; a NO revokes by citation only on the brief" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-decision-ledger.sh"
+  L="$BATS_TEST_TMPDIR/l.jsonl"
+  printf '%s\n' '{"id":"d1","source":"pm","match":"m-1","severity":"major","first_citation":"src/a.py:1","words":"PM yes","at":"2026-10-25T10:00:00Z","ref":"c"}' \
+                '{"id":"d2","source":"pm","match":"m-2","severity":"major","first_citation":"src/a.py:1","words":"PM yes 2","at":"2026-10-25T10:00:00Z","ref":"c"}' \
+                '{"id":"d3","source":"pm","match":"m-3","severity":"minor","first_citation":"zadani.md:7","words":"PM yes 3","at":"2026-10-25T10:00:00Z","ref":"c"}' \
+                '{"id":"r-1","source":"pm","revokes":"m-1","revokes_first_citation":"src/a.py:1","at":"2026-10-25T11:00:00Z","words":"teď je to vada"}' \
+                '{"id":"r-2","source":"pm","revokes":"m-9","revokes_first_citation":"zadani.md:7","at":"2026-10-25T11:00:00Z","words":"bod zadání platí"}' > "$L"
+  [ "$(aid_decision_ledger_live "$L" | jq -r .id | paste -sd ' ')" = "d2" ]
+}
+
 @test "decisions: decide refuses a hand-written line — a card the PM answered NO on, or a JSON file posing as the delegate's verdict" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
   _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_MAJOR"
@@ -2410,7 +2432,7 @@ _pm_card() {  # <fingerprint> — a rendered card quoting it, answered by the PM
   jq -n --arg d ".aid-o/work/evidence/P901/R-P901-final-1" '{previous_run_dir: $d, class: "delivery", docs_only: false, invalidated_feeds: ["diff"], reason: null}' > "$E/fix-class.json"
   _fsc; _F prepare --round 1 >/dev/null
   _fanswer 1 final_criteria
-  _fanswer 1 final_generalist '.findings = [{id: "g1", checkpoint: "cp7", step: null, severity: "minor", claim: "an old helper name is unclear in an untouched place", command: "grep -n 1 src/app.py", evidence: "src/app.py:3", fix: "rename", rule: "names say what they do"}] | del(.no_findings_reason)'
+  _fanswer 1 final_generalist '.findings = [{id: "g1", checkpoint: "cp7", step: null, severity: "minor", claim: "an old helper name is unclear in an untouched place", command: "grep -n New CHANGELOG.md", evidence: "CHANGELOG.md:1", fix: "rename", rule: "names say what they do"}] | del(.no_findings_reason)'
   _F collect --round 1 >/dev/null
   run _F close --round 1 --tokens final_criteria=5 final_generalist=5; echo "$output"
   [ "$(jq -r .verdict "$(FD 1)/measurement.json")" = pass ]

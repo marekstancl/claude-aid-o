@@ -159,3 +159,10 @@ Verze 3 – zapracováno 11 nálezů první revize zadání a 3 druhé (Claude a
   neuzavřeným kolem neprojde. Kontrola postupu v kolech 2+ (`ROUND >= 2`) u CP7 nenastane (kolo 2 CP7 se
   odmítá, protože oprava mění kandidáta), proto bez testu s follow_upem.
 - Oprava během kroku 3: nález s citací `absent:` jq tiše vypustil (prázdný capture) - opraveno, hlídá test.
+- Kontrola celku (Claude s čistým kontextem, Codex limit): opraveno 1 (přeformulovaný otevřený nález - stejný
+  soubor první citace nebo stejné pravidlo zůstává otevřený), 2 (balík revize jen s platnými rozhodnutími),
+  3 (karta PM se kopíruje do `evidence/<plán>/decision-cards/`), 4 (jeden výpočet živých follow-upů pro decide
+  i stránku), 5 (odvolání podle citace jen u `zadani.md:`), 6 (řádek odmítnutí), 7 (cesty s mezerou); testy
+  doplněné (stránka uzávěru, accept-risk se nepřenáší, platná rozhodnutí). Neopraveno: test, že follow_up
+  nepatří do množiny přijatých rizik - množina vyjmenovává stavy open/disputed/form_invalid výslovně;
+  „zahodit settled_by, které verify odmítne“ - po kopii karty už přepsání cesty nenastane.

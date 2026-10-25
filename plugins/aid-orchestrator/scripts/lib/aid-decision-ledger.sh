@@ -7,6 +7,7 @@
 #   aid_decision_ledger_append <run dir> <round dir> <fingerprint> <source pm|delegate> <words> <card|verdict file>
 #   aid_decision_ledger_revoke <run dir> <round dir> <fingerprint> <words> <card|verdict> [pm|delegate]
 #                                                                     a later NO (--pm rejected, the delegate's rejected/fix)
+#   aid_decision_ledger_live <ledger>                         the decisions still in force (settle and the review packet)
 #   aid_decision_ledger_settle <merged.json> <ledger>        rewrites merged.json; prints how many it settled
 #   aid_decision_ledger_verify <run dir>                     0, or 1 with the first reason on stdout
 #
@@ -24,12 +25,25 @@
 # A settled finding carries `settled_by: <decision id>`. decide checks each settlement against this file AND against
 # the plan's own rounds: the decision's finding exists in a cp7 round of the plan with the same answer, card or
 # verdict, match, severity and first citation; the card (or verdict) is unchanged; a card quotes the finding; a
-# verdict is the delegate's file for that finding, technical, accepted or dismiss. A line written by hand passes none.
+# verdict is the delegate's file for that finding (a PM card is copied to evidence/<plan>/decision-cards/ when the
+# answer is recorded, so a later card written to the same path cannot unmake it), technical, accepted or dismiss. A line written by hand passes none.
 # An accepted RISK (`accept-risk`) is not here: it stays bound to its candidate (P117 (14)).
 # NO top-level `set -e` — sourced under the caller's own strict shell.
 # =============================================================================
 [[ -n "${_AID_DECISION_LEDGER_SH_LOADED:-}" ]] && return 0
 _AID_DECISION_LEDGER_SH_LOADED=1
+
+# the last entry per match wins: a later revocation of the same match — or, for the brief, of the same zadani.md line —
+# cancels the decision. One definition, read by settle and by the review packet.
+AID_DECISION_LIVE_JQ='def live($all): . as $e
+  | ([$all[] | select(.revokes != null) | {k: .revokes, c: (.revokes_first_citation // ""), at: .at}
+      | select((.k == $e.match or (.c != "" and (.c | startswith("zadani.md:")) and .c == $e.first_citation)) and .at >= $e.at)]
+     | length) == 0;'
+# aid_decision_ledger_live <ledger> — the decisions still in force, one JSON line each
+aid_decision_ledger_live() {
+  [[ -s "$1" ]] || return 0
+  jq -c -s "${AID_DECISION_LIVE_JQ}"' . as $d | .[] | select(.revokes == null) | select(live($d))' "$1"
+}
 
 aid_decision_ledger_path() { printf '%s/pm-decisions.jsonl' "$(dirname "$1")"; }
 
@@ -39,15 +53,21 @@ aid_decision_ledger_append() {
   finding="$(jq -c --arg f "$fp" 'first(.findings[] | select(.fingerprint == $f)) // empty' "${rd}/merged.json" 2>/dev/null)"
   [[ -n "$finding" ]] || { echo "decision ledger: no finding ${fp} in ${rd}/merged.json" >&2; return 1; }
   [[ -f "$ref" ]] || { echo "decision ledger: no ${src} record ${ref}" >&2; return 1; }
+  local card_was=""
+  if [[ "$src" == pm ]]; then
+    # the PM's card is kept in the evidence: a later card written to the same path must not unmake the decision
+    card_was="$ref"; mkdir -p "$(dirname "$ledger")/decision-cards" || return 1
+    ref="$(realpath -m "$(dirname "$ledger")")/decision-cards/$(date -u +%Y%m%dT%H%M%S)-${fp:7:16}.md"; cp "$card_was" "$ref" || return 1
+  fi
   first="$(jq -r '(.evidence // "") | split(";")[0] | gsub("^\\s+|\\s+$"; "")' <<< "$finding")"
   n=0; [[ -f "$ledger" ]] && n="$(grep -c '' "$ledger")"
   jq -nc --arg id "d$((n + 1))-${fp:7:12}" --arg plan "$(basename "$(dirname "$run")")" --arg src "$src" \
      --arg w "$words" --arg ref "$ref" --arg rs "$(sha256sum "$ref" | cut -d' ' -f1)" --argjson f "$finding" \
      --arg first "$first" --arg run "$(basename "$run")" --arg round "$(basename "$rd")" \
-     --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg cw "$card_was" \
     '{id: $id, plan: $plan, source: $src, at: $at, words: $w, ref: $ref, ref_sha256: $rs, run: $run, round: $round,
       fingerprint: $f.fingerprint, match: $f.match, severity: $f.severity, rule: ($f.rule // null), claim: $f.claim,
-      first_citation: $first}' >> "$ledger"
+      first_citation: $first} + (if $cw == "" then {} else {card: $cw} end)' >> "$ledger"
 }
 
 aid_decision_ledger_revoke() {
@@ -72,9 +92,7 @@ aid_decision_ledger_settle() {
     def rank: {"blocker": 3, "major": 2, "minor": 1}[.] // 0;
     def first_cit: ((.evidence // "") | split(";")[0] | gsub("^\\s+|\\s+$"; ""));
     # the last entry per match wins: a later revocation cancels the decision
-    ([$d[] | select(.revokes != null) | {k: .revokes, c: (.revokes_first_citation // ""), at: .at}]) as $rev
-    | def live: . as $e | ([$rev[] | select((.k == $e.match or (.c != "" and .c == $e.first_citation)) and .at >= $e.at)] | length) == 0;
-    [$d[] | select(.revokes == null) | select(live)] as $dec
+    '"${AID_DECISION_LIVE_JQ}"' [$d[] | select(.revokes == null) | select(live($d))] as $dec
     | .findings |= map(
       if (.status | IN("open", "form_invalid")) and (.settled_by == null) and (.dispute.pm == null)
          and (.dispute.delegated == null) and (.delegated == null) then
@@ -119,7 +137,7 @@ aid_decision_ledger_verify() {
         [.[].findings[]? | select(.fingerprint == $e.fingerprint and .match == $e.match
            and (.settled_by // .dispute.pm.settled_by // .dispute.delegated.settled_by) == null
            and .severity == $e.severity and first_cit == $e.first_citation)
-         | select(if $e.source == "pm" then (.dispute.pm.answer == "accepted" and .dispute.pm.card == $e.ref)
+         | select(if $e.source == "pm" then (.dispute.pm.answer == "accepted" and (.dispute.pm.card | IN($e.card, $e.ref)))
                   else (((.delegated // .dispute.delegated) // {}) | .verdict_file == $e.ref and .verdict_sha256 == $e.ref_sha256) end)]
         | length')"
       [[ "${orig:-0}" -ge 1 ]] || { echo "decision ${sb} names a finding that no cp7 round of the plan decided that way"; return 1; }

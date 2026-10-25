@@ -5404,11 +5404,9 @@ _pfsm_finalize_decide() {
   echo "READY: ${plan_id} at ${candidate:0:12} — gates green, the whole-plan round closed, obligations settled. PM page: ${run_dir_rel}/pm-summary.md. ${plan_id} is AWAITING_PM: show the PM the MERGE | FIX | ABORT card; MERGE runs plan-merge-to-main." >&2
   # 3.12.0: what the confirmation rounds left for after the close goes to the project's backlog
   local _fu="${run_dir_abs%/*}/follow-ups.jsonl"
-  # a follow-up the last round of this attempt reports again as anything else (fixed, open) is not owed any more
-  local _fun=0 _lr; _lr="$(ls -d "${run_dir_abs}"/cp7/round-* 2>/dev/null | sort -V | tail -1)"
-  [[ -s "$_fu" ]] && _fun="$(grep -c '' "$_fu")"
-  [[ -s "$_fu" && -f "${_lr}/merged.json" ]] && _fun="$(jq -s --slurpfile m "${_lr}/merged.json" \
-    '[$m[0].findings[] | select(.status != "follow_up") | .match] as $gone | [.[] | select(.match | IN($gone[]) | not)] | length' "$_fu")"
+  # what a later round reported as anything else (fixed, open) is not owed any more — the same count as the close page
+  declare -F aid_follow_up_live >/dev/null || source "${SCRIPT_DIR}/lib/aid-follow-up.sh"
+  local _fun; _fun="$(aid_follow_up_live "${run_dir_abs%/*}" | grep -c '' || true)"
   (( _fun > 0 )) && echo "FOLLOW-UPS: ${_fun} finding(s) a confirmation round left for after the close (${_fu#"${root}/"}) — write each into the project's backlog and name the count in the close message." >&2
   return 0
 }

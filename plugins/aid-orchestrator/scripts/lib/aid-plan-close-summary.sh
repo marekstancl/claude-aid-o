@@ -180,17 +180,20 @@ _apcs_settled_count() {
 }
 # _apcs_follow_up_lines <plan_id> — 3.12.0: what a confirmation round left for after the close (follow-ups.jsonl),
 # the count and one line each; the controller writes them into the project's backlog
+# shellcheck source=aid-follow-up.sh
+declare -F aid_follow_up_live >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/aid-follow-up.sh"
 _apcs_follow_up_lines() {
   local root f; root="$(aid_state_root 2>/dev/null || pwd)"; f="${root}/.aid-o/work/evidence/${1}/follow-ups.jsonl"
   local settled; settled="$(_apcs_settled_count "$1")"
   [[ "${settled:-0}" == 0 ]] || printf 'Uzavřeno dřívějším rozhodnutím (bez nové otázky): %s nálezů\n' "$settled"
-  [[ -s "$f" ]] || return 0
-  printf 'K dořešení po uzávěru (do backlogu projektu): %s\n' "$(grep -c '' "$f")"
-  jq -r '"  - [\(.severity)] \(.claim | .[0:160]) (\(.first_citation))"' "$f" 2>/dev/null
+  local live; live="$(aid_follow_up_live "$(dirname "$f")")"
+  [[ -n "$live" ]] || return 0
+  printf 'K dořešení po uzávěru (do backlogu projektu): %s\n' "$(grep -c '' <<< "$live")"
+  jq -r '"  - [\(.severity)] \(.claim | .[0:160]) (\(.first_citation))"' <<< "$live" 2>/dev/null
 }
 _apcs_follow_up_inline() {
   local root f n s; root="$(aid_state_root 2>/dev/null || pwd)"; f="${root}/.aid-o/work/evidence/${1}/follow-ups.jsonl"
-  n=0; [[ -s "$f" ]] && n="$(grep -c '' "$f")"; s="$(_apcs_settled_count "$1")"
+  n="$(aid_follow_up_live "$(dirname "$f")" | grep -c '' || true)"; s="$(_apcs_settled_count "$1")"
   [[ "$n" == 0 ]] || printf '; k dořešení po uzávěru: %s' "$n"
   [[ "${s:-0}" == 0 ]] || printf '; uzavřeno dřívějším rozhodnutím: %s' "$s"
 }

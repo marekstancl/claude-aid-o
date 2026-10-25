@@ -229,7 +229,12 @@ aid_final_review_packet_build() {
   fi
   _aid_sr_foreign_final "$dir" "$run" || return 1
   # 3.12.0: what the PM (or the delegate) already decided in this plan — the reviewer is told before it reports
-  [[ -s "$(dirname "$run")/pm-decisions.jsonl" ]] && { cp "$(dirname "$run")/pm-decisions.jsonl" "$dir/pm-decisions.jsonl" || return 1; }
+  # only the decisions still in force: a revoked yes must not tell the reviewer to stay silent (3.12.0)
+  if [[ -s "$(dirname "$run")/pm-decisions.jsonl" ]]; then
+    declare -F aid_decision_ledger_live >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/aid-decision-ledger.sh"
+    aid_decision_ledger_live "$(dirname "$run")/pm-decisions.jsonl" > "$dir/pm-decisions.jsonl" || return 1
+    [[ -s "$dir/pm-decisions.jsonl" ]] || rm -f "$dir/pm-decisions.jsonl"
+  fi
   _aid_sr_packet_finish "$root" "$dir" "$prev"
 }
 

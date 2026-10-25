@@ -577,3 +577,18 @@ _ledger() {
   aid_plan_close_render "$BRIEF" "$DECISION" P080 "$OUT_DIR" >/dev/null
   grep -q 'delegovaná rozhodnutí: 1 — cp2 rozpor: claude → accepted — the reviewer read the live checkout' "$OUT_DIR/plan-close-artifact.html"
 }
+
+@test "3.12.0: the close page lists the follow-ups still owed (one a later round fixed is not) and the settled count, the same count decide prints" {
+  local d="$BATS_TEST_TMPDIR/proj"; mkdir -p "$d"; git -C "$d" init -q
+  local ev="$d/.aid-o/work/evidence/P9"; mkdir -p "$ev/R-P9-final-3/cp7/round-1"
+  printf '%s\n' '{"match":"m-a","severity":"minor","claim":"a stale name","first_citation":"x.py:2"}' \
+                '{"match":"m-b","severity":"minor","claim":"fixed later","first_citation":"y.py:3"}' > "$ev/follow-ups.jsonl"
+  jq -n '{findings: [{fingerprint: "f1", match: "m-b", status: "fixed"}, {fingerprint: "f2", match: "m-c", status: "fixed", settled_by: "d1"}]}' \
+    > "$ev/R-P9-final-3/cp7/round-1/merged.json"
+  run bash -c "cd '$d' && source '$AID_PLUGIN_PATH/scripts/lib/aid-plan-close-summary.sh' && _apcs_follow_up_lines P9 && _apcs_follow_up_inline P9"
+  echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" == *"K dořešení po uzávěru (do backlogu projektu): 1"* ]]
+  [[ "$output" == *"a stale name (x.py:2)"* ]]; [[ "$output" != *"fixed later"* ]]
+  [[ "$output" == *"Uzavřeno dřívějším rozhodnutím (bez nové otázky): 1 nálezů"* ]]
+  [[ "$output" == *"; k dořešení po uzávěru: 1"* ]]
+}
