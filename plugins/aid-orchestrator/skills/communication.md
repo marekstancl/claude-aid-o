@@ -62,7 +62,12 @@ Doporučení: A — <recommended action and consequence>.
 Důvod: <why that one, in terms the PM can check>.
 Alternativy: B — <meaningful alternative>; C — <stop/defer when relevant>.
 Riziko / co není ověřeno: <only material uncertainty>.
+Týká se: <the full fingerprints the answer settles, from the data's `quotes` list — only when it settles findings>.
 ```
+
+When the answer settles review findings (`dispute --pm accepted`, `accept-risk`), put every full fingerprint in the
+data's `quotes` list: the record of the answer checks the card for each one, and a card without them is asked
+twice (AID 3.12.0).
 
 This card is **built, not imitated**: `aid_decision_card_render <data.json>` in
 `scripts/lib/aid-decision-card.sh` assembles it from data and refuses data with fewer than two options, no recommendation or

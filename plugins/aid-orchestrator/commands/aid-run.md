@@ -484,7 +484,9 @@ agent type. A project keeps the old budget (two rounds, 1/50) in its own
    the claim is false) is disputed, never edited: `dispute <review> --round K
    --fingerprint <fp> --reason "<why>"` marks it `disputed` and it keeps
    blocking. Only the PM clears it: render a **Decision** card that quotes the
-   finding's fingerprint, wait for the answer, then
+   finding's fingerprint — put every full fingerprint the answer settles in the card data's `quotes` list
+   (`aid_decision_card_render` prints them on the card, so the PM's first answer is recorded; AID 3.12.0) — wait
+   for the answer, then
    `dispute … --pm accepted --finding-card <card file> --reason "<the PM's words>"`
    — refused without a PM prompt in the hook audit after the card. The round's
    verdict is recomputed; `--pm rejected` leaves it open. The same command

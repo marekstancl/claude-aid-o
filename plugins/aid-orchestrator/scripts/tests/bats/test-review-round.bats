@@ -2199,3 +2199,19 @@ _dep() {
   run "$ROUND_SH" prepare "$PLAN" --round 1
   [ "$status" -eq 1 ]; [[ "$output" == *"plan_not_ready"*"readiness fails"* ]]; [ ! -d "$CP1/round-1/packet" ]
 }
+
+@test "accept-risk (3.12.0): a card rendered with the candidate and the full fingerprint in its quotes passes on the first answer" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_BLOCKER"
+  _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null || true
+  local fp head card; fp="$(jq -r '.findings[0].fingerprint' "$(FD 1)/merged.json")"; head="$(git -C "$R" rev-parse HEAD)"; card="$ROOT/card.md"
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-decision-card.sh"
+  jq -n --arg h "${head:0:12}" --arg f "$fp" '{lang: "cs", question: "Uzavřít s otevřeným nálezem?",
+    options: [{key: "A", text: "zavřít a nález do backlogu", recommended: true, reason: "oprava v dalším plánu"}, {key: "B", text: "opravit"}],
+    quotes: [$h, $f]}' | aid_decision_card_render - "$card" >/dev/null
+  touch -d '-10 seconds' "$card"; export AID_HOOK_AUDIT="$ROOT/audit.jsonl"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
+  run _F accept-risk --round 1 --finding-card "$card" --reason "PM: zavřít s tímto rizikem, oprava v dalším plánu"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.findings[0].resolution' "$(FD 1)/merged.json")" = accepted_risk ]
+}

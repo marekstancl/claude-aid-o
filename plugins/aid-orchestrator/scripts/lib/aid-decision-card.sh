@@ -217,6 +217,12 @@ aid_decision_card_render() {
   card+="$(printf '\n%s: %s' "$(_aid_dc_label "$lang" alternatives)" "$alt_line")"
   (( dropped > 0 )) && card+="$(printf ' (+%d)' "$dropped")"
   [[ -n "$risk" ]] && card+="$(printf '\n%s: %s' "$(_aid_dc_label "$lang" risk)" "$risk")"
+  # `quotes`: what the answer settles, verbatim — the full fingerprints of findings, which the record of the PM's
+  # answer checks the card for (aid_pm_card_check); one line, `; ` between them (AID 3.12.0)
+  local quotes
+  quotes="$(printf '%s' "$data" | jq -r 'if (.quotes // null) == null then "" elif (.quotes | type) != "array" or any(.quotes[]; type != "string" or . == "" or test("[\n;]")) then "BAD" else .quotes | join("; ") end')"
+  [[ "$quotes" != BAD ]] || { echo "decision card: 'quotes' must be a list of non-empty one-line strings without ';' (the full fingerprints the answer settles)" >&2; return 1; }
+  [[ -n "$quotes" ]] && card+="$(printf '\n%s: %s' "$(_aid_dc_label "$lang" quotes)" "$quotes")"
 
   _aid_dc_emit "$card" "$out"
 }

@@ -200,3 +200,25 @@ JSONL
   run bash -c "printf '{}' | bash -c 'source \"$PLUGIN_ROOT/scripts/lib/aid-decision-card.sh\"; aid_hook_rule_decision_card'"
   [ "$status" -eq 3 ]
 }
+
+# ── AID 3.12.0: the card quotes what the answer settles ───────────────────────
+@test "quotes: the full fingerprints print on one line, and the PM check finds each one on the card" {
+  fp1="sha256:$(printf a%.0s {1..64})"; fp2="sha256:$(printf b%.0s {1..64})"
+  aid_decision_card_render "$(data "{\"lang\":\"cs\",\"question\":\"Uzavřít s výhradou?\",\"options\":[{\"key\":\"A\",\"text\":\"ano\",\"recommended\":true,\"reason\":\"r\"},{\"key\":\"B\",\"text\":\"ne\"}],\"quotes\":[\"$fp1\",\"$fp2\"]}")" "$TMP/card.md" >/dev/null
+  grep -qx "Týká se: ${fp1}; ${fp2}" "$TMP/card.md"
+  # the PM answered after the card (the hook audit's marker), so the check passes for each fingerprint on the first try
+  sleep 1; export AID_HOOK_AUDIT="$TMP/audit.jsonl"
+  printf '{"ts":"%s","event":"UserPromptSubmit","rule":"pm_reply_marker"}\n' "$(date -u -d '+5 sec' +%Y-%m-%dT%H:%M:%SZ)" > "$AID_HOOK_AUDIT"
+  run aid_pm_card_check "$TMP/card.md" "$fp1"; [ "$status" -eq 0 ]
+  run aid_pm_card_check "$TMP/card.md" "$fp2"; [ "$status" -eq 0 ]
+  run aid_pm_card_check "$TMP/card.md" "sha256:$(printf c%.0s {1..64})"; [ "$status" -ne 0 ]
+}
+
+@test "quotes: a list that is not one-line strings is refused, a card without quotes is unchanged" {
+  for q in '"x"' '[""]' '["a;b"]' '[1]'; do
+    run aid_decision_card_render "$(data "{\"lang\":\"en\",\"question\":\"Q?\",\"options\":[{\"key\":\"A\",\"text\":\"a\",\"recommended\":true,\"reason\":\"r\"},{\"key\":\"B\",\"text\":\"b\"}],\"quotes\":$q}")"
+    [ "$status" -ne 0 ] || { echo "accepted quotes: $q"; false; }
+  done
+  run aid_decision_card_render "$(data '{"lang":"en","question":"Q?","options":[{"key":"A","text":"a","recommended":true,"reason":"r"},{"key":"B","text":"b"}]}')"
+  [ "$status" -eq 0 ]; [[ "$output" != *"Concerns:"* ]]
+}

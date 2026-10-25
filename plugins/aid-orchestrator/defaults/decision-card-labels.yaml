@@ -21,7 +21,12 @@
 # refuses to end a turn on a half-done step (P087) can recognise an explicit
 # hand-over in the PM's language instead of hard-coding one.
 #
-# **Last Updated:** 2026-08-25
+# `quotes` names what the card is about, verbatim (AID 3.12.0): the full fingerprints of the findings a PM answer
+# settles. `dispute --pm accepted` and `accept-risk` check that the card quotes each one (aid_pm_card_check); before
+# the renderer printed them a controller had to paste them by hand, and a card without them was asked twice
+# (Trading P004, 25. 10. 2026).
+#
+# **Last Updated:** 2026-10-25
 # =============================================================================
 version: 1
 
@@ -34,6 +39,7 @@ languages:
     alternatives: "Alternativy"
     risk: "Riziko / co není ověřeno"
     batch: "Potřebuji od tebe pár rozhodnutí"
+    quotes: "Týká se"
     blocked: "Zastaveno"
   en:
     question: "I need your decision"
@@ -43,4 +49,5 @@ languages:
     alternatives: "Alternatives"
     risk: "Risk / what is unverified"
     batch: "I need a few decisions from you"
+    quotes: "Concerns"
     blocked: "Stopped"

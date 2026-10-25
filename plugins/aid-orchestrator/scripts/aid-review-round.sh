@@ -1480,7 +1480,8 @@ cmd_dispute() {
     || _die "no finding ${FINGERPRINT} in round ${ROUND}"
   if [[ "$MODE" == step && "$PM_ANSWER" == accepted ]]; then
     local why_not
-    why_not="$(aid_pm_card_check "$CARD" "$FINGERPRINT")" || _die "--pm accepted: ${why_not}"
+    why_not="$(aid_pm_card_check "$CARD" "$FINGERPRINT")" \
+      || _die "--pm accepted: ${why_not} — render the card with every full fingerprint in the data's \"quotes\" list (aid_decision_card_render prints them), then ask the PM once"
   fi
   local filter
   case "$PM_ANSWER" in
@@ -1838,7 +1839,9 @@ cmd_accept_risk() {
   local rows="[]" row
   while IFS= read -r f; do
     fp16="$(aid_delegate_fp16 "$(jq -r .fingerprint <<< "$f")")"
-    why="$(aid_pm_card_check "$CARD" "$fp16")" || _die "accept-risk: ${why}"
+    # the 16-character short form, or the full fingerprint as a card's `quotes` line prints it (3.12.0)
+    why="$(aid_pm_card_check "$CARD" "$fp16")" || aid_pm_card_check "$CARD" "$(jq -r .fingerprint <<< "$f")" >/dev/null \
+      || _die "accept-risk: ${why} — render the card with the candidate and every finding's full fingerprint in the data's \"quotes\" list"
     row="$(jq -nc --arg fp "$(jq -r .fingerprint <<< "$f")" --arg sev "$(jq -r .severity <<< "$f")" --arg s "$(_ar_finding_sha "$f")" '{fingerprint: $fp, severity: $sev, finding_sha256: $s}')"
     rows="$(jq -c --argjson r "$row" '. + [$r]' <<< "$rows")"
   done < <(jq -c '.[]' <<< "$set")
