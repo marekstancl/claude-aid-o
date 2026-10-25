@@ -48,6 +48,8 @@ so `web` has six scores. Without --place every command means `web`.
       its target must be the current bundle sha; a hand-made verdict is refused. Prints the verdict to record.
   bundle-files <project> --place <p>  /  bundle-sha <project> --place <p>
       The files a place's roles rate (PLACE_FILES) and their sha (the dirsha rule of aid-ui-motion.py over that list).
+      A web's struktura holds the served pure skeleton .aid-ui/skeleton/site/ too (IMP-700: a rebuild that changes a
+      page voids the verdict); an app's does not (its model is in the bundle, approving it changes the pages).
       A missing required input exits 1 naming it.
 """
 import glob, hashlib, json, os, re, statistics, sys, time
@@ -81,7 +83,9 @@ PLACE_FILES = {
     "logo": [(".aid-ui/logo/cards/*.png", True), ("docs/design/brand-brief.md", False), (".aid-ui/logo/audit.md", False),
              (".aid-ui/critic/competitors/logos/*", False)],
     "pohyb": [(".aid-ui/motion/*/logo-animace.html", True), (".aid-ui/motion/*/logo-motion.css", False)],
-    "struktura": [(".aid-ui/structure.json", True), (".aid-ui/skeleton/redirects.csv", False)],
+    # IMP-700: the served skeleton too (it is built from the facts register and the builder as well): a rebuild that
+    # changes a page voids the verdict; an app's skeleton is not here - its model is, and approving it changes the pages
+    "struktura": [(".aid-ui/structure.json", True), (".aid-ui/skeleton/redirects.csv", False), (".aid-ui/skeleton/site/**", False)],
     "vzhled": [(".aid-ui/directions/*/**", True)],
     "web": [("site/**", True)],
 }
