@@ -1,3 +1,5 @@
+> Archivováno 2026-10-25: dodáno jako AID 3.12.0. Náhrada: žádná.
+
 # AID 3.12.0 – uzávěr plánu konverguje a neptá se dvakrát
 
 PM 25. 10. 2026, volby 1A, 2A, 3A. Vývoj mimo AID (`/opt/eco/CLAUDE.md`), větev `feat/uzaver-konverguje`
