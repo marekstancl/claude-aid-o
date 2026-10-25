@@ -1193,6 +1193,8 @@ _fsm_refusal_next() {
       next="start the plan in plan_branch mode and run from its plan worktree: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}")" ;;
     plan_manifest_missing|plan_branch_mismatch)
       next="start the plan's run again through plan-run, which writes the manifest entry and runs init: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}" --restart --reason "<why>")" ;;
+    land_record_invalid)
+      next="take the step over again in the background — after a commit that followed the takeover: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-land.sh" "$sf" "${step:-N}") --recheck --check \"<AC#>:<command>\" …; after a failed one: fix the step as the record says, then the same command without --recheck — and: $inc" ;;
     contract_return_missing|contract_return_not_done)
       next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent; blocked again in an --auto run: the stand-in decides — $(_fsm_cmd bash "${SCRIPT_DIR}/aid-stand-in.sh" ask --evidence-dir "$(dirname "$sf")" --code contract_return_not_done --proposal "<{\"kind\": \"blocked_step\", \"step\": N, \"action\": \"redispatch\", \"return_sha256\": \"<sha256 of the step's return.json, or none>\", \"why\": …}>"), then $(_fsm_cmd bash "$fsm" step-redispatch "$sf" --stand-in "<auth.json>" --reason "<why>") and dispatch again (a rename or a widening is asked as its own kind); otherwise a Blocked card), then: $inc" ;;
     missing_step_verify|verify_no_ac_checklist|verify_no_memory_used|verify_no_memory_written|step_verify_not_pass|verify_no_commit_ref)
@@ -4875,6 +4877,17 @@ cmd_increment_step() {
           || _increment_fail contract_return_not_done \
             "PRECONDITION FAIL: step ${step}'s return is accepted but not finished — status $(jq -r .step_status "${_c_dir}/return.json" 2>/dev/null), failed gates: $(jq -r '[.gates[]? | select(.result == "fail") | .name] | join(", ")' "${_c_dir}/return.json" 2>/dev/null)." \
             "A blocked step, or one with a failing gate, does not advance: resume the agent or hand over with a Blocked card."
+        # AID 3.11.0: a step taken over in the background (aid-step-land.sh) advances only on a record that
+        # proves THIS step at THIS HEAD with every command criterion passed — the verify file cannot outvote it
+        if [[ -f "${_c_dir}/land.json" ]]; then
+          source "${SCRIPT_DIR}/lib/aid-land-record.sh"
+          local _land_why
+          _land_why="$(aid_land_record_verify "${_c_dir}/land.json" "$state_file" "$_plan_json" "$step" \
+                        "${_c_dir}/contract.json" "${_c_dir}/return.json")" \
+            || _increment_fail land_record_invalid \
+              "PRECONDITION FAIL: step ${step} was taken over in the background and its record does not hold: ${_land_why}" \
+              "Record: ${_c_dir}/land.json (scripts/aid-step-land.sh)"
+        fi
       fi
     fi
 

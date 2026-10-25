@@ -297,6 +297,7 @@ gets its row then. `test-review-round-fsm.bats` fails when a measured reason in
 | `missing_step_verify`, `verify_no_ac_checklist`, `verify_no_memory_used`, `verify_no_memory_written`, `step_verify_not_pass`, `verify_no_commit_ref` | `step-N-verify.md` is missing or incomplete | work | write it (§4 Output verification), `increment-step` | |
 | `binding_wrong_commit`, `binding_plan_step_hash_mismatch`, `incomplete_step_binding` | the verify file's binding does not name this step at HEAD | state | rewrite the binding after the step commit (`reviewed_commit` = HEAD, `plan_step_hash` from the live `plan.json`), `increment-step` | |
 | `contract_return_rejected` | the agent's return does not match its contract | work | re-dispatch the step with its packet, record the new return, `increment-step` | |
+| `land_record_invalid` | the step's background takeover record (`land.json`) is missing a command criterion, failed, is still running or does not match HEAD | work | `aid-step-land.sh <state> <N> --check …` again (`--recheck` after a commit that followed it), `increment-step` | |
 | `contract_return_missing`, `contract_return_not_done` | no return recorded, or the agent reported blocked / a failing gate | work | extract the return; a blocked step is resumed or handed over with a Blocked card | PM, when blocked |
 | `review_round_missing` | the step (or the close) has no review round | state | `aid-step-check.sh --checkpoint <cp> …` (it decides skip or review; cp7: `plan-finalize --stage produce`) | |
 | `round_not_closed` | a round was prepared and never closed | state | answers not collected yet: dispatch the reviewers, then `aid-review-round.sh collect … --round <n>`; collected: `close … --round <n>` | |
@@ -818,6 +819,32 @@ verify file, `increment-step` — or hand over explicitly with a Decision card o
 (`skills/communication.md`). A `Write`/`Edit` outside every open step's paths is named by
 `turn_write_scope` as context before it lands; it does not block, the validation above does.
 
+**Taking a step over in the background (AID 3.11.0, the default).** The mechanical half of what follows —
+validate the return, commit, (in a wave) merge, run the step's command criteria, the plan's measurer — is one
+script the controller starts with Bash `run_in_background: true`, ending its turn `AID-WAIT: převzetí kroku N`:
+
+```bash
+bash "$AID_PLUGIN_PATH/scripts/aid-step-land.sh" "$state_file" "$N" \
+  --check "1:<the command AC1 begins with, verbatim>" --check "3:<…>" [--env NAME=value …]
+```
+
+Every acceptance criterion whose text BEGINS with a backticked command gets one `--check` with exactly that
+command; what the project's tests need from the environment goes in `--env`, never into the command. A wave's
+merge is built in the step's own tree off the plan's branch, and the branch is fast-forwarded only when every
+check passed and nothing else moved it — a failure leaves the plan untouched and the step's tree back on
+`step/<id>`. The script fixes nothing. Meanwhile the controller accepts other returns (read-only), prepares and
+dispatches later steps and runs review rounds; the next takeover waits for this step's `increment-step` (steps
+are taken over in order). On the notification it reads `steps/<id>/land.json`:
+`landed` → `step-N-verify.md` (command criteria cited from the record, the others judged as below), the step
+check, CP2, `increment-step` (which reuses the measurer's result); `return_rejected` / `check_failed` → the
+step's role fixes it; `merge_conflict` → `aid_parallel_step_reset` and dispatch again; `base_moved` → take it
+over again. A review fixer's commit moves HEAD: `aid-step-land.sh … --recheck` reruns the same checks on it.
+`increment-step` refuses a step whose record does not hold (`land_record_invalid`). The manual path below stays
+valid for a step without a record. `<N>` is `current_step` (0-based: the plan's step N+1). After `--recheck` rewrite
+the binding of `step-N-verify.md` (`reviewed_commit` = the new HEAD). A refusal "another takeover … is running" is
+the script's own output — the `land.json` then belongs to the takeover still running. A takeover stopped by a
+signal writes `interrupted` and puts the step's tree back; one killed with -9 is repaired by the next takeover.
+
 **Per-step commit (controller, after an accepted return):**
 ```bash
 aid_dispatch_contract_commit "$tree_root" "$step_dir/contract.json" "$step_dir/return.json" \
@@ -999,7 +1026,8 @@ step dispatched as a slot frees):
    → its own tree on `step/<step_id>` at the current base (`dispatch.worktree_base`, default
    `.aid-worktrees`; a branch left by an earlier run is reset, never reused). Build its
    contract (§4 step 4) and dispatch it there — one message, several `Agent()` calls.
-2. As each agent returns — **one at a time, in arrival order** — validate the return
+2. As each agent returns — **one at a time** — take it over in the background (`aid-step-land.sh`, above; in step
+   order, it refuses another step than `current_step`), or by hand in arrival order: validate the return
    (§4 Output verification), commit it in the step's worktree (`aid_dispatch_contract_commit`),
    write its `step-{N}-verify.md`, then `aid_parallel_merge "$tree_root" "step/<step_id>" "$worktree_base"`.
 3. A clean merge prints the SHA; the step's tree is removed when git agrees it is clean

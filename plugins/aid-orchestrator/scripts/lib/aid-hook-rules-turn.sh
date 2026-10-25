@@ -169,9 +169,18 @@ aid_hook_rule_turn_step_open() {
       echo "step ${idx} (${sid}) of ${epic} is open, but the turn hands over explicitly with a card" >&2
       return 3
     fi
+    # AID 3.11.0: the step is being taken over in the background (aid-step-land.sh) or its agent still works —
+    # a declared wait on a call nobody has answered yet ends the turn; the notification starts the next one
+    if [[ "$(printf '%s' "$last" | grep -v '^[[:space:]]*$' | tail -1)" == AID-WAIT:* ]]; then
+      declare -F _aid_qc_bg_pending >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/aid-auto-continuation.sh"
+      if _aid_qc_bg_pending "$transcript"; then
+        echo "step ${idx} (${sid}) of ${epic} is open; the turn waits on a background call (AID-WAIT)" >&2
+        return 3
+      fi
+    fi
   fi
 
-  echo "step ${idx} (${sid}) of ${epic}/${run} was dispatched under a contract and the run has not advanced past it. Finish it before the turn ends: extract and validate the agent's aid-return (lib/aid-dispatch-contract.sh), commit the accepted return, write step-${idx}-verify.md and run aid-fsm.sh increment-step — or hand over explicitly with a Decision card or a Blocked card, rendered by aid_decision_card_render (scripts/lib/aid-decision-card.sh), never written by hand." >&2
+  echo "step ${idx} (${sid}) of ${epic}/${run} was dispatched under a contract and the run has not advanced past it. Finish it before the turn ends: take it over in the background (scripts/aid-step-land.sh, run_in_background, then end with \`AID-WAIT: převzetí kroku ${idx}\`) or by hand (validate the aid-return, commit), write step-${idx}-verify.md and run aid-fsm.sh increment-step — or hand over explicitly with a Decision card or a Blocked card, rendered by aid_decision_card_render (scripts/lib/aid-decision-card.sh), never written by hand." >&2
   return 2
 }
 

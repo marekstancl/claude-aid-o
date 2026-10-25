@@ -72,6 +72,36 @@ _write_event() { jq -n --arg c "$ROOT" --arg p "$1" --arg tool "${2:-Write}" '{s
   [ "$status" -eq 2 ]
 }
 
+# ── AID 3.11.0: a step taken over in the background ─────────────────────────
+_bg_call() {  # <id> — a Bash call started in the background (the takeover)
+  jq -nc --arg id "$1" '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Bash",input:{command:"aid-step-land.sh …",run_in_background:true}}]}}' >> "$TRANSCRIPT"
+}
+_answered() { printf '{"type":"user","message":{"content":"<task-notification><tool-use-id>%s</tool-use-id></task-notification>"}}\n' "$1" >> "$TRANSCRIPT"; }
+
+@test "turn: an open step + AID-WAIT + a live background call (the takeover) — the turn may end" {
+  _bg_call toolu_land; _say "AID-WAIT: převzetí kroku 0"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"
+  [ "$status" -eq 3 ]; [[ "$output" == *"waits on a background call"* ]]
+}
+
+@test "turn: the takeover answered (its notification in the transcript) — AID-WAIT no longer ends the turn" {
+  _bg_call toolu_land; _answered toolu_land; _say "AID-WAIT: převzetí kroku 0"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"
+  [ "$status" -eq 2 ]
+}
+
+@test "turn: AID-WAIT with nothing running is refused" {
+  _say "AID-WAIT: nic neběží"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"
+  [ "$status" -eq 2 ]
+}
+
+@test "turn: a live background call without AID-WAIT is refused, and the refusal names the background takeover" {
+  _bg_call toolu_land; _say "Převzetí běží."
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"
+  [ "$status" -eq 2 ]; [[ "$output" == *"aid-step-land.sh"* && "$output" == *"AID-WAIT"* ]]
+}
+
 @test "turn: another session's open step is not this turn's — only a transcript that dispatched it holds the turn" {
   # the other session's step, written after this session started: reading its
   # contract (its version) is not dispatching it

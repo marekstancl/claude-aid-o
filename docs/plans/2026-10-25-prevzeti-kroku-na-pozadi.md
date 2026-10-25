@@ -96,12 +96,14 @@ kontrolér krok vrátí k opravě; krok se neposune (`increment-step` odmítne).
   záznamu `landed` téhož kroku [R7].
 
 **Záznam `steps/<step>/land.json`** [R7, R13]: zapsaný atomicky (dočasný soubor + `mv`), pevné schéma
-`version: 1` s `plan_id`, `run_id`, `step_index`, `step_id`, `contract_sha256`, `return_sha256`,
+`version: 1` s `epic_id` (identifikátor běhu plánu, např. `E-115-1_1`; dřív v zadání `plan_id`), `run_id`, `step_index`, `step_id`, `contract_sha256`, `return_sha256`,
 `path` (`wave`/`serial`), `step_sha`, `base_sha`, `landed_sha`, `checks[]` (`ac`, `command`, `exit`,
 `duration_s`, `timed_out`, `output_tail` = posledních 4 000 bajtů s redakcí tajemství stejnou funkcí
 jako souhrn bran (`aid_gate_outcome_redact`, `lib/aid-gate-outcome-summary.sh`), `log` = cesta k plnému logu v evidenci, i ten projde redakcí před zápisem a do gitu nejde –
 evidence `.aid-o/work` je mimo verzování), `status`
-(`landed`/`return_rejected`/`merge_conflict`/`check_failed`/`base_moved`/`precondition_failed`),
+(`landed`/`return_rejected`/`merge_conflict`/`check_failed`/`base_moved`/`precondition_failed`/`interrupted` –
+zastavení signálem nebo chybou: `trap` ukončí skupinu procesů kontroly, vrátí strom kroku a zapíše stav; po `kill -9`
+strom opraví další převzetí, zámek zanikne s procesem a kontroly ho nedědí),
 `reason`, `at`. Plný log patří do evidence, ne do gitu.
 
 **Zámek** [R6]: `aid_lock_acquire` (`lib/aid-lock.sh`, flock na postranním souboru
@@ -129,6 +131,20 @@ s výzvou. Když `turn_step_open` dnes živou úlohu převzetí nezná, naučí 
 na pozadí platí dál: nové ověření návratu proti kontraktu, vazba kroku (5 polí, `AID_STEP_BINDING`
 strict i legacy), vizuální ukotvení u frontendových kroků, kolo CP2 (`cp2/step-N/rounds.json`),
 idempotentní token a opakované volání (`already_applied`), krok bez commitu.
+
+**Stav (krok 3, 25. 10.):** postaveno – `scripts/aid-step-land.sh`, `lib/aid-land-record.sh` (volá
+`increment-step`, odmítnutí `land_record_invalid`), `turn_step_open` pouští `AID-WAIT` na živé volání na pozadí,
+dokumentace `pipeline.md`, `aid-run.md` (16d), registry. Navíc proti verzi 3 (z revizí, 5 kol: Claude zástup
+a Codex): převzetí měří i body zadání (`aid-plan-diff.sh --step N` nad sloučeným HEAD, `increment-step` výsledek
+znovu použije); výstup kontrol jde do souboru (proces nechaný testem na pozadí nedrží rouru); procesy kontroly se
+poznají podle tokenu `AID_LAND_TOKEN` v prostředí a po skončení kontroly i při úklidu se ukončí (TERM, pak KILL);
+kontrola, která projde, ale změní sledované soubory nebo commitne, neprošla; před `landed` se ověří HEAD a čistý
+strom; neúspěšný `--recheck` jde pustit znovu; odmítnuté převzetí (zámek, předpoklad) záznam nepřepíše.
+Testy: `test-step-land.bats` (29), `test-hook-rules-turn.bats` (+4 verdikty).
+
+**Stav (krok 4, 25. 10.):** mod `aid-progress` 0.8.0 – řádek `↳` (sbaleně za aktuálním krokem, blok zůstává na
+3 řádcích; rozbaleně pod kroky); „žije“ = pod číslem procesu běží `aid-step-land.sh` s indexem tohoto kroku
+(číslo procesu po pádu může dostat jiný proces). Revize: Claude zástup + Codex.
 
 ### Z2 – Argumenty bez hodnoty [R11]
 

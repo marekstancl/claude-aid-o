@@ -3404,6 +3404,20 @@ enforcements:
     not_guaranteed: "That the agent did the RIGHT thing inside the allowed paths — the contract proves receipt, scope and artifacts, not correctness; CP2 and the gates own that. The disk check has no baseline: a tree that was already dirty before dispatch is a rejection naming those files, not a pass — a step is dispatched from a clean tree (the FSM's dirty-tree guards, the per-step worktrees), and the reason says so. A step that declares no paths owes no contract (a plan decision), so a pure-analysis step is verified by its step-verify file alone."
     recovery: "Re-dispatch the step with the current packet; the report names every missing artifact, undeclared change and out-of-scope path."
     test: "scripts/tests/bats/test-dispatch-contract.bats + scripts/tests/bats/test-parallel-evidence.bats"
+  - id: step_takeover_record
+    type: 1
+    source: "scripts/aid-step-land.sh + scripts/lib/aid-land-record.sh (aid_land_record_verify) + scripts/aid-fsm.sh (cmd_increment_step, land_record_invalid)"
+    instruction: "skills/pipeline.md (§4 Output verification — taking a step over in the background) + commands/aid-run.md (rule 16d)"
+    severity: blocking
+    surface: internal-guard
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    enforcement_degree: 2
+    description: "AID 3.11.0 — the mechanical half of taking a step over (validate the return, commit, merge, run the step's command criteria, the plan's measurer) runs in the background in aid-step-land.sh; a wave's merge is built off the plan's branch and fast-forwarded only after every check passed. The script fixes nothing (no amend-scope, amend-contract, rename, retry). Every acceptance criterion whose text begins with a backticked command must be checked with exactly that command. increment-step refuses a step whose land.json is missing a command criterion, failed, still running, foreign, stale against HEAD, or whose merge is not the one git computes for its parents."
+    not_guaranteed: "That the controller takes a step over through the script at all — a step without land.json advances on the manual path as before (the record is proof when it exists, not an obligation); and the judgement criteria (review findings, visual checks) stay the controller's verify file."
+    recovery: "aid-step-land.sh <state> <N> --check … again; after a commit that followed the takeover (a review fixer) --recheck."
+    test: "scripts/tests/bats/test-step-land.bats + scripts/tests/bats/test-hook-rules-turn.bats"
   - id: parallel_step_commit
     type: 1
     source: "scripts/lib/aid-dispatch-contract.sh (aid_dispatch_contract_commit) + scripts/aid-fsm.sh (cmd_step_evidence_dir)"
