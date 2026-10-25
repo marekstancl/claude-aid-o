@@ -2,12 +2,14 @@ role: tech
 place: sdeleni
 gates:
   - criterion: presnost_podlozenost
+    required: true
     min: 7
     why: "Tvrzení bez zdroje nebo hypotéza jako fakt je podle copy-rules blokující; klient fakta neschvaluje, takže chybu musí zachytit odborník."
   - criterion: ostrost_positioningu
     min: 7
     why: "Zaměnitelný positioning má strop 6, takže ho brána spolehlivě zastaví; zadání PM žádá jasný rozdíl proti konkurenci nebo stávajícímu postupu."
   - criterion: pojmy_konvence_oboru
+    required: true
     min: 6
     why: "Chybně použitý odborný pojem nebo slib, který obor nesmí dát, je věcná chyba a právní riziko (klamavá reklama); nevysvětlený termín je vážný nález."
   - criterion: slogany

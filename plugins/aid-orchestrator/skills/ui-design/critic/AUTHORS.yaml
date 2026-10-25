@@ -107,7 +107,8 @@ web-local.tech.sdeleni.gates.yaml:
   reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
   review_applied_by: author
   date: 2026-10-16
-  sha256: "45b294084287166e43cbdf7dae6454c7221232a82751b0595e660c4dff53f941"
+  amended: "3.10.1 (IMP-702, PM 17. 10. 2026): required: true on the gates over facts and law; reviewed by Codex"
+  sha256: "3146d360da4bce670ac42e90ceffa36cb8315ed243309d8a9de0cd7107e3b1a5"
 web-local.owner.sdeleni.gates.yaml:
   author: "dílna P113 (PM + cowork agent), from the rubric and the PM's blind tests"
   brief: "role-briefs/sdeleni-common.md"
@@ -115,7 +116,8 @@ web-local.owner.sdeleni.gates.yaml:
   reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
   review_applied_by: author
   date: 2026-10-16
-  sha256: "9f323a29a9caafe98dc151d6d88d63992c7f2b7984daf237e40a19a34fff9b57"
+  amended: "3.10.1 (IMP-702, PM 17. 10. 2026): required: true on the gates over facts and law; reviewed by Codex"
+  sha256: "5da04ddfa59ab94c16881bea4a8d7b7aa5cc3802a7798a395135e52abfcc9400"
 web-local.tech.logo.gates.yaml:
   author: "dílna P113 (PM + cowork agent), from the rubric and the PM's blind tests"
   brief: "role-briefs/logo-tech.md + role-briefs/logo-common.md"
@@ -155,7 +157,8 @@ web-local.tech.struktura.gates.yaml:
   reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
   review_applied_by: author
   date: 2026-10-16
-  sha256: "f0287dfe919aceb44f0b3281dd0634be5da86da670327e92d241dd64328feecc"
+  amended: "3.10.1 (IMP-702, PM 17. 10. 2026): required: true on the gates over facts and law; reviewed by Codex"
+  sha256: "eb0333f4a28b7bffe33279ae91f3a633c7dc8e31038869849a46b1f6959e3a95"
 web-local.owner.struktura.gates.yaml:
   author: "dílna P113 (PM + cowork agent), from the rubric and the PM's blind tests"
   brief: "role-briefs/struktura-common.md"
@@ -163,7 +166,8 @@ web-local.owner.struktura.gates.yaml:
   reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
   review_applied_by: author
   date: 2026-10-16
-  sha256: "733ced4ec5273c35929bdea9ff507a5727aed6566c6650609f621d2148d3772e"
+  amended: "3.10.1 (IMP-702, PM 17. 10. 2026): required: true on the gates over facts and law; reviewed by Codex"
+  sha256: "1d4ba5f1544a67a151d5f409201e3add9130a1e56ded9f34a08e1c062a1cf69c"
 web-local.tech.vzhled.gates.yaml:
   author: "dílna P113 (PM + cowork agent), from the rubric and the PM's blind tests"
   brief: "role-briefs/vzhled-common.md"
@@ -179,7 +183,8 @@ web-local.owner.vzhled.gates.yaml:
   reviewer: "PM (decisions D1-D6 = a, 17. 10. 2026)"
   review_applied_by: author
   date: 2026-10-16
-  sha256: "46f3e7f4980e61939bf2b8b7260def619c960e52e666d14c55065a670028dde8"
+  amended: "3.10.1 (IMP-702, PM 17. 10. 2026): required: true on the gates over facts and law; reviewed by Codex"
+  sha256: "927011d66f498745a095b9da6b40cb65627d0057a24c48b43cde6266b70f2da6"
 web-local.tech.web.gates.yaml:
   author: "Claude Opus (P113 build): the P113a thresholds 8.5 / 8.0 / 7.0, formerly constants of aid-ui-critic.py"
   brief: "PM 13. 10. 2026 (owner and technician each 8.5, no criterion under 7)"
@@ -233,7 +238,8 @@ webapp.tech.vzhled.gates.yaml:
   reviewer: "Claude Opus subagent, clean context (read only the briefs and the rubrics)"
   review_applied_by: author
   date: 2026-10-18
-  sha256: "7b2cda34f7c4b1df85a2ad510960a3deca8cb2c4e5a06c5e982e60064a1b8fd7"
+  amended: "3.10.1 (IMP-702, PM 17. 10. 2026): required: true on the gates over facts and law; reviewed by Codex"
+  sha256: "33dbf691d9adab927df16034f30e6586d1e7a732b6b5ab860a1c5925902603af"
 webapp.tech.yaml:
   author: "codex exec (default model), clean context (everything on stdin)"
   brief: "role-briefs/webapp-tech.md + role-briefs/webapp-common.md + role-briefs/pamet-hodnotitele.md"
@@ -269,7 +275,8 @@ webapp.owner.struktura.gates.yaml:
   reviewer: "codex exec (default model), clean context (everything on stdin)"
   review_applied_by: author
   date: 2026-10-18
-  sha256: "ad21cdc394c7f3ab0bc0265e91a9805c4b8fceed0e2835bf4c85c27ad0c38f4f"
+  amended: "3.10.1 (IMP-702, PM 17. 10. 2026): required: true on the gates over facts and law; reviewed by Codex"
+  sha256: "71433ad084c4fa933c91fb18cac81539ae762c8488b2b05b85f6725a25095db2"
 webapp.owner.vzhled.yaml:
   author: "Claude Opus subagent, clean context (read only the briefs and the standard)"
   brief: "role-briefs/webapp-owner.md + role-briefs/webapp-common.md + role-briefs/pamet-hodnotitele.md"
@@ -305,7 +312,8 @@ webapp.owner.web.gates.yaml:
   reviewer: "codex exec (default model), clean context (everything on stdin)"
   review_applied_by: author
   date: 2026-10-18
-  sha256: "f57a7871f100ad1380997250f6d86e41aa177439b05fbafd65640164dc422d83"
+  amended: "3.10.1 (IMP-702, PM 17. 10. 2026): required: true on the gates over facts and law; reviewed by Codex"
+  sha256: "6fde2c7c4c946f6f088a2b8ec4f4d554bb92c0626df1966f5ef70c4c8cddfdd4"
 webapp.yaml:
   author: "the P116 builder (Claude Opus, the build session) - the type's common part, not a rubric: launch inputs of an app"
   brief: "aplikace-postup.md + P116 plan step 6"

@@ -45,7 +45,7 @@ Tasks“, Nielsen Norman Group o informační architektuře, navigaci, tree test
 „Content Strategy for the Web“, Ginny Redish „Letting Go of the Words“, Steve Krug „Don't Make Me Think“, Google
 Search Central o struktuře webu a přesunu webu) a o přiložená pravidla studia `copy-rules.md`. Zdroje ověř na webu.
 Hranice přijetí neuváděj – zapiš je do `web-local.<role>.struktura.gates.yaml` (`gates: [{criterion, min, why}]`,
-`weighted_min`). Čeština.
+`weighted_min`). Čeština. Brána nad pravdivostí faktů nebo právem má navíc `required: true`: kritérium, které role nemohla posoudit, ji pak nepřeskočí, ale zastaví (IMP-702).
 
 (P113, doplněno po napsání měřítek; brief_sha256 v AUTHORS.yaml je otisk znění, ze kterého autoři psali.)
 Prvním podkladem obou rolí na místě struktura je **stálá adresa živé kostry** (`aid-ui-serve.sh skeleton`, výchozí port

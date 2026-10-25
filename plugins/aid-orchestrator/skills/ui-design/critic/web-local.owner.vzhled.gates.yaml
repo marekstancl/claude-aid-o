@@ -2,6 +2,7 @@ role: owner
 place: vzhled
 gates:
   - criterion: nic_ciziho_ani_vymysleneho
+    required: true
     min: 8
     why: "Majitel nepodepíše vzhled, ve kterém je číslo, hodnocení, odznak, logo partnera nebo citace, kterou nezná, podaná jinak než jako „Ke kontrole“; vymyšlený údaj na webu je jeho reputační i právní riziko."
   - criterion: moje_obrazky_a_zakazky

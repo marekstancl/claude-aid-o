@@ -18,6 +18,16 @@ Převzetí kroku na pozadí (PM 25. 10. 2026, volba 1A): hlavní okno běhu už 
 - **Kontrola na konci tahu rychlejší** (Stop hook AID): dvě čtečky přepisu sezení četly celý soubor nástrojem `jq` při každém konci tahu – na 186 MB přepisu WANu 13 s. Poslední zpráva se čte od konce, úlohy na pozadí jen z řádků, které je můžou nést (předvýběr podle názvů klíčů a vět, které Claude Code nikdy neescapuje). Syntetický přepis 25 000 řádků: asi 6 s → pod 1 s se shodnými verdikty (`scripts/tests/bench/stop-hook-bench.sh` porovná s libovolnou starší verzí a cíl vynutí); 40 výřezů skutečného přepisu: 0 rozdílů. Vědomé rozdíly jen u poškozeného přepisu: poškozený řádek **před** poslední zprávou modelu už pravidla neslepí (dosud je vypnul pro celé sezení) a při hledání úloh na pozadí se poškozený řádek přeskočí, místo aby skryl všechny řádky za sebou; poškozený řádek za poslední zprávou je chyba jako dřív.
 - **Volba bez hodnoty se nezacyklí**: `shift 2` s jedním zbylým argumentem nic neposune; skript bez `set -e` se pak točil donekonečna na 100 % CPU (`aid-plan-check.sh <plan> --json`, WAN P115: 11 minut), skript s `set -u` spadl na `$2: unbound variable` bez vysvětlení. Před každým `shift 2` ve skriptech pluginu teď stojí kontrola dvou zbylých argumentů, ještě než se hodnota přečte: skript skončí kódem 2 s větou, kterou volbu doplnit; uvnitř funkce se vrátí 2 a volajícího neukončí, i když je skript načtený jiným (`return 2 2>/dev/null || exit 2`). Hlídá to `scripts/tests/lib/opt-value-guard.py` (umí i `--fix`) přes test `test-opt-value-guard.bats`.
 
+## [3.10.1] — 2026-10-25
+
+Studio `/aid-ui` hodnotí strukturu na kostře, ne na starém webu.
+
+### Fixed
+- **Stálá adresa kostry servíruje jen kostru**: builder píše celý strom (u aplikace každou obrazovku modelu) vždy znovu do `.aid-ui/skeleton/site/` a `aid-ui-serve.sh skeleton` servíruje tu složku; role struktury, jejich snímky, nezávislý ověřovatel i `skeleton-check` vidí jen kostru, ať je v `site/` cokoli (Coufal 17. 10.: role hodnotily starý web). `site/` zůstává základem stavby.
+- Přestavba kostry už neodsune stránku, kterou kostra nikdy nepsala (stará stránka, která ze stromu odešla, zůstává v `site/`).
+- **Brány nad fakty a právem nejde obejít „nejde posoudit“**: brána s `required: true` (pravdivost tvrzení, nic neznámého ani vymyšleného, odborné a regulované pojmy, fakta mimo registr; u aplikace důvěra v data a čísla) při kritériu, které role nemohla posoudit, směr zastaví; ostatní brány (třeba fotky, které ještě nejsou) se přeskočí jako dřív. Platí pro nově zmrazená měřítka; běžící smyčka si nese brány ze svého zmrazení.
+- **Verdikt struktury webu stojí i na servírované kostře**: otisk místa `struktura` zahrnuje `.aid-ui/skeleton/site/`, takže přestavěná kostra s jiným obsahem (třeba po změně registru faktů) verdikt zneplatní. U aplikace ne: její kostra vzniká jen z modelu, který otisk už má, a schválení modelu kostru mění.
+
 ## [3.10.0] — 2026-10-24
 
 Automatické stránky AID jdou vypnout a na požádání poslat přes share (PM 22.–24. 10. 2026: stránky po sepsání plánu a na konci PM nechce dostávat sám od sebe; když je chce, přepíná účty Claude a artefakt vidí jen v jednom).

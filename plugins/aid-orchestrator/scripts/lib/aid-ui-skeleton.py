@@ -13,10 +13,14 @@ kind (variant.type webapp in docs/design/brand-state.json, else .aid-ui/variant.
       else is written as content. Every page has `meta viewport`. A rebuild rewrites only pages that still carry
       the marker (a built page is kept); a page the skeleton wrote before (.aid-ui/skeleton/manifest.json) whose entry
       left the structure moves to .aid-ui/skeleton/removed/<path>[.<n>] - a page the skeleton never wrote is never
-      touched. A symlink anywhere under site/ or .aid-ui/skeleton/, or two urls that normalise to one file, stop the
+      touched. Every page is also written, freshly and all of them, into .aid-ui/skeleton/site/ (IMP-699): the pure
+      skeleton the skeleton address serves and the structure place is rated and checked on, whatever site/ holds (an
+      old web, built pages); a file there the builder did not make this time is deleted.
+      A symlink anywhere under site/ or .aid-ui/skeleton/, or two urls that normalise to one file, stop the
       build before anything is written; every file is written to a temporary file and renamed. Redirects of the old site (`redirects: [{from, to}]` in structure.json, the
       inventory of struktura-postup.md bod 2) go to .aid-ui/skeleton/redirects.csv; none -> no file.
   check <project>
+      Over the pure skeleton .aid-ui/skeleton/site/ (every page there, IMP-699).
       Exit 1 when a redirect target is not a page of the tree (fix 74), a skeleton page has not exactly one H1
       (aid-ui-seo-check.py --json, its h1 rows; the checker failing to run fails the check) or the gate's facts_match
       row alone (aid-ui-tool.sh verify with a checks file naming only facts_match, over the skeleton pages served on
@@ -31,6 +35,7 @@ import csv, html, json, os, re, shutil, subprocess, sys, unicodedata, urllib.par
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 MARK = "data-aid-skeleton"
+PURE = os.path.join(".aid-ui", "skeleton", "site")   # IMP-699: the skeleton alone, served and rated at the structure
 OPEN_KEYS = ("otevrene", "open", "ke_kontrole")
 
 
@@ -229,6 +234,8 @@ def write_pages(p, site, entries):
         src = os.path.join(site, rel)
         if not os.path.isfile(src) or os.path.islink(src) or not os.path.realpath(src).startswith(real + os.sep):
             continue
+        if MARK not in open(src, encoding="utf-8", errors="replace").read(4000):
+            continue   # a kept page (an old web, a built page) is in the manifest too, but the skeleton never wrote it
         dst = os.path.join(rd, "removed", rel)
         n = 1
         while os.path.exists(dst):   # an older removed version is kept, never overwritten
@@ -239,7 +246,28 @@ def write_pages(p, site, entries):
         os.replace(src, dst)
         removed.append(rel)
     write_atomic(mf, json.dumps({"pages": sorted(want)}, ensure_ascii=False))
+    write_pure(p, site, entries)
     return {"written": written, "kept": kept, "removed": removed}
+
+
+def write_pure(p, site, entries):
+    """IMP-699: every page of the tree, freshly rendered, into .aid-ui/skeleton/site/ - what the skeleton address
+    serves and the structure is rated and checked on, whatever site/ holds (an old web, built pages). Each file is
+    written atomically; anything the builder did not make this time is deleted at the end, so a page that stays is
+    never missing while it is served."""
+    pure = os.path.join(p, PURE)
+    made = set()
+    for f, render_page in entries:
+        dst = os.path.join(pure, os.path.relpath(f, site))
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        write_atomic(dst, render_page())
+        made.add(os.path.relpath(dst, pure))
+    for root, ds, fs in os.walk(pure, topdown=False):
+        for x in fs:
+            if os.path.relpath(os.path.join(root, x), pure) not in made:
+                os.remove(os.path.join(root, x))
+        if root != pure and not os.listdir(root):
+            os.rmdir(root)
 
 
 # --- P116: the skeleton of a web application, from docs/design/screens.json -------------------------------------
@@ -612,8 +640,10 @@ def check(p):
         print("skeleton-check: OK (aplikace: model obrazovek a úloh prošel kontrolou)")
         return
     s, facts = load(p)
-    site = os.path.join(p, "site")
+    site = os.path.join(p, PURE)
     no_symlinks(p, "site", ".aid-ui/skeleton")
+    if not os.path.isfile(os.path.join(site, "index.html")):
+        die(f"no skeleton in {PURE} (aid-ui-serve.sh skeleton <project>)")
     tree = {href(x.get("url") or "/") for x in s["pages"]}
     bad = []
     rf = os.path.join(p, ".aid-ui", "skeleton", "redirects.csv")
@@ -625,10 +655,9 @@ def check(p):
     else:
         print("redirects: bez starého webu")
     pages = [os.path.join(r, "index.html") for r, _, fs in os.walk(site) if "index.html" in fs]
-    sk = [f for f in pages if MARK in open(f, encoding="utf-8", errors="replace").read(4000)]
     import tempfile
     tmp = tempfile.mkdtemp(prefix="aid-ui-skeleton-check-")
-    for f in sk:   # one H1 per page: the SEO gate's own check, read from its JSON; a checker that fails, fails here
+    for f in pages:   # every page of the pure skeleton (IMP-699: nothing skipped); one H1 per page: the SEO gate's own check, read from its JSON; a checker that fails, fails here
         rel = os.path.relpath(f, site)
         js = os.path.join(tmp, re.sub(r"[^a-z0-9]+", "-", rel) + ".json")
         r = subprocess.run([sys.executable, os.path.join(HERE, "..", "aid-ui-seo-check.py"), f, "--json", js], capture_output=True, text=True)
@@ -641,14 +670,14 @@ def check(p):
         n = len(re.findall(r"<h1[\s>]", open(f, encoding="utf-8").read(), re.I))
         if n != 1 or h1:
             bad.append(f"{rel}: {n} H1" + (f" ({str(h1[0].get('detail') or h1[0])[:120]})" if h1 else ""))
-    if sk:   # claims outside the register: the gate's facts_match row alone, over the served skeleton pages
-        bad += facts_row(p, site, sk, facts, tmp)
+    if pages:   # claims outside the register: the gate's facts_match row alone, over the served skeleton pages
+        bad += facts_row(p, site, pages, facts, tmp)
     shutil.rmtree(tmp, ignore_errors=True)
     for b in bad:
         print("FAIL " + b)
     if bad:
         sys.exit(1)
-    print(f"skeleton-check: OK ({len(sk)} skeleton pages, {len(tree)} pages in the tree)")
+    print(f"skeleton-check: OK ({len(pages)} skeleton pages, {len(tree)} pages in the tree)")
 
 
 if __name__ == "__main__":

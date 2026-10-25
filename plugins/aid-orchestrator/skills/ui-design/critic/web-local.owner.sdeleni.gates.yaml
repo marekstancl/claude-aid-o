@@ -2,6 +2,7 @@ role: owner
 place: sdeleni
 gates:
   - criterion: pravdivost_tvrzeni
+    required: true
     min: 8
     why: "Majitel nepodepíše dokument, ve kterém je fakt, který nezná z podkladů, podaný jinak než jako „Ke kontrole“; vymyšlený údaj na webu je jeho reputační i právní riziko."
   - criterion: poznam_se

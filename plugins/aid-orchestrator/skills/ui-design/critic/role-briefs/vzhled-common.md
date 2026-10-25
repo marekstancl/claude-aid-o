@@ -40,7 +40,7 @@ agentura, 10 = špička. Opři se o literaturu a praxi (např. Josef Müller-Bro
 Bringhurst „The Elements of Typographic Style“, Ellen Lupton „Thinking with Type“, Gestalt principy, Refactoring UI
 (Wathan, Schoger), Lindgaard a kol. 2006 o prvním dojmu, Stanford Web Credibility / B. J. Fogg, NN/g o vizuální
 hierarchii a fotkách, WCAG 2.2, Val Head o pohybu) a o rubriku obecnosti studia (přiložena níže). Zdroje ověř na webu.
-Hranice přijetí neuváděj – zapiš je do `web-local.<role>.vzhled.gates.yaml` (`gates`, `weighted_min`). Čeština.
+Hranice přijetí neuváděj – zapiš je do `web-local.<role>.vzhled.gates.yaml` (`gates`, `weighted_min`). Čeština. Brána nad pravdivostí faktů nebo právem má navíc `required: true`: kritérium, které role nemohla posoudit, ji pak nepřeskočí, ale zastaví (IMP-702).
 
 Rubrika obecnosti studia (vyřadit při jednom tvrdém nebo dvou měkkých): tvrdé – SaaS sada stejných zaoblených karet
 se stínem a gradientem; šablonový rám (ALL-CAPS nadpisek nad každým nadpisem, řetězce A · B · C, šipky na tlačítkách);

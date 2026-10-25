@@ -90,6 +90,20 @@ app_places_project() {
   printf 'from fastapi import FastAPI\napp = FastAPI()\n@app.get("/api/poznamky")\ndef x(): pass\n' > "$P/main.py"
 }
 
+@test "places (IMP-700): the web structure's bundle holds the served skeleton - a rebuild that changes a page moves the verdict's target" {
+  mkdir -p "$P/.aid-ui"
+  echo '{"pages": [{"id": "home", "url": "/", "h1": "Úvod", "title": "Úvod", "sections": [{"id": "o", "says": "O nás", "facts": ["rok"]}]}], "nav": ["home"]}' > "$P/.aid-ui/structure.json"
+  printf 'rok: peče od roku 1998\n' > "$P/docs/content/facts.yaml"
+  python3 "$SC/lib/aid-ui-skeleton.py" build "$P" >/dev/null
+  python3 "$C" bundle-files "$P" --place struktura | grep -qx '.aid-ui/skeleton/site/index.html'
+  b0="$(python3 "$C" bundle-sha "$P" --place struktura)"
+  python3 "$SC/lib/aid-ui-skeleton.py" build "$P" >/dev/null
+  [ "$(python3 "$C" bundle-sha "$P" --place struktura)" = "$b0" ]                 # the same skeleton: the same target
+  printf 'rok: peče od roku 1999\n' > "$P/docs/content/facts.yaml"                  # only the register changed
+  python3 "$SC/lib/aid-ui-skeleton.py" build "$P" >/dev/null
+  [ "$(python3 "$C" bundle-sha "$P" --place struktura)" != "$b0" ]
+}
+
 @test "places: webapp - struktura, vzhled and the finished app freeze for both roles with the app's context; the gates stay out of the prompt" {
   app_places_project
   for p in struktura vzhled web; do
@@ -112,6 +126,8 @@ app_places_project() {
   mkdir -p "$P/.aid-ui/client/supplied"; echo '{"items": {}}' > "$P/.aid-ui/client/supplied/struktura.json"
   [ "$(python3 "$C" bundle-files "$P" --place struktura | tr '\n' ' ')" = ".aid-ui/client/supplied/struktura.json docs/design/screens.json zadani.md " ]
   [ "$(python3 "$C" bundle-sha "$P" --place struktura)" != "$b0" ]; rm -r "$P/.aid-ui/client"
+  mkdir -p "$P/.aid-ui/skeleton/site"; echo navrh > "$P/.aid-ui/skeleton/site/index.html"   # IMP-700: an app's skeleton is not its bundle (approval changes it)
+  [ "$(python3 "$C" bundle-sha "$P" --place struktura)" = "$b0" ]
   mkdir -p "$P/.aid-ui/verify"; echo '{}' > "$P/.aid-ui/verify/result.json"
   [ "$(python3 "$C" bundle-files "$P" --place web | tr '\n' ' ')" = ".aid-ui/verify/result.json site/index.html " ]
 }
