@@ -228,6 +228,13 @@ aid_final_review_packet_build() {
     done < <(jq -r '.epics[].epic' "$dir/epic-findings.json")
   fi
   _aid_sr_foreign_final "$dir" "$run" || return 1
+  # 3.12.0: what the PM (or the delegate) already decided in this plan — the reviewer is told before it reports
+  # only the decisions still in force: a revoked yes must not tell the reviewer to stay silent (3.12.0)
+  if [[ -s "$(dirname "$run")/pm-decisions.jsonl" ]]; then
+    declare -F aid_decision_ledger_live >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/aid-decision-ledger.sh"
+    aid_decision_ledger_live "$(dirname "$run")/pm-decisions.jsonl" > "$dir/pm-decisions.jsonl" || return 1
+    [[ -s "$dir/pm-decisions.jsonl" ]] || rm -f "$dir/pm-decisions.jsonl"
+  fi
   _aid_sr_packet_finish "$root" "$dir" "$prev"
 }
 
@@ -285,18 +292,25 @@ aid_step_review_prompt_render() {
     [[ -f "${dir}/packet/open-findings.json" && -f "${dir}/packet/fix.patch" && "$cp" != cp7 ]] && narrow=1
     [[ "$cp" == cp7 && "$cp7_mode" == confirmation && -f "${dir}/packet/fix.patch" ]] && narrow=1
     if [[ "$cp" == cp7 && "$cp7_mode" == confirmation ]]; then
-      # P117 (15): the previous candidate passed a full round; the fix touched documentation only
+      # 3.12.0: after any fix the new attempt confirms the last closed round (P117 (15)(16) made it full after a code
+      # fix, and every full round found new things — the close did not converge)
       echo "## This is a confirmation round over the whole plan"
       echo
-      echo "The previous candidate ($(jq -r '.previous_candidate[:12]' "$(dirname "$(dirname "$dir")")/fix-class.json" 2>/dev/null)) passed a full whole-plan round. Since then the author changed documentation only (fix.patch below; areas it invalidates: $(jq -r '.invalidated_feeds | join(", ")' "$(dirname "$(dirname "$dir")")/fix-class.json" 2>/dev/null))."
-      echo "Your job:"
-      echo "1. The fix is right: every claim it adds or changes is true of the code at HEAD."
-      echo "2. A regression the fix caused indirectly: you can read the WHOLE candidate at HEAD — a claim now contradicting the code elsewhere, a broken reference, an instruction that no longer matches the behaviour. Look for it."
-      echo "3. Any finding still listed below: confirm it is fixed everywhere, or report it again."
-      echo "Do not re-review code the fix did not change; the full round already did."
+      echo "A full whole-plan round already reviewed this plan (the round confirmed: $(jq -r '.confirmation_of // "?"' "${dir}/round.json" | sed 's|.*/evidence/||')). Since its candidate the author changed what fix.patch below shows. Your job:"
+      echo "1. Every finding still listed below: check that its rule holds everywhere in the current tree, not only at the cited line. Fixed everywhere: do not report it. Not fixed, or fixed only where it was cited: report it again with the same claim and the same first evidence citation."
+      echo "2. A NEW problem: report it when the change in fix.patch introduced it, wherever it shows. Its FIRST evidence citation must be a line the fix added or changed (a + line of fix.patch, at HEAD), even if the effect is elsewhere — cite the effect after it. A new problem whose first citation is not such a line is recorded as a follow-up for after the close; it does not block."
+      echo "3. A problem that blocks under your role's own stop rules (its blocker rule) is reported as a blocker whatever it cites; a blocker always blocks."
+      echo "4. final_criteria: judge the brief points as in a full round — a point weakened, dropped or without evidence counts wherever it shows; the fix can change that anywhere."
+      echo "Do not review again the rest of the code the full round already read."
       echo
-      jq -r '.findings[] | "- [\(.severity)] \(.claim) (evidence: \(.evidence))"' "${dir}/packet/open-findings.json" 2>/dev/null
-      _aid_sr_patch "${dir}/packet/fix.patch" "What the author changed (fix.patch)" | sed 's/^## /### /'
+      echo "### Findings still open"
+      jq -r '.findings[] | "- [\(.severity)] \(.claim) (evidence: \(.evidence); fix asked: \(.fix)\(if .rule then "; rule: \(.rule)" else "" end))"' "${dir}/packet/open-findings.json" 2>/dev/null
+      echo
+      if [[ -f "${dir}/packet/fix.patch" ]]; then
+        _aid_sr_patch "${dir}/packet/fix.patch" "What the author changed since the reviewed candidate (fix.patch)" | sed 's/^## /### /'
+      else
+        echo "The confirmed round recorded no head commit, so no fix diff could be cut: the whole diff follows below, and nothing becomes a follow-up."
+      fi
       echo
     elif (( narrow )) && [[ "$(jq '.findings | length' "${dir}/packet/open-findings.json")" == 0 ]]; then
       echo "## This is a delta round"
@@ -341,6 +355,14 @@ aid_step_review_prompt_render() {
       echo
     fi
     if [[ "$cp" == cp7 ]]; then
+      if [[ -s "${dir}/packet/pm-decisions.jsonl" ]]; then
+        echo "## Decisions already taken in this plan (do not report these again)"
+        echo "The PM (or, for technical disputes, the independent delegate) settled the findings below. Do not report the same"
+        echo "thing again in other words: it is settled by code against this list. Disagree only with a NEW fact, and cite a"
+        echo "different place than the decided finding did."
+        jq -r '"- [\(.severity)] \(.claim) (first citation: \(.first_citation)) — \(if .source == "pm" then "PM" else "delegate" end): \(.words)"' "${dir}/packet/pm-decisions.jsonl"
+        echo
+      fi
       echo "## What the step reviews already judged (do not repeat; read ACROSS the steps)"
       jq -r '.epics[] | "- \(.epic): its steps were reviewed one by one — \(.findings | length) finding(s) the step rounds left open" + ((.findings | map("\n  - [\(.severity), \(.status)] \(.claim) (\(.evidence))") | join("")))' "${dir}/packet/epic-findings.json"
       echo

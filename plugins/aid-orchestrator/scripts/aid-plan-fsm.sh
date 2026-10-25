@@ -4000,6 +4000,23 @@ _pfsm_finalize_gates_body() {
     while IFS= read -r g; do
       [[ -n "$g" ]] && ! jq -e --arg g "$g" '.rows | has($g)' <<<"$reuse" >/dev/null && to_run+=("$g")
     done <<< "$effective_include"
+    # 3.12.0: a gate that passed last time, is defined the same, and runs again only because it declares no inputs:
+    # says so with what it costs (plan_diff measures the brief at the new candidate and always runs)
+    local _prev_rep; _prev_rep="$(jq -r '.report // empty' <<<"$reuse")"
+    if [[ -n "$_prev_rep" && -f "$_prev_rep" ]]; then
+      local _g _row
+      for _g in "${to_run[@]+"${to_run[@]}"}"; do
+        [[ "$_g" == plan_diff ]] && continue
+        [[ "$(GATE="$_g" yq -r '(.gates[strenv(GATE)].inputs // []) | length' "$execution_yaml" 2>/dev/null)" == 0 ]] || continue
+        # from an EPIC run a gate with a per-run token reruns anyway (_pfsm_gate_reuse_rows) — not for lack of inputs:
+        [[ "$(jq -r '.from // ""' <<<"$reuse")" == */* ]] && GATE="$_g" yq -r '.gates[strenv(GATE)].command // ""' "$execution_yaml" 2>/dev/null \
+          | sed 's/{plugin_path}//g' | grep -q '{[^}]*}' && continue
+        _row="$(jq -c --arg g "$_g" --arg d "$(_pfsm_gate_definition_sha "$execution_yaml" "$_g")" \
+          "${AID_GATE_ROW_JQ}"'.gates[$g] | select(type == "object") | gate_row_normalize | select(.status == "pass" and .definition_sha256 == $d)' "$_prev_rep" 2>/dev/null)"
+        [[ -n "$_row" ]] || continue
+        echo "plan-finalize --stage gates: ${_g} runs again only because it declares no inputs: (last time $(jq -r '((.duration_ms // 0) / 1000 | floor)' <<<"$_row") s) — declare inputs: in execution.yaml so a fix outside them reuses it (skills/pipeline.md, gate inputs)" >&2
+      done
+    fi
 
     if (( ${#to_run[@]} > 0 )); then
       ran_now=1
@@ -5045,21 +5062,32 @@ _pfsm_validate_plan_final_close_receipt_json() {
   ' <<< "$json" >/dev/null 2>&1
 }
 
-# _pfsm_cp7_confirmation_bad <run dir> — 0 when the last cp7 round is full, or a confirmation round whose
-# predecessor is a passed full round over the previous candidate and whose fix was documentation only (P117 (15));
-# else prints why and returns 1.
+# _pfsm_cp7_confirmation_bad <run dir> <candidate> <root> — 0 when the last cp7 round is full, or a confirmation round
+# (3.12.0) whose chain of confirmed rounds is sound: each confirmed round CLOSED, each reviewed an ancestor of this
+# candidate, the chain ends in a FULL closed round, and no fix in this attempt's chain rewrote the branch
+# (fix-class.json reason); else prints why and returns 1. Before 3.12.0 only a documentation fix after a passed full
+# round could be confirmed (P117 (15)); now any fix is, because the confirmation round reads every change since the
+# reviewed candidate (fix.patch) and a blocker or a brief point never becomes a follow-up.
 _pfsm_cp7_confirmation_bad() {
-  local run_dir_abs="$1" _lr _co _fc="${1}/fix-class.json"
+  local run_dir_abs="$1" candidate="$2" root="$3" _lr _co _cur _fc n=0
   _lr="$(ls -d "${run_dir_abs}"/cp7/round-* 2>/dev/null | grep -E '/round-[0-9]+$' | sort -t- -k2 -n | tail -1)"
   [[ -n "$_lr" && "$(jq -r '.mode // "full"' "${_lr}/round.json" 2>/dev/null)" == confirmation ]] || return 0
-  _co="$(jq -r '.confirmation_of // ""' "${_lr}/round.json")"
-  declare -F aid_docs_only >/dev/null || source "${SCRIPT_DIR}/lib/aid-docs-surface.sh"
-  if ! aid_docs_only "$_fc"; then echo "the fix since the previous candidate is not documentation only"; return 1; fi
-  if [[ ! -f "${_co}/measurement.json" || "$(jq -r .verdict "${_co}/measurement.json")" != pass || "$(jq -r '.mode // "full"' "${_co}/round.json")" != full ]]; then
-    echo "${_co:-<none>} is no passed full round"; return 1; fi
-  if [[ "$(jq -r .head_sha "${_co}/round.json")" != "$(jq -r .previous_candidate "$_fc")" ]]; then
-    echo "${_co} reviewed $(jq -r '.head_sha[:12]' "${_co}/round.json"), not the previous candidate"; return 1; fi
-  return 0
+  _cur="$run_dir_abs"
+  while [[ -f "${_cur}/fix-class.json" ]] && (( n++ < 50 )); do
+    _fc="${_cur}/fix-class.json"
+    [[ "$(jq -r '.reason // ""' "$_fc")" == "" ]] || { echo "a fix in the attempt chain ($(basename "$_cur")) rewrote the branch or its range was unreadable"; return 1; }
+    _cur="$(dirname "$_cur")/$(basename "$(jq -r '.previous_run_dir // "none"' "$_fc")")"
+    [[ -d "$_cur" ]] || break
+  done
+  _co="$(jq -r '.confirmation_of // ""' "${_lr}/round.json")"; n=0
+  while (( n++ < 50 )); do
+    [[ -n "$_co" && -f "${_co}/measurement.json" && -f "${_co}/round.json" ]] || { echo "${_co:-<none>} is no closed round"; return 1; }
+    git -C "$root" merge-base --is-ancestor "$(jq -r .head_sha "${_co}/round.json")" "$candidate" 2>/dev/null \
+      || { echo "${_co} reviewed $(jq -r '.head_sha[:12]' "${_co}/round.json"), not an ancestor of ${candidate:0:12}"; return 1; }
+    [[ "$(jq -r '.mode // "full"' "${_co}/round.json")" == full ]] && return 0
+    _co="$(jq -r '.confirmation_of // ""' "${_co}/round.json")"
+  done
+  echo "the chain of confirmed rounds never reaches a full round"; return 1
 }
 
 # _pfsm_accepted_risk_stale <run dir> <candidate> <root> — every cp7 accepted-risk.json is for this candidate,
@@ -5267,10 +5295,10 @@ _pfsm_finalize_decide() {
     return 1
   fi
 
-  # P117 (15): the last whole-plan round is FULL over this candidate, or a confirmation round that follows a passed
-  # full round of the previous candidate after a documentation-only fix
+  # P117 (15), 3.12.0: the last whole-plan round is FULL over this candidate, or a confirmation round whose chain of
+  # confirmed rounds is closed, ancestral and ends in a full round
   local _c7bad=""
-  if ! _c7bad="$(_pfsm_cp7_confirmation_bad "$run_dir_abs")"; then
+  if ! _c7bad="$(_pfsm_cp7_confirmation_bad "$run_dir_abs" "$candidate" "$root")"; then
     echo "REFUSED (cp7_confirmation_not_enough): plan-finalize --stage decide: the last whole-plan round is a confirmation round, and ${_c7bad} — a full round over ${candidate:0:12} is needed" >&2
     echo "next: aid-review-round.sh prepare --checkpoint cp7 --evidence-dir ${run_dir_rel} --round <next> (a full round), then close it and decide again" >&2
     echo "(pipeline.md §When AID refuses: cp7_confirmation_not_enough)" >&2; return 1
@@ -5293,6 +5321,15 @@ _pfsm_finalize_decide() {
     echo "REFUSED (accepted_risk_stale): plan-finalize --stage decide: ${_ar_bad} — the PM's decision does not carry over" >&2
     echo "next: render a new Decision card for the current candidate and its open findings; the PM answers with aid-review-round.sh accept-risk" >&2
     echo "(pipeline.md §When AID refuses: accepted_risk_stale)" >&2; return 1
+  fi
+  # 3.12.0: a finding settled by an earlier decision of the plan is settled by a real one — in the plan's ledger,
+  # this plan's, its card (or the delegate's verdict) unchanged, the card quoting what it decided
+  declare -F aid_decision_ledger_verify >/dev/null || source "${SCRIPT_DIR}/lib/aid-decision-ledger.sh"
+  local _pd_bad=""
+  if ! _pd_bad="$(aid_decision_ledger_verify "$run_dir_abs")"; then
+    echo "REFUSED (pm_decision_unverified): plan-finalize --stage decide: ${_pd_bad}" >&2
+    echo "next: collect the round again (aid-review-round.sh collect --checkpoint cp7 …) so the finding is judged without the decision, and ask the PM on a card with its fingerprint in quotes if it stays open" >&2
+    echo "(pipeline.md §When AID refuses: pm_decision_unverified)" >&2; return 1
   fi
 
   local tampered=""
@@ -5365,6 +5402,12 @@ _pfsm_finalize_decide() {
   local _fb; _fb="$(jq -r '[.plan_summary.foreign_branches[]? | "\(.name): \(.branch) at \(.head[0:12]) (\(.commits) commit(s))"] | join("; ")' "$decision" 2>/dev/null || true)"
   [[ -n "$_fb" ]] && echo "Foreign branches to merge by hand after MERGE (repo_roots): ${_fb}" >&2
   echo "READY: ${plan_id} at ${candidate:0:12} — gates green, the whole-plan round closed, obligations settled. PM page: ${run_dir_rel}/pm-summary.md. ${plan_id} is AWAITING_PM: show the PM the MERGE | FIX | ABORT card; MERGE runs plan-merge-to-main." >&2
+  # 3.12.0: what the confirmation rounds left for after the close goes to the project's backlog
+  local _fu="${run_dir_abs%/*}/follow-ups.jsonl"
+  # what a later round reported as anything else (fixed, open) is not owed any more — the same count as the close page
+  declare -F aid_follow_up_live >/dev/null || source "${SCRIPT_DIR}/lib/aid-follow-up.sh"
+  local _fun; _fun="$(aid_follow_up_live "${run_dir_abs%/*}" | grep -c '' || true)"
+  (( _fun > 0 )) && echo "FOLLOW-UPS: ${_fun} finding(s) a confirmation round left for after the close (${_fu#"${root}/"}) — write each into the project's backlog and name the count in the close message." >&2
   return 0
 }
 

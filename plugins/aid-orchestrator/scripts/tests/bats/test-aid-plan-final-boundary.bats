@@ -1279,6 +1279,24 @@ _ran() { wc -l < "$TEST_PROJECT_ROOT/.aid-o/work/ran_$1" | tr -d ' '; }
   [ "$(jq -r '.gates.docs_updated.reused_from' "$(_report)")" = "R-${PLAN_ID}-final-1" ]
 }
 
+@test "reuse (3.12.0): the stage names a passed gate that runs again only for lack of inputs:, not one with inputs, not plan_diff" {
+  _reuse_project
+  _second_attempt src-fix.txt "a code fix"; [ "$status" -eq 0 ]
+  [[ "$output" == *"shell_pipeline_smoke runs again only because it declares no inputs: (last time "* ]]
+  [[ "$output" != *"bats_fsm runs again only because"* ]]       # it declares inputs, they changed
+  [[ "$output" != *"plan_diff runs again only because"* ]]
+}
+
+@test "reuse (3.12.0): an empty inputs: [] is the whole tree too, and the stage names the gate" {
+  _seed_gates_project; _write_exec_yaml
+  local y="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
+  yq -i '.gates.docs_updated.command = "echo x >> .aid-o/work/ran_docs_updated" | .gates.docs_updated.inputs = []' "$y"
+  RECEIPT_ARGS=(--substitute-receipt "bats_all=$(_write_receipt bats_all)"); _gates "${RECEIPT_ARGS[@]}"; [ "$status" -eq 0 ]
+  _second_attempt src-fix.txt "a code fix"; [ "$status" -eq 0 ]
+  [ "$(_ran docs_updated)" -eq 2 ]
+  [[ "$output" == *"docs_updated runs again only because it declares no inputs: (last time "* ]]
+}
+
 @test "reuse: a row that did not pass, or whose gate definition changed, is executed again" {
   _reuse_project
   yq -i '.gates.bats_fsm.timeout_seconds = 31' "$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"

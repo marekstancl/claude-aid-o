@@ -171,6 +171,33 @@ _apcs_delegated_inline() {
   jq -rs 'map(select(.checkpoint != "stand_in_used")) | map("\(.checkpoint) \(.kind | {dispute: "rozpor", open_after_rounds: "otevřené po kolech", scope_extension: "rozšíření rozsahu", no_change_step: "krok bez změny", visual_check: "vizuální kontrola", measurement_failed: "technicky selhané měření", rename: "přejmenování", blocked_step: "blokovaný krok"}[.] // .): \(.provider) → \(.answer)\(if .class != "technical" then " (\(.class) → PM)" else "" end) — \(.reason)") | join("; ")' "$f" 2>/dev/null
 }
 
+# _apcs_settled_count <plan_id> — 3.12.0: CP7 findings the plan's earlier decisions settled (distinct fingerprints
+# across its attempts; evidence/<plan>/R-*-final-*/cp7/round-*/merged.json, settled_by)
+_apcs_settled_count() {
+  local root; root="$(aid_state_root 2>/dev/null || pwd)"
+  cat "${root}/.aid-o/work/evidence/${1}"/R-*-final-*/cp7/round-*/merged.json 2>/dev/null \
+    | jq -rs '[.[].findings[]? | select((.settled_by // .dispute.pm.settled_by // .dispute.delegated.settled_by) != null) | .fingerprint] | unique | length' 2>/dev/null || echo 0
+}
+# _apcs_follow_up_lines <plan_id> — 3.12.0: what a confirmation round left for after the close (follow-ups.jsonl),
+# the count and one line each; the controller writes them into the project's backlog
+# shellcheck source=aid-follow-up.sh
+declare -F aid_follow_up_live >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/aid-follow-up.sh"
+_apcs_follow_up_lines() {
+  local root f; root="$(aid_state_root 2>/dev/null || pwd)"; f="${root}/.aid-o/work/evidence/${1}/follow-ups.jsonl"
+  local settled; settled="$(_apcs_settled_count "$1")"
+  [[ "${settled:-0}" == 0 ]] || printf 'Uzavřeno dřívějším rozhodnutím (bez nové otázky): %s nálezů\n' "$settled"
+  local live; live="$(aid_follow_up_live "$(dirname "$f")")"
+  [[ -n "$live" ]] || return 0
+  printf 'K dořešení po uzávěru (do backlogu projektu): %s\n' "$(grep -c '' <<< "$live")"
+  jq -r '"  - [\(.severity)] \(.claim | .[0:160]) (\(.first_citation))"' <<< "$live" 2>/dev/null
+}
+_apcs_follow_up_inline() {
+  local root f n s; root="$(aid_state_root 2>/dev/null || pwd)"; f="${root}/.aid-o/work/evidence/${1}/follow-ups.jsonl"
+  n="$(aid_follow_up_live "$(dirname "$f")" | grep -c '' || true)"; s="$(_apcs_settled_count "$1")"
+  [[ "$n" == 0 ]] || printf '; k dořešení po uzávěru: %s' "$n"
+  [[ "${s:-0}" == 0 ]] || printf '; uzavřeno dřívějším rozhodnutím: %s' "$s"
+}
+
 _apcs_plugin_issues_line() {
   local plan_id="$1" num="${1#P}" n=0 f entries
   local root; root="$(aid_state_root 2>/dev/null || pwd)"
@@ -474,13 +501,13 @@ aid_plan_close_render() {
     --arg fr "$final_review" --arg cost "$close_cost" --arg time "$time_spent" \
     --arg rcost "$run_cost" --arg pcost "$plan_cost" \
     --arg ev "$ev_status" --arg evh "$ev_at_head" \
-    --arg wv "$waivers_n" --arg bl "$backlog_n" --arg dlg "$(_apcs_delegated_count "$plan_id")" --arg dlgl "$(_apcs_delegated_inline "$plan_id")" '[
+    --arg wv "$waivers_n" --arg bl "$backlog_n" --arg dlg "$(_apcs_delegated_count "$plan_id")" --arg dlgl "$(_apcs_delegated_inline "$plan_id")" --arg fu "$(_apcs_follow_up_inline "$plan_id")" '[
       "Recenzovaný kandidát: " + $cand + " → schválený cíl " + $tgt + " (" + $tref + "), merge do main: " + $merge
         + (if $foreign == "" then "" else "; cizí větve k ručnímu merge: " + $foreign end),
       "Kam šel čas: " + $time,
       "Cena běhu: " + $rcost + "; Cena plánu: " + $pcost,   # one row: the block shows six
       "Plan-final brány: " + $gres + " (report: " + $grep_ + ")",
-      "Čtení celku: " + $fr + "; uzavření: " + $cost + (if $dlg == "0" then "" else "; delegovaná rozhodnutí: " + $dlg + " — " + $dlgl end),
+      "Čtení celku: " + $fr + "; uzavření: " + $cost + (if $dlg == "0" then "" else "; delegovaná rozhodnutí: " + $dlg + " — " + $dlgl end) + $fu,
       "Evidence: " + $ev + " (ověřeno na HEAD: " + $evh + "), waiverů " + $wv + ", zbývá v backlogu " + $bl
     ]')"
 
@@ -591,6 +618,7 @@ aid_plan_close_render() {
     _apcs_plugin_issues_line "$plan_id"
     _apcs_standing_line "$plan_id"
     _apcs_delegated_lines "$plan_id"
+    _apcs_follow_up_lines "$plan_id"
   else
     printf 'Potřebuji tvoje rozhodnutí: jak uzavřít plán %s?\n' "$plan_id"
     printf 'Proč teď: %s\n' "$why"
@@ -604,6 +632,7 @@ aid_plan_close_render() {
     _apcs_plugin_issues_line "$plan_id"
     _apcs_standing_line "$plan_id"
     _apcs_delegated_lines "$plan_id"
+    _apcs_follow_up_lines "$plan_id"
   fi
   printf 'Artifact body: %s\n' "$out_path"
   return 0

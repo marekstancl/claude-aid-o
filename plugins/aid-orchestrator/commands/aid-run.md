@@ -484,14 +484,21 @@ agent type. A project keeps the old budget (two rounds, 1/50) in its own
    the claim is false) is disputed, never edited: `dispute <review> --round K
    --fingerprint <fp> --reason "<why>"` marks it `disputed` and it keeps
    blocking. Only the PM clears it: render a **Decision** card that quotes the
-   finding's fingerprint, wait for the answer, then
+   finding's fingerprint — put every full fingerprint the answer settles in the card data's `quotes` list
+   (`aid_decision_card_render` prints them on the card, so the PM's first answer is recorded; AID 3.12.0) — wait
+   for the answer, then
    `dispute … --pm accepted --finding-card <card file> --reason "<the PM's words>"`
    — refused without a PM prompt in the hook audit after the card. The round's
    verdict is recomputed; `--pm rejected` leaves it open. The same command
    settles a whole-plan (cp7) finding — one the author refuted by measurement,
    one the PM deferred to the backlog, or one the adjudicator kept as
    `form_invalid` because its evidence lies outside the candidate's repository:
-   `dispute --checkpoint cp7 --evidence-dir <final run> --round K …`. The
+   `dispute --checkpoint cp7 --evidence-dir <final run> --round K …`. **AID 3.12.0:** a cp7 `--pm accepted` (and a
+   technical delegate verdict that settles a finding) also goes to the plan's `evidence/<plan>/pm-decisions.jsonl`;
+   every later cp7 round of the plan — this attempt or the next — settles the same thing with it on collect
+   (`settled_by`; same `match`, or for a PM answer the same first `zadani.md:N` citation on a finding that is not a
+   blocker and not more severe), the round's prompt lists the decisions, and `decide` refuses a settlement it cannot
+   verify (`pm_decision_unverified`). Do not ask the PM again about a finding marked `settled_by`. The
    dispute records its writes as a stage (`cp7-dispute-accepted` in
    `stage-writes.jsonl`), so `plan-finalize --stage decide` reads it as the
    PM's decision, not as tampering. A plan is never merged by hand around an
@@ -981,6 +988,15 @@ is round 1 of the next attempt.
    had no finding is carried. A brief point measured `absent` is a blocker
    finding of `final_criteria`. The round's packet shows the re-asked
    reviewers what stayed open and the fix diff.
+   **AID 3.12.0 — the next attempt CONFIRMS, it does not review the plan again.** Its round 1 is a
+   confirmation round (`round.json mode: confirmation`) whenever the attempt chain holds a closed cp7 round and
+   no fix rewrote the branch — after any fix, code or documentation, and even when the attempt in between failed
+   on its gates. The reviewers check the open findings everywhere, report a NEW problem with its first citation on
+   a line the fix added (fix.patch), report a blocker of their role from anywhere, and `final_criteria` judges the
+   brief points as in a full round. On collect a NEW finding that is not a blocker, not the brief's
+   (`final_criteria`, `zadani.md:*`, the plan file) and whose first citation is no line the fix added becomes
+   `follow_up`: it does not block the close and is listed in `evidence/<plan>/follow-ups.jsonl`. `decide` prints
+   `FOLLOW-UPS: N`; write each into the project's backlog and name the count in the close message.
 3. `gates` (unchanged gates are copied), `produce`, the round, `decide`.
 
 **Closing is not development** (P010, agents: twelve attempts, four of the last

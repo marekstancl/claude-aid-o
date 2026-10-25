@@ -3,6 +3,20 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.12.0] — 2026-10-25
+
+Uzávěr plánu konverguje a neptá se PM dvakrát na totéž (PM 25. 10. 2026, volby 1A, 2A, 3A: WAN P115 pět pokusů o uzávěr, Trading P004 sedm, PM odsouhlasil tutéž věc třikrát). Zadání: `docs/archive/2026-10-25-uzaver-konverguje.md`.
+
+### Changed
+- **Po opravě uzávěr potvrzuje, nereviduje celý plán znovu.** První kolo celkové revize (CP7) v pokusu, který následuje po opravě, je potvrzovací po jakékoli opravě (dosud jen po opravě dokumentace, P117 (15)(16)) – i když mezilehlý pokus spadl na branách. Revizor ověří otevřené nálezy všude, nový problém hlásí s první citací na řádku, který oprava přidala, blokující problém své role odkudkoli a `final_criteria` posuzuje body zadání jako v plném kole. Nový nález, který není blocker, není o zadání a necituje řádek opravy, dostane stav `follow_up`: uzávěr nezastaví, zapíše se do `evidence/<plán>/follow-ups.jsonl`, závěrečná karta ho uvede a `decide` vypíše `FOLLOW-UPS: N` k zápisu do backlogu projektu. Kontrola `cp7_confirmation_not_enough` hlídá řetěz potvrzených kol (uzavřená, nad předky kandidáta, končí plným kolem, bez přepsané větve). Spouštěč: WAN P115 pět pokusů a Trading P004 sedm, každé plné kolo našlo něco nového. Nový nález ve stejném souboru nebo podle stejného pravidla jako nález, který zůstal otevřený, se za odložený nepočítá – je to tentýž problém jinými slovy a dál blokuje. Kartu, na kterou PM odpověděl, si záznam rozhodnutí uloží do evidence plánu, takže ji pozdější karta na stejné cestě nepřepíše, a revizor dostává jen rozhodnutí, která platí (odvolané ne).
+- **Uzávěr řekne, která brána běží znovu jen kvůli chybějícímu `inputs:`.** `plan-finalize --stage gates` vypíše u každé brány, která minule prošla, je definovaná stejně a nemá `inputs:`, že se pouští znovu jen proto, a kolik minule trvala (`plan_diff` běží vždy). Projekt tak vidí, kterou bránu se vyplatí popsat; přenos bran podle `inputs:` se nemění (`skills/pipeline.md`, `defaults/execution.yaml`). U WANu a Tradingu brány `inputs:` nemají a jejich testy čtou soubory napříč stromem – návrh pro WAN (`tests_frontend`) převezme okno projektu, úspora je malá.
+
+### Added
+- **Rozhodnutí v uzávěru platí pro věc, ne pro jedno znění nálezu.** Odpověď PM `dispute --pm accepted` v celkové revizi (CP7) a technický verdikt delegáta, který nález uzavře, se zapíšou do `evidence/<plán>/pm-decisions.jsonl` (`lib/aid-decision-ledger.sh`). Další kola i další pokusy téhož plánu stejnou věc uzavřou samy (`settled_by`): stejný klíč `match`, nebo u rozhodnutí PM stejná první citace zadání (`zadani.md:N`) u nálezu, který není blocker a není závažnější. Revizor dostane rozhodnutí v balíku kola s pokynem je znovu nehlásit. `plan-finalize --stage decide` každé takové uzavření ověří (rozhodnutí existuje, patří plánu, karta / verdikt nezměněné, karta cituje rozhodnutý nález) a jinak odmítne (`pm_decision_unverified`). Přijaté riziko (`accept-risk`) se dál nepřenáší, platí jen pro svého kandidáta. Závěrečná karta a stránka uvádějí, kolik nálezů se takto uzavřelo.
+
+### Fixed
+- **Karta pro PM nese otisky nálezů, které odpověď uzavírá** (pole `quotes` v datech karty; `aid_decision_card_render` je vypíše na řádek „Týká se:“). Zápis odpovědi (`dispute --pm accepted`, `accept-risk`) kontroluje, že karta každý otisk cituje; dřív ho tam musel řadič opsat ručně, a když ho vynechal, PM dostal tutéž otázku znovu (Trading P004, 16:31 a 16:36). Platí pro `dispute --pm accepted` i pro `accept-risk` (ten dřív hledal jen zkrácený otisk). Odmítnutí teď říká, jak kartu vyrobit správně.
+
 ## [3.11.0] — 2026-10-25
 
 Převzetí kroku na pozadí (PM 25. 10. 2026, volba 1A): sloučení a testy kroku může hlavní okno běhu pustit na pozadí a mezitím pracovat dál. Mechanika je ověřená testy a testbedem (stejný výsledek jako ruční převzetí, chyby zastaví); kolik času to na skutečném běhu ušetří, se změří na prvním živém plánu. Zadání: `docs/plans/2026-10-25-prevzeti-kroku-na-pozadi.md`.

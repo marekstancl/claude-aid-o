@@ -86,6 +86,7 @@ source "${SCRIPT_DIR}/lib/aid-obligations.sh"
 source "${SCRIPT_DIR}/lib/aid-ancillary.sh"
 # shellcheck source=lib/aid-decision-card.sh
 source "${SCRIPT_DIR}/lib/aid-decision-card.sh"   # aid_pm_card_check (dispute --pm accepted; P110)
+source "${SCRIPT_DIR}/lib/aid-decision-ledger.sh"  # decisions that hold for the thing across CP7 rounds (3.12.0)
 # shellcheck source=lib/aid-lifecycle.sh
 source "${SCRIPT_DIR}/lib/aid-lifecycle.sh"       # _aid_lc_frontmatter_depends, aid_target_branch (P117 (3))
 # shellcheck source=lib/aid-plan-dependency.sh
@@ -253,7 +254,7 @@ _expected_roles() {
       narrow="$(jq -r --slurpfile fd "$fix" '
         ($fd[0].steps_changed // []) as $changed
         | [.findings[] | select(.step != null and (.step | IN($changed[]))
-                                or ((.severity == "blocker" or .severity == "major") and .status != "fixed"))
+                                or ((.severity == "blocker" or .severity == "major") and (.status | IN("fixed", "follow_up") | not)))
            | .reported_by[]] | unique | .[]' "$prev")"
       roles="$(for r in $roles; do grep -qxF "$r" <<<"$narrow" && echo "$r"; done)"
     fi
@@ -344,31 +345,26 @@ _carried_roles() {
   done
   echo "$out"
 }
-# _previous_attempt_round — cp7 after a fix: the last closed round of the previous
-# attempt, when it left a blocker or major open. A fix always moves the candidate,
-# so the confirmation happens in the NEXT attempt's first round: its packet shows
-# the reviewers what stayed open and what the fix changed.
-_previous_attempt_round() {
-  local d
-  for d in $(_prev_attempt_rounds); do
-    [[ -f "$d/measurement.json" ]] || continue
-    jq -e '[.findings[] | select((.status | IN("open", "disputed", "form_invalid")) and (.severity == "blocker" or .severity == "major"))] | length > 0' "$d/merged.json" >/dev/null 2>&1 && echo "$d"
-    return 0
-  done
-}
 _is_carried() { jq -e --arg r "$2" '(.carried_from // {}) | has($r)' "$1/round.json" >/dev/null 2>&1; }
-# _previous_attempt_full_pass — cp7 (P117 (15)(16)): the previous attempt's last closed round, when it was a FULL
-# round and passed. Only after such a round, and only for a fix that touched documentation alone
-# (fix-class.json docs_only), is the next attempt's round a confirmation round; anything else is full again.
-_previous_attempt_full_pass() {
-  local d
-  for d in $(_prev_attempt_rounds); do
-    [[ -f "$d/measurement.json" ]] || continue
-    [[ "$(jq -r '.verdict // ""' "$d/measurement.json")" == pass && "$(jq -r '.mode // "full"' "$d/round.json" 2>/dev/null)" == full ]] && echo "$d"
-    return 0
+# _chain_confirmed_round — cp7 (3.12.0): the round a new attempt's first round confirms. Walks the attempt chain
+# (fix-class.json → previous_run_dir) back to the newest attempt that has a CLOSED cp7 round and prints that round;
+# nothing when any fix in the chain rewrote the branch or its range was unreadable (fix-class.json reason), or no
+# attempt got that far — then the round is full. The fix.patch is cut from that round's head, so every change since
+# the last reviewed candidate is in it, whatever happened in between (a gate failure, an attempt with no round).
+_chain_confirmed_round() {
+  local cur="$EVID" fc prev d n=0
+  while (( n++ < 50 )); do
+    fc="${cur}/fix-class.json"
+    [[ -f "$fc" ]] || return 0
+    [[ "$(jq -r '.reason // ""' "$fc" 2>/dev/null)" == "" ]] || return 0
+    prev="$(dirname "$cur")/$(basename "$(jq -r '.previous_run_dir // "none"' "$fc")")"
+    [[ -d "$prev" ]] || return 0
+    d="$(ls -d "$prev"/cp7/round-* 2>/dev/null | grep -E '/round-[0-9]+$' | sort -t- -k2 -n -r | while read -r r; do
+           [[ -f "$r/measurement.json" && -f "$r/merged.json" ]] && { echo "$r"; break; }; done)"
+    [[ -n "$d" ]] && { echo "$d"; return 0; }
+    cur="$prev"
   done
 }
-
 # _restart_attempt — prepare --round 1 --restart (P109): the only sanctioned way
 # to restart a plan review. Allowed when the live attempt's last fix-check
 # recorded `brief_changed: true` (the brief got a new verze) or with --pm (the
@@ -572,8 +568,8 @@ cmd_prepare() {
       # there is no chain to converge — P110 review)
       if (( ROUND >= 3 && ! delta )); then
         local open_now open_before
-        open_now="$(jq -c '[.findings[] | select(.status != "fixed" and (.severity == "blocker" or .severity == "major")) | (.match // .fingerprint)] | sort' "${prev}/merged.json")"
-        open_before="$(jq -c '[.findings[] | select(.status != "fixed" and (.severity == "blocker" or .severity == "major")) | (.match // .fingerprint)] | sort' "$(_round_dir $((ROUND - 2)))/merged.json" 2>/dev/null || echo '[]')"
+        open_now="$(jq -c '[.findings[] | select((.status | IN("fixed", "follow_up") | not) and (.severity == "blocker" or .severity == "major")) | (.match // .fingerprint)] | sort' "${prev}/merged.json")"
+        open_before="$(jq -c '[.findings[] | select((.status | IN("fixed", "follow_up") | not) and (.severity == "blocker" or .severity == "major")) | (.match // .fingerprint)] | sort' "$(_round_dir $((ROUND - 2)))/merged.json" 2>/dev/null || echo '[]')"
         [[ "$open_now" != "$open_before" ]] \
           || _die "round $((ROUND - 1)) re-opened the same findings as round $((ROUND - 2)); a standing-instruction round needs progress — the PM decides"
       fi
@@ -584,7 +580,7 @@ cmd_prepare() {
         [[ "$(jq -r '.pass' "${prev}/fix-diff.json")" == true ]] \
           || _die "the fix of round $((ROUND - 1)) did not pass fix-check: $(jq -c '.added_outside_fixes' "${prev}/fix-diff.json")"
       fi
-      [[ "$(jq '[.findings[] | select(.status != "fixed" and (.severity == "blocker" or .severity == "major"))] | length' "${prev}/merged.json")" -gt 0 ]] \
+      [[ "$(jq '[.findings[] | select((.status | IN("fixed", "follow_up") | not) and (.severity == "blocker" or .severity == "major"))] | length' "${prev}/merged.json")" -gt 0 ]] \
         || _die "nothing to confirm: round $((ROUND - 1)) left no open blocker or major finding"
     fi
   fi
@@ -628,11 +624,11 @@ cmd_prepare() {
   else
     local prevdir=""; (( ROUND >= 2 )) && prevdir="$(_round_dir $((ROUND - 1)))"
     local cp7_mode=full
-    [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 ]] && prevdir="$(_previous_attempt_round)"
-    declare -F aid_docs_only >/dev/null || source "${SCRIPT_DIR}/lib/aid-docs-surface.sh"
-    if [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 && -z "$prevdir" ]] \
-       && aid_docs_only "${EVID}/fix-class.json"; then
-      prevdir="$(_previous_attempt_full_pass)"; [[ -n "$prevdir" ]] && cp7_mode=confirmation
+    # 3.12.0: after any fix the first round of the new attempt CONFIRMS the last closed round of the chain (the
+    # fix, what stayed open, what the fix broke) instead of reviewing the whole plan again (P117 (16) made it full,
+    # and each full round found new things: WAN P115 five attempts, Trading P004 seven, 25. 10. 2026)
+    if [[ "$CHECKPOINT" == cp7 && "$ROUND" -eq 1 ]]; then
+      prevdir="$(_chain_confirmed_round)"; [[ -n "$prevdir" ]] && cp7_mode=confirmation
     fi
     if [[ "$CHECKPOINT" == cp7 ]]; then
       # P110: the round argues from the isolated close measurement and the brief
@@ -1005,6 +1001,16 @@ cmd_collect() {
   (( ROUND >= 2 )) && [[ -f "$(_round_dir $((ROUND - 1)))/merged.json" ]] && prev=(--previous "$(_round_dir $((ROUND - 1)))")
   if [[ "$MODE" == plan ]]; then extra=(--plan "${dir}/packet/plan.md"); else extra=(--step-check "$STEPCHECK"); fi
   "${SCRIPT_DIR}/aid-review-adjudicate.sh" "$dir" --project-root "$ROOT" --namespace "$NS" "${extra[@]}" "${prev[@]}" >/dev/null || exit 1
+  # 3.12.0: what the PM (or the delegate) already decided in this plan is settled again, not asked again
+  if [[ "$CHECKPOINT" == cp7 ]]; then
+    local settled; settled="$(aid_decision_ledger_settle "${dir}/merged.json" "$(aid_decision_ledger_path "$EVID")")" \
+      || _die "cannot apply the plan's earlier decisions to ${dir}/merged.json"
+    (( settled > 0 )) && echo "round ${ROUND}: ${settled} finding(s) settled by an earlier decision of this plan ($(aid_decision_ledger_path "$EVID"))"
+    # 3.12.0: a confirmation round's new non-blocking finding outside the fix is left for after the close
+    declare -F aid_follow_up_mark >/dev/null || source "${SCRIPT_DIR}/lib/aid-follow-up.sh"
+    local fu; fu="$(aid_follow_up_mark "$dir" "$EVID" "$ROOT")" || _die "cannot mark the follow-ups of ${dir}"
+    (( fu > 0 )) && echo "round ${ROUND}: ${fu} new finding(s) outside the fix left for after the close ($(dirname "$EVID")/follow-ups.jsonl)"
+  fi
   echo "round ${ROUND}: ${#valid[@]} of $(jq '.reviewers_expected | length' "${dir}/round.json") answered$( (( ${#absent[@]} )) && echo ", provider absent: ${absent[*]}"), missing: $(jq -r '[.missing[], .invalid[].role] | if length == 0 then "none" else join(", ") end' "${dir}/collect.json"), $(jq '.blockers_open' "${dir}/merged.json") blockers open, $(jq 'length' "${dir}/rejected.json") findings rejected"
 }
 
@@ -1066,7 +1072,7 @@ _semantic_final_write() {
         --arg project "$(basename "$ROOT")" --arg plan "$(basename "$(dirname "$EVID")")" --arg run "$(basename "$EVID")" \
         --argjson roles "$(_json_strings "${RC_ROLE[@]}")" --argjson from "$(printf '%s\n' "${rounds[@]}" | jq -R . | jq -s .)" '
     def sev: {"blocker": "critical", "major": "medium", "minor": "low"}[.] // "low";
-    def st: {"fixed": "resolved", "carried": "deferred"}[.] // "open";
+    def st: {"fixed": "resolved", "carried": "deferred", "follow_up": "deferred"}[.] // "open";   # follow_up: 3.12.0
     def file: (split(";")[0] | sub("^[0-9a-f]{7,40}:"; "") | split(":")[0]);
     (sort_by(.round) | map(.findings[]) | group_by(.fingerprint) | map(last)) as $f
     | {artifact_type: "semantic_review", generated_at: $at, generated_by: "aid-review-round.sh close \($cp)",
@@ -1480,7 +1486,8 @@ cmd_dispute() {
     || _die "no finding ${FINGERPRINT} in round ${ROUND}"
   if [[ "$MODE" == step && "$PM_ANSWER" == accepted ]]; then
     local why_not
-    why_not="$(aid_pm_card_check "$CARD" "$FINGERPRINT")" || _die "--pm accepted: ${why_not}"
+    why_not="$(aid_pm_card_check "$CARD" "$FINGERPRINT")" \
+      || _die "--pm accepted: ${why_not} — render the card with every full fingerprint in the data's \"quotes\" list (aid_decision_card_render prints them), then ask the PM once"
   fi
   local filter
   case "$PM_ANSWER" in
@@ -1493,6 +1500,15 @@ cmd_dispute() {
     .findings |= map(if .fingerprint == \$f then (${filter}) else . end)
     | .blockers_open = ([.findings[] | select(.severity == \"blocker\" and (.status == \"open\" or .status == \"disputed\"))] | length)
   " "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
+  # 3.12.0: the PM's answer holds for the thing in the plan's later rounds and attempts, not for this wording
+  if [[ "$CHECKPOINT" == cp7 && "$PM_ANSWER" == accepted ]]; then
+    aid_decision_ledger_append "$EVID" "$dir" "$FINGERPRINT" pm "$REASON" "$CARD" \
+      || _die "the PM's answer is recorded on the finding, but not in $(aid_decision_ledger_path "$EVID"); run the dispute again"
+  elif [[ "$CHECKPOINT" == cp7 && "$PM_ANSWER" == rejected ]]; then
+    # a later NO revokes an earlier yes about the same thing
+    aid_decision_ledger_revoke "$EVID" "$dir" "$FINGERPRINT" "$REASON" "$CARD" \
+      || _die "the PM's answer is recorded on the finding, but its revocation not in $(aid_decision_ledger_path "$EVID"); run the dispute again"
+  fi
   # A closed step round carries its verdict in four places; the FSM reads the index.
   if [[ "$MODE" == step && -f "${dir}/measurement.json" ]]; then
     local v f index="${BASE}/rounds.json"
@@ -1789,6 +1805,15 @@ cmd_delegate() {
   fi
   jq --arg f "$FINGERPRINT" --argjson e "$entry" ".findings |= map(if .fingerprint == \$f then (${filter}) else . end)" \
     "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
+  # 3.12.0: a technical verdict that settles the finding holds for the same thing (its match) in later CP7 rounds
+  if [[ "$CHECKPOINT" == cp7 && "$class" == technical ]] \
+     && { [[ "$kind" == dispute && "$answer" == accepted ]] || [[ "$kind" != dispute && "$answer" == dismiss ]]; }; then
+    aid_decision_ledger_append "$EVID" "$dir" "$FINGERPRINT" delegate "$reason" "$VERDICT" \
+      || _die "the verdict is recorded on the finding, but not in $(aid_decision_ledger_path "$EVID"); record it again"
+  elif [[ "$CHECKPOINT" == cp7 && "$class" == technical && "$answer" =~ ^(rejected|fix)$ ]]; then
+    aid_decision_ledger_revoke "$EVID" "$dir" "$FINGERPRINT" "$reason" "$VERDICT" delegate \
+      || _die "the verdict is recorded on the finding, but its revocation not in $(aid_decision_ledger_path "$EVID"); record it again"
+  fi
   if [[ "$class" == technical && "$kind" == open_after_rounds && "$answer" == fix ]]; then
     # ONE more fix-and-confirm round after this round, however many findings ask for it
     local g=0 rf="${BASE}/delegate-rounds.json"
@@ -1838,7 +1863,9 @@ cmd_accept_risk() {
   local rows="[]" row
   while IFS= read -r f; do
     fp16="$(aid_delegate_fp16 "$(jq -r .fingerprint <<< "$f")")"
-    why="$(aid_pm_card_check "$CARD" "$fp16")" || _die "accept-risk: ${why}"
+    # the 16-character short form, or the full fingerprint as a card's `quotes` line prints it (3.12.0)
+    why="$(aid_pm_card_check "$CARD" "$fp16")" || aid_pm_card_check "$CARD" "$(jq -r .fingerprint <<< "$f")" >/dev/null \
+      || _die "accept-risk: ${why} — render the card with the candidate and every finding's full fingerprint in the data's \"quotes\" list"
     row="$(jq -nc --arg fp "$(jq -r .fingerprint <<< "$f")" --arg sev "$(jq -r .severity <<< "$f")" --arg s "$(_ar_finding_sha "$f")" '{fingerprint: $fp, severity: $sev, finding_sha256: $s}')"
     rows="$(jq -c --argjson r "$row" '. + [$r]' <<< "$rows")"
   done < <(jq -c '.[]' <<< "$set")

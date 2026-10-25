@@ -461,6 +461,33 @@ _with_epic_bound_gate() {
   _stage decide; echo "$output"; [ "$status" -eq 0 ]; [ "$(_decision release_ready)" = true ]
 }
 
+# ── 3.12.0: after a fix the close confirms; a new non-blocker outside the fix is left for after it ──────────
+_followup_attempt() {   # attempt 1 holds a blocker open; the fix rewrites the cited line; attempt 2's round answers $1
+  _project_closed "$_BLOCKER"
+  echo 'print("hello")  # greets' > "$R/app.py"; git -C "$R" commit -qam "fix(review): greet"
+  _stage freeze; [ "$status" -eq 0 ]; _stage gates; _stage produce
+  run _round "$1"; [ "$status" -eq 0 ]
+}
+_FU_MINOR='.findings = [{id: "g-1", checkpoint: "cp7", step: null, severity: "minor", claim: "the ignore list names a folder nobody uses", command: "grep -n reports .gitignore", evidence: ".gitignore:2", fix: "drop it"}] | del(.no_findings_reason)'
+
+@test "follow-up (3.12.0): a confirmation round whose only new finding is a minor outside the fix lets decide release, and decide names it for the backlog" {
+  _followup_attempt "$_FU_MINOR"
+  local rd="$(_run_dir)/cp7/round-1"
+  [ "$(jq -r .mode "$rd/round.json")" = confirmation ]
+  [ "$(jq -r '.findings[] | select(.id == "g-1" or (.claim | startswith("the ignore list"))) | .status' "$rd/merged.json")" = follow_up ]
+  _stage decide; echo "$output"; [ "$status" -eq 0 ]; [ "$(_decision release_ready)" = true ]   # release policy: a follow_up never blocks
+  [[ "$output" == *"FOLLOW-UPS: 1 finding(s)"* ]]
+}
+
+@test "follow-up (3.12.0): a finding written to follow_up by hand after close makes decide refuse" {
+  _followup_attempt '.findings = [{id: "g-2", checkpoint: "cp7", step: null, severity: "major", claim: "the new greeting comment misleads", command: "grep -n greets app.py", evidence: "app.py:1", fix: "drop it", rule: "comments say what the code does"}] | del(.no_findings_reason)'
+  local m="$(_run_dir)/cp7/round-1/merged.json"
+  [ "$(jq -r '.findings[0].status' "$m")" = open ]                 # on the line the fix wrote: it blocks
+  jq '.findings[0].status = "follow_up"' "$m" > "$m.t" && mv "$m.t" "$m"
+  _stage decide; echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"merged.json was changed after the stage that wrote it"* ]]
+}
+
 # ── 2.114.0: the closing measurement ─────────────────────────────────────────
 @test "closing measure: attempt 1 counts no line as written during the closing; a finding on a line the fix wrote counts in attempt 2, an uncited one is named" {
   _project_closed "$_BLOCKER"                                 # evidence app.py:1, a line of the base

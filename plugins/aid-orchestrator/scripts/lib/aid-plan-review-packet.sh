@@ -207,7 +207,7 @@ aid_plan_review_prompt_render() {
       echo "2. Report NEW problems only when the changed lines (the diff below) introduced them. Do not review the rest of the plan again."
       echo
       echo "### Findings still open after round $((round - 1))"
-      jq -r '.findings[] | select(.status != "fixed" and (.severity == "blocker" or .severity == "major"))
+      jq -r '.findings[] | select((.status | IN("fixed", "follow_up") | not) and (.severity == "blocker" or .severity == "major"))
              | "- [\(.severity)] step \(.step // "plan"): \(.claim) (evidence: \(.evidence); fix asked: \(.fix))"' "${prev}/merged.json"
       echo
       if [[ -f "${prev}/fix-diff.json" ]] && jq -e '.also_steps' "${prev}/fix-diff.json" >/dev/null 2>&1; then

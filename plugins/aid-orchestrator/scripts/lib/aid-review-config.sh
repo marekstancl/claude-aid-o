@@ -285,7 +285,7 @@ aid_review_second_round_allowed() {
       [[ "$(jq -r '.pass // false' "${prev}/fix-diff.json" 2>/dev/null)" == true ]] ;;
     open_finding_and_fix)
       [[ -n "$head" && "$(jq -r '.head_sha // ""' "${prev}/round.json" 2>/dev/null)" != "$head" ]] || return 1
-      (( $(jq '[.findings[] | select(.status != "fixed" and (.severity == "blocker" or .severity == "major"))] | length' "${prev}/merged.json" 2>/dev/null || echo 0) > 0 )) ;;
+      (( $(jq '[.findings[] | select((.status | IN("fixed", "follow_up") | not) and (.severity == "blocker" or .severity == "major"))] | length' "${prev}/merged.json" 2>/dev/null || echo 0) > 0 )) ;;
     *) return 1 ;;
   esac
 }
