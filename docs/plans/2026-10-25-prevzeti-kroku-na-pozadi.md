@@ -142,6 +142,13 @@ kontrola, která projde, ale změní sledované soubory nebo commitne, neprošla
 strom; neúspěšný `--recheck` jde pustit znovu; odmítnuté převzetí (zámek, předpoklad) záznam nepřepíše.
 Testy: `test-step-land.bats` (29), `test-hook-rules-turn.bats` (+4 verdikty).
 
+**Stav (krok 5, 25. 10.):** testbed dráha `prevzeti_pilot` (`aid-testbed/bin/lane-prevzeti.sh`): dva klony téhož
+plánu, A ruční převzetí, B na pozadí s vloženými chybami (výstup bez bloku `aid-return` → `return_rejected`,
+konflikt → `merge_conflict`, padající bod → `check_failed`, `increment-step` pokaždé odmítne) – výsledné stromy
+obou plánů shodné. AC1 (přepis řadiče: převzetí jen na pozadí) se offline změřit nedá – drží ho verdikty Stop hooku
+v `test-hook-rules-turn.bats`. Dráha našla mezeru: po neúspěšné kontrole sériového kroku (commit kroku zůstává)
+nešel `--recheck` – doplněno, `--recheck` naváže na commit kroku (test v `test-step-land.bats`).
+
 **Stav (krok 4, 25. 10.):** mod `aid-progress` 0.8.0 – řádek `↳` (sbaleně za aktuálním krokem, blok zůstává na
 3 řádcích; rozbaleně pod kroky); „žije“ = pod číslem procesu běží `aid-step-land.sh` s indexem tohoto kroku
 (číslo procesu po pádu může dostat jiný proces). Revize: Claude zástup + Codex.

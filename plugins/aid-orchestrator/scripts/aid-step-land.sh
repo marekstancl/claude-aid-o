@@ -17,7 +17,8 @@
 #            (detached; first parent = the plan, as aid_parallel_merge) · run the checks there · fast-forward the
 #            plan's branch to it only when every check passed and its HEAD has not moved · remove the clean tree
 #   serial (the step ran in the plan's tree): validate · commit on the run's branch · run the checks
-#   --recheck (after a step-review fixer committed): the same checks on the plan's HEAD, nothing else
+#   --recheck (after a step-review fixer committed, or after the role fixed a serial step whose checks failed — its
+#             commit stays on the branch): the same checks on the plan's HEAD, nothing else
 # then the plan's own measurer (aid-plan-diff.sh --step N) on the landed HEAD, which increment-step reuses.
 #
 # Every acceptance criterion whose text BEGINS with a backticked command must come with exactly that command
@@ -161,8 +162,10 @@ git -C "$TREE" merge-tree --write-tree HEAD HEAD >/dev/null 2>&1 \
   || _end precondition_failed "this git has no merge-tree --write-tree (needs 2.38+): increment-step could not check the landed merge"
 CSHA="$(_sha "${SD}/contract.json")"
 if (( RECHECK )); then   # the record is about to be replaced: take what proves the takeover from it first
-  # the last landed commit: a landed record's, or the base a failed recheck carried forward
-  prev="$(jq -r 'if .status == "landed" then .landed_sha elif .path == "recheck" then .base_sha else "" end // ""' "$REC" 2>/dev/null)"
+  # what the recheck starts from: a landed record's commit; the base a failed recheck carried forward; or, on the
+  # serial path, the step's own commit when its checks failed (the commit stays there, the role fixes on top of it)
+  prev="$(jq -r 'if .status == "landed" then .landed_sha elif .path == "recheck" then .base_sha
+                 elif .path == "serial" and .status == "check_failed" then .step_sha else "" end // ""' "$REC" 2>/dev/null)"
   [[ -n "$prev" ]] || _end precondition_failed "no landed record of step ${N} to recheck"
   RSHA="$(jq -r '.return_sha256 // ""' "$REC")"; STEP_SHA="$(jq -r '.step_sha // ""' "$REC")"
 fi

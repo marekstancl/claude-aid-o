@@ -167,6 +167,16 @@ _wave() { WT="$(aid_parallel_step_worktree "$PWD" step_1_backend HEAD .aid-workt
   [ "$status" -eq 0 ]; [ "$(jq -r .landed_sha "$REC")" = "$(git rev-parse HEAD)" ]
 }
 
+@test "serial: after a failed check the role fixes on top of the step's commit and --recheck lands it" {
+  _plan '`grep -q bye a.txt`'; _agent .
+  bash "$LAND" "$S" 0 --check '1:grep -q bye a.txt' >/dev/null || true
+  step="$(jq -r .step_sha "$REC")"; [ "$(jq -r .status "$REC")" = check_failed ]
+  printf 'bye\n' > a.txt; git commit -qam "the role's fix"
+  run bash "$LAND" "$S" 0 --check '1:grep -q bye a.txt' --recheck
+  [ "$status" -eq 0 ]
+  [ "$(jq -r '.status, .base_sha, .landed_sha' "$REC" | tr '\n' ' ')" = "landed ${step} $(git rev-parse HEAD) " ]
+}
+
 @test "the script changes nothing but the commit and the merge: contract, plan, state and scope stay as they were" {
   _plan '`grep -q bye a.txt`'; _wave; _agent "$WT"
   sums() { sha256sum "$D/contract.json" "$TEST_EVIDENCE_DIR/plan.json" "$S"; }

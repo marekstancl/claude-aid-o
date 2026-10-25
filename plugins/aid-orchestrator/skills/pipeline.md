@@ -837,7 +837,8 @@ dispatches later steps and runs review rounds; the next takeover waits for this 
 are taken over in order). On the notification it reads `steps/<id>/land.json`:
 `landed` → `step-N-verify.md` (command criteria cited from the record, the others judged as below), the step
 check, CP2, `increment-step` (which reuses the measurer's result); `return_rejected` / `check_failed` → the
-step's role fixes it; `merge_conflict` → `aid_parallel_step_reset` and dispatch again; `base_moved` → take it
+step's role fixes it (in a wave on `step/<id>`, then the same takeover; on the serial path the step's commit
+already stands — the fix is a commit on top, then `--recheck`); `merge_conflict` → `aid_parallel_step_reset` and dispatch again; `base_moved` → take it
 over again. A review fixer's commit moves HEAD: `aid-step-land.sh … --recheck` reruns the same checks on it.
 `increment-step` refuses a step whose record does not hold (`land_record_invalid`). The manual path below stays
 valid for a step without a record. `<N>` is `current_step` (0-based: the plan's step N+1). After `--recheck` rewrite
