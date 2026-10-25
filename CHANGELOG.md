@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [3.11.0] — Unreleased
+## [3.11.0] — 2026-10-25
 
 Převzetí kroku na pozadí (PM 25. 10. 2026, volba 1A): sloučení a testy kroku může hlavní okno běhu pustit na pozadí a mezitím pracovat dál. Mechanika je ověřená testy a testbedem (stejný výsledek jako ruční převzetí, chyby zastaví); kolik času to na skutečném běhu ušetří, se změří na prvním živém plánu. Zadání: `docs/plans/2026-10-25-prevzeti-kroku-na-pozadi.md`.
 

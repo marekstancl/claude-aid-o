@@ -123,7 +123,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v3.10.1** (current) — studio `/aid-ui`: strukturu role hodnotí jen na kostře (stálá adresa servíruje čistou kostru, ne starý web), přestavěná kostra webu zneplatní verdikt struktury, brány nad fakty a zákonem nejde obejít „nejde posoudit“
+- **v3.11.0** (current) — převzetí vráceného kroku na pozadí (`aid-step-land.sh`): sloučení a testy kroku běží mimo hlavní okno, plán se posune až po zelených kontrolách a `increment-step` ověří záznam; konec tahu s otevřeným krokem pustí `AID-WAIT` na vlastní převzetí; kontrola na konci tahu čte dlouhý přepis pod sekundu; volba bez hodnoty skript nezacyklí
+- **v3.10.1** — studio `/aid-ui`: strukturu role hodnotí jen na kostře (stálá adresa servíruje čistou kostru, ne starý web), přestavěná kostra webu zneplatní verdikt struktury, brány nad fakty a zákonem nejde obejít „nejde posoudit“
 - **v3.10.0** — stránky AID pro PM jdou vypnout (`AID_PM_PAGES=off`: jen soubor, nic se neposílá) a na požádání poslat přes nastavitelnou službu (share) se záznamem o doručení; bez nastavení artefakt jako dosud
 - **v3.9.2** — popis brány z `execution.yaml` je ve výsledku každé brány (i neproběhlé a obnovené); noční sada čtenářů konfigurace zase zelená
 - **v3.9.1** — opravy z hlášení projektů: smazání přes `git rm` v commitu kroku, konec výstupu brány, kolo kontroly plánu s otevřeným nálezem není „pass“, `plan-run` nic nezapíše před průchodem plánu, verze z CHANGELOGu mimo ukázky, méně falešných upozornění kontroly plánu, uzavření starých plánů se smazanou větví, úplný `.gitignore`; noční běh zase zelený
