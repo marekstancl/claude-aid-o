@@ -1,0 +1,230 @@
+# AID 3.11.0 – převzetí kroku na pozadí
+
+PM 25. 10. 2026, volba 1A (v podobě „mechanika na pozadí, rozhodování zůstává v hlavním okně“).
+Vývoj mimo AID (`/opt/eco/CLAUDE.md`), větev `feat/prevzeti-na-pozadi` (od 3.10.0) v repu
+`aid-orchestrator`; Z4 větev `feat/aid-progress-hotove-kroky` v repu `services`. Revizor Codex.
+Vydání jen na slovo PM.
+
+Verze 3 – zapracováno 14 nálezů první revize zadání a 8 nálezů druhé (Codex, 25. 10. 2026,
+`.aid-o/work/evidence/prevzeti-na-pozadi/brief-review.md`, `brief-review-2.md`); značky `[R<n>]`.
+
+## Proč
+
+Od 17. 10. 2026 (rozšíření Claude Code 2.1.301) běží každý agent na pozadí a hlavní okno běhu
+(kontrolér) končí tah řádkem `AID-WAIT`. PM to vnímá jako zastavenou práci. Měřením (WAN P115,
+25. 10. 2026, sezení `888f7139`) se ukázalo:
+
+1. **Kontrolér čeká v popředí na vlastní dlouhé příkazy.** Za 3 hodiny 53 minut: commit
+   a sloučení kroku, testy akceptačních bodů na sloučené větvi (až 10 min), kontrola plánu.
+   Celou tu dobu nepřevezme hotového agenta a nepustí dalšího. Živé měření 14:31–14:58
+   ukázalo totéž (14:43–14:46 a 14:52–14:54 žádný agent).
+2. **`aid-plan-check.sh <plan> --json` bez hodnoty se zacyklí na 100 % CPU** (`shift 2` při
+   jednom zbylém argumentu nic neposune). V P115 to stálo 11 minut. Ověřeno: `timeout 5 bash
+   aid-plan-check.sh /dev/null --json` → 124. Vzor `X="${2:-}"; shift 2` je v dalších skriptech.
+3. **Stop hook AID trvá 7,5–13 s** na každém konci tahu (`aid-hook.sh Stop`, log rozšíření,
+   sezení s ~22 000 řádky).
+4. **Blok průběhu (mod `aid-progress`) ukazuje „krok 4/12 · 27 %“**, i když jsou kroky 1–3
+   a 8 hotové: počítá `current_step`.
+
+Vliv okna v popředí na rychlost se v datech nepotvrdil (agenti se hlásí do minuty, 785/785;
+živý test bez okna 27 min plynulý) – není předmětem změny.
+
+## Co se staví
+
+### Z1 – Převzetí kroku na pozadí (hlavní část)
+
+**Výchozí fakta (ověřeno v kódu):** `increment-step` vyžaduje `reviewed_commit == HEAD`
+(`aid-fsm.sh` `_increment_binding_verified`, ř. ~4513 a ~5045) a kroky se zvyšují v pořadí,
+takže kroky se **převezmou v pořadí** a další převzetí začne až po `increment-step` předchozího.
+Paralelní zůstává implementace v pracovních stromech kroků (vlny) – to, co převzetí na pozadí
+uvolní, je kontrolér: během převzetí smí přijímat návraty, chystat a pouštět agenty dalších kroků
+a vést kola revize. Na tom stojí přínos. Vazba `reviewed_commit == HEAD` se **nemění** [R2].
+
+Nový skript `scripts/aid-step-land.sh <state_file> <step_index> --check "<AC#>:<příkaz>" …
+[--timeout <s>]` udělá jen mechanickou část převzetí a nic neopravuje.
+
+**Transakční model – cesta vlny (krok ve vlastním stromu `step/<id>`)** [R1, R4, R5]:
+1. Ověří předpoklady: `step_index == current_step`, krok má `contract.json`, strom plánu je čistý,
+   pro tento plán neběží jiné převzetí (zámek, viz níž). Jinak skončí bez jakékoli změny.
+2. Vytáhne a ověří návrat (`aid_dispatch_contract_extract` + `_validate`). Odmítnutí → záznam, konec.
+3. Commitne ve stromu kroku (`aid_dispatch_contract_commit`); „nic ke commitu“ se zaznamená
+   a pokračuje se jako dnes.
+4. **Sestaví kandidáta mimo větev plánu:** v odpojeném (detached) stavu ve stromu kroku
+   z `base = HEAD plánu` udělá `git merge --no-ff --no-edit step/<id>` – stejný tvar historie
+   jako dnešní `aid_parallel_merge` (první rodič = plán). Konflikt → `merge --abort`, záznam se
+   seznamem souborů, konec; reset kroku na nový základ (`aid_parallel_step_reset`) a nové zadání
+   dělá **kontrolér** podle dnešního postupu a `defaults/policies/auto-recovery.yaml` [R4].
+5. Spustí kontroly na kandidátovi (cwd = strom kroku, který je k testům připravený, protože v něm
+   agent testoval). Každá kontrola má časový limit (výchozí 1800 s) a při překročení se ukončí
+   celá skupina procesů [R13]. První neúspěch → záznam, konec; větev plánu se nepohnula.
+6. Když je `HEAD` plánu pořád `base`, posune větev plánu na kandidáta (`git merge --ff-only`,
+   strom plánu je čistý). Když se mezitím pohnul (nemá se stát, převzetí jdou v pořadí) → záznam
+   `base_moved`, konec bez změny plánu. Teprve po úspěšném posunu se odstraní strom kroku (jako
+   dnes jen čistý).
+7. **Návrat stromu kroku** [R15]: při každém neúspěchu po kroku 4 (`merge_conflict`, `check_failed`,
+   timeout, `base_moved`) skript vrátí strom kroku na větev `step/<id>` (`git checkout step/<id>`;
+   kandidát byl odpojený, větev kroku se nezměnila) a ověří, že strom je čistý a na větvi. Oprava
+   agentem i nové převzetí tak pracují na `step/<id>` jako dnes. Test: opakované převzetí po
+   `check_failed` a po `base_moved` projde a výsledná historie je stejná jako na první pokus.
+
+**Sériová cesta** (krok pracoval přímo ve stromu plánu, dnešní chování): commit vzniká na
+`plan/<id>` jako dnes, pak kontroly. Neúspěch kontroly commit nevrací – stejně jako dnes, kdy
+kontrolér krok vrátí k opravě; krok se neposune (`increment-step` odmítne). Přínos je tu menší
+(další sériový krok stejně čeká), ale postup je jeden [R1, R5].
+
+**Co se kontroluje – úplnost** [R3]:
+- `--check` nese číslo akceptačního bodu (`AC#` = pořadí v `plan.json .steps[N].acceptance_criteria`).
+- Akceptační bod, jehož text **začíná příkazem v backticku** (např. „`scripts/pytest.sh …` passes“),
+  je **příkazový** a musí být v záznamu se svým příkazem; ostatní body (zjištění revize, vizuální
+  kontrola, posouzení) posuzuje kontrolér v `step-N-verify.md` jako dnes.
+- Kontrola z příkazu: příkaz bodu = **první úsek v backticku** v textu bodu. `--check "<AC#>:<příkaz>"`
+  musí mít příkaz **znak po znaku shodný** (po oříznutí okrajových mezer). Proměnné prostředí, které
+  projekt k testům potřebuje (např. `WAN_TEST_DOCKER_MODE=run`), se předávají zvlášť
+  `--env NAME=hodnota` (opakovatelně, zapsané v záznamu) – nikdy jako součást příkazu. Každé `AC#`
+  v záznamu nejvýš jednou (duplicita → skript i `increment-step` odmítnou) [R3].
+- **Oprava po revizi (CP2):** když opravář po kole revize commitne, `HEAD` se pohne. Kontrolér pak
+  pustí `aid-step-land.sh … --recheck` (na pozadí): bez návratu a sloučení spustí tytéž kontroly
+  nad aktuálním `HEAD` plánu a zapíše nový záznam s `landed_sha = HEAD` (`path: recheck`).
+  Kontrola kroku samotná `HEAD` nepohne [R2]. Kvalita tím vzroste: dnes se akceptační body po
+  opravě znovu nepouštějí povinně.
+- `increment-step` u kroku se záznamem odmítne, když: záznam chybí nebo nepatří k témuž plánu, běhu,
+  kroku a commitu (`landed_sha == reviewed_commit == HEAD`); některý příkazový bod v záznamu chybí;
+  některá kontrola neprošla; celkový stav není `landed`; hash kontraktu nebo návratu nesedí s diskem;
+  commity `step_sha`, `base_sha`, `landed_sha` neexistují; u cesty vlny `landed_sha` nemá rodiče
+  `base_sha` (první) a `step_sha` (druhý) nebo jeho strom není shodný se stromem, který vrátí
+  `git merge-tree --write-tree base_sha step_sha` (eco-dev má git 2.39.5; starší git bez `--write-tree` → skript skončí `precondition_failed` s větou, co chybí); u `recheck` `landed_sha` není potomkem posledního
+  záznamu `landed` téhož kroku [R7].
+
+**Záznam `steps/<step>/land.json`** [R7, R13]: zapsaný atomicky (dočasný soubor + `mv`), pevné schéma
+`version: 1` s `plan_id`, `run_id`, `step_index`, `step_id`, `contract_sha256`, `return_sha256`,
+`path` (`wave`/`serial`), `step_sha`, `base_sha`, `landed_sha`, `checks[]` (`ac`, `command`, `exit`,
+`duration_s`, `timed_out`, `output_tail` = posledních 4 000 bajtů s redakcí tajemství stejnou funkcí
+jako souhrn bran (`aid_gate_outcome_redact`, `lib/aid-gate-outcome-summary.sh`), `log` = cesta k plnému logu v evidenci, i ten projde redakcí před zápisem a do gitu nejde –
+evidence `.aid-o/work` je mimo verzování), `status`
+(`landed`/`return_rejected`/`merge_conflict`/`check_failed`/`base_moved`/`precondition_failed`),
+`reason`, `at`. Plný log patří do evidence, ne do gitu.
+
+**Zámek** [R6]: `aid_lock_acquire` (`lib/aid-lock.sh`, flock na postranním souboru
+`<state_root>/.aid-o/work/locks/land-<plan>.lock`). Flock se uvolní i při pádu procesu, takže
+neexistuje zatuchlý zámek. Drží se po celou dobu skriptu: jedno převzetí naráz. Založení
+stromu dalšího kroku zámek **nebere** – větev plánu se pohne jen atomickým posunem v kroku 6,
+takže strom vzniká vždy z ověřeného stavu. Druhé spuštění čeká nejvýš `--lock-wait` (výchozí
+5 s), pak skončí `precondition_failed` s větou „převzetí kroku N běží“. Funkce knihovny, které
+skript volá, zámek samy neberou (žádná reentrance).
+
+**Kontrolér:** pouští skript přes `Bash` s `run_in_background: true` a končí tah
+`AID-WAIT: převzetí kroku N`. Po notifikaci přečte `land.json`. Při `landed` napíše
+`step-N-verify.md` (příkazové body cituje ze záznamu, ostatní posoudí), pustí kontrolu kroku
+a kolo revize (CP2) a pak `increment-step`. Při neúspěchu rozhoduje jako dnes. Ruční cesta
+(vše v popředí) zůstává platná pro krok bez záznamu.
+
+**Stop hook** [R8]: požadované verdikty, ověřené integračním testem Stop události:
+otevřený krok + poslední řádek `AID-WAIT` + živá úloha převzetí na pozadí → tah smí skončit
+(`auto_continuation` i `turn_step_open` ho pustí); úloha doběhla a notifikace je v přepisu → tah
+skončit nesmí; `AID-WAIT` bez živé úlohy → odmítnuto; úloha běží, ale bez `AID-WAIT` → odmítnuto
+s výzvou. Když `turn_step_open` dnes živou úlohu převzetí nezná, naučí se ji stejným
+`_aid_qc_bg_pending`.
+
+**Zachované předpoklady `increment-step`** [R9] – žádný se neobchází, každý má test, že s převzetím
+na pozadí platí dál: nové ověření návratu proti kontraktu, vazba kroku (5 polí, `AID_STEP_BINDING`
+strict i legacy), vizuální ukotvení u frontendových kroků, kolo CP2 (`cp2/step-N/rounds.json`),
+idempotentní token a opakované volání (`already_applied`), krok bez commitu.
+
+### Z2 – Argumenty bez hodnoty [R11]
+
+Jedna pomocná funkce v `scripts/lib/common.sh` (`aid_opt_value <volba> <počet zbylých> <hodnota>`):
+chybějící hodnota, nebo hodnota začínající `--` u voleb, kde hodnota nesmí být volba → kód 2 a věta,
+kterou volbu doplnit. Všechny smyčky argumentů ve `scripts/` přejdou na ni.
+Vynucení **staticky** (bez spouštění skriptů s vedlejšími účinky) [R11]: test projde všechny
+`scripts/**/*.sh`, najde každou větev `case` smyčky argumentů, která čte `$2` (inventář vzniká
+při každém běhu testu, ne ručně), a vyžaduje v ní `aid_opt_value`; navíc každé `shift 2` kdekoli ve `scripts/` musí
+mít na témže řádku nebo těsně před sebou `aid_opt_value` nebo kontrolu `$# -ge 2`. Výjimky jen v seznamu
+s důvodem u řádku (`scripts/tests/opt-value-allow.txt`); test hlásí i položku seznamu, která už
+nic neodpovídá.
+Funkční test: pomocná funkce (chybí hodnota / hodnota je volba / v pořádku) a skutečné spuštění
+`aid-plan-check.sh x --json` v dočasném adresáři (kód 2 do 1 s).
+
+### Z3 – Rychlejší Stop hook AID [R12]
+
+Měřicí skript `scripts/tests/bench/stop-hook-bench.sh`: vygeneruje syntetický přepis
+(25 000 řádků ve tvaru přepisu Claude Code, bez cizích dat), 1 zahřívací + 5 měřených běhů,
+limit 30 s na běh, vypíše medián. Základ = implementace z `main` (`git show main:<soubory>` do
+dočasného adresáře), nová implementace na téže sadě. Najde, kde čas vzniká, a zrychlí to.
+Cíl: medián ≤ 2 s na eco-dev a aspoň 4× rychleji než základ. **Verdikty:** sada přepisů (běžný,
+`AID-WAIT` s živou/mrtvou úlohou, karta, otevřený krok, poškozený řádek, prázdný přepis) – shodný
+návratový kód, řádek `outcome=` i důvod u základu i nové verze **pro případy, které Z1 nemění**;
+případy s převzetím na pozadí se ověřují proti verdiktům Z1 (AC6), ne proti základu [R12].
+
+### Z4 – Blok průběhu počítá hotové kroky [R14]
+
+Repo `services`, větev `feat/aid-progress-hotove-kroky`, vlastní commit a záznam v dokumentaci modu
+(services nemá CHANGELOG; změna se zapíše do README modu a do Docusaurus
+`/ecosystem/operations/claude-code-mody`). Hotový krok je dál jen převzatý (`current_step`), procenta se
+nemění [R16]. Mod navíc ukáže kroky, jejichž agent už odevzdal (`output.md` v evidenci kroku), ale na
+převzetí teprve čekají: „P115 · krok 4/12 · 27 % · odevzdáno a čeká na převzetí: 8“, Skript zapíše `land.json` hned na začátku se
+stavem `running` a `pid` a na konci ho atomicky přepíše výsledkem. Mod podle toho ukáže: `running`
+a proces žije → „přebírá se krok 4“; `landed` a krok ještě nepřevzatý → „krok 4 sloučen, čeká na
+revizi“; neúspěšný stav → „převzetí kroku 4 neprošlo: <stav>“; `running` s mrtvým procesem →
+„převzetí kroku 4 přerušeno“ [R16]. `increment-step` stav `running` odmítne. Funguje i se staršími verzemi AID
+(bez `land.json` tento řádek chybí). Test modu: vlna s odevzdaným krokem 8 před krokem 4. Vydání pluginu na Z4 nečeká a naopak.
+
+„Oba CHANGELOGy“ = `CHANGELOG.md` v kořeni repa a `plugins/aid-orchestrator/CHANGELOG.md`
+(musí být shodné, CONTRIBUTING).
+
+## Co se nemění (mimo rozsah)
+
+- Výběr testů k bodům, rozhodování o neúspěchu, kola revize, uzávěr plánu – kontrolér.
+- Pořadí převzetí a vazba `reviewed_commit == HEAD`.
+- Přejmenování testů, které v P115 stálo ~10 min (plán pojmenoval testy číslem plánu, projektová
+  kontrola to zakazuje) – do backlogu: kontrola plánu má znát pravidla jmen testů projektu.
+- Upozornění „okno čeká na tebe“, probuzení po kliknutí na stránce, slib bez běžící práce – backlog
+  (PM 2A, 25. 10.).
+- Odpojování VS Code – mimo AID.
+
+## Hotovo, když
+
+- [ ] AC1 [R10]: Testbed, dráha s vlnou tří kroků: v přepisu kontroléru jsou commit, sloučení
+  i kontroly akceptačních bodů **jen uvnitř** volání `Bash` s `run_in_background: true`
+  spouštějícího `aid-step-land.sh` (test prochází tool_use podle ID); mezi startem převzetí kroku N
+  a jeho notifikací je v přepisu aspoň jedno spuštění agenta jiného kroku nebo kolo revize.
+- [ ] AC2: **Kvalita beze změny** – tatáž dráha postaru (ruční převzetí) a ponovu: stejné kroky
+  převzaté, `git diff` stromů výsledné větve plánu prázdný, stejné verdikty kontrol kroku a CP2.
+  Vložené chyby ponovu: odmítnutý návrat, konflikt sloučení, padající kontrola, překročený limit
+  kontroly → záznam s odpovídajícím stavem, větev plánu (cesta vlny) beze změny, `increment-step`
+  odmítne.
+- [ ] AC3 [R5]: Invarianty po fázích (testy): po `precondition_failed` a `return_rejected` beze
+  změny gitu i FSM; po `merge_conflict` a `check_failed` (vlna) větev plánu, index, stav sloučení
+  a FSM beze změny, commit kroku na `step/<id>` zůstává; po `landed` jen posun větve plánu
+  a odstraněný čistý strom kroku. Vždy jen deklarované soubory evidence (`land.json`, logy).
+  Skript nikdy nevolá `amend-scope`, `amend-contract` ani nic, co mění kontrakt, plán nebo FSM.
+- [ ] AC4: `increment-step` odmítne krok se záznamem: chybějícím, cizím (plán/běh/krok/commit),
+  s chybějícím příkazovým bodem, s červenou kontrolou, se změněným kontraktem nebo návratem,
+  poškozeným JSON – každý případ test, který na `main` neexistuje a s opravou prochází.
+- [ ] AC4b: `--recheck` po commitu opraváře: nový záznam nad `HEAD`, `increment-step` projde;
+  bez `--recheck` po opravě odmítne (`landed_sha != HEAD`). Návrat stromu kroku po neúspěchu
+  a opakované převzetí (Z1 bod 7) – test.
+- [ ] AC5: Dva souběžné `aid-step-land.sh` na témž plánu – druhý skončí `precondition_failed`,
+  nic se nepromíchá; zabitý proces převzetí zámek nedrží (další běh ho dostane).
+- [ ] AC6: Stop hook – čtyři verdikty z Z1 integračním testem.
+- [ ] AC7: Zachované předpoklady `increment-step` z Z1 – testy zelené s převzetím na pozadí.
+- [ ] AC8: Z2 – statický test zelený (na `main` padá), `aid-plan-check.sh x --json` kód 2 do 1 s.
+- [ ] AC9: Z3 – medián ≤ 2 s a ≥ 4× rychleji než základ; verdikty shodné se základem u případů,
+  které Z1 nemění, a shodné se specifikací Z1 u případů s převzetím na pozadí.
+- [ ] AC10: Z4 – test modu zelený (odevzdaný krok mimo pořadí, přebíraný krok, procenta beze
+  změny), dokumentace modu upravená.
+- [ ] AC11: Dokumentace ve stejném kroku jako kód: `skills/pipeline.md` (§Output verification,
+  §Parallel groups), `commands/aid-run.md`, `defaults/hook-registry.yaml` a registr kontrol, oba
+  CHANGELOGy, Docusaurus `/aid/` jen kde chování popisuje.
+- [ ] AC12: T0 + T1 zelené, přímo dotčené sady zelené, testbed nad `git archive` prochází.
+- [ ] AC13: Revize Codexem – zadání, každý krok, celek.
+
+## Postup po krocích
+
+1. Z2 – pomocná funkce, převod smyček, statický test, CHANGELOG.
+2. Z1 – `aid-step-land.sh` (záznam, zámek, transakční model), testy AC3–AC5.
+3. Z1 – `increment-step` se záznamem, Stop hook, zachované předpoklady (AC4, AC6, AC7),
+   dokumentace postupu.
+4. Z1 – testbed dráha, srovnání postaru/ponovu (AC1, AC2).
+5. Z3 – měření a zrychlení Stop hooku.
+6. Z4 – mod `aid-progress` (repo `services`).
+7. Kontrola celku, testy, hlášení PM.
