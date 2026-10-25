@@ -155,6 +155,17 @@ Cíl: medián ≤ 2 s na eco-dev a aspoň 4× rychleji než základ. **Verdikty:
 návratový kód, řádek `outcome=` i důvod u základu i nové verze **pro případy, které Z1 nemění**;
 případy s převzetím na pozadí se ověřují proti verdiktům Z1 (AC6), ne proti základu [R12].
 
+**Stav (krok 2, 25. 10.):** pořadí kroků změněno – Z3 před Z1 (malé, samostatné). Příčina ověřená:
+`_aid_hrt_last_message` (`jq -s` přes celý přepis, 4,5 s na 186 MB) a `_aid_qc_bg_pending` (čtyři
+průchody `jq`, 6,9 s). Oprava: čtení od konce (`tac | jq first(...)`) a předvýběr řádků `grep`em
+(nadmnožina, JSON je kompaktní; test pokrývá i JSON s mezerami). Měření `stop-hook-bench.sh`: 6,11 s →
+1,05 s (5,8×), 6/6 verdiktů shodných; 40 výřezů skutečného přepisu WAN: 0 rozdílů. **Vědomé změny (po revizi kroku 2):** poškozený řádek před poslední zprávou modelu už pravidla nevypne
+(dřív `jq -s` selhal na celém souboru a pravidlo pustilo každý konec tahu); při hledání úloh na pozadí se
+každý řádek posoudí sám (`fromjson?`) – poškozený se přeskočí, dřív `jq` skončil na prvním poškozeném a řádky
+za ním neviděl. Předvýběr: `run_in_background`, `"(Agent|Task)"` a věty harnessu – Claude Code escapuje jen
+uvozovky, zpětná lomítka a řídicí znaky, takže je to nadmnožina při jakémkoli odsazení (test s mezerami
+i tabulátory). Měřicí skript vynutí cíl a skončí chybou při pádu nebo překročení limitu.
+
 ### Z4 – Blok průběhu počítá hotové kroky [R14]
 
 Repo `services`, větev `feat/aid-progress-hotove-kroky`, vlastní commit a záznam v dokumentaci modu

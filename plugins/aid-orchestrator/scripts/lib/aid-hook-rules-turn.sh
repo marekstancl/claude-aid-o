@@ -108,10 +108,14 @@ aid_turn_open_steps() {
 
 # _aid_hrt_last_message <transcript> — the text of the turn's last assistant
 # message (empty when there is none). Shared by every Stop rule that reads it.
+# Read from the END: a long session's transcript runs to hundreds of MB (WAN 25. 10. 2026: 186 MB, and
+# slurping it took 4.5 s on every Stop). jq stops at the first assistant line it meets; tac's broken pipe
+# is not a failure, a line jq cannot parse before that point still is.
 _aid_hrt_last_message() {
-  jq -rs '[.[] | select(.type == "assistant")] | last
-          | (.message.content // []) | map(select(.type == "text") | .text) | join("\n")' \
-    "$1" 2>/dev/null
+  [[ -r "$1" ]] || return 1
+  { tac "$1" 2>/dev/null || true; } \
+    | jq -rn 'first(inputs | select(.type == "assistant"))
+              | (.message.content // []) | map(select(.type == "text") | .text) | join("\n")' 2>/dev/null
 }
 
 # _aid_hrt_hands_over <text_file> — does the turn's last message open a
