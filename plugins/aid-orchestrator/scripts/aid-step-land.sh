@@ -76,11 +76,11 @@ _write() {
   jq -n --arg plan "$EPIC" --arg run "$RUN" --argjson i "$N" --arg sid "$SID" --arg st "$STATUS" --arg why "$REASON" \
         --arg path "$PATHKIND" --arg ssha "$STEP_SHA" --arg bsha "$BASE_SHA" --arg lsha "$LANDED_SHA" \
         --arg c "$CSHA" --arg r "$RSHA" --argjson checks "$CHECKS_JSON" --arg m "$MEASURE" \
-        --argjson pid "$$" --arg ctok "$CHECK_TOKEN" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --argjson pid "$$" --arg ctok "$CHECK_TOKEN" --arg sess "${CLAUDE_CODE_SESSION_ID:-}" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --argjson env "$(printf '%s\n' "${ENVS[@]+"${ENVS[@]}"}" | jq -R . | jq -sc 'map(select(. != ""))')" \
     '{version: 1, epic_id: $plan, run_id: $run, step_index: $i, step_id: $sid, status: $st, reason: $why,
       path: $path, contract_sha256: $c, return_sha256: $r, step_sha: $ssha, base_sha: $bsha, landed_sha: $lsha,
-      env: $env, checks: $checks, measure: $m, pid: $pid, check_token: $ctok, at: $at}' > "$tmp" && mv -f "$tmp" "$REC"
+      env: $env, checks: $checks, measure: $m, pid: $pid, session_id: $sess, check_token: $ctok, at: $at}' > "$tmp" && mv -f "$tmp" "$REC"
 }
 HAVE_LOCK=0 OWNED=0 BACK_NOTE="" CHECK_PID="" CHECK_TOKEN=""
 # the run's timeline keeps every takeover of a step, start and result: increment-step reads it, so a step whose

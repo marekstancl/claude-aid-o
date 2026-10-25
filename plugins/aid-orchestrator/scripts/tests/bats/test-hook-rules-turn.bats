@@ -80,7 +80,7 @@ _answered() { printf '{"type":"user","message":{"content":"<task-notification><t
 # _takeover_running — the step's record says running and its process is aid-step-land.sh
 _takeover_running() {
   ( exec -a aid-step-land.sh sleep 30 ) & TAKEOVER_PID=$!
-  printf '{"version":1,"status":"running","pid":%s}\n' "$TAKEOVER_PID" > "$EV/steps/step_1_backend/land.json"
+  printf '{"version":1,"status":"running","pid":%s,"session_id":"%s"}\n' "$TAKEOVER_PID" "${1:-s}" > "$EV/steps/step_1_backend/land.json"
 }
 _takeover_gone() { kill "$TAKEOVER_PID" 2>/dev/null; wait "$TAKEOVER_PID" 2>/dev/null || true; }
 
@@ -106,6 +106,9 @@ _takeover_gone() { kill "$TAKEOVER_PID" 2>/dev/null; wait "$TAKEOVER_PID" 2>/dev
   # another run's takeover: its call is pending, but THIS step has no running record
   _bg_call toolu_otherrun "bash /p/scripts/aid-step-land.sh /x/E-9/R-9/fsm-state.yaml 0"; _say "AID-WAIT: jiný běh"
   run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  # … and THIS step's takeover running, started by another session: still not this turn's wait
+  _takeover_running other-session; _say "AID-WAIT: jiný běh"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; _takeover_gone; [ "$status" -eq 2 ]
   jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"toolu_ag",name:"Agent",input:{prompt:"another task"}}]}}' >> "$TRANSCRIPT"
   jq -nc '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"toolu_ag",content:"Async agent launched successfully."}]}}' >> "$TRANSCRIPT"
   _say "AID-WAIT: agent"
