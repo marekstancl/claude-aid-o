@@ -3,6 +3,13 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.11.0] — Unreleased
+
+Převzetí kroku na pozadí (PM 25. 10. 2026, volba 1A): hlavní okno běhu už nečeká v popředí na sloučení a testy kroku. Zadání: `docs/plans/2026-10-25-prevzeti-kroku-na-pozadi.md`.
+
+### Fixed
+- **Volba bez hodnoty se nezacyklí**: `shift 2` s jedním zbylým argumentem nic neposune; skript bez `set -e` se pak točil donekonečna na 100 % CPU (`aid-plan-check.sh <plan> --json`, WAN P115: 11 minut), skript s `set -u` spadl na `$2: unbound variable` bez vysvětlení. Před každým `shift 2` ve skriptech pluginu teď stojí kontrola dvou zbylých argumentů, ještě než se hodnota přečte: skript skončí kódem 2 s větou, kterou volbu doplnit; uvnitř funkce se vrátí 2 a volajícího neukončí, i když je skript načtený jiným (`return 2 2>/dev/null || exit 2`). Hlídá to `scripts/tests/lib/opt-value-guard.py` (umí i `--fix`) přes test `test-opt-value-guard.bats`.
+
 ## [3.10.0] — 2026-10-24
 
 Automatické stránky AID jdou vypnout a na požádání poslat přes share (PM 22.–24. 10. 2026: stránky po sepsání plánu a na konci PM nechce dostávat sám od sebe; když je chce, přepíná účty Claude a artefakt vidí jen v jednom).

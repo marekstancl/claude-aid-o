@@ -79,9 +79,9 @@ fi
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --config) CONFIG="$2"; shift 2 ;;
+    --config) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; CONFIG="$2"; shift 2 ;;
     --strict) STRICT=1; shift ;;
-    --allowlist) ALLOWLIST="$2"; shift 2 ;;
+    --allowlist) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ALLOWLIST="$2"; shift 2 ;;
     -h|--help) sed -n '2,40p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "ERROR: unknown option: $1" >&2; exit 2 ;;
   esac

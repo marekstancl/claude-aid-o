@@ -132,17 +132,17 @@ idempotentní token a opakované volání (`already_applied`), krok bez commitu.
 
 ### Z2 – Argumenty bez hodnoty [R11]
 
-Jedna pomocná funkce v `scripts/lib/common.sh` (`aid_opt_value <volba> <počet zbylých> <hodnota>`):
-chybějící hodnota, nebo hodnota začínající `--` u voleb, kde hodnota nesmí být volba → kód 2 a věta,
-kterou volbu doplnit. Všechny smyčky argumentů ve `scripts/` přejdou na ni.
-Vynucení **staticky** (bez spouštění skriptů s vedlejšími účinky) [R11]: test projde všechny
-`scripts/**/*.sh`, najde každou větev `case` smyčky argumentů, která čte `$2` (inventář vzniká
-při každém běhu testu, ne ručně), a vyžaduje v ní `aid_opt_value`; navíc každé `shift 2` kdekoli ve `scripts/` musí
-mít na témže řádku nebo těsně před sebou `aid_opt_value` nebo kontrolu `$# -ge 2`. Výjimky jen v seznamu
-s důvodem u řádku (`scripts/tests/opt-value-allow.txt`); test hlásí i položku seznamu, která už
-nic neodpovídá.
-Funkční test: pomocná funkce (chybí hodnota / hodnota je volba / v pořádku) a skutečné spuštění
-`aid-plan-check.sh x --json` v dočasném adresáři (kód 2 do 1 s).
+**Odchylka od verze 3 (krok 1, 25. 10., po revizi kroku Codexem):** místo pomocné funkce v `common.sh`
+stojí před každým `shift 2` kontrola, **ještě než se hodnota přečte** (jinak ji `set -u` předběhne):
+`[[ $# -ge 2 ]] || { echo "<jméno>: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }` –
+jedna akce pro každý kontext: ve funkci vrátí (skript jako `aid-fsm.sh` se i načítá a `exit` by ukončil
+volajícího), na nejvyšší úrovni skončí (samotné `return` by se tam točilo dál – `aid-review-round.sh`,
+3. kolo revize). U funkcí se dvěma povinnými parametry věta „needs 2 arguments, got N“. Místa, kde kontrola počtu už byla (`$# -ge 2`,
+`_pfsm_require_optval`, `[[ -n "${2:-}" ]] ||`), zůstávají. Důvod odchylky: funkci by muselo nově
+načítat přes sto skriptů. Vkládá a ověřuje jeden nástroj `scripts/tests/lib/opt-value-guard.py`
+(`--fix` / kontrola); test `test-opt-value-guard.bats` (t0) ho volá a navíc spouští skutečné skripty:
+`aid-plan-check.sh x --json` (bez `set -e`), `aid-job.sh run --id` (`set -u`, holé `$2`), knihovnu
+spuštěnou i načtenou a funkci se dvěma parametry.
 
 ### Z3 – Rychlejší Stop hook AID [R12]
 

@@ -84,12 +84,12 @@ PLAN=""; EVIDENCE_DIR=""; BASE_COMMIT=""; STEP_N=""; PLAN_JSON=""; ISOLATED=0; R
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --isolated) ISOLATED=1; shift ;;
-    --cwd) RUN_CWD="$2"; shift 2 ;;
-    --step) STEP_N="$2"; shift 2 ;;
-    --plan-json) PLAN_JSON="$2"; shift 2 ;;
-    --plan) PLAN="$2"; shift 2 ;;
-    --evidence-dir) EVIDENCE_DIR="$2"; shift 2 ;;
-    --base-commit) BASE_COMMIT="$2"; shift 2 ;;
+    --cwd) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; RUN_CWD="$2"; shift 2 ;;
+    --step) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; STEP_N="$2"; shift 2 ;;
+    --plan-json) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PLAN_JSON="$2"; shift 2 ;;
+    --plan) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PLAN="$2"; shift 2 ;;
+    --evidence-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; EVIDENCE_DIR="$2"; shift 2 ;;
+    --base-commit) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; BASE_COMMIT="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown arg: $1"; usage; exit 10 ;;
   esac

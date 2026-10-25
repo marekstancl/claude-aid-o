@@ -209,6 +209,7 @@ _aid_rs_cost_json() {
 # tokens, rounds, attempts}; attempts_partial when an EPIC dir is missing.
 # Returns 3 on an unreadable measurement.json (measurement_unreadable).
 aid_plan_run_cost() {
+  [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }
   local dir="$1" plan_id="$2" e partial=false out; shift 2
   local -a files=()
   for e in "$@"; do
@@ -283,6 +284,7 @@ aid_hook_audit_files() {
 }
 
 aid_plan_close_time() {
+  [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }
   local root="$1" plan="$2"; shift 2
   local ev="${root}/.aid-o/work/evidence/${plan}" d audit sids
   local -a m=() tl=()

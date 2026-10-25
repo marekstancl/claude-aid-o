@@ -433,6 +433,7 @@ _pfsm_force_evidence_dir() {
 # it, so the operator is not left guessing.
 # ---------------------------------------------------------------------------
 _pfsm_precondition() {
+  [[ $# -ge 2 ]] || { echo "${0##*/}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }
   local name="$1" class="$2"; shift 2
   if "$@"; then
     return 0
@@ -1814,21 +1815,21 @@ cmd_plan_start() {
   local plan_id="" mode="" project_root_opt="" op_id_opt="" plan_file_opt="" autonomy_opt="" declared_epics_opt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --mode) mode="${2:-}"; shift 2 ;;
-      --declared-epics) declared_epics_opt="${2:-}"; shift 2 ;;   # P111: plan-run declares its one run
-      --project-root) project_root_opt="${2:-}"; shift 2 ;;
-      --op-id) op_id_opt="${2:-}"; shift 2 ;;
+      --mode) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; mode="${2:-}"; shift 2 ;;
+      --declared-epics) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; declared_epics_opt="${2:-}"; shift 2 ;;   # P111: plan-run declares its one run
+      --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; project_root_opt="${2:-}"; shift 2 ;;
+      --op-id) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; op_id_opt="${2:-}"; shift 2 ;;
       # P073 Step 11 (P083): the path of the source plan this lifecycle is
       # being created FROM. Optional so legacy callers are unchanged; the
       # production caller (the former generation pipeline) always passes it, and it is
       # what lets this command verify the source is committed before it
       # creates a branch or a manifest.
-      --plan-file) plan_file_opt="${2:-}"; shift 2 ;;
+      --plan-file) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; plan_file_opt="${2:-}"; shift 2 ;;
       # P090 Step 3 — record on the PLAN whether it runs autonomously, so the
       # continuation loop has something durable to read at merge time. Without
       # the flag the answer comes from .aid-o/config/permissions.yaml; with it,
       # the caller has said so explicitly and that wins.
-      --autonomy) autonomy_opt="${2:-}"; shift 2 ;;
+      --autonomy) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; autonomy_opt="${2:-}"; shift 2 ;;
       # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
       # every state-TRANSITION command; what it can BYPASS is bounded by the
       # forceable/hard classification in _pfsm_precondition.
@@ -1841,8 +1842,8 @@ cmd_plan_start() {
       # named only plan-rollback as the collision — epic-complete is a second
       # one, found while wiring.
       --force) _PFSM_FORCE=1; shift ;;
-      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
-      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --force-reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       --*) echo "ERROR: plan-start: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1"; else echo "ERROR: plan-start: unexpected argument: $1" >&2; exit 2; fi
@@ -5675,9 +5676,9 @@ cmd_plan_record_decision() {
   shift 2 2>/dev/null || true
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --by)           by="${2:-}"; shift 2 ;;
-      --reason)       reason="${2:-}"; shift 2 ;;
-      --project-root) project_root_opt="${2:-}"; shift 2 ;;
+      --by)           [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; by="${2:-}"; shift 2 ;;
+      --reason)       [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; reason="${2:-}"; shift 2 ;;
+      --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; project_root_opt="${2:-}"; shift 2 ;;
       *) echo "ERROR: plan-record-decision: unknown argument '$1'" >&2; exit 2 ;;
     esac
   done
@@ -5748,8 +5749,8 @@ cmd_plan_merge_to_main() {
       # named only plan-rollback as the collision — epic-complete is a second
       # one, found while wiring.
       --force) _PFSM_FORCE=1; shift ;;
-      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
-      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --force-reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       --*) echo "ERROR: plan-merge-to-main: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1"
@@ -6511,8 +6512,8 @@ cmd_plan_close() {
       # named only plan-rollback as the collision — epic-complete is a second
       # one, found while wiring.
       --force) _PFSM_FORCE=1; shift ;;
-      --force-reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
-      --reason) _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --force-reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
+      --reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; _PFSM_FORCE_REASON="${2:-}"; shift 2 ;;
       # ADMINISTRATIVE CLOSE — a different thing from --force, and the
       # difference is the whole point.
       #
@@ -7066,7 +7067,7 @@ cmd_worktrees() {
   local root_opt=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --project-root) root_opt="${2:-}"; shift 2 ;;
+      --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; root_opt="${2:-}"; shift 2 ;;
       *) echo "Usage: aid-plan-fsm.sh worktrees [--project-root <path>]" >&2; return 2 ;;
     esac
   done
@@ -7122,7 +7123,7 @@ cmd_plan_state() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --repair) repair=1; shift ;;
-      --declare-epics) declare_epics="${2:-}"; shift 2 ;;   # P111: the lifecycle_epics_mismatch repair
+      --declare-epics) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; declare_epics="${2:-}"; shift 2 ;;   # P111: the lifecycle_epics_mismatch repair
       # P074 Step 11: the audited repair for a damaged, deleted or unrecorded
       # execution worktree. Like --supersede-epic it is a TRANSACTION, not a
       # force: nothing is bypassed, so it writes no waiver and sets no
@@ -7135,15 +7136,15 @@ cmd_plan_state() {
       # existed carries no field, and continuation then falls back to the
       # project setting on every merge (printing a line each time). This stamps
       # it once, so the plan says what it is.
-      --set-autonomy) set_autonomy="${2:-}"; shift 2 ;;
+      --set-autonomy) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; set_autonomy="${2:-}"; shift 2 ;;
       # P099 Step 5: `/aid-run --auto` names the session that drives the plan;
       # the Stop hook keeps only that session working.
-      --bind-session) bind_session="${2:-}"; bind_given=1; shift 2 ;;
-      --supersede-epic) supersede_epic="${2:-}"; shift 2 ;;
-      --attest-source-ref) attest_ref="${2:-}"; shift 2 ;;
-      --reason) attest_reason="${2:-}"; shift 2 ;;
-      --epic) attest_epic="${2:-}"; shift 2 ;;
-      --project-root) project_root_opt="${2:-}"; shift 2 ;;
+      --bind-session) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; bind_session="${2:-}"; bind_given=1; shift 2 ;;
+      --supersede-epic) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; supersede_epic="${2:-}"; shift 2 ;;
+      --attest-source-ref) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; attest_ref="${2:-}"; shift 2 ;;
+      --reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; attest_reason="${2:-}"; shift 2 ;;
+      --epic) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; attest_epic="${2:-}"; shift 2 ;;
+      --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; project_root_opt="${2:-}"; shift 2 ;;
       --*) echo "ERROR: plan-state: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1"; else echo "ERROR: plan-state: unexpected argument: $1" >&2; exit 2; fi
@@ -9427,9 +9428,9 @@ cmd_plan_scratch() {
   local plan_id="" phase="" release=0 root_arg=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --phase)        phase="${2:-}"; shift 2 ;;
+      --phase)        [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; phase="${2:-}"; shift 2 ;;
       --release)      release=1; shift ;;
-      --project-root) root_arg="${2:-}"; shift 2 ;;
+      --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; root_arg="${2:-}"; shift 2 ;;
       -*) echo "ERROR: plan-scratch: unknown flag '$1'" >&2; return 2 ;;
       *)  [[ -z "$plan_id" ]] && plan_id="$1"; shift ;;
     esac
@@ -9605,9 +9606,9 @@ _pr_main() {
       --auto) auto=1; shift ;;
       --restart) restart=1; shift ;;
       --force) force=true; shift ;;
-      --reason) force_reason="${2:-}"; shift 2 ;;
-      --force-init-reason) force_init_reason="${2:-}"; shift 2 ;;
-      --project-root) project_root_opt="${2:-}"; shift 2 ;;
+      --reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; force_reason="${2:-}"; shift 2 ;;
+      --force-init-reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; force_init_reason="${2:-}"; shift 2 ;;
+      --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; project_root_opt="${2:-}"; shift 2 ;;
       --*) echo "ERROR: plan-run: unknown flag: $1" >&2; exit 2 ;;
       *) if [[ -z "$plan_id" ]]; then plan_id="$1"; else echo "ERROR: plan-run: unexpected argument: $1" >&2; exit 2; fi; shift ;;
     esac
@@ -10098,7 +10099,7 @@ main() {
       local __dm_root=""
       while [[ $# -gt 0 ]]; do
         case "$1" in
-          --project-root) __dm_root="${2:-}"; shift 2 ;;
+          --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; __dm_root="${2:-}"; shift 2 ;;
           *) shift ;;
         esac
       done

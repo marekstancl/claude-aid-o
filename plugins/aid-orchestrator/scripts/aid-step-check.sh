@@ -62,15 +62,15 @@ usage() { sed -n '5,10p' "${BASH_SOURCE[0]}" | sed 's/^# *//'; }
 CHECKPOINT="" EVID="" STEP="" STATE="" PLAN_JSON="" WORKTREE=0 DOD_FILE="" ROOT="" BASE_SHA=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --checkpoint) CHECKPOINT="$2"; shift 2 ;;
-    --evidence-dir) EVID="$2"; shift 2 ;;
-    --step) STEP="$2"; shift 2 ;;
-    --state-file) STATE="$2"; shift 2 ;;
-    --plan-json) PLAN_JSON="$2"; shift 2 ;;
+    --checkpoint) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; CHECKPOINT="$2"; shift 2 ;;
+    --evidence-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; EVID="$2"; shift 2 ;;
+    --step) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; STEP="$2"; shift 2 ;;
+    --state-file) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; STATE="$2"; shift 2 ;;
+    --plan-json) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PLAN_JSON="$2"; shift 2 ;;
     --worktree) WORKTREE=1; shift ;;
-    --dod-file) DOD_FILE="$2"; shift 2 ;;
-    --base) BASE_SHA="$2"; shift 2 ;;
-    --project-root) ROOT="$2"; shift 2 ;;
+    --dod-file) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; DOD_FILE="$2"; shift 2 ;;
+    --base) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; BASE_SHA="$2"; shift 2 ;;
+    --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ROOT="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown option $1 (see --help)" 2 ;;
   esac

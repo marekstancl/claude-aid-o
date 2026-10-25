@@ -55,11 +55,11 @@ source "${SCRIPT_DIR}/lib/aid-plan-review-packet.sh"
 DIR="" ROOT="" PREV="" NS="" PLAN="" STEP_CHECK=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --project-root) ROOT="${2:-}"; shift 2 ;;
-    --previous)     PREV="${2:-}"; shift 2 ;;
-    --namespace)    NS="${2:-}"; shift 2 ;;
-    --plan)         PLAN="${2:-}"; shift 2 ;;
-    --step-check)   STEP_CHECK="${2:-}"; shift 2 ;;
+    --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ROOT="${2:-}"; shift 2 ;;
+    --previous)     [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PREV="${2:-}"; shift 2 ;;
+    --namespace)    [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; NS="${2:-}"; shift 2 ;;
+    --plan)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PLAN="${2:-}"; shift 2 ;;
+    --step-check)   [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; STEP_CHECK="${2:-}"; shift 2 ;;
     -*) echo "adjudicate: unknown option $1" >&2; exit 2 ;;
     *)  DIR="$1"; shift ;;
   esac

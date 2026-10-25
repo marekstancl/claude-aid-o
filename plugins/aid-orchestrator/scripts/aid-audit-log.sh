@@ -29,11 +29,12 @@ cmd_append() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --epic-id)  epic_id="$2";  shift 2 ;;
-      --run-id)   run_id="$2";   shift 2 ;;
-      --event)    event="$2";    shift 2 ;;
-      --output)   output="$2";   shift 2 ;;
+      --epic-id)  [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; epic_id="$2";  shift 2 ;;
+      --run-id)   [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; run_id="$2";   shift 2 ;;
+      --event)    [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; event="$2";    shift 2 ;;
+      --output)   [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; output="$2";   shift 2 ;;
       --*)
+        [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }
         local key="${1#--}" val="${2:-}"
         extra_kvs+=("${key}=${val}")
         shift 2

@@ -58,10 +58,10 @@ cmd_start() {
   local focus="" agent_id="" evidence_dir="" exp_dur=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --focus)                 focus="$2"; shift 2 ;;
-      --agent-id)              agent_id="$2"; shift 2 ;;
-      --evidence-dir)          evidence_dir="$2"; shift 2 ;;
-      --expected-duration-max) exp_dur="$2"; shift 2 ;;
+      --focus)                 [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; focus="$2"; shift 2 ;;
+      --agent-id)              [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; agent_id="$2"; shift 2 ;;
+      --evidence-dir)          [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; evidence_dir="$2"; shift 2 ;;
+      --expected-duration-max) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; exp_dur="$2"; shift 2 ;;
       *) echo "ERROR: unknown arg $1" >&2; exit 1 ;;
     esac
   done
@@ -173,9 +173,9 @@ cmd_complete() {
   local focus="" output_file="" evidence_dir=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --focus)         focus="$2"; shift 2 ;;
-      --output-file)   output_file="$2"; shift 2 ;;
-      --evidence-dir)  evidence_dir="$2"; shift 2 ;;
+      --focus)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; focus="$2"; shift 2 ;;
+      --output-file)   [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; output_file="$2"; shift 2 ;;
+      --evidence-dir)  [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; evidence_dir="$2"; shift 2 ;;
       *) echo "ERROR: unknown arg $1" >&2; exit 1 ;;
     esac
   done
@@ -274,9 +274,9 @@ cmd_cancel() {
   local focus="" evidence_dir="" reason=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --focus)        focus="$2"; shift 2 ;;
-      --evidence-dir) evidence_dir="$2"; shift 2 ;;
-      --reason)       reason="$2"; shift 2 ;;
+      --focus)        [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; focus="$2"; shift 2 ;;
+      --evidence-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; evidence_dir="$2"; shift 2 ;;
+      --reason)       [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; reason="$2"; shift 2 ;;
       *) echo "ERROR: unknown arg $1" >&2; exit 1 ;;
     esac
   done
@@ -321,9 +321,9 @@ cmd_repair() {
   local evidence_dir="" reason="" focus=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --evidence-dir) evidence_dir="$2"; shift 2 ;;
-      --reason)       reason="$2"; shift 2 ;;
-      --focus)        focus="$2"; shift 2 ;;   # the start a damaged line was (it is withdrawn on the record)
+      --evidence-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; evidence_dir="$2"; shift 2 ;;
+      --reason)       [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; reason="$2"; shift 2 ;;
+      --focus)        [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; focus="$2"; shift 2 ;;   # the start a damaged line was (it is withdrawn on the record)
       *) echo "ERROR: unknown arg $1" >&2; exit 1 ;;
     esac
   done

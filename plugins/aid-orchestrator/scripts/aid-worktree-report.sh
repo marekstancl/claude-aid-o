@@ -48,8 +48,8 @@ AS_JSON=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --root) ROOT="$2"; shift 2 ;;
-    --stale-days) STALE_DAYS="$2"; shift 2 ;;
+    --root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ROOT="$2"; shift 2 ;;
+    --stale-days) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; STALE_DAYS="$2"; shift 2 ;;
     --json) AS_JSON=1; shift ;;
     -h|--help) sed -n '2,40p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "ERROR: unknown option: $1" >&2; exit 2 ;;

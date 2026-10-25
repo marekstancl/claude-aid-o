@@ -49,7 +49,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --advisory) ADVISORY=1; shift ;;
     --quiet)    QUIET=1; shift ;;
-    --group)    ONLY_GROUP="${2:-}"; [[ -n "$ONLY_GROUP" ]] || { echo "aid-plan-parallel-check: --group needs a wave name" >&2; exit 2; }; shift 2 ;;
+    --group)    [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ONLY_GROUP="${2:-}"; [[ -n "$ONLY_GROUP" ]] || { echo "aid-plan-parallel-check: --group needs a wave name" >&2; exit 2; }; shift 2 ;;
     -*) echo "aid-plan-parallel-check: unknown option: $1" >&2; exit 2 ;;
     *)  PLAN="$1"; shift ;;
   esac

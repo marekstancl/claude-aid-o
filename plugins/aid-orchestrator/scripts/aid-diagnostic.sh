@@ -128,9 +128,9 @@ main() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --evidence-root) evidence_roots+=("$2"); shift 2 ;;
-      --output)        output="$2"; shift 2 ;;
-      --limit)         limit="$2"; shift 2 ;;
+      --evidence-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; evidence_roots+=("$2"); shift 2 ;;
+      --output)        [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; output="$2"; shift 2 ;;
+      --limit)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; limit="$2"; shift 2 ;;
       -h|--help)       usage; exit 0 ;;
       *)               echo "Unknown arg: $1" >&2; usage >&2; exit 1 ;;
     esac

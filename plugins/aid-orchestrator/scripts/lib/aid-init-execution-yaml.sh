@@ -378,6 +378,7 @@ execution_yaml_has_gate_profiles() {
 # Nothing matches → a comment saying so, never a key that covers no test.
 _AID_TEST_PATTERNS=('test_*.py' '*_test.py' 'test-*.sh' 'tests-*.sh' '*.bats' '*.test.ts' '*.test.tsx' '*.test.js' '*.spec.ts' '*.spec.js' '*_test.go' '*_test.rs')
 render_project_tests_block() {
+  [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }
   local plugin_dir s frag globs='[]' root="" fresh=0
   if [[ "${1:-}" == --root ]]; then root="${2:?render_project_tests_block: --root needs a dir}"; shift 2; fi
   # --fresh: a new workspace (compose) keeps the stack's defaults when no test exists yet; the offer to an
@@ -437,6 +438,7 @@ append_gate_profiles_block() {
 }
 
 compose_execution_yaml() {
+  [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }
   local project_root="$1"
   local output_file="$2"
   shift 2

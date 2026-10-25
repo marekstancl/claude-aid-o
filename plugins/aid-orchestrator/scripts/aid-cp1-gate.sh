@@ -59,9 +59,9 @@ source "${SCRIPT_DIR}/lib/aid-critic.sh"
 plan="" project_root="" json_out=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --plan)          plan="${2:-}";         shift 2 ;;
-    --project-root)  project_root="${2:-}"; shift 2 ;;
-    --json)          json_out="${2:-}";     shift 2 ;;
+    --plan)          [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; plan="${2:-}";         shift 2 ;;
+    --project-root)  [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; project_root="${2:-}"; shift 2 ;;
+    --json)          [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; json_out="${2:-}";     shift 2 ;;
     --help|-h) sed -n '4,6p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) error_exit "Unknown argument: $1" 2 ;;
   esac

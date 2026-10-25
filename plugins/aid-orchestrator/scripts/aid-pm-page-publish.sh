@@ -44,10 +44,10 @@ page="" plan="" kind="" title="" root="" on_request=0
 [[ $# -ge 1 && "$1" != --* ]] && { page="$1"; shift; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --plan) plan="${2:-}"; shift 2 ;;
-    --kind) kind="${2:-}"; shift 2 ;;
-    --title) title="${2:-}"; shift 2 ;;
-    --project-root) root="${2:-}"; shift 2 ;;
+    --plan) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; plan="${2:-}"; shift 2 ;;
+    --kind) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; kind="${2:-}"; shift 2 ;;
+    --title) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; title="${2:-}"; shift 2 ;;
+    --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; root="${2:-}"; shift 2 ;;
     --on-request) on_request=1; shift ;;
     *) _die "unknown argument: $1" 2 ;;
   esac

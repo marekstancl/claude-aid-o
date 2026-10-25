@@ -53,8 +53,8 @@ ROOT=""
 DOCKERFILES=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --root) ROOT="${2:-}"; shift 2 ;;
-    --dockerfile) DOCKERFILES+=("${2:-}"); shift 2 ;;
+    --root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ROOT="${2:-}"; shift 2 ;;
+    --dockerfile) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; DOCKERFILES+=("${2:-}"); shift 2 ;;
     -h|--help) sed -n '3,10p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "release-paths-drift.sh: unknown argument '$1'" >&2; exit 2 ;;
   esac

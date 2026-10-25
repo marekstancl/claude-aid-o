@@ -110,14 +110,15 @@ _aid_up_design_system() {
 #                             both models are handed the same one
 # ---------------------------------------------------------------------------
 aid_ui_proposal_build() {
+  [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }
   local root="${1:?proposal: project root required}" out="${2:?proposal: output dir required}"; shift 2
   local screen="" fixture="" selector="body" brief=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --screen)       screen="${2:-}"; shift 2 ;;
-      --fixture-data) fixture="${2:-}"; shift 2 ;;
-      --selector)     selector="${2:-}"; shift 2 ;;
-      --brief)        brief="${2:-}"; shift 2 ;;
+      --screen)       [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; screen="${2:-}"; shift 2 ;;
+      --fixture-data) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; fixture="${2:-}"; shift 2 ;;
+      --selector)     [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; selector="${2:-}"; shift 2 ;;
+      --brief)        [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; brief="${2:-}"; shift 2 ;;
       *) echo "proposal: unknown option $1" >&2; return 1 ;;
     esac
   done

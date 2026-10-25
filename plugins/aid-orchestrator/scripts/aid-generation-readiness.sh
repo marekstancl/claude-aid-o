@@ -25,10 +25,10 @@ check_prerequisites
 plan="" total="" json=0 out="" project_root=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --total) total="$2"; shift 2 ;;
-    --project-root) project_root="$2"; shift 2 ;;   # the tree the plan's paths are checked against (a dependency's worktree)
+    --total) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; total="$2"; shift 2 ;;
+    --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; project_root="$2"; shift 2 ;;   # the tree the plan's paths are checked against (a dependency's worktree)
     --json) json=1; shift ;;
-    --write-provisional) out="$2"; shift 2 ;;
+    --write-provisional) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; out="$2"; shift 2 ;;
     -*) echo "ERROR: unknown option: $1" >&2; exit 2 ;;
     *) [[ -z "$plan" ]] || { echo "ERROR: one plan path expected" >&2; exit 2; }; plan="$1"; shift ;;
   esac

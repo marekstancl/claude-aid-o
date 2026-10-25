@@ -49,8 +49,8 @@ main() {
   local -a cards=() plans=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --card) cards+=("${2:?--card needs a file}"); shift 2 ;;
-      --plan) plans+=("${2:?--plan needs a file}"); shift 2 ;;
+      --card) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; cards+=("${2:?--card needs a file}"); shift 2 ;;
+      --plan) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; plans+=("${2:?--plan needs a file}"); shift 2 ;;
       -h|--help) usage; return 2 ;;
       *) echo "ERROR: unknown argument '$1'" >&2; usage; return 2 ;;
     esac

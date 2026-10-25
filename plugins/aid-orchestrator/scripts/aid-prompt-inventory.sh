@@ -35,8 +35,8 @@ usage() { sed -n '2,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit "$
 roots=(); out_json=""; out_md=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --json) out_json="$2"; shift 2 ;;
-    --md) out_md="$2"; shift 2 ;;
+    --json) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; out_json="$2"; shift 2 ;;
+    --md) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; out_md="$2"; shift 2 ;;
     -h|--help) usage 0 ;;
     -*) echo "unknown option: $1" >&2; usage 1 ;;
     *) roots+=("$1"); shift ;;

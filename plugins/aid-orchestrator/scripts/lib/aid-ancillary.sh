@@ -230,8 +230,8 @@ aid_ancillary_filter_porcelain() {
   local mode="" root="." line path
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --mode) mode="${2:-}"; shift 2 ;;
-      --project-root) root="${2:-.}"; shift 2 ;;
+      --mode) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; mode="${2:-}"; shift 2 ;;
+      --project-root) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; root="${2:-.}"; shift 2 ;;
       *) shift ;;
     esac
   done

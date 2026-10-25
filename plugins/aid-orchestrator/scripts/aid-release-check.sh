@@ -28,9 +28,9 @@ source "${SCRIPT_DIR}/lib/aid-release-scope.sh"
 ROOT=""; START=""; END="HEAD"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --root)  ROOT="${2:-}"; shift 2 ;;
-    --start) START="${2:-}"; shift 2 ;;
-    --end)   END="${2:-}"; shift 2 ;;
+    --root)  [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ROOT="${2:-}"; shift 2 ;;
+    --start) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; START="${2:-}"; shift 2 ;;
+    --end)   [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; END="${2:-}"; shift 2 ;;
     -h|--help) sed -n '3,10p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "aid-release-check.sh: unknown argument '$1'" >&2; exit 0 ;;
   esac
