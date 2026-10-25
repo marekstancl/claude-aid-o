@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # stop-hook-bench.sh — how long AID's Stop rules take on a long session, and whether a faster version
-# still gives the same verdicts (AID 3.11.0, Z3 of docs/plans/2026-10-25-prevzeti-kroku-na-pozadi.md).
+# still gives the same verdicts (AID 3.11.0, Z3 of docs/archive/2026-10-25-prevzeti-kroku-na-pozadi.md).
 #
 #   stop-hook-bench.sh [--base <git-ref>] [--lines <n>] [--runs <n>] [--limit <s>]
 #
