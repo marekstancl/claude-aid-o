@@ -68,9 +68,9 @@ cmd_open() {
   local path="" run_id="" sha=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --path)          path="$2"; shift 2 ;;
-      --run-id)        run_id="$2"; shift 2 ;;
-      --candidate-sha) sha="$2"; shift 2 ;;
+      --path)          [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; path="$2"; shift 2 ;;
+      --run-id)        [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; run_id="$2"; shift 2 ;;
+      --candidate-sha) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; sha="$2"; shift 2 ;;
       *) _die 2 "open: unknown argument '$1'" ;;
     esac
   done
@@ -88,12 +88,12 @@ cmd_append() {
   local path="${AID_EXECUTION_LEDGER:-}" unit="" gate="" fp="" point="" kind="${AID_EXECUTION_KIND:-normal}"
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --path)        path="$2"; shift 2 ;;
-      --run-unit-id) unit="$2"; shift 2 ;;
-      --gate-id)     gate="$2"; shift 2 ;;
-      --fingerprint) fp="$2"; shift 2 ;;
-      --dispatch-point) point="$2"; shift 2 ;;
-      --execution-kind) kind="$2"; shift 2 ;;
+      --path)        [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; path="$2"; shift 2 ;;
+      --run-unit-id) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; unit="$2"; shift 2 ;;
+      --gate-id)     [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; gate="$2"; shift 2 ;;
+      --fingerprint) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; fp="$2"; shift 2 ;;
+      --dispatch-point) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; point="$2"; shift 2 ;;
+      --execution-kind) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; kind="$2"; shift 2 ;;
       *) _die 2 "append: unknown argument '$1'" ;;
     esac
   done
@@ -143,8 +143,8 @@ cmd_close() {
   local path="" contains_file=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --path)     path="$2"; shift 2 ;;
-      --contains) contains_file="$2"; shift 2 ;;
+      --path)     [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; path="$2"; shift 2 ;;
+      --contains) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; contains_file="$2"; shift 2 ;;
       *) _die 2 "close: unknown argument '$1'" ;;
     esac
   done

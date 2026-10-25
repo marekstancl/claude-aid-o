@@ -56,10 +56,10 @@ source "${SCRIPT_DIR}/lib/aid-verification-pattern.sh"
 PLAN="" ROOT="" JSON_OUT="" SNAPSHOT="" FIXES="" QUIET=0 FORCE_MODE="" RUN_CMDS="${AID_PLAN_CHECK_RUN_CMDS:-0}"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --project-root) ROOT="${2:-}"; shift 2 ;;
-    --json)         JSON_OUT="${2:-}"; shift 2 ;;
-    --snapshot)     SNAPSHOT="${2:-}"; shift 2 ;;
-    --fixes)        FIXES="${2:-}"; shift 2 ;;
+    --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ROOT="${2:-}"; shift 2 ;;
+    --json)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; JSON_OUT="${2:-}"; shift 2 ;;
+    --snapshot)     [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; SNAPSHOT="${2:-}"; shift 2 ;;
+    --fixes)        [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; FIXES="${2:-}"; shift 2 ;;
     --quiet)        QUIET=1; shift ;;
     --run-cmds)     RUN_CMDS=1; shift ;;
     --strict)       FORCE_MODE="strict"; shift ;;

@@ -27,12 +27,12 @@ CMD="${1:-}"; shift || true
 EVID="" CODE="" PROPOSAL="" ID="" VERDICT="" TROOT=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --evidence-dir) EVID="${2:-}"; shift 2 ;;
-    --code)         CODE="${2:-}"; shift 2 ;;
-    --proposal)     PROPOSAL="${2:-}"; shift 2 ;;
-    --id)           ID="${2:-}"; shift 2 ;;
-    --verdict)      VERDICT="${2:-}"; shift 2 ;;
-    --tree-root)    TROOT="${2:-}"; shift 2 ;;
+    --evidence-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; EVID="${2:-}"; shift 2 ;;
+    --code)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; CODE="${2:-}"; shift 2 ;;
+    --proposal)     [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PROPOSAL="${2:-}"; shift 2 ;;
+    --id)           [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ID="${2:-}"; shift 2 ;;
+    --verdict)      [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; VERDICT="${2:-}"; shift 2 ;;
+    --tree-root)    [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; TROOT="${2:-}"; shift 2 ;;
     *) echo "aid-stand-in: unknown argument $1" >&2; exit 2 ;;
   esac
 done

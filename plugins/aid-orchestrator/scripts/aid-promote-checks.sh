@@ -17,7 +17,7 @@ FORMAT="markdown"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --format) FORMAT="$2"; shift 2 ;;
+    --format) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; FORMAT="$2"; shift 2 ;;
     --help|-h)
       cat <<EOF
 Usage: aid-promote-checks.sh [--format text|markdown]

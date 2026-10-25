@@ -351,6 +351,7 @@ _aid_lc_sync_checkout_of() {
 }
 
 _aid_lc_isolated_commit() {
+  [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }
   local root="$1" msg="$2"; shift 2
   local rels=("$@")
   # Bookkeeping, not a plugin change: the release guard's pre-push hook refuses

@@ -100,15 +100,15 @@ cmd_issue() {
   local authorized_by="PM" project="" epic="" run=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --evidence-dir)   evidence_dir="$2"; shift 2 ;;
-      --reason)         reason="$2"; shift 2 ;;
-      --expires-in)     expires_in="$2"; shift 2 ;;
-      --head)           head="$2"; shift 2 ;;
-      --execution-yaml) execution_yaml="$2"; shift 2 ;;
-      --authorized-by)  authorized_by="$2"; shift 2 ;;
-      --project)        project="$2"; shift 2 ;;
-      --epic)           epic="$2"; shift 2 ;;
-      --run)            run="$2"; shift 2 ;;
+      --evidence-dir)   [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; evidence_dir="$2"; shift 2 ;;
+      --reason)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; reason="$2"; shift 2 ;;
+      --expires-in)     [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; expires_in="$2"; shift 2 ;;
+      --head)           [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; head="$2"; shift 2 ;;
+      --execution-yaml) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; execution_yaml="$2"; shift 2 ;;
+      --authorized-by)  [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; authorized_by="$2"; shift 2 ;;
+      --project)        [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; project="$2"; shift 2 ;;
+      --epic)           [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; epic="$2"; shift 2 ;;
+      --run)            [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; run="$2"; shift 2 ;;
       *) _die "unknown issue arg: $1" ;;
     esac
   done
@@ -204,12 +204,12 @@ cmd_check() {
   local evidence_dir="" head="" command_sha="" project="" epic="" run=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --evidence-dir) evidence_dir="$2"; shift 2 ;;
-      --head)         head="$2"; shift 2 ;;
-      --command-sha)  command_sha="$2"; shift 2 ;;
-      --project)      project="$2"; shift 2 ;;
-      --epic)         epic="$2"; shift 2 ;;
-      --run)          run="$2"; shift 2 ;;
+      --evidence-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; evidence_dir="$2"; shift 2 ;;
+      --head)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; head="$2"; shift 2 ;;
+      --command-sha)  [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; command_sha="$2"; shift 2 ;;
+      --project)      [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; project="$2"; shift 2 ;;
+      --epic)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; epic="$2"; shift 2 ;;
+      --run)          [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; run="$2"; shift 2 ;;
       *) _die "unknown check arg: $1" ;;
     esac
   done
@@ -323,8 +323,8 @@ cmd_consume() {
   local evidence_dir="" by_run=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --evidence-dir) evidence_dir="$2"; shift 2 ;;
-      --by-run)       by_run="$2"; shift 2 ;;
+      --evidence-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; evidence_dir="$2"; shift 2 ;;
+      --by-run)       [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; by_run="$2"; shift 2 ;;
       *) _die "unknown consume arg: $1" ;;
     esac
   done

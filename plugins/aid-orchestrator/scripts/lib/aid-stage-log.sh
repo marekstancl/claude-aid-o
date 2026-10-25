@@ -8,6 +8,7 @@
 die() { echo "ERROR: $*" >&2; exit 1; }
 
 log_event() {
+  [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }
   local timeline_file="$1"
   local event="$2"
   shift 2
@@ -160,6 +161,7 @@ aid_stage_writes_inputs() {
 }
 # aid_stage_writes_record <run_dir> <stage> <file>... — append {path, sha256, stage, at}.
 aid_stage_writes_record() {
+  [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }
   local run_dir="$1" stage="$2" f; shift 2
   for f in "$@"; do
     [[ -f "${run_dir}/${f}" ]] || continue

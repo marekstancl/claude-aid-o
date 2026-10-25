@@ -294,8 +294,8 @@ main() {
       --status)     action=status; shift ;;
       --seed-trust) action=seed; shift ;;
       --json)       json_out=--json; shift ;;
-      --tool)       AID_HOOK_TOOL="${2:-}"; export AID_HOOK_TOOL; shift 2 ;;
-      --timeout)    timeout_s="${2:-120}"; shift 2 ;;
+      --tool)       [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; AID_HOOK_TOOL="${2:-}"; export AID_HOOK_TOOL; shift 2 ;;
+      --timeout)    [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; timeout_s="${2:-120}"; shift 2 ;;
       *) echo "Usage: aid-hook-verify.sh --canary [--tool auto|claude-code|codex] [--timeout <s>] | --status [--json] | --seed-trust" >&2; return 2 ;;
     esac
   done

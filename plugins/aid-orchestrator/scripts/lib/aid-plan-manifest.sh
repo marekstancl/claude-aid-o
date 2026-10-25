@@ -664,11 +664,12 @@ _pm_check_invariants() {
 # aid-protocol-validate.sh missing/non-executable (fail-closed).
 # ===========================================================================
 _plan_manifest_validate_file() {
+  [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }
   local plan_id="$1" file="$2"; shift 2
   local current_head=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --current-head) current_head="${2:-}"; shift 2 ;;
+      --current-head) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; current_head="${2:-}"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -879,6 +880,7 @@ plan_manifest_get() {
 # only on success -> release lock.
 # ===========================================================================
 _plan_manifest_atomic_mutate() {
+  [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }
   local plan_id="$1" jq_filter="$2"; shift 2
   local -a jq_extra_args=("$@")
 
@@ -1599,7 +1601,7 @@ plan_manifest_validate() {
   local current_head=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --current-head) current_head="${2:-}"; shift 2 ;;
+      --current-head) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; current_head="${2:-}"; shift 2 ;;
       *) shift ;;
     esac
   done

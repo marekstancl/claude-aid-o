@@ -659,8 +659,8 @@ active_runs_stalled_json() {
   local now="" only=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --now)  now="${2:-}"; shift 2 ;;
-      --epic) only="${2:-}"; shift 2 ;;
+      --now)  [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; now="${2:-}"; shift 2 ;;
+      --epic) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; only="${2:-}"; shift 2 ;;
       *) echo "ERROR: active-runs stalled: unknown argument '$1'" >&2; return 1 ;;
     esac
   done
@@ -1193,6 +1193,8 @@ _fsm_refusal_next() {
       next="start the plan in plan_branch mode and run from its plan worktree: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}")" ;;
     plan_manifest_missing|plan_branch_mismatch)
       next="start the plan's run again through plan-run, which writes the manifest entry and runs init: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-plan-fsm.sh" plan-run "${_pb_plan_id:-<plan>}" --restart --reason "<why>")" ;;
+    land_record_invalid)
+      next="take the step over again in the background — after a commit that followed the takeover: $(_fsm_cmd bash "${SCRIPT_DIR}/aid-step-land.sh" "$sf" "${step:-N}") --recheck --check \"<AC#>:<command>\" …; after a failed one: fix the step as the record says, then the same command without --recheck — and: $inc" ;;
     contract_return_missing|contract_return_not_done)
       next="extract and validate the agent's aid-return block into $(_fsm_cmd "${_c_dir:-<step dir>}/return.json") (a blocked return: resume the agent; blocked again in an --auto run: the stand-in decides — $(_fsm_cmd bash "${SCRIPT_DIR}/aid-stand-in.sh" ask --evidence-dir "$(dirname "$sf")" --code contract_return_not_done --proposal "<{\"kind\": \"blocked_step\", \"step\": N, \"action\": \"redispatch\", \"return_sha256\": \"<sha256 of the step's return.json, or none>\", \"why\": …}>"), then $(_fsm_cmd bash "$fsm" step-redispatch "$sf" --stand-in "<auth.json>" --reason "<why>") and dispatch again (a rename or a widening is asked as its own kind); otherwise a Blocked card), then: $inc" ;;
     missing_step_verify|verify_no_ac_checklist|verify_no_memory_used|verify_no_memory_written|step_verify_not_pass|verify_no_commit_ref)
@@ -1320,7 +1322,7 @@ fsm_check_review_round() {
   shift 3 2>/dev/null || shift $#
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --head) expected_head="${2:-}"; shift 2 ;;
+      --head) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; expected_head="${2:-}"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -1688,10 +1690,10 @@ fsm_handle_force_override() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --reason) reason="$2"; shift 2 ;;
-      --blocked-checks) blocked_checks="$2"; shift 2 ;;
-      --blocking-epic) blocking_epic="$2"; shift 2 ;;
-      --blocking-plan) blocking_plan="$2"; shift 2 ;;
+      --reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; reason="$2"; shift 2 ;;
+      --blocked-checks) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; blocked_checks="$2"; shift 2 ;;
+      --blocking-epic) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; blocking_epic="$2"; shift 2 ;;
+      --blocking-plan) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; blocking_plan="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -2999,7 +3001,7 @@ cmd_resume() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --resolve-pidless) resolve_pidless=true; shift ;;
-      --poll-seconds) AID_RESUME_POLL_SEC="${2:-0}"; shift 2 ;;
+      --poll-seconds) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; AID_RESUME_POLL_SEC="${2:-0}"; shift 2 ;;
       --no-poll) AID_RESUME_POLL_SEC=0; shift ;;
       --*) echo "ERROR: aid-fsm.sh resume: unknown flag '$1'" >&2; return 1 ;;
       *) [[ -z "$epic_id" ]] || { echo "ERROR: aid-fsm.sh resume: unexpected argument '$1'" >&2; return 1; }
@@ -4069,8 +4071,8 @@ cmd_abandon() {
   shift || true
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --reason) reason="${2:-}"; shift 2 ;;
-      --epic) epic_opt="${2:-}"; shift 2 ;;
+      --reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; reason="${2:-}"; shift 2 ;;
+      --epic) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; epic_opt="${2:-}"; shift 2 ;;
       *) echo "ERROR: abandon: unknown argument: $1" >&2; exit 2 ;;
     esac
   done
@@ -4235,7 +4237,7 @@ cmd_advance_to_gates() {
   local explicit_profile=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --profile) explicit_profile="$2"; shift 2 ;;
+      --profile) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; explicit_profile="$2"; shift 2 ;;
       *) shift ;;
     esac
   done
@@ -4875,6 +4877,25 @@ cmd_increment_step() {
           || _increment_fail contract_return_not_done \
             "PRECONDITION FAIL: step ${step}'s return is accepted but not finished — status $(jq -r .step_status "${_c_dir}/return.json" 2>/dev/null), failed gates: $(jq -r '[.gates[]? | select(.result == "fail") | .name] | join(", ")' "${_c_dir}/return.json" 2>/dev/null)." \
             "A blocked step, or one with a failing gate, does not advance: resume the agent or hand over with a Blocked card."
+        # AID 3.11.0: a step taken over in the background (aid-step-land.sh) advances only on a record that
+        # proves THIS step at THIS HEAD with every command criterion passed — the verify file cannot outvote it
+        # once a takeover of this step started (the run's timeline says so) the record is required — deleting it
+        # does not reopen the manual path
+        if [[ ! -f "${_c_dir}/land.json" ]] && grep -F '"event":"step_takeover_started"' "${evidence_dir}/timeline.jsonl" 2>/dev/null \
+             | jq -e --argjson n "$step" 'select(.step == $n)' >/dev/null 2>&1; then
+          _increment_fail land_record_invalid \
+            "PRECONDITION FAIL: step ${step} was taken over in the background (the run's timeline) and its record ${_c_dir}/land.json is gone." \
+            "Take the step over again: scripts/aid-step-land.sh"
+        fi
+        if [[ -f "${_c_dir}/land.json" ]]; then
+          source "${SCRIPT_DIR}/lib/aid-land-record.sh"
+          local _land_why
+          _land_why="$(aid_land_record_verify "${_c_dir}/land.json" "$state_file" "$_plan_json" "$step" \
+                        "${_c_dir}/contract.json" "${_c_dir}/return.json")" \
+            || _increment_fail land_record_invalid \
+              "PRECONDITION FAIL: step ${step} was taken over in the background and its record does not hold: ${_land_why}" \
+              "Record: ${_c_dir}/land.json (scripts/aid-step-land.sh)"
+        fi
       fi
     fi
 
@@ -5324,8 +5345,8 @@ cmd_auto_mode() {
   case "$mode" in auto|manual) ;; *) echo "ERROR: auto-mode set: mode must be auto or manual (got '${mode}')" >&2; exit 2 ;; esac
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --by) by="${2:-}"; shift 2 ;;
-      --reason) reason="${2:-}"; shift 2 ;;
+      --by) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; by="${2:-}"; shift 2 ;;
+      --reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; reason="${2:-}"; shift 2 ;;
       *) echo "ERROR: auto-mode set: unknown option $1" >&2; exit 2 ;;
     esac
   done
@@ -5353,7 +5374,7 @@ cmd_set_field() {
   local reason=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --reason) reason="${2:-}"; shift 2 ;;
+      --reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; reason="${2:-}"; shift 2 ;;
       *) echo "ERROR: set-field: unknown option $1" >&2; exit 2 ;;
     esac
   done
@@ -5448,7 +5469,7 @@ cmd_rebase_plan() {
   local state_file="" reason=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --reason) reason="${2:-}"; shift 2 ;;
+      --reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; reason="${2:-}"; shift 2 ;;
       *) [[ -z "$state_file" ]] || die "rebase-plan: unexpected argument '$1'"; state_file="$1"; shift ;;
     esac
   done
@@ -5524,8 +5545,8 @@ cmd_step_redispatch() {
   local sf="" auth="" reason=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --stand-in) auth="${2:-}"; shift 2 ;;
-      --reason)   reason="${2:-}"; shift 2 ;;
+      --stand-in) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; auth="${2:-}"; shift 2 ;;
+      --reason)   [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; reason="${2:-}"; shift 2 ;;
       *) [[ -z "$sf" ]] || die "step-redispatch: unexpected argument '$1'"; sf="$1"; shift ;;
     esac
   done
@@ -5555,10 +5576,10 @@ cmd_amend_contract() {
   local sf="" pair="" reason="" auth="" card=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --rename)   pair="${2:-}"; shift 2 ;;
-      --reason)   reason="${2:-}"; shift 2 ;;
-      --stand-in) auth="${2:-}"; shift 2 ;;
-      --pm-card)  card="${2:-}"; shift 2 ;;
+      --rename)   [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; pair="${2:-}"; shift 2 ;;
+      --reason)   [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; reason="${2:-}"; shift 2 ;;
+      --stand-in) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; auth="${2:-}"; shift 2 ;;
+      --pm-card)  [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; card="${2:-}"; shift 2 ;;
       *) [[ -z "$sf" ]] || die "amend-contract: unexpected argument '$1'"; sf="$1"; shift ;;
     esac
   done
@@ -5572,9 +5593,9 @@ cmd_amend_scope() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --add)    [[ -n "${2:-}" ]] || die "amend-scope: --add needs a path"; add+=("$2"); shift 2 ;;
-      --reason) reason="${2:-}"; shift 2 ;;
-      --pm-card) pm_card="${2:-}"; shift 2 ;;   # the PM's decision card quoting every added path (aidlab-apps 15. 10. 2026)
-      --stand-in) stand_in="${2:-}"; shift 2 ;;   # P117: the stand-in's permission (aid-stand-in.sh) in an --auto run
+      --reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; reason="${2:-}"; shift 2 ;;
+      --pm-card) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; pm_card="${2:-}"; shift 2 ;;   # the PM's decision card quoting every added path (aidlab-apps 15. 10. 2026)
+      --stand-in) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; stand_in="${2:-}"; shift 2 ;;   # P117: the stand-in's permission (aid-stand-in.sh) in an --auto run
       *)        [[ -z "$state_file" ]] || die "amend-scope: unexpected argument '$1'"; state_file="$1"; shift ;;
     esac
   done
@@ -6734,7 +6755,7 @@ cmd_plan_close() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --force)  _pc_force="true"; shift ;;
-      --reason) _pc_reason="${2:-}"; shift 2 ;;
+      --reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; _pc_reason="${2:-}"; shift 2 ;;
       --*)      echo "ERROR: Unknown flag for plan-close: $1" >&2
                 echo "  plan-close accepts: <epic_id> <evidence_dir> <project_root> [--force --reason <text>]" >&2
                 exit 2 ;;

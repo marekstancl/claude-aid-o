@@ -264,6 +264,7 @@ _gen_write_atomic() {
 #   LOCKED read-modify-write plus atomic tmp+mv, so two pipeline invocations
 #   never interleave a lost update. `updated_at` is refreshed on every write.
 _gen_tx_update() {
+  [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }
   local plan_id="$1" filter="$2"; shift 2
   local txp; txp="$(_gen_transaction_path "$plan_id")"
   _gen_lock "$plan_id" || error_exit "cannot acquire the generation transaction lock for ${plan_id} (${txp}.lock) — another generation for this plan is running, or flock is unavailable." 3

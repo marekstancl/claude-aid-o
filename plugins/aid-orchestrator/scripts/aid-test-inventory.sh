@@ -115,10 +115,10 @@ _aid_test_inventory_annotate_lock_usage() {
 project_root="" audit_id="" output_dir="" execution_yaml=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --project-root) project_root="$2"; shift 2 ;;
-    --audit-id) audit_id="$2"; shift 2 ;;
-    --output-dir) output_dir="$2"; shift 2 ;;
-    --execution-yaml) execution_yaml="$2"; shift 2 ;;
+    --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; project_root="$2"; shift 2 ;;
+    --audit-id) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; audit_id="$2"; shift 2 ;;
+    --output-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; output_dir="$2"; shift 2 ;;
+    --execution-yaml) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; execution_yaml="$2"; shift 2 ;;
     -h|--help) _usage; exit 0 ;;
     *) echo "aid-test-inventory.sh: unknown option '$1'" >&2; _usage >&2; exit 2 ;;
   esac

@@ -3,6 +3,21 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.11.0] — 2026-10-25
+
+Převzetí kroku na pozadí (PM 25. 10. 2026, volba 1A): sloučení a testy kroku může hlavní okno běhu pustit na pozadí a mezitím pracovat dál. Mechanika je ověřená testy a testbedem (stejný výsledek jako ruční převzetí, chyby zastaví); kolik času to na skutečném běhu ušetří, se změří na prvním živém plánu. Zadání: `docs/plans/2026-10-25-prevzeti-kroku-na-pozadi.md`.
+
+### Added
+- **Převzetí kroku na pozadí** (`scripts/aid-step-land.sh`): mechanickou část převzetí vráceného kroku – ověření návratu, commit, ve vlně sloučení, příkazy akceptačních bodů a měření bodů zadání – dělá skript na pozadí a řadič mezitím přijímá další návraty, posílá agenty na další kroky a vede revize (`AID-WAIT: převzetí kroku N`). Dosud na to řadič čekal v popředí (WAN P115: 53 ze 180 minut). Sloučení vlny se sestaví mimo větev plánu a ta se posune až po zelených kontrolách; při neúspěchu zůstane plán beze změny a strom kroku na své větvi. Skript nic neopravuje (žádné rozšíření rozsahu, změna kontraktu, přejmenování ani opakování) – rozhoduje řadič jako dosud. Každý akceptační bod, jehož text začíná příkazem v backticku, musí dostat právě ten příkaz (`--check "<n>:<příkaz>"`, prostředí zvlášť `--env`). Po opravě z revize kroku `--recheck` pustí tytéž kontroly nad novým HEAD. Záznam `steps/<krok>/land.json`, plné výstupy v `land-logs/`. Zámek převzetí `.aid-o/work/locks/` je běhový soubor (`defaults/.gitignore`, `/aid-init` ho doplní).
+- **`increment-step` ověří záznam převzetí** (`lib/aid-land-record.sh`, odmítnutí `land_record_invalid`): krok se záznamem neposune, když v něm chybí příkazový bod, některý neprošel, převzetí ještě běží, patří jinému běhu nebo kroku, za převzetím přibyl commit, změnil se kontrakt či návrat, commity v záznamu neexistují nebo k sobě nesedí (sloučení vlny není to, které git pro jeho rodiče spočítá; sériový commit nesedí na základu; `--recheck` nezačíná od výsledku skutečného převzetí). Začátek a výsledek každého převzetí jde do časové osy běhu: krok, jehož převzetí začalo, se bez záznamu neposune ani po jeho smazání. Krok, který se na pozadí nepřebíral, jde dál ruční cestou jako dosud.
+
+### Changed
+- **Konec tahu s otevřeným krokem** (`turn_step_open`) pustí `AID-WAIT:`, když na pozadí ještě běží převzetí právě tohoto kroku (jeho záznam říká „běží“, spustilo ho toto sezení, pod jeho číslem procesu běží `aid-step-land.sh` a volání na pozadí je nezodpovězené) nebo jeho agent spuštěný na pozadí (výzva s hlavičkou jeho kontraktu); jiná úloha na pozadí otevřený krok neomluví. Odmítnutí jmenuje převzetí na pozadí.
+
+### Fixed
+- **Kontrola na konci tahu rychlejší** (Stop hook AID): dvě čtečky přepisu sezení četly celý soubor nástrojem `jq` při každém konci tahu – na 186 MB přepisu WANu 13 s. Poslední zpráva se čte od konce, úlohy na pozadí jen z řádků, které je můžou nést (předvýběr podle názvů klíčů a vět, které Claude Code nikdy neescapuje). Syntetický přepis 25 000 řádků: asi 6 s → pod 1 s se shodnými verdikty (`scripts/tests/bench/stop-hook-bench.sh` porovná s libovolnou starší verzí a cíl vynutí); 40 výřezů skutečného přepisu: 0 rozdílů. Vědomé rozdíly jen u poškozeného přepisu: poškozený řádek **před** poslední zprávou modelu už pravidla neslepí (dosud je vypnul pro celé sezení) a při hledání úloh na pozadí se poškozený řádek přeskočí, místo aby skryl všechny řádky za sebou; poškozený řádek za poslední zprávou je chyba jako dřív.
+- **Volba bez hodnoty se nezacyklí**: `shift 2` s jedním zbylým argumentem nic neposune; skript bez `set -e` se pak točil donekonečna na 100 % CPU (`aid-plan-check.sh <plan> --json`, WAN P115: 11 minut), skript s `set -u` spadl na `$2: unbound variable` bez vysvětlení. Před každým `shift 2` ve skriptech pluginu teď stojí kontrola dvou zbylých argumentů, ještě než se hodnota přečte: skript skončí kódem 2 s větou, kterou volbu doplnit; uvnitř funkce se vrátí 2 a volajícího neukončí, i když je skript načtený jiným (`return 2 2>/dev/null || exit 2`). Hlídá to `scripts/tests/lib/opt-value-guard.py` (umí i `--fix`) přes test `test-opt-value-guard.bats`.
+
 ## [3.10.1] — 2026-10-25
 
 Studio `/aid-ui` hodnotí strukturu na kostře, ne na starém webu.

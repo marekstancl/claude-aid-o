@@ -35,6 +35,7 @@ codes:
   contract_return_missing: {class: agent_fix_then_stand_in, how: "obnoví/znovu spustí krok; po opakovaném zablokování → zástupce (rozdělení, kontext); nutná změna zadání → PM"}
   contract_return_not_done: {class: agent_fix_then_stand_in, how: "jako contract_return_missing"}
   contract_return_rejected: {class: agent_fix_then_stand_in, how: "oprava/nové spuštění kroku; nejde opravit bez změny kontraktu (přejmenování) → zástupce s amend-contract (13)"}
+  land_record_invalid: {class: agent_fix_then_stand_in, how: "převzetí kroku znovu na pozadí (aid-step-land.sh; po commitu za převzetím --recheck); padající kontrolu opraví role kroku"}
   cp3_stale_review: {class: not_in_run, how: "CP3 odstraněna v 3.0.0"}
   cp7_brief_sha_mismatch: {class: pm, how: "zadání změněno – PM"}
   cp7_confirmation_not_enough: {class: agent_fix, how: "potvrzovací kolo nestačí: připravit plné kolo CP7 nad kandidátem"}

@@ -161,6 +161,7 @@ Appended to project root `.gitignore` (or created if missing). Content:
 .aid-o/work/release-force-*
 .aid-o/work/companion/
 .aid-o/work/superseded-runs/
+.aid-o/work/locks/
 .aid-o/work/plan-final/
 .aid-o/work/runs/
 .aid-o/work/test-audits/

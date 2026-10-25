@@ -173,7 +173,7 @@ aid_brainstorm_opponent_run() {
   local stand_in_answer=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --answer) stand_in_answer="${2:?opponent: --answer needs a file}"; shift 2 ;;
+      --answer) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; stand_in_answer="${2:?opponent: --answer needs a file}"; shift 2 ;;
       *) echo "opponent: unknown option $1" >&2; return 1 ;;
     esac
   done

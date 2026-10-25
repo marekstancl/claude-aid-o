@@ -53,9 +53,9 @@ _aid_critic_args() {
   _ac_moment=""; _ac_plan=""; _ac_root=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --moment) _ac_moment="${2-}"; shift 2 ;;
-      --plan)   _ac_plan="${2-}"; shift 2 ;;
-      --root)   _ac_root="${2-}"; shift 2 ;;
+      --moment) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; _ac_moment="${2-}"; shift 2 ;;
+      --plan)   [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; _ac_plan="${2-}"; shift 2 ;;
+      --root)   [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; _ac_root="${2-}"; shift 2 ;;
       *) echo "critic: unknown argument '$1'" >&2; return 1 ;;
     esac
   done
@@ -408,9 +408,9 @@ aid_critic_dispatch() {
   shift || true
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --moment) moment="${2-}"; shift 2 ;;
-      --provider) provider="${2-}"; shift 2 ;;
-      --root) root="${2-}"; shift 2 ;;
+      --moment) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; moment="${2-}"; shift 2 ;;
+      --provider) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; provider="${2-}"; shift 2 ;;
+      --root) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; root="${2-}"; shift 2 ;;
       *) echo "critic: unknown argument '$1'" >&2; return 1 ;;
     esac
   done

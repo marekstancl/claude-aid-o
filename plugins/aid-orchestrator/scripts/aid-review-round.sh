@@ -102,29 +102,29 @@ PLAN="" CHECKPOINT="" EVID="" STEP="" ROUND="" ROOT="" ONLY="" MANUAL=0 STUB=0 R
 TOKENS=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --plan)         PLAN="${2:-}"; shift 2 ;;
-    --checkpoint)   CHECKPOINT="${2:-}"; shift 2 ;;
-    --evidence-dir) EVID="${2:-}"; shift 2 ;;
-    --step)         STEP="${2:-}"; shift 2 ;;
-    --round)        ROUND="${2:-}"; shift 2 ;;
-    --project-root) ROOT="${2:-}"; shift 2 ;;
-    --only)         ONLY="${2:-}"; shift 2 ;;
+    --plan)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PLAN="${2:-}"; shift 2 ;;
+    --checkpoint)   [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; CHECKPOINT="${2:-}"; shift 2 ;;
+    --evidence-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; EVID="${2:-}"; shift 2 ;;
+    --step)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; STEP="${2:-}"; shift 2 ;;
+    --round)        [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ROUND="${2:-}"; shift 2 ;;
+    --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ROOT="${2:-}"; shift 2 ;;
+    --only)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ONLY="${2:-}"; shift 2 ;;
     --manual)       MANUAL=1; shift ;;
     --stub)         STUB=1; shift ;;
-    --role)         ROLE="${2:-}"; shift 2 ;;
-    --provider)     PROVIDER="${2:-}"; shift 2 ;;
-    --fingerprint)  FINGERPRINT="${2:-}"; shift 2 ;;
-    --reason)       REASON="${2:-}"; shift 2 ;;
-    --rounds)       ROUNDS="${2:-}"; shift 2 ;;
-    --pm)           PM_ANSWER="${2:-}"; shift 2 ;;
-    --fixer)        FIXER="${2:-}"; shift 2 ;;
-    --finding-card) CARD="${2:-}"; shift 2 ;;
-    --at)           AT_SHA="${2:-}"; shift 2 ;;        # close: the revision the reviewers saw (a fix committed before close)
-    --also-steps)   ALSO_STEPS="${2:-}"; shift 2 ;;    # fix-check: steps edited as a consequence of the fix, with --reason
+    --role)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ROLE="${2:-}"; shift 2 ;;
+    --provider)     [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PROVIDER="${2:-}"; shift 2 ;;
+    --fingerprint)  [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; FINGERPRINT="${2:-}"; shift 2 ;;
+    --reason)       [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; REASON="${2:-}"; shift 2 ;;
+    --rounds)       [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ROUNDS="${2:-}"; shift 2 ;;
+    --pm)           [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PM_ANSWER="${2:-}"; shift 2 ;;
+    --fixer)        [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; FIXER="${2:-}"; shift 2 ;;
+    --finding-card) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; CARD="${2:-}"; shift 2 ;;
+    --at)           [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; AT_SHA="${2:-}"; shift 2 ;;        # close: the revision the reviewers saw (a fix committed before close)
+    --also-steps)   [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ALSO_STEPS="${2:-}"; shift 2 ;;    # fix-check: steps edited as a consequence of the fix, with --reason
     --restart)      RESTART=1; shift ;;                # prepare --round 1: a new review attempt (P109)
     --delegate)     DELEGATE=1; shift ;;               # standing: the PM delegates escalations (P112)
     --pending)      PENDING=1; shift ;;                # delegate: list what awaits a verdict
-    --verdict)      VERDICT="${2:-}"; shift 2 ;;       # delegate: record an adjudicator's verdict
+    --verdict)      [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; VERDICT="${2:-}"; shift 2 ;;       # delegate: record an adjudicator's verdict
     --tokens)       shift; while [[ $# -gt 0 && "$1" != --* ]]; do TOKENS+=("$1"); shift; done ;;
     -*) echo "${CMD}: unknown option $1" >&2; exit 2 ;;
     *)  [[ -z "$PLAN" ]] && PLAN="$1"; shift ;;   # a bare path is the plan (CP1 compatibility)

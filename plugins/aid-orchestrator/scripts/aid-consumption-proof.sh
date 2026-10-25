@@ -39,6 +39,7 @@ shift 3 || true
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --out)
+      [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }
       OUT_PATH="${2:-}"
       shift 2
       ;;

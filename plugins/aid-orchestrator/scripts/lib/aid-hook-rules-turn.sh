@@ -106,12 +106,51 @@ aid_turn_open_steps() {
   cut -f1-5 <<< "$lines" | grep -v '^$'
 }
 
+# _aid_hrt_step_call_pending <transcript> <contract file> <session id> — 0 when something works on THIS step now:
+#   its takeover — the step's land.json (next to the contract) says `running`, was started by THIS session
+#     (session_id, from CLAUDE_CODE_SESSION_ID) and its pid is aid-step-land.sh, and this session has an unanswered
+#     background Bash that runs aid-step-land.sh (the command's text cannot name the run: controllers pass the
+#     state file through a variable, quoted or not — so the record does);
+#   or its agent — an Agent/Task launched in the background whose prompt carries this step's contract header.
+_aid_hrt_step_call_pending() {
+  local t="$1" c="$2" sess="${3:-}" ver rec pid
+  ver="$(jq -r '.version // ""' "$c" 2>/dev/null)"; rec="$(dirname "$c")/land.json"
+  local candidates answered
+  candidates="$( { grep -F 'aid-step-land.sh' "$t" 2>/dev/null \
+      | jq -rR 'fromjson? | select(.type == "assistant") | .message.content[]?
+          | select(.type? == "tool_use" and .name == "Bash" and .input.run_in_background? == true
+                   and ((.input.command // "") | contains("aid-step-land.sh")) and .id != null) | "land\t\(.id)"' 2>/dev/null
+    if [[ -n "$ver" ]]; then
+      grep -F "Dispatch Contract (version ${ver})" "$t" 2>/dev/null \
+        | jq -rR --arg h "Dispatch Contract (version ${ver})" 'fromjson? | select(.type == "assistant") | .message.content[]?
+            | select(.type? == "tool_use" and (.name == "Agent" or .name == "Task") and ((.input.prompt // "") | contains($h))
+                     and .id != null) | "agent\t\(.id)"' 2>/dev/null
+    fi; } )"
+  answered="$(grep -o '<tool-use-id>[^<]*' "$t" | cut -d'>' -f2 | sort -u)"
+  local kind id
+  while IFS=$'\t' read -r kind id; do
+    [[ -n "$id" ]] || continue
+    grep -qxF "$id" <<< "$answered" && continue
+    # an agent counts only once the harness said it went to the background (a foreground one is answered by its result)
+    [[ "$kind" == agent ]] && grep -F "\"tool_use_id\":\"${id}\"" "$t" 2>/dev/null | grep -qE 'Async agent launched|working in the background' && return 0
+    if [[ "$kind" == land && -n "$sess" && "$(jq -r '"\(.status // "")\t\(.session_id // "")"' "$rec" 2>/dev/null)" == "running"$'\t'"$sess" ]]; then
+      pid="$(jq -r '.pid // ""' "$rec" 2>/dev/null)"
+      [[ "$pid" =~ ^[0-9]+$ ]] && tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null | grep -q 'aid-step-land\.sh' && return 0
+    fi
+  done <<< "$candidates"
+  return 1
+}
+
 # _aid_hrt_last_message <transcript> — the text of the turn's last assistant
 # message (empty when there is none). Shared by every Stop rule that reads it.
+# Read from the END: a long session's transcript runs to hundreds of MB (WAN 25. 10. 2026: 186 MB, and
+# slurping it took 4.5 s on every Stop). jq stops at the first assistant line it meets; tac's broken pipe
+# is not a failure, a line jq cannot parse before that point still is.
 _aid_hrt_last_message() {
-  jq -rs '[.[] | select(.type == "assistant")] | last
-          | (.message.content // []) | map(select(.type == "text") | .text) | join("\n")' \
-    "$1" 2>/dev/null
+  [[ -r "$1" ]] || return 1
+  { tac "$1" 2>/dev/null || true; } \
+    | jq -rn 'first(inputs | select(.type == "assistant"))
+              | (.message.content // []) | map(select(.type == "text") | .text) | join("\n")' 2>/dev/null
 }
 
 # _aid_hrt_hands_over <text_file> — does the turn's last message open a
@@ -140,8 +179,8 @@ _aid_hrt_hands_over() {
 # ---------------------------------------------------------------------------
 aid_hook_rule_turn_step_open() {
   local input; input="$(cat)"
-  local cwd transcript
-  IFS=$'\x1f' read -r cwd transcript < <(jq -r '[.cwd // "", .transcript_path // ""] | join("\u001f")' <<< "$input" 2>/dev/null)
+  local cwd transcript sess
+  IFS=$'\x1f' read -r cwd transcript sess < <(jq -r '[.cwd // "", .transcript_path // "", .session_id // ""] | join("\u001f")' <<< "$input" 2>/dev/null)
   [[ -n "$cwd" && -d "$cwd" ]] || { echo "no usable cwd in the event" >&2; return 3; }
   local root
   root="$(cd "$cwd" && aid_state_root 2>/dev/null)" || { echo "cwd is not inside an AID workspace" >&2; return 3; }
@@ -165,9 +204,18 @@ aid_hook_rule_turn_step_open() {
       echo "step ${idx} (${sid}) of ${epic} is open, but the turn hands over explicitly with a card" >&2
       return 3
     fi
+    # AID 3.11.0: the step is being taken over in the background (its record says running, its process lives) or
+    # the agent dispatched with its packet still works — a declared wait on THAT, unanswered, ends the turn; the
+    # notification starts the next one. Any other background call does not excuse an open step.
+    if [[ "$(printf '%s' "$last" | grep -v '^[[:space:]]*$' | tail -1)" == AID-WAIT:* ]]; then
+      if _aid_hrt_step_call_pending "$transcript" "$(cut -f5 <<< "$line")" "$sess"; then
+        echo "step ${idx} (${sid}) of ${epic} is open; the turn waits on a background call (AID-WAIT)" >&2
+        return 3
+      fi
+    fi
   fi
 
-  echo "step ${idx} (${sid}) of ${epic}/${run} was dispatched under a contract and the run has not advanced past it. Finish it before the turn ends: extract and validate the agent's aid-return (lib/aid-dispatch-contract.sh), commit the accepted return, write step-${idx}-verify.md and run aid-fsm.sh increment-step — or hand over explicitly with a Decision card or a Blocked card, rendered by aid_decision_card_render (scripts/lib/aid-decision-card.sh), never written by hand." >&2
+  echo "step ${idx} (${sid}) of ${epic}/${run} was dispatched under a contract and the run has not advanced past it. Finish it before the turn ends: take it over in the background (scripts/aid-step-land.sh, run_in_background, then end with \`AID-WAIT: převzetí kroku ${idx}\`) or by hand (validate the aid-return, commit), write step-${idx}-verify.md and run aid-fsm.sh increment-step — or hand over explicitly with a Decision card or a Blocked card, rendered by aid_decision_card_render (scripts/lib/aid-decision-card.sh), never written by hand." >&2
   return 2
 }
 

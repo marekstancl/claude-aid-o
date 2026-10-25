@@ -161,16 +161,16 @@ cmd_run() {
   local -a command=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --jobs-dir) jobs_dir="$2"; shift 2;;
-      --id) job_id="$2"; shift 2;;
-      --label) label="$2"; shift 2;;
-      --owner) owner="$2"; shift 2;;
-      --repo) repo="$2"; shift 2;;
-      --expect-p95) expect_p95="$2"; shift 2;;
-      --deadline) deadline="$2"; shift 2;;
-      --polarity) polarity="$2"; shift 2;;
-      --expect) expect="$2"; shift 2;;
-      --filter) filter="$2"; shift 2;;
+      --jobs-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; jobs_dir="$2"; shift 2;;
+      --id) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; job_id="$2"; shift 2;;
+      --label) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; label="$2"; shift 2;;
+      --owner) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; owner="$2"; shift 2;;
+      --repo) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; repo="$2"; shift 2;;
+      --expect-p95) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; expect_p95="$2"; shift 2;;
+      --deadline) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; deadline="$2"; shift 2;;
+      --polarity) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; polarity="$2"; shift 2;;
+      --expect) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; expect="$2"; shift 2;;
+      --filter) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; filter="$2"; shift 2;;
       --) shift; command=("$@"); break;;
       *) _die "run: unknown arg '$1'" 1;;
     esac
@@ -507,8 +507,8 @@ cmd_status() {
   local jobs_dir="" job_id="" as_json=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --jobs-dir) jobs_dir="$2"; shift 2;;
-      --id) job_id="$2"; shift 2;;
+      --jobs-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; jobs_dir="$2"; shift 2;;
+      --id) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; job_id="$2"; shift 2;;
       --json) as_json=1; shift;;
       *) _die "status: unknown arg '$1'" 1;;
     esac
@@ -533,9 +533,9 @@ cmd_collect() {
   local jobs_dir="" job_id="" require_current=0 repo=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --jobs-dir) jobs_dir="$2"; shift 2;;
-      --id) job_id="$2"; shift 2;;
-      --repo) repo="$2"; shift 2;;
+      --jobs-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; jobs_dir="$2"; shift 2;;
+      --id) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; job_id="$2"; shift 2;;
+      --repo) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; repo="$2"; shift 2;;
       --require-current) require_current=1; shift;;
       *) _die "collect: unknown arg '$1'" 1;;
     esac
@@ -579,8 +579,8 @@ cmd_cancel() {
   local jobs_dir="" job_id=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --jobs-dir) jobs_dir="$2"; shift 2;;
-      --id) job_id="$2"; shift 2;;
+      --jobs-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; jobs_dir="$2"; shift 2;;
+      --id) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; job_id="$2"; shift 2;;
       *) _die "cancel: unknown arg '$1'" 1;;
     esac
   done
@@ -687,10 +687,10 @@ cmd_watchdog() {
   local jobs_dir="" interval=300 now="" last_progress=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --jobs-dir) jobs_dir="$2"; shift 2;;
-      --interval) interval="$2"; shift 2;;
-      --now) now="$2"; shift 2;;
-      --last-progress) last_progress="$2"; shift 2;;
+      --jobs-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; jobs_dir="$2"; shift 2;;
+      --interval) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; interval="$2"; shift 2;;
+      --now) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; now="$2"; shift 2;;
+      --last-progress) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; last_progress="$2"; shift 2;;
       *) _die "watchdog: unknown arg '$1'" 1;;
     esac
   done
@@ -744,9 +744,9 @@ cmd_redgreen() {
   local jobs_dir="" baseline="" fixed=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --jobs-dir) jobs_dir="$2"; shift 2;;
-      --baseline) baseline="$2"; shift 2;;
-      --fixed) fixed="$2"; shift 2;;
+      --jobs-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; jobs_dir="$2"; shift 2;;
+      --baseline) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; baseline="$2"; shift 2;;
+      --fixed) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; fixed="$2"; shift 2;;
       *) _die "redgreen: unknown arg '$1'" 1;;
     esac
   done
@@ -837,7 +837,7 @@ cmd_revision() {
   local repo=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --repo) repo="$2"; shift 2;;
+      --repo) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; repo="$2"; shift 2;;
       *) _die "revision: unknown arg '$1' (usage: revision [--repo <path>])" 1;;
     esac
   done

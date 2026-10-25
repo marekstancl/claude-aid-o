@@ -1164,9 +1164,9 @@ record_tests() {
   local -a globs=() ran=()
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --evidence-file) ev="$2"; shift 2 ;;
-      --glob) globs+=("$2"); shift 2 ;;
-      --execution-yaml) yaml="$2"; shift 2 ;;
+      --evidence-file) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ev="$2"; shift 2 ;;
+      --glob) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; globs+=("$2"); shift 2 ;;
+      --execution-yaml) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; yaml="$2"; shift 2 ;;
       --) shift; break ;;
       *) echo "record-tests: unknown option $1" >&2; return 2 ;;
     esac
@@ -1263,12 +1263,12 @@ run_all_gates() {
   local base_commit_opt_set=0 plan_path_opt_set=0
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --state-file) state_file="$2"; shift 2 ;;
-      --report-file) report_file="$2"; shift 2 ;;
-      --plan-json) plan_json="$2"; shift 2 ;;
-      --profile) profile="$2"; shift 2 ;;
-      --base-commit) base_commit_opt="$2"; base_commit_opt_set=1; shift 2 ;;
-      --plan-path) plan_path_opt="$2"; plan_path_opt_set=1; shift 2 ;;
+      --state-file) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; state_file="$2"; shift 2 ;;
+      --report-file) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; report_file="$2"; shift 2 ;;
+      --plan-json) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; plan_json="$2"; shift 2 ;;
+      --profile) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; profile="$2"; shift 2 ;;
+      --base-commit) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; base_commit_opt="$2"; base_commit_opt_set=1; shift 2 ;;
+      --plan-path) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; plan_path_opt="$2"; plan_path_opt_set=1; shift 2 ;;
       *) shift ;;
     esac
   done

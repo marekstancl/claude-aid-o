@@ -125,6 +125,7 @@ parse_args() {
         shift 2
         ;;
       --candidate)
+        [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }
         CANDIDATE_SHA="$2"
         shift 2
         continue
@@ -134,6 +135,7 @@ parse_args() {
         shift
         ;;
       --tree)
+        [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }
         # The working tree whose HEAD and cleanliness are judged — see
         # resolve_root. Evidence still comes from the state root.
         TREE="${2:-}"

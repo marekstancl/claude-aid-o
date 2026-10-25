@@ -1,0 +1,5 @@
+# Deliberate `shift 2` without a two-argument check: optional positional arguments, no argument loop around them,
+# so a failed shift cannot loop and nothing reads a missing value. One line per site: <path>: <line as written>  # <reason>
+scripts/lib/aid-critic.sh: shift 2 || true  # aid_critic_verdict <plan> [<sha>] — both positionals optional, read with ${1-}/${2-}
+scripts/aid-plan-fsm.sh: shift 2 2>/dev/null || true  # plan-record-decision <id> <decision> — missing ones are refused by name below
+scripts/aid-brainstorm-state.sh: local plan_id="${1:?}" kind="${2:-}" reason=""; shift 2 || true  # topic-kind: kind validated right after

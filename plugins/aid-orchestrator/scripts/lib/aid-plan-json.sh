@@ -412,14 +412,14 @@ aid_plan_json_build() {
   local steps_file="" out="" epic_id="" plan_source="" gates_file="" direct=0 exec_yaml="" rr_file=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --steps-json) steps_file="$2"; shift 2 ;;
-      --out) out="$2"; shift 2 ;;
-      --epic-id) epic_id="$2"; shift 2 ;;
-      --plan) plan_source="$2"; shift 2 ;;
-      --gates-json) gates_file="$2"; shift 2 ;;
+      --steps-json) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; steps_file="$2"; shift 2 ;;
+      --out) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; out="$2"; shift 2 ;;
+      --epic-id) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; epic_id="$2"; shift 2 ;;
+      --plan) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; plan_source="$2"; shift 2 ;;
+      --gates-json) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; gates_file="$2"; shift 2 ;;
       --direct) direct=1; shift ;;
-      --execution) exec_yaml="$2"; shift 2 ;;
-      --repo-roots-json) rr_file="$2"; shift 2 ;;
+      --execution) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; exec_yaml="$2"; shift 2 ;;
+      --repo-roots-json) [[ $# -ge 2 ]] || { echo "${FUNCNAME[0]:-${0##*/}}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; rr_file="$2"; shift 2 ;;
       *) error_exit "aid_plan_json_build: unknown argument: $1" 1 ;;
     esac
   done

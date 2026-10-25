@@ -37,9 +37,9 @@ shift
 PLAN=""; PROJECT=""; KOLO=""; HISTORY=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --plan) PLAN="${2:-}"; shift 2 ;;
-    --project-dir) PROJECT="${2:-}"; shift 2 ;;
-    --kolo) KOLO="${2:-}"; shift 2 ;;
+    --plan) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PLAN="${2:-}"; shift 2 ;;
+    --project-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PROJECT="${2:-}"; shift 2 ;;
+    --kolo) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; KOLO="${2:-}"; shift 2 ;;
     --history) HISTORY=1; shift ;;
     *) die "unknown argument: $1" ;;
   esac

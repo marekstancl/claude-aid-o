@@ -171,7 +171,7 @@ rules:
     timeout_s: 5
     lib: scripts/lib/aid-hook-rules-turn.sh
     handler: aid_hook_rule_turn_step_open
-    description: refuses to close a turn while a step this session dispatched under a contract has not been advanced — unless the last message hands over with a Decision or Blocked card
+    description: refuses to close a turn while a step this session dispatched under a contract has not been advanced — unless the last message hands over with a Decision or Blocked card, or ends `AID-WAIT:` while THIS step's own background call is unanswered — its takeover (the step's land.json running, its pid aid-step-land.sh, a background call unanswered) or its agent launched in the background (the prompt with its contract header); AID 3.11.0
 
   - id: turn_write_scope
     event: PreToolUse

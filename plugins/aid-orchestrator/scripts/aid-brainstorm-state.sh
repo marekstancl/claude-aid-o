@@ -130,10 +130,10 @@ cmd_init() {
   shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --scope) scope="${2:-}"; shift 2 ;;
-      --topic) topic="${2:-}"; shift 2 ;;
-      --topic-kind) kind="${2:-}"; shift 2 ;;
-      --reason) kind_reason="${2:-}"; shift 2 ;;
+      --scope) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; scope="${2:-}"; shift 2 ;;
+      --topic) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; topic="${2:-}"; shift 2 ;;
+      --topic-kind) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; kind="${2:-}"; shift 2 ;;
+      --reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; kind_reason="${2:-}"; shift 2 ;;
       --no-worktree) want_worktree=0; shift ;;
       *) echo "ERROR: init: unknown flag '$1'" >&2; return 2 ;;
     esac
@@ -210,7 +210,7 @@ cmd_vision_propose() {
   shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --file) file="${2:-}"; shift 2 ;;
+      --file) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; file="${2:-}"; shift 2 ;;
       *) echo "ERROR: vision-propose: unknown flag '$1'" >&2; return 2 ;;
     esac
   done
@@ -251,7 +251,7 @@ cmd_vision_reject() {
   shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --reason) reason="${2:-}"; shift 2 ;;
+      --reason) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; reason="${2:-}"; shift 2 ;;
       *) echo "ERROR: vision-reject: unknown flag '$1'" >&2; return 2 ;;
     esac
   done
@@ -267,7 +267,7 @@ cmd_gate() {
   shift
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --phase) phase="${2:-}"; shift 2 ;;
+      --phase) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; phase="${2:-}"; shift 2 ;;
       *) echo "ERROR: gate: unknown flag '$1'" >&2; return 2 ;;
     esac
   done
