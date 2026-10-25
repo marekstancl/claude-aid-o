@@ -12,7 +12,8 @@ brief pro vyhledávače v `docs/seo/brief.md`).
 ## Zásada: web je vidět od tohoto kroku (rozhodnutí PM 12. 10.)
 Z této fáze vzniká **živá kostra na stálé adrese**: skutečné stránky se skutečnými adresami, menu, hlavičkou
 (logo, telefon, „Poptat“) a patičkou; sekce jako popsané bloky; hned v ní to, co je schválené (logo a pohyb z 1i,
-slogan a teze z 1p/1v). Další kroky ji **jen doplňují** (texty, fotky, vzhled), stavba v kroku 6 na ní pokračuje.
+slogan a teze z 1p/1v). Další kroky ji v `site/` **jen doplňují** (texty, fotky, vzhled), stavba v kroku 6 na ní pokračuje;
+stálá adresa ale ukazuje vždy jen kostru ze stromu (IMP-699), postavený web je vidět v náhledu brány.
 Brána a klient ji kontrolují po každém kroku. Drátěné modely jako PNG odpadají.
 Nástroj: `aid-ui-serve.sh skeleton <projekt>` postaví ze `structure.json` skutečné stránky (menu, hlavička, patička,
 bloky čekající na klienta přerušovaně, u bloku „Důkaz / zdroj“) a servíruje je na stálé adrese
