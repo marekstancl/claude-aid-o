@@ -1,3 +1,5 @@
+> Archivováno 2026-10-25: vydáno jako AID 3.11.0 (merge 2334b564, tag v3.11.0). Náhrada: žádná.
+
 # AID 3.11.0 – převzetí kroku na pozadí
 
 PM 25. 10. 2026, volba 1A (v podobě „mechanika na pozadí, rozhodování zůstává v hlavním okně“).
