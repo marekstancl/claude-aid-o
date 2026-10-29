@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** v3.3.0
+**Multi-agent orchestration plugin for [Claude Code](https://claude.com/claude-code).** Current version: see [Changelog](#changelog).
 
 You describe what you want to build. AID brainstorms the design with you, generates a plan, dispatches agents, runs quality gates, and delivers reviewed code — you approve the plan and the merge, everything in between is autonomous.
 
@@ -14,7 +14,7 @@ You describe what you want to build. AID brainstorms the design with you, genera
 > - `rm -rf /`, `git push --force`, `git reset --hard`, `sudo`, `chmod 777`, `chown`
 > - Access `~/.ssh`, `~/.aws`, `~/.gnupg`, `/etc`, or Claude's own config
 >
-> **Safety mechanisms exist** (deny-list, escalation triggers, scope checking), but they do not eliminate all risk. Autonomous AI agents can produce unexpected results. Always review your task queue before starting, use `--dry-run` to preview, and keep `/aid-stop` in mind.
+> **Safety mechanisms exist** (deny-list, escalation triggers, scope checking), but they do not eliminate all risk. Autonomous AI agents can produce unexpected results. Always review the plan before starting, use `--dry-run` to preview, and keep `/aid-stop` in mind.
 
 ## Quick Start
 
@@ -27,15 +27,15 @@ You describe what you want to build. AID brainstorms the design with you, genera
 /aid-plan "Build a REST API with auth and CRUD"
 # → brainstorm → architecture → plan.json
 
-/aid-run
+/aid-run P001
 # → READY → EXECUTE (agents) → GATES (tests, lint, security) → DONE
 ```
 
 Or go fully autonomous:
 
 ```bash
-/aid-run --auto
-# → processes EPIC queue unattended, pausing only on genuine escalations
+/aid-run P001 --auto
+# → runs the plan unattended, pausing only on genuine escalations
 ```
 
 ## Installation
@@ -51,15 +51,14 @@ Or go fully autonomous:
 
 **6-state bash FSM** — READY → EXECUTE → GATES → DONE (happy path), with ESCALATION and ERROR branches. State transitions enforced by bash scripts, not LLM instructions. Deterministic, auditable, crash-recoverable.
 
-**Fast Mode (`/aid-do`)** — For tasks under 2 hours. < 2 min overhead. Creates a quick log (Q-NNN.md), skips the full EPIC pipeline.
+**Fast Mode (`/aid-do`)** — For tasks under 2 hours. < 2 min overhead. Creates a quick log (Q-NNN.md), skips the plan pipeline.
 
-**8 agents** — Implementer (and its low-effort twin), Reviewer-light, Verifier, Gate-fixer, Auditor, Simplifier, Project-scanner. The Implementer is dispatched per step from your plan's dependency graph; every delivery is read by reviewer rounds (step, EPIC, whole plan).
+**5 agents** — Implementer (and its low-effort twin), Reviewer-light, Gate-fixer, Project-scanner. The Implementer is dispatched per step from your plan's dependency graph; every delivery is read by reviewer rounds (each step, then the whole plan), including an independent second-provider reviewer (Codex) where configured.
 
 **Quality gates with auto-fix** — Tests, lint, build, security scan run via `aid-run-gates.sh`. Gate failures trigger the gate-fixer agent (up to 3 attempts) before escalating to you.
 
 **Evidence trail** — Every event, gate result, and decision is recorded in `.aid-o/work/evidence/` as `timeline.jsonl`. Full auditability.
 
-**~50K prompt tokens** — 87% reduction from v1's ~400K. Deterministic logic moved to bash scripts, skills consolidated, cross-references eliminated.
 
 ## Commands
 
@@ -67,17 +66,17 @@ Or go fully autonomous:
 |---------|-------------|
 | `/aid-do [task]` | Fast Mode — implement small task with < 2 min overhead |
 | `/aid-plan [topic]` | Brainstorm → architecture → plan.json (merges old brainstorm + write-plan + plan-epic) |
-| `/aid-run [id]` | Execute full pipeline: READY → EXECUTE → GATES → DONE. Use `--auto` for autonomous mode |
-| `/aid-status [id]` | Pipeline status — FSM state, steps, gates, queue (merges old epic-status + epic-queue) |
+| `/aid-run P<NNN>` | Run a plan as one run on `plan/<id>`: READY → EXECUTE → GATES → DONE. Use `--auto` for autonomous mode |
+| `/aid-status [id]` | Plan and run status — FSM state, steps, gates |
 | `/aid-init` | Create or upgrade the `.aid-o/` workspace — base manifest, stack auto-detection, idempotent |
 | `/aid-setup [module]` | Configure what init created — permissions, integrations, CLAUDE.md, stack re-scan |
 | `/aid-verify-plan` | Independent adversarial review of a plan before it goes to execution |
 | `/aid-ui` | Guided UI design outside the AID pipeline: references, visual direction chosen by the PM, design standard, build, verification, brand page |
 | `/aid-verify-implementation` | Independent adversarial DONE review of an implementation before it is trusted as complete |
-| `/aid-audit` | Project health audit — code, docs, tests, dependencies |
-| `/visual-companion` | Browser-based visual brainstorming companion — interactive mockups, per-question visual/text decision |
 | `/aid-stop` | Emergency stop — save progress, restore permissions |
 | `/aid-help [topic]` | Progressive help — Level 0 cheat sheet → Level 3 architecture deep-dive |
+
+The visual companion for UI brainstorming is a skill loaded by `/aid-plan`, not a separate command.
 
 ## How the Pipeline Works
 
@@ -103,7 +102,7 @@ Or go fully autonomous:
              DONE      ESCALATION → gate-fixer (auto) or PM (manual)
                │              │
                ▼              └──► retry → GATES
-        EPIC review + archive
+   plan review + close
 ```
 
 **Manual mode** — PM approves at READY and reviews at ESCALATION.
@@ -191,14 +190,14 @@ AGPL-3.0-only — see [LICENSE](LICENSE)
 A plan declares its release model in its committed lifecycle manifest
 (`.aid-lifecycle/manifests/<plan_id>.yaml`, key `mode`).
 
-Under **`plan_branch`** an EPIC merges into the plan branch and releases nothing.
+Under **`plan_branch`** each step merges into the plan branch and releases nothing.
 The plan releases once, at the plan-final boundary: one gate profile run against
 a frozen candidate, one review of the whole delivery by three reviewer roles,
 one PM authorization bound to that candidate, one compare-and-swap
 merge to the target branch, at most one tag, and a committed lifecycle receipt
 without which the plan cannot be declared closed.
 
-Under **`legacy_epic_release_mode`** each EPIC releases as before.
+Under **`legacy_epic_release_mode`** (plans created before v3.0.0) each EPIC released on its own.
 
 New plans default to `plan_branch` when the project declares a `gate_profiles`
 table in its `execution.yaml`, and otherwise fall back to legacy with a logged
