@@ -58,7 +58,11 @@ src_root, dst_root, rel = sys.argv[1], sys.argv[2], sys.argv[3]
 parts = rel.split("/")
 D = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 def walk(root, create):
-    fd = os.open(root, D)
+    # the roots are canonical (realpath): from / every component, the roots included, is opened without
+    # following a symlink: one swapped in after the checks is refused, not followed
+    fd = os.open("/", D)
+    for name in [c for c in root.split("/") if c]:
+        nfd = os.open(name, D, dir_fd=fd); os.close(fd); fd = nfd
     for name in parts[:-1]:
         if create:
             try: os.mkdir(name, 0o755, dir_fd=fd)
