@@ -2917,7 +2917,8 @@ _pfsm_freeze_release_check() {
   rel="${SCRIPT_DIR}/aid-release.sh"
   if [[ "$when" == before ]]; then
     local carried recorded intent version target top
-    recorded="$(jq -r .candidate_version "$rec")"; intent="$(jq -r '.intent // "release"' "$rec")"; version="$(jq -r .version "$rec")"
+    # the pair the record was made for: the version the bump starts from | the newest CHANGELOG header
+    recorded="$(jq -r '"\(.candidate_version)|\(.changelog_version // "")"' "$rec")"; intent="$(jq -r '.intent // "release"' "$rec")"; version="$(jq -r .version "$rec")"
     carried="$(bash "$rel" carried-version --project-root "$troot" --rev "refs/heads/${plan_branch}" 2>/dev/null)" || carried=""
     if [[ "$carried" != "$recorded" ]]; then
       echo "REFUSED (release_prep_version_changed): ${plan_id} was prepared for ${recorded} and the plan branch now carries ${carried:-no version}" >&2
@@ -2929,8 +2930,8 @@ _pfsm_freeze_release_check() {
       return 1
     fi
     [[ "$intent" == release ]] || return 0
-    if [[ "$version" != "$recorded" ]]; then
-      echo "REFUSED (release_prep_version_changed): ${plan_id} is prepared as ${version} but the candidate carries ${recorded} (the CHANGELOG and the manifest disagree)" >&2
+    if [[ "$version" != "${recorded%%|*}" || ( -n "${recorded#*|}" && "${recorded#*|}" != "$version" ) ]]; then
+      echo "REFUSED (release_prep_version_changed): ${plan_id} is prepared as ${version} but the candidate carries ${recorded%%|*} (CHANGELOG ${recorded#*|}) — the CHANGELOG and the manifest disagree" >&2
       echo "  next: make the CHANGELOG header and the version files agree, then bash ${rel} prepare-plan ${plan_id} --bump none --plan-branch ${plan_branch} --project-root ${troot} (pipeline.md §When AID refuses: release_prep_version_changed)" >&2
       return 1
     fi
@@ -5915,19 +5916,28 @@ cmd_plan_merge_to_main() {
   # ── 3.13.0: the release record is coherent and belongs to the frozen candidate — checked BEFORE anything is
   #    merged (after the merge a wrong record could only mis-tag or skip the tag). A missing record is a
   #    no-release plan, a record from before 3.13.0 (no tree) is read as before. ───────────────────────────
-  local _rp _rp_why=""
-  for _rp in "${root}/${run_dir_rel}/release-prep.json" "${root}/.aid-o/work/plan-state/${plan_id}/release-prep.json"; do
-    [[ -e "$_rp" ]] || continue
+  local _rp _rp_why="" _rp_run="${root}/${run_dir_rel}/release-prep.json" _rp_canon="${root}/.aid-o/work/plan-state/${plan_id}/release-prep.json"
+  _rp=""; [[ -e "$_rp_run" ]] && _rp="$_rp_run"
+  if [[ -z "$_rp" && -e "$_rp_canon" ]]; then
+    # freeze copies a 3.13.0 record into the attempt: without that copy only a pre-3.13.0 record may be read
+    jq -e 'has("intent") or has("candidate_version") or has("tree")' "$_rp_canon" >/dev/null 2>&1 \
+      && _rp_why="the attempt holds no copy of ${_rp_canon} (freeze writes one)" || _rp="$_rp_canon"
+  fi
+  if [[ -n "$_rp" && -z "$_rp_why" ]]; then
     if ! jq -e 'type == "object" and (.version | type) == "string"' "$_rp" >/dev/null 2>&1; then _rp_why="${_rp} is unreadable"
-    elif [[ -n "$(jq -r '.tree // ""' "$_rp")" ]]; then
-      if [[ "$(jq -r .tree "$_rp")" != "$(git -C "$root" rev-parse "${candidate}^{tree}" 2>/dev/null)" ]]; then
+    elif jq -e 'has("intent") or has("candidate_version") or has("tree")' "$_rp" >/dev/null 2>&1; then
+      local _rp_at; _rp_at="$(bash "${SCRIPT_DIR}/aid-release.sh" carried-version --project-root "$root" --rev "$candidate" 2>/dev/null)"
+      if [[ "$(jq -r '.tree // ""' "$_rp")" != "$(git -C "$root" rev-parse "${candidate}^{tree}" 2>/dev/null)" ]]; then
         _rp_why="${_rp} was made for another tree than the frozen candidate ${candidate:0:12}"
-      elif jq -e '(.intent // "release") == "release" and .version != "none" and (.candidate_version // .version) != .version' "$_rp" >/dev/null 2>&1; then
+      elif ! jq -e '(.intent == "release" and .version != "none") or (.intent == "none" and .version == "none")' "$_rp" >/dev/null 2>&1; then
+        _rp_why="${_rp} is incoherent (intent $(jq -r '.intent // "?"' "$_rp"), version $(jq -r .version "$_rp"))"
+      elif [[ "$(jq -r '"\(.candidate_version // "")|\(.changelog_version // "")"' "$_rp")" != "$_rp_at" ]]; then
+        _rp_why="${_rp} records $(jq -r '"\(.candidate_version)|\(.changelog_version)"' "$_rp") but the frozen candidate carries ${_rp_at}"
+      elif jq -e '.intent == "release" and .version != .candidate_version' "$_rp" >/dev/null 2>&1; then
         _rp_why="${_rp} prepares $(jq -r .version "$_rp") but the candidate carries $(jq -r .candidate_version "$_rp")"
       fi
     fi
-    break
-  done
+  fi
   if [[ -n "$_rp_why" ]]; then
     echo "REFUSED (release_prep_stale): ${_rp_why} — nothing was merged" >&2
     echo "  next: bash ${SCRIPT_DIR}/aid-release.sh rebind ${plan_id} --plan-branch <the plan branch> (no bump), or prepare-plan again, then plan-finalize --stage freeze and this command again (pipeline.md §When AID refuses: release_prep_stale)" >&2

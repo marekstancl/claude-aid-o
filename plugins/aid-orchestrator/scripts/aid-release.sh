@@ -527,7 +527,7 @@ fi
 _release_version_sealed() {
   local ver="${1:-}" out=""
   [[ -n "$ver" ]] || return 1
-  if ! out="$(git -C "$REPO_ROOT" tag -l "v${ver}" 2>/dev/null)"; then
+  if ! out="$(git -C "$REPO_ROOT" tag -l "v${ver}" "${ver}" 2>/dev/null)"; then   # vX.Y.Z or a bare X.Y.Z tag (3.13.0)
     echo "ERROR: aid-release.sh: cannot list tags in ${REPO_ROOT}, so whether v${ver} is already released is unknown — refusing to rewrite a CHANGELOG heading on a guess. Set the new heading by hand, or run from the repository." >&2
     exit 1
   fi
@@ -1093,8 +1093,9 @@ _release_plan_state_dir() {
 
 # _release_carried_version — the version the checkout at REPO_ROOT carries now (the same reading the bump starts
 # from: plugin/marketplace/package JSON, pyproject.toml, else the newest CHANGELOG header); empty when none
-_release_carried_version() {   # [<rev>] — of that commit (its files read from git), else of the checkout at REPO_ROOT
-  local rev="${1:-}" tmp f
+_release_carried_version() {   # [<rev>] [changelog] — of that commit (its files read from git), else of the checkout;
+  # the version the bump starts from (CURRENT), or with `changelog` the newest CHANGELOG header
+  local rev="${1:-}" which="${2:-current}" tmp f
   if [[ -n "$rev" ]]; then
     git -C "$REPO_ROOT" rev-parse -q --verify "${rev}^{commit}" >/dev/null 2>&1 || return 0
     tmp="$(mktemp -d)" || return 0
@@ -1102,10 +1103,12 @@ _release_carried_version() {   # [<rev>] — of that commit (its files read from
       git -C "$REPO_ROOT" cat-file -e "${rev}:${f}" 2>/dev/null || continue
       mkdir -p "${tmp}/$(dirname "$f")"; git -C "$REPO_ROOT" show "${rev}:${f}" > "${tmp}/${f}" 2>/dev/null
     done
-    ( set +e; REPO_ROOT="$tmp"; BUMP_TYPE=patch; _release_detect_version >/dev/null 2>&1; printf '%s' "$CURRENT" ) 2>/dev/null || true
+    ( set +e; REPO_ROOT="$tmp"; BUMP_TYPE=patch; _release_detect_version >/dev/null 2>&1
+      [[ "$which" == changelog ]] && printf '%s' "$CHANGELOG_HEADER" || printf '%s' "$CURRENT" ) 2>/dev/null || true
     rm -rf "$tmp"; return 0
   fi
-  ( set +e; BUMP_TYPE=patch; _release_detect_version >/dev/null 2>&1; printf '%s' "$CURRENT" ) 2>/dev/null || true
+  ( set +e; BUMP_TYPE=patch; _release_detect_version >/dev/null 2>&1
+    [[ "$which" == changelog ]] && printf '%s' "$CHANGELOG_HEADER" || printf '%s' "$CURRENT" ) 2>/dev/null || true
 }
 
 # _release_write_prep_record <plan_id> <plan_branch> <bump> <version|none>
@@ -1119,12 +1122,13 @@ _release_write_prep_record() {
   # 3.13.0: the version the candidate CARRIES and the tree the record belongs to — freeze checks both, so a version
   # changed after the preparation is caught at the freeze, not at the tag (WAN P116 28. 10. 2026: 0.45.0 recorded,
   # 0.46.0 carried, the tag failed after the merge)
-  local carried tree; carried="$(_release_carried_version HEAD)"; tree="$(git -C "$REPO_ROOT" rev-parse 'HEAD^{tree}' 2>/dev/null)" || tree=""
+  local carried tree clv; carried="$(_release_carried_version HEAD)"; clv="$(_release_carried_version HEAD changelog)"
+  tree="$(git -C "$REPO_ROOT" rev-parse 'HEAD^{tree}' 2>/dev/null)" || tree=""
   jq -n --arg p "$plan_id" --arg b "$plan_branch" --arg bump "$bump" \
-        --arg v "$version" --arg h "$head" --arg ts "$ts" --arg cv "$carried" --arg t "$tree" \
+        --arg v "$version" --arg h "$head" --arg ts "$ts" --arg cv "$carried" --arg clv "$clv" --arg t "$tree" \
     '{schema_version:"aid-release-prep-1.1", plan_id:$p, plan_branch:$b,
       bump_requested:$bump, version:$v, prepare_commit:$h, prepared_at:$ts,
-      intent: (if $v == "none" then "none" else "release" end), candidate_version: $cv, tree: $t}' \
+      intent: (if $v == "none" then "none" else "release" end), candidate_version: $cv, changelog_version: $clv, tree: $t}' \
     > "${dir}/release-prep.json.tmp" \
     && mv "${dir}/release-prep.json.tmp" "${dir}/release-prep.json" \
     || { rm -f "${dir}/release-prep.json.tmp"; echo "PRECONDITION FAIL: could not write ${dir}/release-prep.json" >&2; return 1; }
@@ -1432,7 +1436,9 @@ cmd_rebind() {
   intent="$(jq -r '.intent // (if .version == "none" then "none" else "release" end)' "$rec")"
   # the plan BRANCH, not whatever the checkout has checked out (a plan without its own worktree runs from the primary)
   local rev; rev="$(git -C "$REPO_ROOT" rev-parse -q --verify "refs/heads/${plan_branch}" 2>/dev/null || git -C "$REPO_ROOT" rev-parse HEAD)"
-  recorded="$(jq -r '.candidate_version // ""' "$rec")"; carried="$(_release_carried_version "$rev")"
+  recorded="$(jq -r '"\(.candidate_version // "")|\(.changelog_version // "")"' "$rec")"
+  carried="$(_release_carried_version "$rev")|$(_release_carried_version "$rev" changelog)"
+  [[ "$recorded" == "|" ]] && recorded=""
   if [[ -n "$recorded" && "$carried" != "$recorded" ]]; then
     if [[ "$intent" == none && "$adopt" == 1 ]]; then :
     elif [[ "$intent" == none ]]; then
@@ -1448,9 +1454,9 @@ cmd_rebind() {
     [[ "$intent" == none ]] || { echo "REFUSED: --adopt-version is for a no-release plan; ${plan_id} is prepared as $(jq -r .version "$rec")" >&2; exit 1; }
   fi
   local tmp="${rec}.tmp.$$"
-  jq --arg h "$rev" --arg t "$(git -C "$REPO_ROOT" rev-parse "${rev}^{tree}")" --arg cv "$carried" \
+  jq --arg h "$rev" --arg t "$(git -C "$REPO_ROOT" rev-parse "${rev}^{tree}")" --arg cv "${carried%%|*}" --arg clv "${carried#*|}" \
      --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-     '.prepare_commit = $h | .tree = $t | .candidate_version = $cv | .intent = (.intent // (if .version == "none" then "none" else "release" end))
+     '.prepare_commit = $h | .tree = $t | .candidate_version = $cv | .changelog_version = $clv | .intent = (.intent // (if .version == "none" then "none" else "release" end))
       | .rebound_at = $at | .schema_version = "aid-release-prep-1.1"' "$rec" > "$tmp" && mv "$tmp" "$rec" \
     || { rm -f "$tmp"; echo "ERROR: could not rebind ${rec}" >&2; exit 1; }
   echo "rebound ${plan_id}: $(jq -r '"\(.intent) \(.version), carried \(.candidate_version)"' "$rec") at ${rev:0:8}"
@@ -1463,7 +1469,7 @@ main() {
       local _cv_rev=""; while [[ $# -gt 0 ]]; do case "$1" in
         --project-root) REPO_ROOT="$(cd "$2" && git rev-parse --show-toplevel)"; shift 2 ;;
         --rev) _cv_rev="$2"; shift 2 ;; *) shift ;; esac; done
-      _release_carried_version "$_cv_rev"; echo ;;
+      printf '%s|%s\n' "$(_release_carried_version "$_cv_rev")" "$(_release_carried_version "$_cv_rev" changelog)" ;;
     prepare-plan) shift; cmd_prepare_plan "$@" ;;
     tag-plan)     shift; cmd_tag_plan "$@" ;;
     *) _release_legacy_bump "$@" ;;

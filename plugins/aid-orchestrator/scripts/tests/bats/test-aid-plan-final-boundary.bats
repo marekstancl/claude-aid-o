@@ -4354,25 +4354,25 @@ _rel_ready() {   # <carried> <record json filter> — a bootstrapped plan whose 
 _rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"; }
 
 @test "freeze (3.13.0): a version changed after the preparation is refused before anything is bumped or merged" {
-  _rel_ready 0.46.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0"'
+  _rel_ready 0.46.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0" | .changelog_version = "0.45.0"'
   _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -ne 0 ]
   [[ "$output" == *"REFUSED (release_prep_version_changed)"* && "$output" == *"--bump none"* ]]
   [ "$(_rec .version)" = 0.45.0 ]
 }
 
 @test "freeze (3.13.0): a release version not above the target's highest tag is refused before the sync" {
-  _rel_ready 0.45.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0"'
+  _rel_ready 0.45.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0" | .changelog_version = "0.45.0"'
   git -C "$TEST_PROJECT_ROOT" tag v0.45.0 main
   _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"REFUSED (plan_version_not_above_target)"* ]]
   git -C "$TEST_PROJECT_ROOT" tag -d v0.45.0 >/dev/null; git -C "$TEST_PROJECT_ROOT" tag v0.9.0 main
-  _rel_ready 0.10.0 '.version = "0.10.0" | .intent = "release" | .candidate_version = "0.10.0"'   # numerically above
+  _rel_ready 0.10.0 '.version = "0.10.0" | .intent = "release" | .candidate_version = "0.10.0" | .changelog_version = "0.10.0"'   # numerically above
   _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -eq 0 ]
   # the record follows the final tree, without a bump
   [ "$(_rec .version)" = 0.10.0 ]; [ "$(_rec .tree)" != stale ]
 }
 
 @test "freeze (3.13.0): a no-release plan whose carried version moved takes it only with --adopt-version, and stays no-release" {
-  _rel_ready 0.47.0 '.version = "none" | .intent = "none" | .candidate_version = "0.46.0"'
+  _rel_ready 0.47.0 '.version = "none" | .intent = "none" | .candidate_version = "0.46.0" | .changelog_version = "0.46.0"'
   _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"--adopt-version"* ]]
   run bash "$AID_PLUGIN_PATH/scripts/aid-release.sh" rebind "$PLAN_ID" --plan-branch "plan/$PLAN_ID" --project-root "$TEST_PROJECT_ROOT" --adopt-version
   echo "$output"; [ "$status" -eq 0 ]; [ "$(_rec .intent)" = none ]; [ "$(_rec .version)" = none ]; [ "$(_rec .candidate_version)" = 0.47.0 ]
@@ -4397,9 +4397,9 @@ _rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/releas
 }
 
 @test "freeze (3.13.0): a record whose version is not the one the candidate carries is refused; a bare X.Y.Z tag counts like vX.Y.Z" {
-  _rel_ready 0.45.0 '.version = "0.44.0" | .intent = "release" | .candidate_version = "0.45.0"'
+  _rel_ready 0.45.0 '.version = "0.44.0" | .intent = "release" | .candidate_version = "0.45.0" | .changelog_version = "0.45.0"'
   _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"the CHANGELOG and the manifest disagree"* ]]
-  _rel_ready 0.45.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0"'
+  _rel_ready 0.45.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0" | .changelog_version = "0.45.0"'
   git -C "$TEST_PROJECT_ROOT" tag 0.45.0 main
   _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"plan_version_not_above_target"*"--again"* ]]
 }
@@ -4410,4 +4410,17 @@ _rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/releas
   local before; before="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
   _merge; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"REFUSED (release_prep_stale)"*"nothing was merged"* ]]
   [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse main)" = "$before" ]
+}
+
+@test "merge (3.13.0): an incoherent record, a 3.13 record without its tree, or a canonical record the attempt has no copy of is refused" {
+  _seed_merge_project
+  local cand; cand="$(plan_manifest_get "$PLAN_ID" '.plan_boundary_manifest.candidate_sha')"
+  local tree; tree="$(git -C "$TEST_PROJECT_ROOT" rev-parse "${cand}^{tree}")"
+  jq -n --arg t "$tree" '{schema_version: "aid-release-prep-1.1", version: "none", intent: "release", candidate_version: "", changelog_version: "", tree: $t}' > "$(_run_dir)/release-prep.json"
+  _merge; [ "$status" -ne 0 ]; [[ "$output" == *"incoherent"* ]]
+  jq -n '{schema_version: "aid-release-prep-1.1", version: "9.9.9", intent: "release", candidate_version: "9.9.9"}' > "$(_run_dir)/release-prep.json"
+  _merge; [ "$status" -ne 0 ]; [[ "$output" == *"another tree"* ]]
+  rm "$(_run_dir)/release-prep.json"; mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  jq -n --arg t "$tree" '{version: "9.9.9", intent: "release", candidate_version: "9.9.9", tree: $t}' > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"
+  _merge; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"holds no copy"* ]]
 }
