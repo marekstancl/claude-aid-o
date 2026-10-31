@@ -114,24 +114,38 @@ aid_turn_open_steps() {
 #   or its agent — an Agent/Task launched in the background whose prompt carries this step's contract header.
 _aid_hrt_step_call_pending() {
   local t="$1" c="$2" sess="${3:-}" idx="${4:-}" ver rec pid
-  # 3.13.0: a reviewer or fixer of THIS step dispatched in the background by THIS session — its start's nonce is in
-  # this transcript (aid-emit-dispatch.sh prints it), the start is still in the round's pending ledger (complete and
-  # cancel remove exactly their line) and it is younger than its own time limit (WAN P114 26. 10. 2026: the turn
-  # was refused while the CP2 reviewers ran, AID-WAIT knew only aid-job.sh)
+  # 3.13.0: a reviewer or fixer of THIS step dispatched in the background by THIS session (WAN P114 26. 10. 2026: the
+  # turn was refused while the CP2 reviewers ran, AID-WAIT knew only aid-job.sh). It counts when, for its focus, the
+  # LAST start in the round's timeline is still in the round's pending ledger (complete and cancel remove exactly their
+  # line), is younger than its own time limit, and its printed line `nonce=… focus=… evidence=<this round>` is in a
+  # TOOL RESULT of this transcript (one pass; text the model wrote is not read).
   if [[ "$idx" =~ ^[0-9]+$ ]]; then
-    local run_dir pl ln nonce ts exp now; run_dir="$(dirname "$(dirname "$(dirname "$c")")")"; now="$(date -u +%s)"
-    for pl in "$run_dir"/cp2/step-"$idx"/round-*/pending-dispatches.jsonl; do
-      [[ -s "$pl" ]] || continue
-      while IFS=$'\t' read -r nonce ts exp; do
-        [[ -n "$nonce" && "$nonce" != null ]] || continue
-        grep -qF "nonce=${nonce} " "$t" 2>/dev/null || continue
-        ts="$(date -u -d "$ts" +%s 2>/dev/null)" || continue
-        [[ "$exp" =~ ^[0-9]+$ ]] || exp=3600
-        (( now - ts <= exp )) && return 0
-      done < <(jq -r 'select(.event == "start") | "\(.nonce)\t\(.ts)\t\(.expected_duration_max // "")"' "$pl" 2>/dev/null)
-    done
+    local run_dir rd printed now f nonce ts exp
+    run_dir="$(dirname "$(dirname "$(dirname "$c")")")"; now="$(date -u +%s)"
+    if compgen -G "${run_dir}/cp2/step-${idx}/round-*/pending-dispatches.jsonl" >/dev/null; then
+      printed="$(grep -F 'nonce=' "$t" 2>/dev/null | jq -rR 'fromjson? | select(.type == "user") | .message.content
+          | if type == "array" then .[] | select(.type? == "tool_result") | .content
+              | if type == "array" then (map(.text? // "") | join("\n")) else tostring end
+            else empty end' 2>/dev/null | grep -oE 'nonce=[^ ]+ focus=[^ ]+ evidence=[^ "\\]+' | sort -u)"
+      if [[ -n "$printed" ]]; then
+        for rd in "${run_dir}/cp2/step-${idx}"/round-*; do
+          [[ -s "${rd}/pending-dispatches.jsonl" && -f "${rd}/timeline.jsonl" ]] || continue
+          while IFS=$'\t' read -r f nonce ts exp; do
+            [[ -n "$nonce" ]] || continue
+            grep -qxF "nonce=${nonce} focus=${f} evidence=$(realpath -m -- "$rd")" <<< "$printed" || continue
+            ts="$(date -u -d "$ts" +%s 2>/dev/null)" || continue
+            [[ "$exp" =~ ^[0-9]+$ ]] || exp=3600
+            (( now - ts <= exp )) && return 0
+          done < <(jq -rs --slurpfile tl "${rd}/timeline.jsonl" --arg i "$idx" '
+              [.[] | select(.event == "start" and (.focus | test("^(cp2-step-" + $i + "-|fix-cp2-" + $i + "-r)")))] as $open
+              | [$open[].focus] | unique[] as $f
+              | ([$tl[] | select(.event == "verifier_dispatch_start" and .focus == $f)] | last | .nonce) as $last
+              | $open[] | select(.focus == $f and .nonce == $last)
+              | "\(.focus)\t\(.nonce)\t\(.ts)\t\(.expected_duration_max // "")"' "${rd}/pending-dispatches.jsonl" 2>/dev/null)
+        done
+      fi
+    fi
   fi
-  ver="$(jq -r '.version // ""' "$c" 2>/dev/null)"; rec="$(dirname "$c")/land.json"
   local candidates answered
   candidates="$( { grep -F 'aid-step-land.sh' "$t" 2>/dev/null \
       | jq -rR 'fromjson? | select(.type == "assistant") | .message.content[]?

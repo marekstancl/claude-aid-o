@@ -32,7 +32,7 @@ EOF
 }
 
 # The one focus allowlist (the start check and its error text read this).
-AID_DISPATCH_FOCUS_RE='^(copy-review-standin|cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp6-[a-z][a-z0-9-]*|cp7-[a-z][a-z0-9-]*|critic-(brainstorm|plan)|adjudicator-delegated-[0-9a-f]{16}|stand-in-[0-9a-f]{16})$'
+AID_DISPATCH_FOCUS_RE='^(copy-review-standin|cp1-[a-z][a-z0-9-]*|cp2-step-[0-9]+-[a-z][a-z0-9-]*|cp6-[a-z][a-z0-9-]*|cp7-[a-z][a-z0-9-]*|critic-(brainstorm|plan)|adjudicator-delegated-[0-9a-f]{16}|stand-in-[0-9a-f]{16}|fix-cp2-[0-9]+-r[0-9]+|fix-cp7-r[0-9]+)$'   # fix-…: the round's fixer (3.13.0)
 
 # Focus default duration table (resolved when --expected-duration-max not given).
 default_duration_for_focus() {
@@ -100,7 +100,13 @@ cmd_start() {
   # review round (round.json with reviewers_expected), the focus must name one
   # of its roles — the error falls here, not at close.
   # P112: the delegated adjudicator is no reviewer of the round
-  if [[ -f "${evidence_dir}/round.json" && "$focus" != adjudicator-delegated-* ]]; then
+  # 3.13.0: a fixer is no reviewer either; its focus names this round's step and number
+  if [[ "$focus" == fix-* && -f "${evidence_dir}/round.json" ]]; then
+    local fs fr; fs="$(jq -r '.step // ""' "${evidence_dir}/round.json")"; fr="$(jq -r '.round // ""' "${evidence_dir}/round.json")"
+    [[ "$focus" == "fix-cp2-${fs}-r${fr}" || "$focus" == "fix-cp7-r${fr}" ]] \
+      || { echo "ERROR: fixer focus ${focus} does not name this round (step ${fs:-none}, round ${fr}): fix-cp2-${fs}-r${fr} or fix-cp7-r${fr}" >&2; exit 1; }
+  fi
+  if [[ -f "${evidence_dir}/round.json" && "$focus" != adjudicator-delegated-* && "$focus" != fix-* ]]; then
     local role_of_focus roles
     jq -e '.reviewers_expected | type == "array"' "${evidence_dir}/round.json" >/dev/null 2>&1 \
       || { echo "ERROR: ${evidence_dir}/round.json has no reviewers_expected list — not a review round this script can check; repair the round (prepare) before dispatching" >&2; exit 1; }
@@ -117,7 +123,7 @@ cmd_start() {
 
   # Parse step_n from focus (cp2-step-<N>-<role>)
   local step_n="null"
-  if [[ "$focus" =~ ^cp2-step-([0-9]+)- ]]; then
+  if [[ "$focus" =~ ^cp2-step-([0-9]+)- || "$focus" =~ ^fix-cp2-([0-9]+)-r ]]; then
     step_n="${BASH_REMATCH[1]}"
   fi
 
@@ -169,7 +175,7 @@ cmd_start() {
   ) 200>"$lockfile" || return $?
   # 3.13.0: the nonce is this dispatch's identity — complete/cancel --nonce closes exactly it, and the Stop rule
   # (AID-WAIT) excuses an open step only for a dispatch whose start this session's transcript holds
-  echo "nonce=${nonce} focus=${focus} evidence=${evidence_dir}"
+  echo "nonce=${nonce} focus=${focus} evidence=$(realpath -m -- "$evidence_dir")"
 }
 
 cmd_complete() {
@@ -242,10 +248,11 @@ cmd_complete() {
     fi
     mv "$tmp" "$pending"
 
-    printf '%s\t%s\t%s\n' "$s_ts" "$a_id" "$s_n" > "$resultf"
+    printf '%s\t%s\t%s\t%s\n' "$s_ts" "$a_id" "$s_n" "$s_nonce" > "$resultf"
   ) 200>"$lockfile"
 
-  IFS=$'\t' read -r start_ts agent_id step_n < "$resultf"
+  local closed_nonce
+  IFS=$'\t' read -r start_ts agent_id step_n closed_nonce < "$resultf"
   rm -f "$resultf"
 
   local start_epoch
@@ -261,7 +268,7 @@ cmd_complete() {
   log_event "${evidence_dir}/timeline.jsonl" "verifier_dispatch_complete" \
     focus="$focus" agent_id="$agent_id" step_n="$step_n" \
     evidence_dir="$evidence_dir" output_file="$output_file" output_sha256="$out_sha" \
-    duration_sec="$duration_sec" nonce="${want_nonce:-}"
+    duration_sec="$duration_sec" nonce="${closed_nonce:-null}"
 
   if [[ -n "$late_flag" ]]; then
     echo "WARNING: dispatch complete arrived late$late_flag" >&2
@@ -311,12 +318,12 @@ cmd_cancel() {
     jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg f "$focus" --arg a "$a_id" --arg n "$s_nonce" --arg r "$reason" --arg st "$s_ts" \
       '{ts: $ts, event: "cancel", focus: $f, agent_id: $a, start_nonce: $n, started_at: $st, reason: $r}' >> "$tmp"
     mv "$tmp" "$pending"
-    printf '%s\t%s\n' "$s_ts" "$a_id" > "$resultf"
+    printf '%s\t%s\t%s\n' "$s_ts" "$a_id" "$s_nonce" > "$resultf"
   ) 200>"$lockfile"
   local start_ts agent_id
-  IFS=$'\t' read -r start_ts agent_id < "$resultf"; rm -f "$resultf"
+  local closed_nonce; IFS=$'\t' read -r start_ts agent_id closed_nonce < "$resultf"; rm -f "$resultf"
   log_event "${evidence_dir}/timeline.jsonl" "verifier_dispatch_cancel" \
-    focus="$focus" agent_id="$agent_id" evidence_dir="$evidence_dir" started_at="$start_ts" reason="$reason" nonce="${want_nonce:-}"
+    focus="$focus" agent_id="$agent_id" evidence_dir="$evidence_dir" started_at="$start_ts" reason="$reason" nonce="${closed_nonce:-null}"
   echo "cancelled start ${focus} (started ${start_ts}): ${reason}"
 }
 

@@ -553,8 +553,12 @@ one at a time:
 
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus <focus> \
-     --output-file <answer> --evidence-dir <round dir>
+     --output-file <answer> --evidence-dir <round dir> --nonce <the nonce its start printed>
    ```
+
+   `start` prints `nonce=<n> focus=<focus> evidence=<round dir>` (AID 3.13.0): pass that nonce to `complete` and
+   `cancel`. It closes exactly that start, the round's bracket check reads the LAST start of the focus, and a
+   reviewer still running in the background lets the turn end with `AID-WAIT: <what>`.
 
    A step round's `close` refuses a reviewer file with no such start/complete
    bracket in `<round dir>/timeline.jsonl` (`no_dispatch_record`; `prepare` prints the
@@ -571,7 +575,7 @@ one at a time:
 
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" cancel --focus <focus> \
-     --evidence-dir <round dir> --reason "<why, 20+ characters>"
+     --evidence-dir <round dir> --reason "<why, 20+ characters>" --nonce <its start's nonce>
    ```
 
    A cancelled start is not a complete: an answer filed under it has no
@@ -980,6 +984,8 @@ is round 1 of the next attempt.
 
 **When something is open.** `close` reports `fail`, or `decide` prints
 `NOT READY` with the blockers:
+
+Bracket the CP7 fixer as the step fixer: `aid-emit-dispatch.sh start --focus fix-cp7-r<K> --agent-id aid-orchestrator:<role> --evidence-dir <run dir>/cp7/round-<K>`, its report to `<round dir>/fixer-report.md`, then `complete --focus fix-cp7-r<K> --output-file <round dir>/fixer-report.md --evidence-dir <round dir> --nonce <the start's nonce>` (AID 3.13.0).
 
 1. The role that wrote the code fixes it, on the plan branch:
    ```

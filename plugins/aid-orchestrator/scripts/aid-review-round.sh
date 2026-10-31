@@ -1037,8 +1037,15 @@ _token_value() {
 _bracket_last() {
   local tl="$1/timeline.jsonl" focus; focus="${3:-$(_focus "$2")}"   # P112: an exact focus (the delegate's)
   [[ -f "$tl" ]] || { echo none; return 0; }
-  jq -r --arg f "$focus" 'select(.focus == $f and (.event | IN("verifier_dispatch_start", "verifier_dispatch_complete", "verifier_dispatch_cancel"))) | .event' "$tl" 2>/dev/null \
-    | tail -1 | sed 's/^verifier_dispatch_//; s/^$/none/' | grep . || echo none
+  # 3.13.0: with nonces, what counts is the LAST start and whatever ended THAT start (a later complete or cancel of an
+  # older start of the same focus says nothing about it); events without a nonce keep the old reading
+  jq -rs --arg f "$focus" '
+    [.[] | select(.focus == $f and (.event | IN("verifier_dispatch_start", "verifier_dispatch_complete", "verifier_dispatch_cancel")))] as $ev
+    | ([$ev[] | select(.event == "verifier_dispatch_start")] | last) as $s
+    | if $s == null then "none"
+      elif (($s.nonce // "") | IN("", "null")) then ($ev | last | .event)
+      else ([$ev[] | select(.event != "verifier_dispatch_start" and .nonce == $s.nonce)] | last | .event) // "verifier_dispatch_start"
+      end' "$tl" 2>/dev/null | sed 's/^verifier_dispatch_//; s/^$/none/' | grep . || echo none
 }
 _dispatch_recorded() {
   local tl="$1/timeline.jsonl" focus; focus="${3:-$(_focus "$2")}"
@@ -1048,11 +1055,19 @@ _dispatch_recorded() {
   jq -c --arg f "$focus" 'select(.event == "verifier_dispatch_start" and .focus == $f)' "$tl" 2>/dev/null | grep -q . || return 1
   # the LAST complete of the focus is the one that counts, and it must name this role's file
   if [[ -n "${4:-}" ]]; then   # P112: the complete names exactly this file
-    [[ "$(jq -r --arg f "$focus" 'select(.event == "verifier_dispatch_complete" and .focus == $f) | .output_file // ""' "$tl" 2>/dev/null | tail -1)" == "$4" ]]
+    [[ "$(_dispatch_last_complete "$tl" "$focus")" == "$4" ]]
     return
   fi
-  jq -r --arg f "$focus" 'select(.event == "verifier_dispatch_complete" and .focus == $f) | .output_file // ""' "$tl" 2>/dev/null | tail -1 \
-    | grep -Eq "reviewer-${2}\.(json|missing)$"
+  _dispatch_last_complete "$tl" "$focus" | grep -Eq "reviewer-${2}\.(json|missing)$"
+}
+# _dispatch_last_complete <timeline> <focus> — the output_file of the complete that ended the LAST start (by its nonce;
+# a timeline without nonces: the last complete of the focus, as before 3.13.0)
+_dispatch_last_complete() {
+  jq -rs --arg f "$2" '
+    ([.[] | select(.focus == $f and .event == "verifier_dispatch_start")] | last) as $s
+    | [.[] | select(.focus == $f and .event == "verifier_dispatch_complete")] as $c
+    | if (($s.nonce // "") | IN("", "null")) then ($c | last | .output_file // "")
+      else ([$c[] | select(.nonce == $s.nonce)] | last | .output_file // "") end' "$1" 2>/dev/null
 }
 
 # ── the semantic file of a whole-plan (cp7) round ─────────────────────────────
@@ -1800,7 +1815,7 @@ cmd_delegate() {
     { _dispatch_recorded "$dir" "" "adjudicator-delegated-${fp16}" "$VERDICT" \
       && [[ "$(jq -r --arg f "adjudicator-delegated-${fp16}" 'select(.event == "verifier_dispatch_start" and .focus == $f) | .agent_id // ""' "${dir}/timeline.jsonl" 2>/dev/null | tail -1)" == claude:adjudicator-delegated ]]; } \
       || _dlg_refuse delegation_missing "a Claude verdict without its closed bracket adjudicator-delegated-${fp16} (agent claude:adjudicator-delegated) naming ${VERDICT}" \
-           "dispatch the stand-in inside the bracket (aid-emit-dispatch.sh start/complete --focus adjudicator-delegated-${fp16}), then record again"
+           "dispatch the stand-in inside the bracket (aid-emit-dispatch.sh start/complete --focus adjudicator-delegated-${fp16}; pass the nonce start prints to complete --nonce), then record again"
   fi
   local before="${dir}/adjudicator-delegated-${fp16}.status-before" left
   if [[ "$provider" != codex ]]; then

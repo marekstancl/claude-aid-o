@@ -732,6 +732,17 @@ _mplan() {
   _sc; run _S prepare --round 2; echo "$output"; [ "$status" -eq 0 ]
   grep -q '`test -f src/new.py` instead of' "$(D 2)/packet/dod.md"
 }
+@test "cp2 (3.13.0): the bracket that counts is the LAST start's — an older start cancelled later does not void the newer one's answer" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  local d; d="$(D 1)"; local EMIT="$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" o a b
+  o="$(bash "$EMIT" start --focus cp2-step-0-step-generalist --agent-id aid-orchestrator:review --evidence-dir "$d")"; a="$(sed -E 's/^nonce=([^ ]+) .*/\1/' <<< "$o")"
+  o="$(bash "$EMIT" start --focus cp2-step-0-step-generalist --agent-id aid-orchestrator:review --evidence-dir "$d")"; b="$(sed -E 's/^nonce=([^ ]+) .*/\1/' <<< "$o")"
+  jq -n '{role: "step_generalist", checkpoint: "cp2", findings: [], no_findings_reason: "nothing found in the step"}' > "$d/reviewer-step_generalist.json"
+  bash "$EMIT" complete --focus cp2-step-0-step-generalist --output-file "$d/reviewer-step_generalist.json" --evidence-dir "$d" --nonce "$b"
+  bash "$EMIT" cancel --focus cp2-step-0-step-generalist --evidence-dir "$d" --nonce "$a" --reason "the older start was a duplicate of this one"
+  run _S collect --round 1; echo "$output"; [ "$status" -eq 0 ]
+  run _S close --round 1 --tokens step_generalist=5; echo "$output"; [ "$status" -eq 0 ]
+}
 @test "step: a disputed cp2 blocker keeps blocking; --pm accepted needs the card quoting it and a PM prompt after the card, then the verdict flips" {
   _repo; _sc; _S prepare --round 1 >/dev/null
   _sanswer 1 step_generalist '.findings[0].severity = "blocker"'; _S collect --round 1 >/dev/null; _bracket 1 step_generalist

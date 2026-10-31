@@ -320,3 +320,14 @@ teardown() {
   run bash "$SCRIPT" complete --focus cp2-step-0-step-generalist --output-file "$TMPDIR_TEST/out.json" --evidence-dir "$EVID" --nonce nope
   [ "$status" -ne 0 ]; [ "$(jq -s '[.[] | select(.event == "start")] | length' "$PENDING")" -eq 1 ]
 }
+
+@test "3.13.0: a fixer is bracketed under fix-cp2-<step>-r<round> / fix-cp7-r<round> of THIS round, never another" {
+  jq -n '{step: 2, round: 1, reviewers_expected: ["step_generalist"]}' > "$EVID/round.json"
+  run bash "$SCRIPT" start --focus fix-cp2-2-r1 --agent-id aid-orchestrator:backend --evidence-dir "$EVID"
+  echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == nonce=* ]]
+  [ "$(jq -r 'select(.event == "start") | .step_n' "$PENDING")" = 2 ]
+  run bash "$SCRIPT" start --focus fix-cp2-3-r1 --agent-id aid-orchestrator:backend --evidence-dir "$EVID"
+  [ "$status" -ne 0 ]; [[ "$output" == *"does not name this round"* ]]
+  run bash "$SCRIPT" start --focus fix-cp2-2-r9 --agent-id aid-orchestrator:backend --evidence-dir "$EVID"
+  [ "$status" -ne 0 ]
+}

@@ -237,6 +237,7 @@ _cp2_start() {  # <round> <focus> [age seconds] — a start in the round's pendi
   local rd="$EV/cp2/step-0/round-$1" n="n$RANDOM$RANDOM" at; mkdir -p "$rd"
   at="$(date -u -d "-${3:-5} seconds" +%Y-%m-%dT%H:%M:%SZ)"
   jq -nc --arg ts "$at" --arg f "$2" --arg n "$n" '{ts: $ts, event: "start", focus: $f, agent_id: "x", step_n: 0, evidence_dir: "d", expected_duration_max: 600, nonce: $n}' >> "$rd/pending-dispatches.jsonl"
+  jq -nc --arg f "$2" --arg n "$n" '{event: "verifier_dispatch_start", focus: $f, nonce: $n}' >> "$rd/timeline.jsonl"
   printf '{"type":"user","message":{"content":[{"type":"tool_result","content":"nonce=%s focus=%s evidence=%s"}]}}\n' "$n" "$2" "$rd" >> "$TRANSCRIPT"
   LAST_NONCE="$n"
 }
@@ -262,5 +263,22 @@ _cp2_start() {  # <round> <focus> [age seconds] — a start in the round's pendi
   rm -rf "$EV/cp2"; mkdir -p "$EV/cp2/step-3/round-1"; n="n$RANDOM"
   jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg n "$n" '{ts: $ts, event: "start", focus: "cp2-step-3-x", expected_duration_max: 600, nonce: $n}' >> "$EV/cp2/step-3/round-1/pending-dispatches.jsonl"
   printf '{"type":"user","message":{"content":"nonce=%s focus=x evidence=y"}}\n' "$n" >> "$TRANSCRIPT"
+  _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+}
+
+@test "turn (3.13.0): an older start of a focus whose newer start ended, a nonce the model only typed, or another evidence dir does not excuse the step" {
+  _cp2_start 1 cp2-step-0-step-generalist; local a="$LAST_NONCE"
+  _cp2_start 1 cp2-step-0-step-generalist; local b="$LAST_NONCE"
+  # B completes: its line leaves the ledger, A stays — but A is not the focus's last start
+  jq -c --arg n "$b" 'select(.nonce != $n)' "$EV/cp2/step-0/round-1/pending-dispatches.jsonl" > "$TMP/p" && mv "$TMP/p" "$EV/cp2/step-0/round-1/pending-dispatches.jsonl"
+  _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  # a nonce in the model's own text, not in a tool result
+  rm -rf "$EV/cp2"; mkdir -p "$EV/cp2/step-0/round-1"
+  jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{ts: $ts, event: "start", focus: "cp2-step-0-step-generalist", expected_duration_max: 600, nonce: "typed1"}' >> "$EV/cp2/step-0/round-1/pending-dispatches.jsonl"
+  jq -nc '{event: "verifier_dispatch_start", focus: "cp2-step-0-step-generalist", nonce: "typed1"}' >> "$EV/cp2/step-0/round-1/timeline.jsonl"
+  _say "nonce=typed1 focus=cp2-step-0-step-generalist evidence=$EV/cp2/step-0/round-1"; _say "AID-WAIT: revize"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  # printed in a tool result, but for another evidence dir
+  printf '{"type":"user","message":{"content":[{"type":"tool_result","content":"nonce=typed1 focus=cp2-step-0-step-generalist evidence=/elsewhere"}]}}\n' >> "$TRANSCRIPT"
   _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
 }
