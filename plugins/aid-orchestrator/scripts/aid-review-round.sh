@@ -1631,7 +1631,7 @@ _dlg_kind() { [[ "$(jq -r .status <<< "$1")" == disputed ]] && echo dispute || e
 # finding already answered in this round, or classed brief|money|data, is not.
 _dlg_pending() {
   jq -r --argjson last "$2" '.findings[]
-    | select(.delegated == null and (.dispute.delegated // null) == null)
+    | select(.delegated == null and (.dispute.delegated // null) == null and (.dispute.handed_to_confirmation // null) == null)
     | select(.status == "disputed" or ($last == 1 and (.status | IN("open", "form_invalid")) and (.severity == "blocker" or .severity == "major")))
     | .fingerprint' "$1/merged.json" 2>/dev/null
 }
@@ -1711,9 +1711,24 @@ cmd_delegate() {
   fi
   [[ "$(jq -r .status <<< "$finding")" == fixed && -z "$VERDICT" ]] && _die "finding ${FINGERPRINT} is fixed — nothing to settle"
   kind="$(_dlg_kind "$finding")"
-  if [[ -z "$VERDICT" ]] && _dlg_fix_touched "$dir" "$finding"; then
-    _dlg_refuse delegation_fix_pending "a commit after round ${ROUND} changed the lines finding ${FINGERPRINT} cites ($(jq -r '.evidence' <<< "$finding" | cut -d';' -f1)) — a fix is judged by the next round, not by an adjudicator" \
-      "freeze the new candidate (cp7) or prepare the next round (cp2): its confirmation lists the finding and the fix"
+  if [[ -z "$VERDICT" ]] && (( ! last )) && _dlg_fix_touched "$dir" "$finding"; then
+    # 3.13.0: a commit after the round changed the lines the finding cites — the fix is the next round's to confirm.
+    # The dispute is handed to that round: the finding stays OPEN and blocking, so this round closes (as failed while a
+    # blocker stays) and the next one confirms or reopens it (WAN P115 25. 10. 2026: delegate refused, close waited
+    # for the dispute, the next round waited for the close — only the PM's card was left). The last round has no next
+    # one: there the stand-in judges the finding at HEAD as any other.
+    local _hc; _hc="$(git -C "$ROOT" rev-parse HEAD)"
+    jq --arg f "$FINGERPRINT" --arg c "$_hc" --arg at "$(_now)" \
+       '.findings |= map(if .fingerprint == $f then
+          (if .status == "disputed" then .status = "open" else . end)
+          | .dispute = ((.dispute // {}) + {handed_to_confirmation: {commit: $c, at: $at,
+              reason: "a commit after the round changed the lines the finding cites; the next round confirms the fix"}})
+        else . end)' "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
+    _dlg_resync "$dir" handed
+    _log delegation_handed_to_confirmation fingerprint="$FINGERPRINT" commit="$_hc"
+    echo "finding ${FINGERPRINT}: a commit after round ${ROUND} changed the lines it cites — handed to the next round's confirmation; it stays open and blocking"
+    echo "next: close the round at its reviewed head (bash ${SCRIPT_DIR}/aid-review-round.sh close --checkpoint ${CHECKPOINT} --evidence-dir ${EVID}${STEP:+ --step ${STEP}} --round ${ROUND} --at $(jq -r .head_sha "${dir}/round.json") --tokens …), then $( [[ "$CHECKPOINT" == cp7 ]] && echo "freeze the new candidate" || echo "prepare the next round")"
+    return 0
   fi
   [[ "$kind" == dispute ]] || (( last )) \
     || _die "finding ${FINGERPRINT} is open but round ${ROUND} is not the last one the plan allows — the fix loop goes on; nothing is escalated yet"

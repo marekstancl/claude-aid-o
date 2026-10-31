@@ -2108,22 +2108,37 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   run _DLG --fingerprint "$FP"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_out_of_scope"*"a third opinion is not asked"* ]]
   [ "$(grep -c . "$L")" = 2 ]
 }
-@test "delegate: a fix that changed the cited lines goes to the next round's confirmation, not to the adjudicator; a change elsewhere does not" {
+@test "delegate (3.13.0): a fix that changed the cited lines hands the dispute to the next round — the finding stays open, the round closes" {
   _dlg auto; _dispute; _fake_codex
+  yq -i '.review_checkpoints.step_review.rounds_default = 2' "$R/.aid-o/config/policies/review-checkpoints.yaml"   # round 1 is not the last
   export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "fine", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
+  local m="$(D 1)/merged.json"; cp "$m" "$BATS_TEST_TMPDIR/m0"
+  local ev; ev="$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .evidence' "$m")"
+  local file="${ev%%:*}" line="${ev#*:}"; line="${line%%[!0-9]*}"
+  local h1; h1="$(jq -r .head_sha "$(D 1)/round.json")"
+  sed -i "${line}s/.*/the fix/" "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "fix the cited line"
+  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"handed to the next round's confirmation"* ]]
+  [ "$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | "\(.status) \(.dispute.handed_to_confirmation.commit != null)"' "$m")" = "open true" ]
+  [ ! -f "$(D 1)/adjudicator-delegated-$(jq -rn --arg f "$FP" '$f | ltrimstr("sha256:") | .[0:16]').json" ]   # nobody judged the fix
+  # a second collect keeps the handoff; the round closes at its reviewed head (as failed: the blocker stays)
+  _S collect --round 1 >/dev/null
+  [ "$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .dispute.handed_to_confirmation != null' "$m")" = true ]
+  run _S close --round 1 --at "$h1" --tokens step_generalist=5 step_security=unknown; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" != *"await an independent verdict"* ]]
+  # a change elsewhere is still the adjudicator's
+  cp "$BATS_TEST_TMPDIR/m0" "$m"; rm -f "$(D 1)/measurement.json"
+  git -C "$R" reset -q --hard HEAD~1
+  echo "an unrelated line" >> "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "elsewhere"
+  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"dispute settled by codex"* ]]
+}
+@test "delegate (3.13.0): in the last round a fix of the cited lines is judged by the stand-in at HEAD — no next round would confirm it" {
+  _dlg auto; _dispute; _fake_codex
+  export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "fixed at HEAD", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
   local ev; ev="$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .evidence' "$(D 1)/merged.json")"
   local file="${ev%%:*}" line="${ev#*:}"; line="${line%%[!0-9]*}"
   sed -i "${line}s/.*/the fix/" "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "fix the cited line"
-  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_fix_pending"* ]]
-  [ "$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .status' "$(D 1)/merged.json")" = disputed ]   # never marked fixed by itself
-  git -C "$R" reset -q --hard HEAD~1
-  # a second citation of the finding fixed: the same (every citation counts)
-  local m="$(D 1)/merged.json"; jq --arg f "$FP" '.findings |= map(if .fingerprint == $f then .evidence = (.evidence + "; src/new.py:1") else . end)' "$m" > "$m.t" && mv "$m.t" "$m"
-  echo "fixed too" > "$R/src/new.py"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "fix the second citation"
-  run _DLG --fingerprint "$FP"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_fix_pending"* ]]
-  git -C "$R" reset -q --hard HEAD~1
-  echo "an unrelated line" >> "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "elsewhere"
-  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]
+  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"dispute settled by codex"* ]]
+  [[ "$output" != *"handed to the next round"* ]]
 }
 @test "delegate: after /aid-stop (the run declared manual) the automatic delegation is not in force" {
   _dlg auto; _dispute

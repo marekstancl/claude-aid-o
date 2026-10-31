@@ -677,8 +677,11 @@ Every settlement is a line of `evidence/<plan>/delegated-disputes.jsonl`; the
 close card and page list them. **P117:** a verdict is bound to its evidence (the
 finding, the author's dispute, HEAD); new evidence allows one new verdict, the old
 one is kept as `superseded` — once per finding and round, then the PM. A finding
-whose cited lines a later commit changed is never delegated
-(`delegation_fix_pending`): the next round's confirmation judges the fix.
+whose cited lines a later commit changed is never delegated: `delegate` hands it to
+the next round (`dispute.handed_to_confirmation`, AID 3.13.0) — it stays open and
+blocking, the round closes (`close --at <the round's head>`), and the next round's
+confirmation judges the fix. In the last round, with no next one, the stand-in judges
+it at HEAD.
 
 ## Run decisions by the stand-in (P117)
 
