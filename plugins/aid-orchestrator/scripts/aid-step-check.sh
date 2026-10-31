@@ -271,8 +271,16 @@ if (( tn_rc == 1 )); then
 elif (( tn_rc != 0 )); then
   die "the names of the added tests could not be read (${RANGE}); run the check again" 1
 fi
+# 3.13.0: a criterion the takeover measured with another command than the plan's is never skipped — the step review
+# judges the replacement (aid-step-land.sh --reason), and increment-step checks the round saw exactly it
+land_repl=0
+if [[ "$CHECKPOINT" == cp2 && -n "${STEP:-}" && -f "$PLAN_JSON" ]]; then
+  land_f="$(dirname "$PLAN_JSON")/steps/$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "$PLAN_JSON" 2>/dev/null || true)/land.json"
+  [[ -f "$land_f" ]] && land_repl="$(jq '(.replacements // []) | length' "$land_f" 2>/dev/null || echo 0)"
+fi
 verdict="" reason=""
-if (( ${#OTHER_MISSING[@]} > 0 )); then verdict=review; reason="declared repository with no commits named in the step's return (repo_commits): ${OTHER_MISSING[*]}"
+if (( land_repl > 0 )); then verdict=review; reason="${land_repl} criterion(s) measured with another command than the plan names (land.json replacements)"
+elif (( ${#OTHER_MISSING[@]} > 0 )); then verdict=review; reason="declared repository with no commits named in the step's return (repo_commits): ${OTHER_MISSING[*]}"
 elif (( ${#OUTSIDE_GIT[@]} > 0 )); then verdict=review; reason="declared path(s) outside any git repository — no diff shows them, the reviewers read them as they are: ${OUTSIDE_GIT[*]}"
 elif (( ${#FILES[@]} == 0 )); then verdict=no_change; reason="the range $RANGE has no changes"
 elif [[ "$STREAMLINED" == true ]]; then verdict=skip; reason="streamlined"

@@ -74,18 +74,18 @@ STATE_ROOT="$(cd "$TREE" && aid_state_root 2>/dev/null || printf '%s' "$TREE")"
 
 # --- the record ---------------------------------------------------------------------------------------------
 STATUS=running REASON="" PATHKIND="" STEP_SHA="" BASE_SHA="" LANDED_SHA="" CSHA="" RSHA="" MEASURE=""
-CHECKS_JSON="[]"
+CHECKS_JSON="[]" REPL_JSON="[]"   # REPL_JSON: every replaced criterion of this takeover, whatever ran (3.13.0)
 _sha() { [[ -f "$1" ]] && sha256sum "$1" | cut -d' ' -f1 || printf ''; }
 _write() {
   local tmp="${REC}.tmp.$$"
   jq -n --arg plan "$EPIC" --arg run "$RUN" --argjson i "$N" --arg sid "$SID" --arg st "$STATUS" --arg why "$REASON" \
         --arg path "$PATHKIND" --arg ssha "$STEP_SHA" --arg bsha "$BASE_SHA" --arg lsha "$LANDED_SHA" \
-        --arg c "$CSHA" --arg r "$RSHA" --argjson checks "$CHECKS_JSON" --arg m "$MEASURE" \
+        --arg c "$CSHA" --arg r "$RSHA" --argjson checks "$CHECKS_JSON" --argjson repl "$REPL_JSON" --arg m "$MEASURE" \
         --argjson pid "$$" --arg ctok "$CHECK_TOKEN" --arg sess "${CLAUDE_CODE_SESSION_ID:-}" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --argjson env "$(printf '%s\n' "${ENVS[@]+"${ENVS[@]}"}" | jq -R . | jq -sc 'map(select(. != ""))')" \
     '{version: 1, epic_id: $plan, run_id: $run, step_index: $i, step_id: $sid, status: $st, reason: $why,
       path: $path, contract_sha256: $c, return_sha256: $r, step_sha: $ssha, base_sha: $bsha, landed_sha: $lsha,
-      env: $env, checks: $checks, measure: $m, pid: $pid, session_id: $sess, check_token: $ctok, at: $at}' > "$tmp" && mv -f "$tmp" "$REC"
+      env: $env, checks: $checks, replacements: $repl, measure: $m, pid: $pid, session_id: $sess, check_token: $ctok, at: $at}' > "$tmp" && mv -f "$tmp" "$REC"
 }
 HAVE_LOCK=0 OWNED=0 BACK_NOTE="" CHECK_PID="" CHECK_TOKEN=""
 # the run's timeline keeps every takeover of a step, start and result: increment-step reads it, so a step whose
@@ -149,7 +149,7 @@ declare -A WANT=() GOT=() GOTWHY=() PREVCMD=() PREVWHY=()
 # the replacements of the takeover a --recheck starts from (read before this run writes its own record)
 if (( RECHECK )) && [[ -f "$PREV_REC" ]]; then
   while IFS=$'\t' read -r k c w; do [[ -n "$k" ]] && { PREVCMD[$k]="$c"; PREVWHY[$k]="$w"; }; done < <(
-    jq -r '.checks[]? | select(.plan_command != null) | "\(.ac)\t\(.command)\t\(.reason)"' "$PREV_REC" 2>/dev/null)
+    jq -r '(.replacements // [.checks[]? | select(.plan_command != null)])[] | "\(.ac)\t\(.command)\t\(.reason)"' "$PREV_REC" 2>/dev/null)
 fi
 while IFS=$'\t' read -r k cmd; do [[ -n "$k" ]] && WANT[$k]="$cmd"; done < <(
   jq -r --argjson i "$N" "${AID_AC_COMMAND_JQ}"'.steps[$i].acceptance_criteria // [] | to_entries[]
@@ -179,13 +179,20 @@ for c in "${CHECKS[@]+"${CHECKS[@]}"}"; do
 done
 if [[ -z "$REASON" ]]; then
   for k in "${!GOTWHY[@]}"; do
-    [[ -n "${GOT[$k]+x}" && "${GOT[$k]}" != "${WANT[$k]:-}" ]] || { REASON="AC${k} has --reason but no replaced --check"; break; }
+    # a reason goes with a replaced command — or, on a --recheck, with going back to the plan's own command
+    [[ -n "${GOT[$k]+x}" && ( "${GOT[$k]}" != "${WANT[$k]:-}" || ( RECHECK -eq 1 && -n "${PREVCMD[$k]+x}" ) ) ]] \
+      || { REASON="AC${k} has --reason but no replaced --check"; break; }
   done
 fi
 if [[ -z "$REASON" ]]; then
   for k in "${!WANT[@]}"; do [[ -n "${GOT[$k]+x}" ]] || { REASON="AC${k} is a command criterion and has no --check: ${WANT[$k]}"; break; }; done
 fi
 for e in "${ENVS[@]+"${ENVS[@]}"}"; do [[ "$e" =~ ^[A-Za-z_][A-Za-z0-9_]*= ]] || REASON="--env must be NAME=value, got '${e}'"; done
+for k in $(printf '%s\n' "${!GOT[@]}" | sort -n); do
+  [[ "${GOT[$k]}" != "${WANT[$k]}" ]] || continue
+  REPL_JSON="$(jq -c --argjson k "$k" --arg c "${GOT[$k]}" --arg pc "${WANT[$k]}" --arg w "${GOTWHY[$k]:-}" \
+    '. + [{ac: $k, command: $c, plan_command: $pc, reason: $w}]' <<< "$REPL_JSON")"
+done
 [[ -z "$REASON" ]] || _end precondition_failed "$REASON"
 
 # --- one takeover per plan at a time ---------------------------------------------------------------------------

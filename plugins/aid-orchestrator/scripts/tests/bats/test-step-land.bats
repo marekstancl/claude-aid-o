@@ -449,3 +449,28 @@ _verify_file() {  # the bound step-0-verify.md at HEAD
 plain text|NAME
 CASES
 }
+
+@test "3.13.0: increment-step advances a replaced criterion only after a CP2 round whose packet listed exactly that replacement" {
+  _wave; _agent "$WT"
+  bash "$LAND" "$S" 0 --check '1:test -e a.txt' --reason '1:the plan measures the main checkout, this the plan tree' >/dev/null
+  [ "$(jq '.replacements | length' "$REC")" -eq 1 ]; _verify_file
+  run bash "$FSM" increment-step "$S"
+  [ "$status" -ne 0 ]; [[ "$output" == *"no CP2 round of it saw that replacement"* ]]
+  # a round whose packet holds the line (prepare writes it into dod.md) lets the record through
+  mkdir -p "$TEST_EVIDENCE_DIR/cp2/step-0/round-1/packet"
+  printf -- '- AC1: `test -e a.txt` instead of `test -f a.txt` — the plan measures the main checkout, this the plan tree\n' > "$TEST_EVIDENCE_DIR/cp2/step-0/round-1/packet/dod.md"
+  run bash "$FSM" increment-step "$S"; [[ "$output" != *"saw that replacement"* ]] || { echo "$output" | tail -8; false; }
+}
+
+@test "3.13.0: the record keeps every replacement even when an earlier check fails; a recheck may go back to the plan's command with a reason" {
+  jq '.steps[0].acceptance_criteria = ["`test -f nope.txt` passes", "`test -f a.txt` passes"]' "$TEST_EVIDENCE_DIR/plan.json" > "$TEST_EVIDENCE_DIR/p" && mv "$TEST_EVIDENCE_DIR/p" "$TEST_EVIDENCE_DIR/plan.json"
+  _agent .
+  run bash "$LAND" "$S" 0 --check '1:test -f nope.txt' --check '2:test -e a.txt' --reason '2:the plan measures the main checkout here'
+  [ "$status" -eq 1 ]; [ "$(jq -r .status "$REC")" = check_failed ]
+  [ "$(jq -r '.replacements[0] | "\(.ac) \(.command)"' "$REC")" = "2 test -e a.txt" ]       # AC2 never ran, its mapping is kept
+  : > nope.txt; git add nope.txt; git commit -qm "fix: the file"
+  run bash "$LAND" "$S" 0 --recheck --check '1:test -f nope.txt' --check '2:test -f a.txt'
+  [ "$status" -eq 1 ]; [[ "$output" == *"was measured with"* ]]
+  run bash "$LAND" "$S" 0 --recheck --check '1:test -f nope.txt' --check '2:test -f a.txt' --reason '2:back to the plan command, the tree is fine'
+  echo "$output"; [ "$status" -eq 0 ]; [ "$(jq '.replacements | length' "$REC")" -eq 0 ]
+}

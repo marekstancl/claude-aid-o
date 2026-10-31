@@ -289,3 +289,12 @@ _rr_step() {   # a declared foreign repository "docs" with a worktree on plan/P1
   run _run --checkpoint cp2 --step 0 --worktree; echo "$output"; [ "$status" -eq 1 ]
   [[ "$output" == *"REFUSED (step_test_named_after_plan)"* ]]; [[ "$output" == *"tests/new.test.ts"* ]]
 }
+
+@test "3.13.0: a step whose takeover replaced a criterion's command is review, never skip" {
+  echo "one line" >> "$R/src/app.py"; _commit s0 >/dev/null
+  jq -n '{steps: [{id: "step_1_backend", acceptance_criteria: ["`pytest -q x` passes"], outputs: ["Modify: `src/app.py` — x"], allowed_paths: ["src/app.py"]}]}' > "$E/plan.json"
+  mkdir -p "$E/steps/step_1_backend"
+  jq -n '{replacements: [{ac: 1, command: "pytest -q y", plan_command: "pytest -q x", reason: "measures the plan tree"}]}' > "$E/steps/step_1_backend/land.json"
+  run _run --checkpoint cp2 --step 0; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_json .verdict cp2/step-0)" = review ]; [[ "$(_json .reason cp2/step-0)" == *"another command than the plan names"* ]]
+}

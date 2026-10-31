@@ -4895,6 +4895,20 @@ cmd_increment_step() {
             || _increment_fail land_record_invalid \
               "PRECONDITION FAIL: step ${step} was taken over in the background and its record does not hold: ${_land_why}" \
               "Record: ${_c_dir}/land.json (scripts/aid-step-land.sh)"
+          # 3.13.0: every replacement was in the packet of the step's last CP2 round — a replacement changed by a later
+          # --recheck needs a new round, not the old approval
+          local _repl_n _lastr _dod _rl
+          _repl_n="$(jq '(.replacements // []) | length' "${_c_dir}/land.json" 2>/dev/null || echo 0)"
+          if (( _repl_n > 0 )); then
+            _lastr="$(ls -d "${evidence_dir}/cp2/step-${step}"/round-* 2>/dev/null | grep -E '/round-[0-9]+$' | sort -V | tail -1 || true)"
+            _dod="${_lastr}/packet/dod.md"
+            while IFS= read -r _rl; do
+              [[ -f "$_dod" ]] && grep -qxF -- "$_rl" "$_dod" \
+                || _increment_fail land_record_invalid \
+                     "PRECONDITION FAIL: step ${step} measured a criterion with another command than the plan names, and no CP2 round of it saw that replacement: ${_rl}" \
+                     "Run the step check and a new CP2 round (its packet lists the replacement), then increment-step"
+            done < <(jq -r '.replacements[] | "- AC\(.ac): `\(.command)` instead of `\(.plan_command)` — \(.reason)"' "${_c_dir}/land.json")
+          fi
           # 3.13.0: a criterion measured with another command than the plan's says so, with its reason
           jq -r '.checks[]? | select(.plan_command != null)
                  | "increment-step: AC\(.ac) was measured with `\(.command)` instead of the plan'"'"'s `\(.plan_command)` — \(.reason)"' \
