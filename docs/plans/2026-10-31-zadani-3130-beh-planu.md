@@ -125,6 +125,7 @@ commit a strom kandidáta [R9e].
 - **Sloučení a jeho obnova** (Z8) berou verzi ze záznamu, který zmrazení ověřilo. Rozpor mezi záznamem
   a kandidátem je chyba, nikdy tichá náhrada.
 
+**Při stavbě 31. 10.:** chybějící záznam dál znamená plán bez vydání (tak to dnes mají projekty bez `prepare-plan`; za chybu se počítá jen nečitelný záznam), záznam ze 3.12 bez `candidate_version` se nekontroluje a nesená verze se čte z větve plánu, ne z pracovní kopie.
 Hlídání migrací patří do backlogu okna WANu.
 
 **Z11 – spor po pozdějším commitu** (`aid-review-round.sh` ř. ~1705, `aid-review-adjudicate.sh`) [R10, R10b]
