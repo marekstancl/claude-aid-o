@@ -278,10 +278,22 @@ _round1_closed() {
 @test "fix-check (3.13.0): a plan-level finding allows any step; --also-steps only records, it does not narrow (WAN P116)" {
   _round1_closed '.findings[0].severity = "blocker" | .findings[0].step = null'
   jq -e ".findings | any(.status == \"open\" and .severity == \"blocker\" and .step == null)" "$CP1/round-1/merged.json"
+  # step 1 changes (the plan-level fix) and step 2 restates it: with `any,2` the old code allowed only step 2
+  sed -i 's/^uses {{x}} literally$/uses {{x}} literally\n\n- Create: `scripts\/near.sh` — the plan-level fix/' "$PLAN"
   printf '\n- Create: `scripts/far.sh` — a consequence of the plan-level fix\n' >> "$PLAN"; _check
   run "$ROUND_SH" fix-check "$PLAN" --round 1 --also-steps 2 --reason "step 2 restates what the plan-level fix changed"
   echo "$output"; [ "$status" -eq 0 ]
   [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = any ]; [ "$(jq -c .also_steps "$CP1/round-1/fix-diff.json")" = "[2]" ]
+  [ "$(jq '.added_outside_fixes | length' "$CP1/round-1/fix-diff.json")" -eq 0 ]
+}
+
+@test "plan-check (3.13.0): --fixes reads 'any' as a whole item — any,2 allows every step, many,2 does not" {
+  printf -- '---\nid: P900\n---\n# Plan\n\n### Step 1: first\n\ntext\n\n### Step 2: second\n\ntext\n' > "$ROOT/fp.md"; cp "$ROOT/fp.md" "$ROOT/fp-snap.md"
+  sed -i 's/^### Step 1: first$/### Step 1: first\n\n- Create: `x.sh` — new/' "$ROOT/fp.md"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" "$ROOT/fp.md" --snapshot "$ROOT/fp-snap.md" --fixes any,2 --json "$ROOT/o.json" --quiet
+  [ "$(jq '.added_outside_fixes | length' "$ROOT/o.json")" -eq 0 ]
+  run bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" "$ROOT/fp.md" --snapshot "$ROOT/fp-snap.md" --fixes many,2 --json "$ROOT/o.json" --quiet
+  [ "$(jq '.added_outside_fixes | length' "$ROOT/o.json")" -gt 0 ]
 }
 
 @test "finalize (3.13.0): --also-steps lets a consequential edit through and records it in finalize.json" {
