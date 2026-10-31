@@ -261,3 +261,16 @@ _rr_step() {   # a declared foreign repository "docs" with a worktree on plan/P1
   [ "$(_json '.outside_git[0]' cp2/step-0)" = "$T/eco-root/CLAUDE.md" ]
   [[ "$(_json .reason cp2/step-0)" == *"outside any git repository"* ]]
 }
+
+@test "3.13.0: a small diff adding a test named after a plan is review with a major script finding, never skip" {
+  # WAN P115 25. 10. and P114 27. 10. 2026: step reviews passed `describe('… — P114')`, the close gate refused it
+  printf "describe('owner reassign — P114', () => {})\n" > "$R/tests/owner.test.ts"; _commit s0 >/dev/null
+  run _run --checkpoint cp2 --step 0; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_json .verdict cp2/step-0)" = review ]; [[ "$(_json .reason cp2/step-0)" == *"tests/owner.test.ts"* ]]
+  jq -e '.script_findings[] | select(.severity == "major" and (.claim | test("P114")) and (.evidence == "tests/owner.test.ts:0"))' "$E/cp2/step-0/step-check.json" >/dev/null
+  # the same file named after its behaviour carries no such finding
+  printf "describe('owner reassign keeps the history', () => {})\n" > "$R/tests/owner.test.ts"; _commit s0b >/dev/null
+  rm -rf "$E/cp2"; run _run --checkpoint cp2 --step 0; [ "$status" -eq 0 ]
+  [ "$(jq '[.script_findings[] | select(.id | startswith("step_check-test-name"))] | length' "$E/cp2/step-0/step-check.json")" -eq 0 ]
+  [[ "$(_json .reason cp2/step-0)" != *"named after a plan"* ]]
+}
