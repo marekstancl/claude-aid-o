@@ -45,7 +45,7 @@ codes:
   critic_required: {class: not_in_run, how: "psaní plánu"}
   cwd_not_worktree: {class: prevent, how: "běh v kopii plánu"}
   defer_refused: {class: pm, how: "vypuštění bodu zadání"}
-  delegation_fix_pending: {class: agent_fix, how: "od 3.13.0 delegate spor předá dalšímu kolu (handed_to_confirmation), kolo se zavře close --at; v posledním kole rozhodne zástupce"}
+  delegation_fix_pending: {class: agent_fix, how: "CP7: oprava je nový kandidát, posoudí ji potvrzení dalšího pokusu (zmrazit); CP2 od 3.13.0 bez odmítnutí: spor se předá dalšímu kolu"}
   delegation_left_files: {class: agent_fix, how: "odstraní soubory náhradníka a zapíše verdikt znovu"}
   delegation_missing: {class: pm, how: "delegace není v platnosti (běh ručně / zastaven PM); v --auto nenastane"}
   delegation_out_of_scope: {class: pm, how: "chráněný dopad"}

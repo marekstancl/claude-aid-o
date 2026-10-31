@@ -2131,14 +2131,16 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   echo "an unrelated line" >> "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "elsewhere"
   run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"dispute settled by codex"* ]]
 }
-@test "delegate (3.13.0): in the last round a fix of the cited lines is judged by the stand-in at HEAD — no next round would confirm it" {
+@test "delegate (3.13.0): in the last step round the dispute is handed over too, and no round is added — the budget refuses as before" {
   _dlg auto; _dispute; _fake_codex
   export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "fixed at HEAD", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
-  local ev; ev="$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .evidence' "$(D 1)/merged.json")"
+  local ev h1; ev="$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .evidence' "$(D 1)/merged.json")"; h1="$(jq -r .head_sha "$(D 1)/round.json")"
   local file="${ev%%:*}" line="${ev#*:}"; line="${line%%[!0-9]*}"
   sed -i "${line}s/.*/the fix/" "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "fix the cited line"
-  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"dispute settled by codex"* ]]
-  [[ "$output" != *"handed to the next round"* ]]
+  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"handed to the next round's confirmation"* ]]
+  [[ "$output" != *"dispute settled by codex"* ]]                     # nobody judges the fix at the moved HEAD
+  run _S close --round 1 --at "$h1" --tokens step_generalist=5 step_security=unknown; [ "$status" -eq 0 ]
+  _sc; run _S prepare --round 2; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"budget"* ]]
 }
 @test "delegate: after /aid-stop (the run declared manual) the automatic delegation is not in force" {
   _dlg auto; _dispute
