@@ -21,9 +21,11 @@
 #             commit stays on the branch): the same checks on the plan's HEAD, nothing else
 # then the plan's own measurer (aid-plan-diff.sh --step N) on the landed HEAD, which increment-step reuses.
 #
-# Every acceptance criterion whose text BEGINS with a backticked command must come with exactly that command
-# (`--check "<n>:<command>"`, n = its 1-based place in plan.json); environment the project's tests need goes in
-# `--env`, never into the command. Anything else is refused before a thing changes.
+# Every command criterion (lib/aid-ac-command.sh: its text begins with a backticked command — a space, a slash or
+# NAME=value; one bare word is a name, not a command) must come with exactly that command (`--check "<n>:<command>"`,
+# n = its 1-based place in plan.json), or with another one and its reason (`--reason "<n>:<why>"`, 3.13.0: the
+# plan's command measures another environment); environment the project's tests need goes in `--env`, never into
+# the command. Anything else is refused before a thing changes.
 #
 # Record: <step dir>/land.json (schema version 1), written `running` at the start and replaced atomically with the
 # result: landed | return_rejected | merge_conflict | check_failed | base_moved | precondition_failed | interrupted. The full
@@ -39,14 +41,16 @@ source "${SCRIPT_DIR}/lib/aid-lock.sh"
 source "${SCRIPT_DIR}/lib/aid-dispatch-contract.sh"
 source "${SCRIPT_DIR}/lib/aid-parallel-dispatch.sh"
 source "${SCRIPT_DIR}/lib/aid-gate-outcome-summary.sh"
+source "${SCRIPT_DIR}/lib/aid-ac-command.sh"            # ac_command: which criteria are commands (3.13.0)
 
 _usage() { sed -n '4,6p' "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 [[ $# -ge 2 ]] || _usage
 SF="$1" N="$2"; shift 2
-CHECKS=() ENVS=() TREE="" TMO=1800 LOCK_WAIT=5 RECHECK=0
+CHECKS=() ENVS=() WHY=() TREE="" TMO=1800 LOCK_WAIT=5 RECHECK=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --check)     [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; CHECKS+=("$2"); shift 2 ;;
+    --reason)    [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; WHY+=("$2"); shift 2 ;;   # <AC#>:<why the command differs from the plan's>
     --env)       [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; ENVS+=("$2"); shift 2 ;;
     --tree)      [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; TREE="$2"; shift 2 ;;
     --timeout)   [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; TMO="$2"; shift 2 ;;
@@ -139,19 +143,31 @@ trap _on_exit EXIT
 trap 'exit 130' INT TERM HUP
 
 # --- what the checks must be ---------------------------------------------------------------------------------
-declare -A WANT=() GOT=()
+declare -A WANT=() GOT=() GOTWHY=()
 while IFS=$'\t' read -r k cmd; do [[ -n "$k" ]] && WANT[$k]="$cmd"; done < <(
-  jq -r --argjson i "$N" '.steps[$i].acceptance_criteria // [] | to_entries[]
-    | select(.value | type == "string" and startswith("`"))
-    | "\(.key + 1)\t\(.value | capture("^`(?<c>[^`]+)`").c)"' "$PJ")
+  jq -r --argjson i "$N" "${AID_AC_COMMAND_JQ}"'.steps[$i].acceptance_criteria // [] | to_entries[]
+    | (.value | ac_command) as $c | select($c != null) | "\(.key + 1)\t\($c)"' "$PJ")
+for w in "${WHY[@]+"${WHY[@]}"}"; do
+  k="${w%%:*}"; [[ "$k" =~ ^[0-9]+$ && "$w" == *:* ]] || { REASON="--reason must be <AC#>:<why>, got '${w}'"; break; }
+  GOTWHY[$k]="$(sed -E 's/^[[:space:]]+|[[:space:]]+$//g' <<< "${w#*:}")"
+done
 for c in "${CHECKS[@]+"${CHECKS[@]}"}"; do
   k="${c%%:*}"; cmd="${c#*:}"; cmd="$(sed -E 's/^[[:space:]]+|[[:space:]]+$//g' <<< "$cmd")"
   [[ "$k" =~ ^[0-9]+$ && "$c" == *:* ]] || { REASON="--check must be <AC#>:<command>, got '${c}'"; break; }
   [[ -z "${GOT[$k]+x}" ]] || { REASON="AC${k} is given twice"; break; }
   [[ -n "${WANT[$k]+x}" ]] || { REASON="AC${k} is not a command criterion (its text does not begin with a backticked command)"; break; }
-  [[ "$cmd" == "${WANT[$k]}" ]] || { REASON="AC${k}: the command differs from the plan's — plan: ${WANT[$k]} · given: ${cmd}"; break; }
+  # 3.13.0: another command measures the same point elsewhere (the plan's `docker compose exec` reads the main
+  # checkout) only with its reason, which the record and increment-step show
+  if [[ "$cmd" != "${WANT[$k]}" ]] && (( ${#GOTWHY[$k]} < 10 )); then
+    REASON="AC${k}: the command differs from the plan's — plan: ${WANT[$k]} · given: ${cmd} (a replacement needs --reason \"${k}:<why, 10+ chars>\")"; break
+  fi
   GOT[$k]="$cmd"
 done
+if [[ -z "$REASON" ]]; then
+  for k in "${!GOTWHY[@]}"; do
+    [[ -n "${GOT[$k]+x}" && "${GOT[$k]}" != "${WANT[$k]:-}" ]] || { REASON="AC${k} has --reason but no replaced --check"; break; }
+  done
+fi
 if [[ -z "$REASON" ]]; then
   for k in "${!WANT[@]}"; do [[ -n "${GOT[$k]+x}" ]] || { REASON="AC${k} is a command criterion and has no --check: ${WANT[$k]}"; break; }; done
 fi
@@ -216,7 +232,9 @@ _run_checks() {  # <cwd> — every --check in order; stops at the first that fai
     printf '%s\n' "$out" > "$log"
     CHECKS_JSON="$(jq -c --argjson k "$k" --arg c "$cmd" --argjson x "$rc" --argjson d "$((t1 - t0))" --argjson to "$timed" \
       --arg tail "$(tail -c 4000 <<< "$out")" --arg log "$log" \
-      '. + [{ac: $k, command: $c, exit: $x, duration_s: $d, timed_out: $to, output_tail: $tail, log: $log}]' <<< "$CHECKS_JSON")"
+      --arg pc "${WANT[$k]}" --arg why "${GOTWHY[$k]:-}" \
+      '. + [{ac: $k, command: $c, exit: $x, duration_s: $d, timed_out: $to, output_tail: $tail, log: $log}
+            + (if $c != $pc then {plan_command: $pc, reason: $why} else {} end)]' <<< "$CHECKS_JSON")"
     _write
     (( rc == 0 )) || { REASON="AC${k} failed (exit ${rc}$([[ $timed == true ]] && echo ", timed out after ${TMO} s")): ${cmd}"; return 1; }
     # untracked files (caches, reports a test writes) do not count; tracked changes and commits do

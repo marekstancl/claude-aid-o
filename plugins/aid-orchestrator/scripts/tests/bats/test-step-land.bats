@@ -203,8 +203,8 @@ _wave() { WT="$(aid_parallel_step_worktree "$PWD" step_1_backend HEAD .aid-workt
   ! pgrep -f "^sleep 30$" >/dev/null
   [ "$(git rev-parse HEAD)" = "$base" ]
   [ "$(git -C "$WT" branch --show-current)" = step/step_1_backend ]
-  _plan '`true`'
-  run bash "$LAND" "$S" 0 --check '1:true' --lock-wait 1
+  _plan '`test -n ok`'
+  run bash "$LAND" "$S" 0 --check '1:test -n ok' --lock-wait 1
   [ "$status" -eq 0 ]
 }
 
@@ -249,8 +249,8 @@ _wave() { WT="$(aid_parallel_step_worktree "$PWD" step_1_backend HEAD .aid-workt
   for _ in $(seq 1 50); do pgrep -f "^sleep 53$" >/dev/null && [ -n "$(jq -r '.check_token // ""' "$REC" 2>/dev/null)" ] && break; sleep 0.2; done
   kill -9 "$pid"; wait "$pid" || true
   pgrep -f "^sleep 53$" >/dev/null                       # the orphan still runs
-  _plan '`true`'
-  run bash "$LAND" "$S" 0 --check '1:true' --lock-wait 2
+  _plan '`test -n ok`'
+  run bash "$LAND" "$S" 0 --check '1:test -n ok' --lock-wait 2
   [ "$status" -eq 0 ]
   ! pgrep -f "^sleep 53$"
 }
@@ -374,4 +374,39 @@ _verify_file() {  # the bound step-0-verify.md at HEAD
   _edit '.checks[0].exit = 0'
   run bash "$FSM" increment-step "$S"
   [[ "$output" != *"land_record_invalid"* ]] || { echo "$output" | tail -8; false; }
+}
+
+# ── 3.13.0: which criteria are commands, and a replaced command with its reason ───────────────────────────────
+@test "3.13.0: a criterion beginning with a test's name is not a command — the step lands without a --check for it" {
+  # WAN P116 28. 10. and P118 30. 10. 2026: `test_regime_…` was demanded as a runnable command, so no takeover
+  _plan '`test_regime_override` fails on main and'; _agent .
+  run bash "$LAND" "$S" 0; echo "$output"; [ "$status" -eq 0 ]; [ "$(jq -r .status "$REC")" = landed ]
+  run _verify; [ "$status" -eq 0 ]
+  run bash "$LAND" "$S" 0 --check '1:test_regime_override'
+  [ "$status" -eq 1 ]; [[ "$output" == *"AC1 is not a command criterion"* ]]
+}
+
+@test "3.13.0: a command written as one (./x, a/b, NAME=v x) stays a command, and a missing program fails the check" {
+  _plan '`./check.sh`'; _agent .
+  run bash "$LAND" "$S" 0; [ "$status" -eq 1 ]; [[ "$output" == *"AC1 is a command criterion and has no --check: ./check.sh"* ]]
+  run bash "$LAND" "$S" 0 --check '1:./check.sh'; [ "$status" -eq 1 ]; [ "$(jq -r .status "$REC")" = check_failed ]
+}
+
+@test "3.13.0: another command than the plan's lands only with its reason, which the record keeps and verify checks" {
+  _agent .
+  run bash "$LAND" "$S" 0 --check '1:test -e a.txt'
+  [ "$status" -eq 1 ]; [[ "$output" == *"needs --reason"* ]]
+  run bash "$LAND" "$S" 0 --check '1:test -f a.txt' --reason '1:nothing replaced here'
+  [ "$status" -eq 1 ]; [[ "$output" == *"has --reason but no replaced --check"* ]]
+  run bash "$LAND" "$S" 0 --check '1:test -e a.txt' --reason '1:short'
+  [ "$status" -eq 1 ]; [[ "$output" == *"needs --reason"* ]]
+  run bash "$LAND" "$S" 0 --check '1:test -e a.txt' --reason '1:the plan measures the main checkout, this the plan tree'
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.checks[0] | "\(.command)|\(.plan_command)|\(.reason)"' "$REC")" = "test -e a.txt|test -f a.txt|the plan measures the main checkout, this the plan tree" ]
+  run _verify; [ "$status" -eq 0 ]
+  cp "$REC" "$BATS_TEST_TMPDIR/good"
+  for e in 'del(.checks[0].reason)' '.checks[0].reason = "x"' '.checks[0].plan_command = "true"' 'del(.checks[0].plan_command)'; do
+    cp "$BATS_TEST_TMPDIR/good" "$REC"; _edit "$e"
+    run _verify; [ "$status" -eq 1 ] || { echo "accepted after: $e"; false; }
+  done
 }

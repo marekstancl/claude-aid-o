@@ -4895,6 +4895,10 @@ cmd_increment_step() {
             || _increment_fail land_record_invalid \
               "PRECONDITION FAIL: step ${step} was taken over in the background and its record does not hold: ${_land_why}" \
               "Record: ${_c_dir}/land.json (scripts/aid-step-land.sh)"
+          # 3.13.0: a criterion measured with another command than the plan's says so, with its reason
+          jq -r '.checks[]? | select(.plan_command != null)
+                 | "increment-step: AC\(.ac) was measured with `\(.command)` instead of the plan'"'"'s `\(.plan_command)` — \(.reason)"' \
+            "${_c_dir}/land.json" >&2 2>/dev/null || true
         fi
       fi
     fi

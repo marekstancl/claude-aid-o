@@ -41,14 +41,16 @@ aid_land_record_verify() {
           and (.command | type) == "string" and (.exit | type) == "number")' "$rec" >/dev/null 2>&1 \
     || { echo "the takeover record's checks are not a list of {ac, command, exit}"; return 1; }
   local missing
-  missing="$(jq -r --argjson i "$n" --slurpfile rec "$rec" '
+  [[ -n "${AID_AC_COMMAND_JQ:-}" ]] || source "$(dirname "${BASH_SOURCE[0]}")/aid-ac-command.sh"
+  missing="$(jq -r --argjson i "$n" --slurpfile rec "$rec" "${AID_AC_COMMAND_JQ}"'
     ($rec[0].checks // []) as $ch
     | .steps[$i].acceptance_criteria // [] | to_entries[]
-    | select(.value | type == "string" and startswith("`"))
-    | (.key + 1) as $k | (.value | capture("^`(?<c>[^`]+)`").c) as $cmd
+    | (.value | ac_command) as $cmd | select($cmd != null)
+    | (.key + 1) as $k
     | [$ch[] | select(.ac == $k)] as $m
     | if ($m | length) != 1 then "AC\($k) checked \($m | length) times, not once"
-      elif $m[0].command != $cmd then "AC\($k) ran another command than the plan names"
+      elif $m[0].command != $cmd and ($m[0].plan_command != $cmd or (($m[0].reason // "") | length) < 10)
+        then "AC\($k) ran another command than the plan names, without its reason"
       elif $m[0].exit != 0 or $m[0].timed_out == true then "AC\($k) did not pass (exit \($m[0].exit))"
       else empty end' "$pj" 2>/dev/null)" || { echo "the takeover record's checks could not be read against the plan"; return 1; }
   missing="${missing%%$'\n'*}"
