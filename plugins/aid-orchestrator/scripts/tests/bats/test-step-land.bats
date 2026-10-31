@@ -203,8 +203,8 @@ _wave() { WT="$(aid_parallel_step_worktree "$PWD" step_1_backend HEAD .aid-workt
   ! pgrep -f "^sleep 30$" >/dev/null
   [ "$(git rev-parse HEAD)" = "$base" ]
   [ "$(git -C "$WT" branch --show-current)" = step/step_1_backend ]
-  _plan '`true`'
-  run bash "$LAND" "$S" 0 --check '1:true' --lock-wait 1
+  _plan '`test -n ok`'
+  run bash "$LAND" "$S" 0 --check '1:test -n ok' --lock-wait 1
   [ "$status" -eq 0 ]
 }
 
@@ -249,8 +249,8 @@ _wave() { WT="$(aid_parallel_step_worktree "$PWD" step_1_backend HEAD .aid-workt
   for _ in $(seq 1 50); do pgrep -f "^sleep 53$" >/dev/null && [ -n "$(jq -r '.check_token // ""' "$REC" 2>/dev/null)" ] && break; sleep 0.2; done
   kill -9 "$pid"; wait "$pid" || true
   pgrep -f "^sleep 53$" >/dev/null                       # the orphan still runs
-  _plan '`true`'
-  run bash "$LAND" "$S" 0 --check '1:true' --lock-wait 2
+  _plan '`test -n ok`'
+  run bash "$LAND" "$S" 0 --check '1:test -n ok' --lock-wait 2
   [ "$status" -eq 0 ]
   ! pgrep -f "^sleep 53$"
 }
@@ -374,4 +374,103 @@ _verify_file() {  # the bound step-0-verify.md at HEAD
   _edit '.checks[0].exit = 0'
   run bash "$FSM" increment-step "$S"
   [[ "$output" != *"land_record_invalid"* ]] || { echo "$output" | tail -8; false; }
+}
+
+# ── 3.13.0: which criteria are commands, and a replaced command with its reason ───────────────────────────────
+@test "3.13.0: a criterion beginning with a test's name is not a command — the step lands without a --check for it" {
+  # WAN P116 28. 10. and P118 30. 10. 2026: `test_regime_…` was demanded as a runnable command, so no takeover
+  _plan '`test_regime_override` fails on main and'; _agent .
+  run bash "$LAND" "$S" 0; echo "$output"; [ "$status" -eq 0 ]; [ "$(jq -r .status "$REC")" = landed ]
+  run _verify; [ "$status" -eq 0 ]
+  run bash "$LAND" "$S" 0 --check '1:test_regime_override'
+  [ "$status" -eq 1 ]; [[ "$output" == *"AC1 is not a command criterion"* ]]
+}
+
+@test "3.13.0: a command written as one (./x, a/b, NAME=v x) stays a command, and a missing program fails the check" {
+  _plan '`./check.sh`'; _agent .
+  run bash "$LAND" "$S" 0; [ "$status" -eq 1 ]; [[ "$output" == *"AC1 is a command criterion and has no --check: ./check.sh"* ]]
+  run bash "$LAND" "$S" 0 --check '1:./check.sh'; [ "$status" -eq 1 ]; [ "$(jq -r .status "$REC")" = check_failed ]
+}
+
+@test "3.13.0: another command than the plan's lands only with its reason, which the record keeps and verify checks" {
+  _agent .
+  run bash "$LAND" "$S" 0 --check '1:test -e a.txt'
+  [ "$status" -eq 1 ]; [[ "$output" == *"needs --reason"* ]]
+  run bash "$LAND" "$S" 0 --check '1:test -f a.txt' --reason '1:nothing replaced here'
+  [ "$status" -eq 1 ]; [[ "$output" == *"has --reason but no replaced --check"* ]]
+  run bash "$LAND" "$S" 0 --check '1:test -e a.txt' --reason '1:short'
+  [ "$status" -eq 1 ]; [[ "$output" == *"needs --reason"* ]]
+  run bash "$LAND" "$S" 0 --check '1:test -e a.txt' --reason '1:the plan measures the main checkout, this the plan tree'
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.checks[0] | "\(.command)|\(.plan_command)|\(.reason)"' "$REC")" = "test -e a.txt|test -f a.txt|the plan measures the main checkout, this the plan tree" ]
+  run _verify; [ "$status" -eq 0 ]
+  cp "$REC" "$BATS_TEST_TMPDIR/good"
+  for e in 'del(.checks[0].reason)' '.checks[0].reason = "x"' '.checks[0].plan_command = "true"' 'del(.checks[0].plan_command)' \
+           '.checks[0].reason = 1234567890123' '.checks[0].reason = "            "' '.checks[0].command = "   "' \
+           '.checks[0].command = .checks[0].plan_command'; do
+    cp "$BATS_TEST_TMPDIR/good" "$REC"; _edit "$e"
+    run _verify; [ "$status" -eq 1 ] || { echo "accepted after: $e"; false; }
+  done
+}
+
+@test "3.13.0: an empty replacement is refused; --recheck keeps the replacement" {
+  _agent .
+  run bash "$LAND" "$S" 0 --check '1:   ' --reason '1:a long enough reason here'
+  [ "$status" -eq 1 ]; [[ "$output" == *"an empty command checks nothing"* ]]
+  run bash "$LAND" "$S" 0 --check '1:test -e a.txt' --reason '1:the plan measures the main checkout, this the plan tree'
+  [ "$status" -eq 0 ]
+  # a fixer's commit: --recheck with the plan's command again is a change, with the same replacement it inherits the reason
+  git commit -q --allow-empty -m "fix(review): nothing"
+  run bash "$LAND" "$S" 0 --recheck --check '1:test -f a.txt'
+  [ "$status" -eq 1 ]; [[ "$output" == *"was measured with"*"test -e a.txt"* ]]
+  run bash "$LAND" "$S" 0 --recheck --check '1:test -e a.txt'
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.checks[0].reason' "$REC")" = "the plan measures the main checkout, this the plan tree" ]
+  [ -z "$(ls "$D" | grep 'land.json.prev')" ]
+}
+
+@test "3.13.0: the command-criterion rule, case by case (independent of what is installed)" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-ac-command.sh"
+  local t want got
+  while IFS='|' read -r t want; do
+    got="$(jq -rn --arg t "$t" "${AID_AC_COMMAND_JQ}"'$t | ac_command // "NAME"')"
+    [ "$got" = "$want" ] || { echo "$t → $got, want $want"; false; }
+  done <<'CASES'
+`pytest -q x` passes|pytest -q x
+`./check.sh` passes|./check.sh
+`scripts/check.sh`|scripts/check.sh
+`VAR=v cmd` passes|VAR=v cmd
+`NAME=value`|NAME
+`pytest`|NAME
+`make`|NAME
+`test_regime_x` fails on main|NAME
+`a::b` passes|NAME
+`check.sh` exists|NAME
+plain text|NAME
+CASES
+}
+
+@test "3.13.0: increment-step advances a replaced criterion only after a CP2 round whose packet listed exactly that replacement" {
+  _wave; _agent "$WT"
+  bash "$LAND" "$S" 0 --check '1:test -e a.txt' --reason '1:the plan measures the main checkout, this the plan tree' >/dev/null
+  [ "$(jq '.replacements | length' "$REC")" -eq 1 ]; _verify_file
+  run bash "$FSM" increment-step "$S"
+  [ "$status" -ne 0 ]; [[ "$output" == *"no CP2 round of it saw that replacement"* ]]
+  # a round whose packet holds the line (prepare writes it into dod.md) lets the record through
+  mkdir -p "$TEST_EVIDENCE_DIR/cp2/step-0/round-1/packet"
+  printf -- '- AC1: `test -e a.txt` instead of `test -f a.txt` — the plan measures the main checkout, this the plan tree\n' > "$TEST_EVIDENCE_DIR/cp2/step-0/round-1/packet/dod.md"
+  run bash "$FSM" increment-step "$S"; [[ "$output" != *"saw that replacement"* ]] || { echo "$output" | tail -8; false; }
+}
+
+@test "3.13.0: the record keeps every replacement even when an earlier check fails; a recheck may go back to the plan's command with a reason" {
+  jq '.steps[0].acceptance_criteria = ["`test -f nope.txt` passes", "`test -f a.txt` passes"]' "$TEST_EVIDENCE_DIR/plan.json" > "$TEST_EVIDENCE_DIR/p" && mv "$TEST_EVIDENCE_DIR/p" "$TEST_EVIDENCE_DIR/plan.json"
+  _agent .
+  run bash "$LAND" "$S" 0 --check '1:test -f nope.txt' --check '2:test -e a.txt' --reason '2:the plan measures the main checkout here'
+  [ "$status" -eq 1 ]; [ "$(jq -r .status "$REC")" = check_failed ]
+  [ "$(jq -r '.replacements[0] | "\(.ac) \(.command)"' "$REC")" = "2 test -e a.txt" ]       # AC2 never ran, its mapping is kept
+  : > nope.txt; git add nope.txt; git commit -qm "fix: the file"
+  run bash "$LAND" "$S" 0 --recheck --check '1:test -f nope.txt' --check '2:test -f a.txt'
+  [ "$status" -eq 1 ]; [[ "$output" == *"was measured with"* ]]
+  run bash "$LAND" "$S" 0 --recheck --check '1:test -f nope.txt' --check '2:test -f a.txt' --reason '2:back to the plan command, the tree is fine'
+  echo "$output"; [ "$status" -eq 0 ]; [ "$(jq '.replacements | length' "$REC")" -eq 0 ]
 }

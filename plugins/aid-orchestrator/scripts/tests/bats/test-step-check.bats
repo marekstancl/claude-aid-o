@@ -261,3 +261,64 @@ _rr_step() {   # a declared foreign repository "docs" with a worktree on plan/P1
   [ "$(_json '.outside_git[0]' cp2/step-0)" = "$T/eco-root/CLAUDE.md" ]
   [[ "$(_json .reason cp2/step-0)" == *"outside any git repository"* ]]
 }
+
+@test "3.13.0: a test named after a plan refuses the step check before any round — on exactly the reviewed range" {
+  # WAN P115 25. 10. and P114 27. 10. 2026: step reviews passed `describe('… — P114')`, the close gate refused it
+  printf "describe('owner reassign — P114', () => {})\n" > "$R/tests/owner.test.ts"; _commit s0 >/dev/null
+  # an uncommitted rename does not hide the committed name: the range base..HEAD is what is reviewed
+  printf "describe('owner reassign keeps the history', () => {})\n" > "$R/tests/owner.test.ts"
+  run _run --checkpoint cp2 --step 0; echo "$output"; [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSED (step_test_named_after_plan)"* ]]; [[ "$output" == *"tests/owner.test.ts"*"P114"* ]]
+  [ ! -f "$E/cp2/step-0/step-check.json" ]
+  git -C "$R" commit -qam rename
+  run _run --checkpoint cp2 --step 0; [ "$status" -eq 0 ]
+  # an uncommitted bad name does not stain a clean reviewed range
+  printf "describe('x — IMP-700', () => {})\n" > "$R/tests/later.test.ts"
+  rm -rf "$E/cp2"; run _run --checkpoint cp2 --step 0; [ "$status" -eq 0 ]
+}
+
+@test "3.13.0: an untracked file the check cannot read stops the step check, it is not passed unchecked" {
+  printf "describe('x', () => {})\n" > "$R/tests/new.test.ts"; chmod 000 "$R/tests/new.test.ts"
+  run _run --checkpoint cp2 --step 0 --worktree; chmod 644 "$R/tests/new.test.ts"; echo "$output"
+  [ "$(id -u)" -eq 0 ] && skip "root reads any file"
+  [ "$status" -ne 0 ]; [[ "$output" == *"could not be read"* ]]
+}
+
+@test "3.13.0: --worktree checks the untracked new test too" {
+  printf "describe('a new one — P114', () => {})\n" > "$R/tests/new.test.ts"
+  run _run --checkpoint cp2 --step 0 --worktree; echo "$output"; [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSED (step_test_named_after_plan)"* ]]; [[ "$output" == *"tests/new.test.ts"* ]]
+}
+
+@test "3.13.0: a step whose takeover replaced a criterion's command is review, never skip" {
+  echo "one line" >> "$R/src/app.py"; _commit s0 >/dev/null
+  jq -n '{steps: [{id: "step_1_backend", acceptance_criteria: ["`pytest -q x` passes"], outputs: ["Modify: `src/app.py` — x"], allowed_paths: ["src/app.py"]}]}' > "$E/plan.json"
+  mkdir -p "$E/steps/step_1_backend"
+  jq -n '{replacements: [{ac: 1, command: "pytest -q y", plan_command: "pytest -q x", reason: "measures the plan tree"}]}' > "$E/steps/step_1_backend/land.json"
+  run _run --checkpoint cp2 --step 0; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_json .verdict cp2/step-0)" = review ]; [[ "$(_json .reason cp2/step-0)" == *"another command than the plan names"* ]]
+}
+
+@test "3.13.0: a tree whose project setup failed is review, never skip, naming the command" {
+  echo "one line" >> "$R/src/app.py"; _commit s0 >/dev/null
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-worktree-env.sh"; local rec; rec="$(aid_worktree_env_record_path "$R" "$R")"; mkdir -p "$(dirname "$rec")"
+  jq -n --arg t "$(realpath "$R")" '{tree: $t, setup: [{command: "cd ui && npm ci", exit: 1}]}' > "$rec"
+  run _run --checkpoint cp2 --step 0; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_json .verdict cp2/step-0)" = review ]; [[ "$(_json .reason cp2/step-0)" == *"setup failed (cd ui && npm ci"* ]]
+}
+
+@test "3.13.0: a setup killed half-way (its record still says running) is review like a failed one" {
+  echo "one line" >> "$R/src/app.py"; _commit s0 >/dev/null
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-worktree-env.sh"; local rec; rec="$(aid_worktree_env_record_path "$R" "$R")"; mkdir -p "$(dirname "$rec")"
+  jq -n --arg t "$(realpath "$R")" '{tree: $t, setup: [], status: "running"}' > "$rec"
+  run _run --checkpoint cp2 --step 0; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_json .verdict cp2/step-0)" = review ]; [[ "$(_json .reason cp2/step-0)" == *"did not finish"* ]]
+}
+
+@test "3.13.0: a setup failure next to a security pattern keeps review+security and adds its reason" {
+  echo 'subprocess.run(cmd, shell=True)' >> "$R/src/app.py"; _commit s0 >/dev/null
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-worktree-env.sh"; local rec; rec="$(aid_worktree_env_record_path "$R" "$R")"; mkdir -p "$(dirname "$rec")"
+  jq -n --arg t "$(realpath "$R")" '{tree: $t, setup: [{command: "npm ci", exit: 1}]}' > "$rec"
+  run _run --checkpoint cp2 --step 0; [ "$status" -eq 0 ]
+  [ "$(_json .verdict cp2/step-0)" = "review+security" ]; [[ "$(_json .reason cp2/step-0)" == *"setup failed (npm ci"* ]]
+}

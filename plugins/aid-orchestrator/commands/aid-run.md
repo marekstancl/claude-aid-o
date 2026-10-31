@@ -95,7 +95,10 @@ answers. A turn may end with:
 - a Decision card or a Blocked card (`skills/communication.md`) — the PM gets one
   "agent is waiting" message; the PM's "zastav se" is answered with a Blocked card;
 - a last line `AID-WAIT: <what>` while a background gate job AID owns is live
-  (`aid-job.sh`); the harness brings you back when it finishes;
+  (`aid-job.sh`); the harness brings you back when it finishes. An open step's own
+  background work counts the same: its takeover, its agent, and (AID 3.13.0) its CP2
+  reviewers and fixer started with `aid-emit-dispatch.sh start` (pass the printed
+  nonce to `complete --nonce`);
 - the budget spent, or an account limit — the PM gets the same one message.
 
 Requires `autonomous_mode: true` in `.aid-o/config/permissions.yaml`.
@@ -236,7 +239,7 @@ Scripts WILL REFUSE to proceed if preconditions are not met.
 16a. **AID's own defects go to `.aid-o/work/aid-plugin-issues.md`** (date → plugin version → what happened → what it caused → what you did), never to the project backlog — see `skills/agent-protocol.md` §"Problems with AID itself". The file exists from the first run (created at plan-start / init, rules in its header). This includes anything you had to `--force` past and every `amend-scope`, and plugin defects Codex reports (you write those — Codex is read-only). The Stop hook reminds once per session when AID refused or was bypassed and nothing was written.
 16. **Per-step commit** — the controller commits each accepted return (`aid_dispatch_contract_commit`) BEFORE calling `increment-step`. One commit per step, never a bulk commit at the end — also when steps ran concurrently.
 
-16d. **Take a returned step over in the background (AID 3.11.0)** — instead of validating, committing, merging and running the step's tests in the foreground, start `bash {plugin_path}/scripts/aid-step-land.sh <state_file> <N> --check "<AC#>:<command>" … [--env NAME=value]` with Bash `run_in_background: true` and end the turn `AID-WAIT: převzetí kroku N`. Every acceptance criterion of the step whose text begins with a backticked command gets one `--check` with exactly that command (the project's test environment goes in `--env`). Meanwhile accept other returns (read-only), prepare and dispatch later steps, run review rounds. On the notification read `steps/<id>/land.json`: `landed` → write `step-N-verify.md` (command criteria cited from the record, the rest judged as before), the step check and CP2, then `increment-step`; anything else → decide as before (a conflict: `aid_parallel_step_reset` and dispatch again; a failed check: the step's role fixes it — in a wave on `step/<id>` and the same takeover again, on the serial path, where the step's commit already stands, as a commit on top and `--recheck`). After a review fixer committed: `aid-step-land.sh … --recheck` before `increment-step`, and rewrite the binding in `step-N-verify.md` (`reviewed_commit` = the new HEAD). `<N>` is `current_step` — 0-based, the plan's step N+1. A refusal "another takeover … is running" is the script's own output: the `land.json` there belongs to the takeover still running, do not read it as this one's result. The script never fixes anything; `increment-step` refuses a step whose record does not hold (`land_record_invalid`). Steps are taken over in order (`current_step`).
+16d. **Take a returned step over in the background (AID 3.11.0)** — instead of validating, committing, merging and running the step's tests in the foreground, start `bash {plugin_path}/scripts/aid-step-land.sh <state_file> <N> --check "<AC#>:<command>" … [--env NAME=value]` with Bash `run_in_background: true` and end the turn `AID-WAIT: převzetí kroku N`. Every command criterion of the step gets one `--check` with exactly that command (the project's test environment goes in `--env`). A command criterion begins with a backticked text written as a command — with a space or a slash (`pytest -q x`, `./check.sh`, `VAR=v cmd`); one bare backticked word (`test_regime_x`, `check.sh`, `NAME=value`) is a name, judged like any other criterion (AID 3.13.0, `lib/aid-ac-command.sh`). When the plan's command measures another environment (a `docker compose exec` into the container over the main checkout), give the command that measures the same point in the plan's tree with `--reason "<AC#>:<why>"`: the record keeps both commands and the reason, and `increment-step` prints them, the step's CP2 round reads them (judge whether the replacement still measures the criterion), and `--recheck` keeps them. Meanwhile accept other returns (read-only), prepare and dispatch later steps, run review rounds. On the notification read `steps/<id>/land.json`: `landed` → write `step-N-verify.md` (command criteria cited from the record, the rest judged as before), the step check and CP2, then `increment-step`; anything else → decide as before (a conflict: `aid_parallel_step_reset` and dispatch again; a failed check: the step's role fixes it — in a wave on `step/<id>` and the same takeover again, on the serial path, where the step's commit already stands, as a commit on top and `--recheck`). After a review fixer committed: `aid-step-land.sh … --recheck` before `increment-step`, and rewrite the binding in `step-N-verify.md` (`reviewed_commit` = the new HEAD). `<N>` is `current_step` — 0-based, the plan's step N+1. A refusal "another takeover … is running" is the script's own output: the `land.json` there belongs to the takeover still running, do not read it as this one's result. The script never fixes anything; `increment-step` refuses a step whose record does not hold (`land_record_invalid`). Steps are taken over in order (`current_step`).
 
 ### Precondition failures are HARD STOPS:
 - Do NOT attempt alternative transitions to work around a failure
@@ -550,8 +553,12 @@ one at a time:
 
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus <focus> \
-     --output-file <answer> --evidence-dir <round dir>
+     --output-file <answer> --evidence-dir <round dir> --nonce <the nonce its start printed>
    ```
+
+   `start` prints `nonce=<n> focus=<focus> evidence=<round dir>` (AID 3.13.0): pass that nonce to `complete` and
+   `cancel`. It closes exactly that start, the round's bracket check reads the LAST start of the focus, and a
+   reviewer still running in the background lets the turn end with `AID-WAIT: <what>`.
 
    A step round's `close` refuses a reviewer file with no such start/complete
    bracket in `<round dir>/timeline.jsonl` (`no_dispatch_record`; `prepare` prints the
@@ -568,7 +575,7 @@ one at a time:
 
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" cancel --focus <focus> \
-     --evidence-dir <round dir> --reason "<why, 20+ characters>"
+     --evidence-dir <round dir> --reason "<why, 20+ characters>" --nonce <its start's nonce>
    ```
 
    A cancelled start is not a complete: an answer filed under it has no
@@ -603,12 +610,12 @@ bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" close <review> --round K \
 ```
 
 When `close` reports `fail` on a step round and a round remains
-(`rounds_default`, or the PM's `override`), the fix is the step's own role's:
+(`rounds_default`, or the PM's `override`), the fix is the step's own role's. Bracket the fixer like a reviewer (AID 3.13.0): `aid-emit-dispatch.sh start --focus fix-cp2-<N>-r<K> --agent-id aid-orchestrator:<role> --evidence-dir <round dir>` before it, and after it write its report to `<round dir>/fixer-report.md` and `complete --focus fix-cp2-<N>-r<K> --output-file <round dir>/fixer-report.md --evidence-dir <round dir> --nonce <the start's nonce>` — a fixer in the background then lets the turn end with `AID-WAIT: oprava kroku N`:
 
 ```
 Agent(subagent_type: <"aid-orchestrator:implementer-light" when the step's role card says **Effort:** low, else "aid-orchestrator:implementer">,
       model: <the **Model:** of the step's role card in skills/role-cards.md>,
-      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
+      prompt: "fix_of: <the ABSOLUTE round dir in the state root> (the evidence lies in the primary checkout's .aid-o/work, outside the worktree you work in: read merged.json by this absolute path); role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
 ```
 
 Then `aid-step-check.sh` again (the range now ends at the fix commit) and
@@ -658,7 +665,7 @@ pending and prints the list):
    **Exit 4 + `STAND-IN:`** — Codex is out (absent, over its limit, no answer):
    dispatch the prompt to an independent `general-purpose` agent with a clean
    context inside the bracket
-   `aid-emit-dispatch.sh start --focus adjudicator-delegated-<fp16> --agent-id claude:adjudicator-delegated --evidence-dir <round dir>` … `complete … --output-file <verdict>`,
+   `aid-emit-dispatch.sh start --focus adjudicator-delegated-<fp16> --agent-id claude:adjudicator-delegated --evidence-dir <round dir>` … `complete … --output-file <verdict> --nonce <the nonce its start printed>`,
    then record: `… delegate … --fingerprint <fp> --verdict <verdict file>`.
 3. Next fingerprint; never a PM turn in between.
 
@@ -677,8 +684,13 @@ Every settlement is a line of `evidence/<plan>/delegated-disputes.jsonl`; the
 close card and page list them. **P117:** a verdict is bound to its evidence (the
 finding, the author's dispute, HEAD); new evidence allows one new verdict, the old
 one is kept as `superseded` — once per finding and round, then the PM. A finding
-whose cited lines a later commit changed is never delegated
-(`delegation_fix_pending`): the next round's confirmation judges the fix.
+whose cited lines a later commit changed is never delegated. In a step round (CP2)
+`delegate` hands it to the next round (`dispute.handed_to_confirmation`, AID 3.13.0)
+— it stays open and blocking, the round closes (`close --at <the round's head>`),
+and the next round's confirmation judges the fix; past the round budget the next
+prepare refuses as before (`REVIEW_EXHAUSTED`, the stand-in). In the whole-plan round
+(CP7) the fix is a new candidate: `delegate` refuses (`delegation_fix_pending`) and
+the next attempt's confirmation judges it after the freeze.
 
 ## Run decisions by the stand-in (P117)
 
@@ -973,11 +985,13 @@ is round 1 of the next attempt.
 **When something is open.** `close` reports `fail`, or `decide` prints
 `NOT READY` with the blockers:
 
+Bracket the CP7 fixer as the step fixer: `aid-emit-dispatch.sh start --focus fix-cp7-r<K> --agent-id aid-orchestrator:<role> --evidence-dir <run dir>/cp7/round-<K>`, its report to `<round dir>/fixer-report.md`, then `complete --focus fix-cp7-r<K> --output-file <round dir>/fixer-report.md --evidence-dir <round dir> --nonce <the start's nonce>` (AID 3.13.0).
+
 1. The role that wrote the code fixes it, on the plan branch:
    ```
    Agent(subagent_type: <"aid-orchestrator:implementer-light" when that role's card says **Effort:** low, else "aid-orchestrator:implementer">,
          model: <the **Model:** of that role's card in skills/role-cards.md>,
-         prompt: "fix_of: <run dir>/cp7/round-1; role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix the open findings by CLASS, not one by one (every finding that shares a rule or a pattern is one fix); before you commit, list every caller of each function you changed and every place the rule you introduce applies (graphify explain, or grep), fix those too, and put the list in the commit message; commit with the message prefix fix(review):, and report the fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
+         prompt: "fix_of: <the ABSOLUTE run dir in the state root>/cp7/round-1 (the evidence lies in the primary checkout's .aid-o/work, outside the plan's worktree: read merged.json by this absolute path); role: <the role of the step that owns the file; backend when no step owns it>. Read merged.json, fix the open findings by CLASS, not one by one (every finding that shares a rule or a pattern is one fix); before you commit, list every caller of each function you changed and every place the rule you introduce applies (graphify explain, or grep), fix those too, and put the list in the commit message; commit with the message prefix fix(review):, and report the fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
    ```
    The owning step is the one whose declared files cover the path (the run's `plan.json`; the commit that last touched it: `git log -1 -- <path>`).
 2. `--stage freeze` again. It mints the next attempt and writes `fix-class.json`:

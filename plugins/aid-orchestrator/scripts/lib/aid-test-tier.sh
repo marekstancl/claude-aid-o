@@ -156,7 +156,7 @@ aid_test_tier_list() {
   return 0
 }
 
-# aid_test_names_plan_refs <repo> <base>
+# aid_test_names_plan_refs <repo> <base> [<end commit>|worktree]
 #   Test cases ADDED since <base> — commits, index and the working tree of
 #   tracked files, which is what `git add -u` would sweep in — whose NAME cites
 #   a plan (P123), a review finding (CP2 F3) or a backlog item (IMP-612). A
@@ -168,9 +168,27 @@ aid_test_tier_list() {
 #   NOT a plan reference: "step 0" is a domain word here.
 # ponytail: one-line literal names only; multi-line or computed names pass unread.
 aid_test_names_plan_refs() {
-  local repo="$1" base="$2" diff hits
+  # [<end>] (AID 3.13.0, the step check): a commit = base..end exactly as reviewed; `worktree` = the uncommitted change
+  # against base INCLUDING new untracked files. Without it: base against the working tree's tracked files (the gates).
+  local repo="$1" base="$2" end="${3:-}" diff hits f
   git -C "$repo" rev-parse -q --verify "${base}^{commit}" >/dev/null 2>&1 || return 2
-  diff="$(git -C "$repo" -c core.quotePath=false diff -M --unified=0 --no-color --no-ext-diff "$base" -- 2>/dev/null)" || return 2
+  if [[ -n "$end" && "$end" != worktree ]]; then
+    git -C "$repo" rev-parse -q --verify "${end}^{commit}" >/dev/null 2>&1 || return 2
+    diff="$(git -C "$repo" -c core.quotePath=false diff -M --unified=0 --no-color --no-ext-diff "$base" "$end" -- 2>/dev/null)" || return 2
+  else
+    diff="$(git -C "$repo" -c core.quotePath=false diff -M --unified=0 --no-color --no-ext-diff "$base" -- 2>/dev/null)" || return 2
+    if [[ "$end" == worktree ]]; then
+      local others one rc
+      others="$(git -C "$repo" ls-files --others --exclude-standard)" || return 2
+      while IFS= read -r f; do
+        [[ -n "$f" ]] || continue
+        # --no-index exits 1 when the files differ (always, against /dev/null); anything else is a failure to read
+        rc=0; one="$(cd "$repo" && git -c core.quotePath=false diff --no-index --unified=0 --no-color -- /dev/null "$f" 2>/dev/null)" || rc=$?
+        (( rc <= 1 )) || return 2
+        diff+=$'\n'"$one"
+      done <<< "$others"
+    fi
+  fi
   hits="$(awk '
     # the name inside the quote q that opens at r[1]; "" when it never closes
     function lit(r, q,   i, c) {

@@ -20,6 +20,11 @@ codes:
   abandon_needs_reason: {class: pm, how: "opuštění běhu je rozhodnutí PM"}
   accept_risk_not_protected: {class: agent_fix, how: "v --auto technický nález nejdřív k delegátovi; na kartu PM jen to, co poslal jako chráněné"}
   pm_decision_unverified: {class: agent_fix, how: "nález uzavřený dřívějším rozhodnutím, které nejde ověřit: znovu collect kola; zůstane-li otevřený, karta PM s otiskem v quotes"}
+  merge_checkout_overlap: {class: agent_fix, how: "sloučení je zveřejněné, ale checkout s cílovou větví má překrývající se rozpracované změny: uklidit je podle hlášky a pustit plan-merge-to-main znovu (pokračuje za sloučením)"}
+  release_prep_stale: {class: agent_fix, how: "záznam přípravy vydání je nečitelný: pustit prepare-plan znovu"}
+  release_prep_version_changed: {class: agent_fix, how: "verzi změnil commit po přípravě: prepare-plan --bump none (vydání) / rebind --adopt-version (bez vydání), nebo změnu vrátit"}
+  plan_version_not_above_target: {class: agent_fix, how: "cíl má mezitím vyšší nebo stejný tag (souběžný plán): zvednout verzi prepare-plan --bump …"}
+  step_test_named_after_plan: {class: agent_fix, how: "test pojmenovaný podle plánu, nálezu nebo backlogu: role kroku ho přejmenuje podle chování a kontrola kroku se pustí znovu"}
   accepted_risk_stale: {class: pm, how: "přijetí rizika PM platí jen pro svého kandidáta a svou sadu nálezů: nová karta"}
   active_runs_unreadable: {class: incident, how: "poškozený soubor stavu"}
   active_runs_write_failed: {class: incident, how: "zápis stavu selhal"}
@@ -44,7 +49,7 @@ codes:
   critic_required: {class: not_in_run, how: "psaní plánu"}
   cwd_not_worktree: {class: prevent, how: "běh v kopii plánu"}
   defer_refused: {class: pm, how: "vypuštění bodu zadání"}
-  delegation_fix_pending: {class: agent_fix, how: "oprava se posoudí v dalším kole (potvrzení), ne u rozhodčího: zmrazit nového kandidáta / připravit další kolo"}
+  delegation_fix_pending: {class: agent_fix, how: "CP7: oprava je nový kandidát, posoudí ji potvrzení dalšího pokusu (zmrazit); CP2 od 3.13.0 bez odmítnutí: spor se předá dalšímu kolu"}
   delegation_left_files: {class: agent_fix, how: "odstraní soubory náhradníka a zapíše verdikt znovu"}
   delegation_missing: {class: pm, how: "delegace není v platnosti (běh ručně / zastaven PM); v --auto nenastane"}
   delegation_out_of_scope: {class: pm, how: "chráněný dopad"}

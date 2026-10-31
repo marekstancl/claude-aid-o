@@ -275,6 +275,35 @@ _round1_closed() {
   run "$ROUND_SH" finalize "$PLAN"
   [ "$status" -eq 1 ]; [[ "$output" == *"outside the fix list"* ]]
 }
+@test "fix-check (3.13.0): a plan-level finding allows any step; --also-steps only records, it does not narrow" {
+  _round1_closed '.findings[0].severity = "blocker" | .findings[0].step = null'
+  jq -e ".findings | any(.status == \"open\" and .severity == \"blocker\" and .step == null)" "$CP1/round-1/merged.json"
+  # step 1 changes (the plan-level fix) and step 2 restates it: with `any,2` the old code allowed only step 2
+  sed -i 's/^uses {{x}} literally$/uses {{x}} literally\n\n- Create: `scripts\/near.sh` — the plan-level fix/' "$PLAN"
+  printf '\n- Create: `scripts/far.sh` — a consequence of the plan-level fix\n' >> "$PLAN"; _check
+  run "$ROUND_SH" fix-check "$PLAN" --round 1 --also-steps 2 --reason "step 2 restates what the plan-level fix changed"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r .fix_list "$CP1/round-1/fix-diff.json")" = any ]; [ "$(jq -c .also_steps "$CP1/round-1/fix-diff.json")" = "[2]" ]
+  [ "$(jq '.added_outside_fixes | length' "$CP1/round-1/fix-diff.json")" -eq 0 ]
+}
+
+@test "plan-check (3.13.0): --fixes reads 'any' as a whole item — any,2 allows every step, many,2 does not" {
+  printf -- '---\nid: P900\n---\n# Plan\n\n### Step 1: first\n\ntext\n\n### Step 2: second\n\ntext\n' > "$ROOT/fp.md"; cp "$ROOT/fp.md" "$ROOT/fp-snap.md"
+  sed -i 's/^### Step 1: first$/### Step 1: first\n\n- Create: `x.sh` — new/' "$ROOT/fp.md"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" "$ROOT/fp.md" --snapshot "$ROOT/fp-snap.md" --fixes any,2 --json "$ROOT/o.json" --quiet
+  [ "$(jq '.added_outside_fixes | length' "$ROOT/o.json")" -eq 0 ]
+  run bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" "$ROOT/fp.md" --snapshot "$ROOT/fp-snap.md" --fixes many,2 --json "$ROOT/o.json" --quiet
+  [ "$(jq '.added_outside_fixes | length' "$ROOT/o.json")" -gt 0 ]
+}
+
+@test "finalize (3.13.0): --also-steps lets a consequential edit through and records it in finalize.json" {
+  _round1_closed
+  printf '\n- Modify: `scripts/a.sh` — the name step 1 changed\n' >> "$PLAN"
+  run "$ROUND_SH" finalize "$PLAN"; [ "$status" -eq 1 ]
+  run "$ROUND_SH" finalize "$PLAN" --also-steps 2 --reason "step 2 restates the name step 1 changed"
+  echo "$output"; [ "$status" -eq 0 ]
+  jq -e '(.also_steps == [2]) and (.also_reason | test("restates"))' "$(ls "$CP1"/round-1/finalize.json "$CP1"/finalize.json 2>/dev/null | head -1)"
+}
 @test "dispute: the PM's accepted answer closes a disputed blocker" {
   _round1_closed
   fp="$(jq -r '.findings[] | select(.severity == "blocker") | .fingerprint' "$CP1/round-1/merged.json" | head -1)"
@@ -679,10 +708,40 @@ _mplan() {
   _S prepare --round 2 >/dev/null
   _sanswer 2 step_generalist '.findings = [] | .no_findings_reason = "fixed"'
   _S collect --round 2 >/dev/null; _bracket 2 step_generalist
-  run _S close --round 2 --tokens step_generalist=7 --fixer backend=opus:unknown:unknown
+  run _S close --round 2 --tokens step_generalist=7 --fixer e2e=opus:unknown:unknown   # 3.13.0: a role with a digit (WAN P116)
   [ "$status" -eq 0 ]
+  [ "$(jq -r '.fixer.role // .fixer.name // empty' "$(D 2)/measurement.json")" = e2e ] || jq -e '.fixer | tostring | test("e2e")' "$(D 2)/measurement.json"
   [ "$(jq -r '.fixer.tokens' "$(D 2)/measurement.json")" = unknown ]
   [ "$(jq -r '.verdict' "$(D 2)/measurement.json")" = pass ]
+}
+@test "cp2 (3.13.0): a criterion the takeover measured with another command is listed for the reviewers in dod.md" {
+  _repo; mkdir -p "$E/steps/step_1_backend"
+  jq -n '{replacements: [{ac: 1, command: "test -e src/new.py", plan_command: "docker compose exec api test -e src/new.py", reason: "the container reads the main checkout"}]}' > "$E/steps/step_1_backend/land.json"
+  _sc; _S prepare --round 1 >/dev/null
+  grep -q 'measured with another command than the plan names' "$(D 1)/packet/dod.md"
+  grep -q '^- AC1: `test -e src/new.py` instead of `docker compose exec api test -e src/new.py` — the container reads the main checkout$' "$(D 1)/packet/dod.md"
+}
+@test "cp2 (3.13.0): at the same HEAD a new round is allowed only when the takeover's replacements changed" {
+  _repo; mkdir -p "$E/steps/step_1_backend"
+  jq -n '{replacements: [{ac: 1, command: "test -e src/new.py", plan_command: "docker compose exec api test -e src/new.py", reason: "the container reads the main checkout"}]}' > "$E/steps/step_1_backend/land.json"
+  _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist '.findings = [] | .no_findings_reason = "the replacement measures the same file"'
+  _S collect --round 1 >/dev/null; _bracket 1 step_generalist; _S close --round 1 --tokens step_generalist=5 >/dev/null
+  run _S prepare --round 2; [ "$status" -ne 0 ]; [[ "$output" == *"HEAD has not moved"* ]]
+  jq '.replacements[0].command = "test -f src/new.py"' "$E/steps/step_1_backend/land.json" > "$E/l" && mv "$E/l" "$E/steps/step_1_backend/land.json"
+  _sc; run _S prepare --round 2; echo "$output"; [ "$status" -eq 0 ]
+  grep -q '`test -f src/new.py` instead of' "$(D 2)/packet/dod.md"
+}
+@test "cp2 (3.13.0): the bracket that counts is the LAST start's — an older start cancelled later does not void the newer one's answer" {
+  _repo; _sc; _S prepare --round 1 >/dev/null
+  local d; d="$(D 1)"; local EMIT="$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" o a b
+  o="$(bash "$EMIT" start --focus cp2-step-0-step-generalist --agent-id aid-orchestrator:review --evidence-dir "$d")"; a="$(sed -E 's/^nonce=([^ ]+) .*/\1/' <<< "$o")"
+  o="$(bash "$EMIT" start --focus cp2-step-0-step-generalist --agent-id aid-orchestrator:review --evidence-dir "$d")"; b="$(sed -E 's/^nonce=([^ ]+) .*/\1/' <<< "$o")"
+  jq -n '{role: "step_generalist", checkpoint: "cp2", findings: [], no_findings_reason: "nothing found in the step"}' > "$d/reviewer-step_generalist.json"
+  bash "$EMIT" complete --focus cp2-step-0-step-generalist --output-file "$d/reviewer-step_generalist.json" --evidence-dir "$d" --nonce "$b"
+  bash "$EMIT" cancel --focus cp2-step-0-step-generalist --evidence-dir "$d" --nonce "$a" --reason "the older start was a duplicate of this one"
+  run _S collect --round 1; echo "$output"; [ "$status" -eq 0 ]
+  run _S close --round 1 --tokens step_generalist=5; echo "$output"; [ "$status" -eq 0 ]
 }
 @test "step: a disputed cp2 blocker keeps blocking; --pm accepted needs the card quoting it and a PM prompt after the card, then the verdict flips" {
   _repo; _sc; _S prepare --round 1 >/dev/null
@@ -939,7 +998,7 @@ FD() { printf '%s/cp7/round-%s' "$E" "$1"; }
 # _fanswer <round> <role> [jq filter] — a cp7 answer with no findings, bracketed like a dispatched agent
 _fanswer() {
   local d; d="$(FD "$1")"
-  jq -n --arg r "$2" '{role: $r, checkpoint: "cp7", findings: [], no_findings_reason: "fixture"}' | jq "${3:-.}" > "$d/reviewer-$2.json"
+  jq -n --arg r "$2" '{role: $r, checkpoint: "cp7", findings: [], no_findings_reason: "fixture"} + (if $r == "final_generalist" then {security_and_operations: (["personal_data","host_layout","ci_dependencies","docs_build","log_leaks","account_boundaries","injection","paths_deletion","forged_trust"] | map({(.): {answer: "none", note: ""}}) | add)} else {} end)' | jq "${3:-.}" > "$d/reviewer-$2.json"
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "cp7-${2//_/-}" --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "cp7-${2//_/-}" --output-file "$d/reviewer-$2.json" --evidence-dir "$d" >/dev/null
 }
@@ -999,6 +1058,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [[ "$output" == *"focus cp7-final-criteria"* && "$output" == *"focus cp7-final-generalist"* && "$output" != *"final-claims"* ]]
   grep -q "CHANGELOG" "$(FD 1)/packet/claims.patch"
   grep -q "every EPIC together" "$(FD 1)/prompt-final_generalist.md"
+  grep -q "security_and_operations" "$(FD 1)/prompt-final_generalist.md"           # the nine security and operations questions reach the reviewer
   grep -q '^+60$' "$(FD 1)/prompt-final_generalist.md"                       # a small diff is inline
   # a diff too large for one prompt is pointed at, with its files, never truncated
   rm -rf "$E/cp7/round-1" "$E/cp7/rounds.json"
@@ -1043,7 +1103,8 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
 @test "cp7: close refuses a reviewer file nobody dispatched" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
   _fanswer 1 final_criteria
-  jq -n '{role: "final_generalist", checkpoint: "cp7", findings: [], no_findings_reason: "hand-written"}' > "$(FD 1)/reviewer-final_generalist.json"
+  jq -n '{role: "final_generalist", checkpoint: "cp7", findings: [], no_findings_reason: "hand-written",
+         security_and_operations: (["personal_data","host_layout","ci_dependencies","docs_build","log_leaks","account_boundaries","injection","paths_deletion","forged_trust"] | map({(.): {answer: "none", note: ""}}) | add)}' > "$(FD 1)/reviewer-final_generalist.json"
   _F collect --round 1 >/dev/null
   run _F close --round 1 --tokens final_criteria=5 final_generalist=5
   [ "$status" -eq 1 ]; [[ "$output" == *"no_dispatch_record"* ]]
@@ -1073,6 +1134,22 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [ "$(jq -r .mode "$(FD 1)/round.json")" = confirmation ]
   grep -q "FIRST evidence citation must be a line the fix added" "$(FD 1)/prompt-final_generalist.md"
   ! grep -q "This is a FULL round over the new candidate" "$(FD 1)/prompt-final_generalist.md"
+}
+
+@test "cp7 (3.13.0): final_generalist answers each security and operations question; a missing one is a form re-ask, an unknown one is refused" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist 'del(.security_and_operations.forged_trust)'
+  run _F collect --round 1; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"retry only: final_generalist"* ]]
+  jq -r '.invalid[0].reason' "$(FD 1)/collect.json" | grep -q "forged_trust"
+  _fanswer 1 final_generalist '.security_and_operations.extra = {answer: "none"}'
+  run _F collect --round 1; [ "$status" -eq 1 ]; jq -r '.invalid[0].reason' "$(FD 1)/collect.json" | grep -q "unknown key extra"
+  local bad; for bad in '.security_and_operations.injection.extra = true' '.security_and_operations.injection.note = 42' 'del(.security_and_operations.injection.note)'; do
+    _fanswer 1 final_generalist "$bad"
+    run _F collect --round 1; [ "$status" -eq 1 ]; jq -r '.invalid[0].reason' "$(FD 1)/collect.json" | grep -q "needs exactly"
+  done
+  # WAN P115 25. 10. 2026: the stand-in filled the field the role asks for — it is collected, not refused
+  _fanswer 1 final_generalist '.security_and_operations.log_leaks = {answer: "checked", note: "no new log line"}'
+  run _F collect --round 1; echo "$output"; [ "$status" -eq 0 ]
 }
 
 @test "cp7: a finding of a final role validates against the finding schema's checkpoint and role lists" {
@@ -2043,22 +2120,40 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   run _DLG --fingerprint "$FP"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_out_of_scope"*"a third opinion is not asked"* ]]
   [ "$(grep -c . "$L")" = 2 ]
 }
-@test "delegate: a fix that changed the cited lines goes to the next round's confirmation, not to the adjudicator; a change elsewhere does not" {
+@test "delegate (3.13.0): a fix that changed the cited lines hands the dispute to the next round — the finding stays open, the round closes" {
   _dlg auto; _dispute; _fake_codex
+  yq -i '.review_checkpoints.step_review.rounds_default = 2' "$R/.aid-o/config/policies/review-checkpoints.yaml"   # round 1 is not the last
   export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "fine", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
-  local ev; ev="$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .evidence' "$(D 1)/merged.json")"
+  local m="$(D 1)/merged.json"; cp "$m" "$BATS_TEST_TMPDIR/m0"
+  local ev; ev="$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .evidence' "$m")"
   local file="${ev%%:*}" line="${ev#*:}"; line="${line%%[!0-9]*}"
+  local h1; h1="$(jq -r .head_sha "$(D 1)/round.json")"
   sed -i "${line}s/.*/the fix/" "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "fix the cited line"
-  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_fix_pending"* ]]
-  [ "$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .status' "$(D 1)/merged.json")" = disputed ]   # never marked fixed by itself
-  git -C "$R" reset -q --hard HEAD~1
-  # a second citation of the finding fixed: the same (every citation counts)
-  local m="$(D 1)/merged.json"; jq --arg f "$FP" '.findings |= map(if .fingerprint == $f then .evidence = (.evidence + "; src/new.py:1") else . end)' "$m" > "$m.t" && mv "$m.t" "$m"
-  echo "fixed too" > "$R/src/new.py"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "fix the second citation"
-  run _DLG --fingerprint "$FP"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_fix_pending"* ]]
+  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"handed to the next round's confirmation"* ]]
+  [ "$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | "\(.status) \(.dispute.handed_to_confirmation.commit != null)"' "$m")" = "open true" ]
+  [ ! -f "$(D 1)/adjudicator-delegated-$(jq -rn --arg f "$FP" '$f | ltrimstr("sha256:") | .[0:16]').json" ]   # nobody judged the fix
+  # a second collect keeps the handoff; the round closes at its reviewed head (as failed: the blocker stays)
+  _S collect --round 1 >/dev/null
+  [ "$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .dispute.handed_to_confirmation != null' "$m")" = true ]
+  run _S close --round 1 --at "$h1" --tokens step_generalist=5 step_security=unknown; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$output" != *"await an independent verdict"* ]]
+  [ "$(jq -r .verdict "$(D 1)/measurement.json")" = fail ]                   # the handed blocker keeps the round failed
+  # a change elsewhere is still the adjudicator's
+  cp "$BATS_TEST_TMPDIR/m0" "$m"; rm -f "$(D 1)/measurement.json"
   git -C "$R" reset -q --hard HEAD~1
   echo "an unrelated line" >> "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "elsewhere"
-  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]
+  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"dispute settled by codex"* ]]
+}
+@test "delegate (3.13.0): in the last step round the dispute is handed over too, and no round is added — the budget refuses as before" {
+  _dlg auto; _dispute; _fake_codex
+  export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "fixed at HEAD", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
+  local ev h1; ev="$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .evidence' "$(D 1)/merged.json")"; h1="$(jq -r .head_sha "$(D 1)/round.json")"
+  local file="${ev%%:*}" line="${ev#*:}"; line="${line%%[!0-9]*}"
+  sed -i "${line}s/.*/the fix/" "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "fix the cited line"
+  run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"handed to the next round's confirmation"* ]]
+  [[ "$output" != *"dispute settled by codex"* ]]                     # nobody judges the fix at the moved HEAD
+  run _S close --round 1 --at "$h1" --tokens step_generalist=5 step_security=unknown; [ "$status" -eq 0 ]
+  _sc; run _S prepare --round 2; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"budget"* ]]
 }
 @test "delegate: after /aid-stop (the run declared manual) the automatic delegation is not in force" {
   _dlg auto; _dispute

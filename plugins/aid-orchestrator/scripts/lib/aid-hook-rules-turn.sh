@@ -113,7 +113,49 @@ aid_turn_open_steps() {
 #     state file through a variable, quoted or not — so the record does);
 #   or its agent — an Agent/Task launched in the background whose prompt carries this step's contract header.
 _aid_hrt_step_call_pending() {
-  local t="$1" c="$2" sess="${3:-}" ver rec pid
+  local t="$1" c="$2" sess="${3:-}" idx="${4:-}" ver rec pid
+  # 3.13.0: a reviewer or fixer of THIS step dispatched in the background by THIS session (WAN P114 26. 10. 2026: the
+  # turn was refused while the CP2 reviewers ran, AID-WAIT knew only aid-job.sh). It counts when, for its focus, the
+  # LAST start among all rounds of the step is still in its round's pending ledger (complete and cancel remove exactly
+  # their line) with this step and round dir, is younger than its own time limit, and the line it printed —
+  # `nonce=… focus=… evidence=<that round>` — is the RESULT of this transcript's own `aid-emit-dispatch.sh start` call
+  # (matched by tool_use_id; one pass over the transcript, text the model wrote is never read).
+  if [[ "$idx" =~ ^[0-9]+$ ]]; then
+    local run_dir printed now f nonce ts exp rdir
+    run_dir="$(dirname "$(dirname "$(dirname "$c")")")"; now="$(date -u +%s)"
+    if compgen -G "${run_dir}/cp2/step-${idx}/round-*/pending-dispatches.jsonl" >/dev/null; then
+      printed="$(grep -E 'aid-emit-dispatch\.sh|nonce=' "$t" 2>/dev/null | jq -rRn '
+          [inputs | fromjson? | select(.type == "assistant" or .type == "user")] as $l
+          | ([$l[] | select(.type == "assistant") | .message.content[]?
+               | select(.type? == "tool_use" and .name == "Bash" and ((.input.command // "") | test("aid-emit-dispatch\\.sh\"? +start ")))
+               | .id] | map({(.): true}) | add // {}) as $starts
+          | $l[] | select(.type == "user") | .message.content | if type == "array" then .[] else empty end
+          | select(.type? == "tool_result" and ($starts[.tool_use_id // ""] // false))
+          | .content | if type == "array" then (map(.text? // "") | join("\n")) else tostring end' 2>/dev/null \
+        | grep -oE 'nonce=[^ ]+ focus=[^ ]+ evidence=[^ "\\]+' | sort -u)"
+      if [[ -n "$printed" ]]; then
+        local evd
+        while IFS=$'\t' read -r f nonce ts exp rdir evd; do
+          [[ -n "$nonce" ]] || continue
+          [[ -n "$evd" && "$(realpath -m -- "$evd")" == "$(realpath -m -- "$rdir")" ]] || continue   # the ledger's own round
+          grep -qxF "nonce=${nonce} focus=${f} evidence=$(realpath -m -- "$rdir")" <<< "$printed" || continue
+          ts="$(date -u -d "$ts" +%s 2>/dev/null)" || continue
+          [[ "$exp" =~ ^[0-9]+$ ]] || exp=3600
+          (( now - ts <= exp )) && return 0
+        done < <(
+          for rd in "${run_dir}/cp2/step-${idx}"/round-*; do
+            [[ -f "${rd}/timeline.jsonl" ]] || continue
+            jq -c --arg rd "$rd" --arg r "${rd##*round-}" 'select(.event == "verifier_dispatch_start") + {rd: $rd, rn: ($r | tonumber? // 0)}' "${rd}/timeline.jsonl" 2>/dev/null
+          done | jq -rs --arg i "$idx" --slurpfile pend <(for rd in "${run_dir}/cp2/step-${idx}"/round-*; do
+              [[ -s "${rd}/pending-dispatches.jsonl" ]] && jq -c --arg rd "$rd" '. + {rd: $rd}' "${rd}/pending-dispatches.jsonl" 2>/dev/null; done) '
+            [.[] | select(.focus | test("^(cp2-step-" + $i + "-|fix-cp2-" + $i + "-r)"))]
+            | group_by(.focus)[] | sort_by(.ts, .rn) | last as $s
+            | $pend[] | select(.event == "start" and .nonce == $s.nonce and .focus == $s.focus and .rd == $s.rd
+                               and ((.step_n // -1) | tostring) == $i)
+            | "\(.focus)\t\(.nonce)\t\(.ts)\t\(.expected_duration_max // "")\t\($s.rd)\t\(.evidence_dir // "")"')
+      fi
+    fi
+  fi
   ver="$(jq -r '.version // ""' "$c" 2>/dev/null)"; rec="$(dirname "$c")/land.json"
   local candidates answered
   candidates="$( { grep -F 'aid-step-land.sh' "$t" 2>/dev/null \
@@ -208,7 +250,7 @@ aid_hook_rule_turn_step_open() {
     # the agent dispatched with its packet still works — a declared wait on THAT, unanswered, ends the turn; the
     # notification starts the next one. Any other background call does not excuse an open step.
     if [[ "$(printf '%s' "$last" | grep -v '^[[:space:]]*$' | tail -1)" == AID-WAIT:* ]]; then
-      if _aid_hrt_step_call_pending "$transcript" "$(cut -f5 <<< "$line")" "$sess"; then
+      if _aid_hrt_step_call_pending "$transcript" "$(cut -f5 <<< "$line")" "$sess" "$idx"; then
         echo "step ${idx} (${sid}) of ${epic} is open; the turn waits on a background call (AID-WAIT)" >&2
         return 3
       fi

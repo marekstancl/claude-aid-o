@@ -257,6 +257,46 @@ MAX_LINES="$(_cfg '.review_checkpoints.step_review.skip_threshold.max_lines' 120
 STREAMLINED=false
 [[ -f "$STATE" ]] && STREAMLINED="$(yq -r '.streamlined_mode // false' "$STATE" 2>/dev/null || echo false)"
 
+# AID 3.13.0: a test the step adds is named after what it guards — the close gate's own check, run on exactly the
+# change under review, refuses before any round as the gate does (WAN P115 25. 10., P114 27. 10. 2026: twelve and
+# nine step reviews passed `describe('… — P114')`, the close refused it, one freeze more each time)
+tn_hits="" tn_rc=0
+if (( WORKTREE )); then tn_hits="$(aid_test_names_plan_refs "$ROOT" HEAD worktree)" || tn_rc=$?
+else tn_hits="$(aid_test_names_plan_refs "$ROOT" "$range_base" "$HEAD_SHA")" || tn_rc=$?; fi
+if (( tn_rc == 1 )); then
+  while IFS=$'\t' read -r tn_f tn_n; do echo "step-check: ${tn_f}: \"${tn_n}\" is named after a plan, finding or backlog item" >&2; done <<< "$tn_hits"
+  echo "REFUSED (step_test_named_after_plan): name each test after the behaviour it guards (the plan, finding or backlog number belongs in the commit message); the close's gate refuses the same names" >&2
+  echo "  next: rename the tests above in the step's own commit, then run aid-step-check.sh again (pipeline.md §When AID refuses: step_test_named_after_plan)" >&2
+  exit 1
+elif (( tn_rc != 0 )); then
+  die "the names of the added tests could not be read (${RANGE}); run the check again" 1
+fi
+# 3.13.0: a criterion the takeover measured with another command than the plan's is never skipped — the step review
+# judges the replacement (aid-step-land.sh --reason), and increment-step checks the round saw exactly it
+land_repl=0
+if [[ "$CHECKPOINT" == cp2 && -n "${STEP:-}" && -f "$PLAN_JSON" ]]; then
+  land_f="$(dirname "$PLAN_JSON")/steps/$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "$PLAN_JSON" 2>/dev/null || true)/land.json"
+  [[ -f "$land_f" ]] && land_repl="$(jq '(.replacements // []) | length' "$land_f" 2>/dev/null || echo 0)"
+fi
+# 3.13.0: a setup command the project names for its worktrees failed in THIS tree — the reviewers must know the tests
+# may have run without it (never a skip)
+# (the plan's tree, and the step's own tree when a wave dispatched it — the step may have been merged and its tree gone)
+wt_setup_failed="" wt_rec=""
+declare -F aid_worktree_env_record_path >/dev/null || source "$SCRIPT_DIR/lib/aid-worktree-env.sh"
+wt_trees=("$ROOT")
+if [[ "$CHECKPOINT" == cp2 && -n "${STEP:-}" && -f "$PLAN_JSON" ]]; then
+  _sid="$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "$PLAN_JSON" 2>/dev/null || true)"
+  if [[ -n "$_sid" ]] && source "$SCRIPT_DIR/lib/aid-parallel-dispatch.sh" 2>/dev/null; then
+    _swt="$(_aid_pd_step_worktree_path "$ROOT" "$_sid" "$(aid_orchestration_value "$CFG_ROOT" .dispatch.worktree_base 2>/dev/null | cut -f1)" 2>/dev/null || true)"
+    [[ -n "$_swt" ]] && wt_trees+=("$_swt")
+  fi
+fi
+for wt_tree in "${wt_trees[@]}"; do
+  wt_r="$(aid_worktree_env_record_path "$CFG_ROOT" "$wt_tree")"
+  [[ -f "$wt_r" && "$(jq -r '.tree // ""' "$wt_r" 2>/dev/null)" == "$(realpath -m -- "$wt_tree")" ]] || continue
+  wt_f="$(jq -r 'if .status == "running" then "setup did not finish (killed or still running)" else [.setup[]? | select(.exit != 0) | .command] | join("; ") end' "$wt_r" 2>/dev/null || true)"
+  [[ -n "$wt_f" ]] && { wt_setup_failed="${wt_setup_failed:+${wt_setup_failed}; }${wt_f}"; wt_rec="$wt_r"; }
+done
 verdict="" reason=""
 if (( ${#OTHER_MISSING[@]} > 0 )); then verdict=review; reason="declared repository with no commits named in the step's return (repo_commits): ${OTHER_MISSING[*]}"
 elif (( ${#OUTSIDE_GIT[@]} > 0 )); then verdict=review; reason="declared path(s) outside any git repository — no diff shows them, the reviewers read them as they are: ${OUTSIDE_GIT[*]}"
@@ -273,6 +313,15 @@ elif (( ${#handler_ids[@]} > 0 )); then verdict=review; reason="handler pattern:
 elif [[ "$CHECKPOINT" != cp7 ]] && (( ${#FILES[@]} <= MAX_FILES && LINES <= MAX_LINES )); then verdict=skip; reason="${#FILES[@]} file(s), $LINES line(s), inside scope, no pattern matched"
 else verdict=review; reason="${#FILES[@]} file(s), $LINES line(s)"
 fi
+
+# 3.13.0: these never let a step be skipped, and never weaken a stronger verdict (review+security stays): they
+# turn skip/no_change into review and add their reason
+for _extra in "$( (( land_repl > 0 )) && echo "${land_repl} criterion(s) measured with another command than the plan names (land.json replacements)")" \
+              "$( [[ -n "$wt_setup_failed" ]] && echo "the worktree's setup failed (${wt_setup_failed}; ${wt_rec})")"; do
+  [[ -n "$_extra" ]] || continue
+  [[ "$verdict" == skip || "$verdict" == no_change ]] && { verdict=review; reason="$_extra"; continue; }
+  reason="${reason}; ${_extra}"
+done
 
 # ── 6. write, bind, index ───────────────────────────────────────────────────
 [[ "$(git_ rev-parse HEAD)" == "$HEAD_SHA" ]] || die "HEAD moved while the check ran; run it again"

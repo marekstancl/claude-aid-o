@@ -4,7 +4,7 @@
 položku dodá, ji tu ve stejném commitu označí `HOTOVO vX.Y.Z`. Do zdrojového hlášení projektu se dopíše
 `> **HOTOVO vX.Y.Z (datum):** …` až při vydání. Rozbor dělá skill `rozbor-plugin-issues`.
 
-Zadání 3.13.0: `docs/plans/2026-10-31-zadani-3130-beh-planu.md` (7 kol revize Codexem, resolved).
+Zadání 3.13.0 (archiv): `docs/archive/2026-10-31-zadani-3130-beh-planu.md` (7 kol revize Codexem, resolved; vydáno 3.13.0).
 
 Volby PM 31. 10. 2026: „beru tvoje doporučení“ = 1A, 2A, 3A, 4A, 5A, 6A, 7A, 8A, 9A, 10A, 11A, 12B;
 nové věci z companionu přihodit; **studio (`/aid-ui`) teď neřešit**.
@@ -20,18 +20,18 @@ nové věci z companionu přihodit; **studio (`/aid-ui`) teď neřešit**.
 
 | # | Co | Zdroj | Stav |
 |---|---|---|---|
-| 3 | `aid-step-land.sh` bere bod začínající jménem testu v backticku za příkaz. Za příkaz brát jen spustitelné; jinak náhradní příkaz s důvodem. | WAN P116 28. 10., P118 30. 10. | čeká |
-| 4 | `test_named_after_plan` až u bran uzávěru. Pustit už v kontrole kroku (`aid-step-check.sh`). | WAN P115 25. 10., P114 27. 10. | čeká |
-| 5 | Strom plánu a kroků bez prostředí: kopírovat neverzované soubory, které projekt vyjmenuje (`.env`), napojit `node_modules`; nápověda, jak měřit ve stromu (ne `docker compose exec` do hlavního checkoutu). | WAN P114 26. 10., P116 28. 10. | čeká |
-| 6 | Konec tahu (`turn_step_open`) uznává čekání jen na `aid-job.sh`. Uznat i živé zapsané agenty a revizory na pozadí. | WAN P115 25. 10. (3.10.0), P114 26. 10. (3.12.0) | čeká |
-| 7 | `--also-steps`: ve `fix-check` ruší „any“; `finalize` ho nezná. Opravit obojí se stejným záznamem. | WAN P116 28. 10., P118 30. 10. | čeká |
-| 8 | `plan-merge-to-main` se při obnově zacyklí (bring-forward na strom sloučení místo tipu, verze z `release-prep.json`). Poznat zapsaný lifecycle commit, pokračovat od tipu, verzi brát z kandidáta. | WAN P116 28. 10. | čeká |
-| 9 | Souběžné plány: zmrazení odmítne verzi, která není nad nejvyšším tagem cíle. Hlídání jediné hlavy migrací = brána WANu (projekt, ne plugin) - předat oknu WANu. | WAN P116 + W12 28. 10. | čeká |
-| 11 | Spor o nález, jehož řádky změnil pozdější commit: `delegate` (`delegation_fix_pending`) ho uzavře jako „předáno potvrzovacímu kolu“, ne zablokuje. | WAN P115 25. 10. | čeká |
-| 12.1 | `close --fixer` odmítne roli s číslicí (`e2e`). | WAN P116 28. 10. | čeká |
-| 12.2 | Testovací soubor jmenovaný v AC kroku: `amend-scope` bez zástupce (`amend_scope_no_brief_point`). | WAN P116 28. 10. | čeká |
-| 12.3 | Opravář CP7 ve stromu plánu nenajde `merged.json` (cesta do state root). | WAN P118 30. 10. | čeká |
-| 12.4 | Zástupce za `final_generalist` vyplní `security_and_operations`, `collect` ho odmítne: sjednotit zadání role a validátor. | WAN P115 25. 10. | čeká |
+| 3 | `aid-step-land.sh` bere bod začínající jménem testu v backticku za příkaz. Za příkaz brát jen spustitelné; jinak náhradní příkaz s důvodem. | WAN P116 28. 10., P118 30. 10. | HOTOVO v3.13.0 |
+| 4 | `test_named_after_plan` až u bran uzávěru. Pustit už v kontrole kroku (`aid-step-check.sh`). | WAN P115 25. 10., P114 27. 10. | HOTOVO v3.13.0 |
+| 5 | Strom plánu a kroků bez prostředí: kopírovat neverzované soubory, které projekt vyjmenuje (`.env`), napojit `node_modules`; nápověda, jak měřit ve stromu (ne `docker compose exec` do hlavního checkoutu). | WAN P114 26. 10., P116 28. 10. | HOTOVO v3.13.0 |
+| 6 | Konec tahu (`turn_step_open`) uznává čekání jen na `aid-job.sh`. Uznat i živé zapsané agenty a revizory na pozadí. | WAN P115 25. 10. (3.10.0), P114 26. 10. (3.12.0) | HOTOVO v3.13.0 |
+| 7 | `--also-steps`: ve `fix-check` ruší „any“; `finalize` ho nezná. Opravit obojí se stejným záznamem. | WAN P116 28. 10., P118 30. 10. | HOTOVO v3.13.0 |
+| 8 | `plan-merge-to-main` se při obnově zacyklí (bring-forward na strom sloučení místo tipu, verze z `release-prep.json`). Poznat zapsaný lifecycle commit, pokračovat od tipu, verzi brát z kandidáta. | WAN P116 28. 10. | HOTOVO v3.13.0 |
+| 9 | Souběžné plány: zmrazení odmítne verzi, která není nad nejvyšším tagem cíle. Hlídání jediné hlavy migrací = brána WANu (projekt, ne plugin) - předat oknu WANu. | WAN P116 + W12 28. 10. | HOTOVO v3.13.0 |
+| 11 | Spor o nález, jehož řádky změnil pozdější commit: `delegate` (`delegation_fix_pending`) ho uzavře jako „předáno potvrzovacímu kolu“, ne zablokuje. | WAN P115 25. 10. | HOTOVO v3.13.0 |
+| 12.1 | `close --fixer` odmítne roli s číslicí (`e2e`). | WAN P116 28. 10. | HOTOVO v3.13.0 |
+| 12.2 | Testovací soubor jmenovaný v AC kroku: `amend-scope` bez zástupce (`amend_scope_no_brief_point`). | WAN P116 28. 10. | HOTOVO v3.13.0 |
+| 12.3 | Opravář CP7 ve stromu plánu nenajde `merged.json` (cesta do state root). | WAN P118 30. 10. | HOTOVO v3.13.0 |
+| 12.4 | Zástupce za `final_generalist` vyplní `security_and_operations`, `collect` ho odmítne: sjednotit zadání role a validátor. | WAN P115 25. 10. | HOTOVO v3.13.0 |
 
 ## 3.14.0 - roadmapa a companion
 

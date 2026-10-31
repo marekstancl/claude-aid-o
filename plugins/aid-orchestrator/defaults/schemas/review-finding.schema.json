@@ -8,6 +8,12 @@
   "additionalProperties": false,
   "required": ["role", "findings"],
   "properties": {
+    "security_and_operations": {
+      "description": "final_generalist (CP7, AID 3.13.0): one typed answer to each security and operations question of skills/step-review-roles.md (Role: final_generalist, question 7); a finding goes in findings.",
+      "type": "object", "additionalProperties": false,
+      "required": ["personal_data", "host_layout", "ci_dependencies", "docs_build", "log_leaks", "account_boundaries", "injection", "paths_deletion", "forged_trust"],
+      "properties": {"personal_data": {"$ref": "#/$defs/so_answer"}, "host_layout": {"$ref": "#/$defs/so_answer"}, "ci_dependencies": {"$ref": "#/$defs/so_answer"}, "docs_build": {"$ref": "#/$defs/so_answer"}, "log_leaks": {"$ref": "#/$defs/so_answer"}, "account_boundaries": {"$ref": "#/$defs/so_answer"}, "injection": {"$ref": "#/$defs/so_answer"}, "paths_deletion": {"$ref": "#/$defs/so_answer"}, "forged_trust": {"$ref": "#/$defs/so_answer"}}
+    },
     "role": { "type": "string" },
     "checkpoint": { "$ref": "#/$defs/checkpoint" },
     "provider": { "type": "string" },
@@ -30,6 +36,7 @@
     }
   ],
   "$defs": {
+    "so_answer": {"type": "object", "additionalProperties": false, "required": ["answer", "note"], "properties": {"answer": {"enum": ["none", "checked", "finding"]}, "note": {"type": "string"}}},
     "checkpoint": { "enum": ["cp1", "cp2", "cp6", "cp7"] },
     "roles_cp1": {
       "enum": ["generalist_a", "generalist_b", "behaviour_edges", "feasibility_deps", "reuse", "enforcement_tests"]

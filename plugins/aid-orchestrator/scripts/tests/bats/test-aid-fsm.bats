@@ -1854,6 +1854,44 @@ _zp_state() {   # <td> <state> <current_step>
   [ "$status" -ne 0 ]; [[ "$output" == *"closes no point of the brief"*"rule 11"* ]]; [[ "$output" == *"amend_scope_no_brief_point"* ]]
 }
 
+@test "amend-scope (3.13.0): a file the step's AC names is a routine widening — exact path or a file name unique in the repo; ambiguous, mixed or protected is not" {
+  local td="$TEST_EVIDENCE_DIR" g="$BATS_TEST_TMPDIR/repo"; _zp_plan_json "$td"
+  jq '.steps[0].zavira = [] | .steps[0].acceptance_criteria = ["`tests/test_vemex.py` passes", "`test_sep.py` fails on main and passes after", "`.env` loads"]' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"
+  _zp_state "$td" EXECUTE 0
+  mkdir -p "$g/tests" "$g/other"; git -C "$g" init -q; : > "$g/tests/test_vemex.py"; : > "$g/tests/test_sep.py"; : > "$g/src.py"
+  git -C "$g" add -A; git -C "$g" -c user.email=t@t -c user.name=t commit -qm base
+  cd "$g"
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_vemex.py --add tests/test_sep.py --reason "the step's criteria name these test files"
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(cat "$td"/steps/*/scope-amendment.json | jq -sc '[.[][-1] | .. | objects | select(has("named_in_ac")) | .named_in_ac[].ac]')" = '["AC1","AC2"]' ]
+  # a second test_sep.py elsewhere makes the bare name ambiguous: back to the stand-in / PM path
+  _zp_state "$td" EXECUTE 0; : > "$g/other/test_sep.py"
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_sep.py --reason "the step's criteria name this test file"
+  [ "$status" -ne 0 ]; [[ "$output" == *"amend_scope_no_brief_point"* ]]
+  # mixed: one named, one not
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_vemex.py --add src.py --reason "the step's criteria name one of these files"
+  [ "$status" -ne 0 ]; [[ "$output" == *"amend_scope_no_brief_point"* ]]
+  # a path that is not canonical, or leads out through a symlink, does not take the short way
+  jq '.steps[0].acceptance_criteria += ["`./tests/test_vemex.py` and `tests//test_vemex.py`", "`link/x.py` passes"]' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"; _zp_state "$td" EXECUTE 0
+  mkdir -p "$BATS_TEST_TMPDIR/outside"; : > "$BATS_TEST_TMPDIR/outside/x.py"; ln -s "$BATS_TEST_TMPDIR/outside" "$g/link"
+  local alias; for alias in ./tests/test_vemex.py tests//test_vemex.py link/x.py; do
+    run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add "$alias" --reason "the step's criteria name this file here"
+    [[ "$output" != *"named_in_ac"* ]]; ! cat "$td"/steps/*/scope-amendment.json | jq -e --arg p "$alias" '.[] | select(.pm_decision.named_in_ac? // [] | any(.path == $p))' >/dev/null
+  done
+  # a file name with regex characters counts literally: t[1].py twice is ambiguous even with a decoy t1.py
+  mkdir -p "$g/decoy"; : > "$g/tests/t[1].py"; : > "$g/other/t[1].py"; : > "$g/decoy/t1.py"
+  jq '.steps[0].acceptance_criteria += ["`t[1].py` passes"]' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"; _zp_state "$td" EXECUTE 0
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add "tests/t[1].py" --reason "the step's criteria name this test file"
+  [ "$status" -ne 0 ]; [[ "$output" == *"amend_scope_no_brief_point"* ]]
+  # a named file that is not a test does not take the short way ("`src.py` must not change")
+  jq '.steps[0].acceptance_criteria += ["`src.py` must not change"]' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"; _zp_state "$td" EXECUTE 0
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add src.py --reason "the step's criteria name this file here"
+  [ "$status" -ne 0 ]; [[ "$output" == *"amend_scope_no_brief_point"* ]]
+  # protected (.env) even when named
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add .env --reason "the step's criteria name the env file here"
+  [ "$status" -ne 0 ]; [[ "$output" == *"amend_scope_no_brief_point"* ]]
+}
+
 @test "amend-scope-zadani: a plan.json without zadani_sha256 records zadani_point null" {
   local td="$TEST_EVIDENCE_DIR"; _zp_plan_json "$td"
   jq 'del(.zadani, .zadani_sha256)' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"

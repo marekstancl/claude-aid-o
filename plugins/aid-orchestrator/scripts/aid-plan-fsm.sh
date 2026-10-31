@@ -1055,6 +1055,8 @@ _pfsm_worktree_add() {
 
   if _pfsm_worktree_registered "$root" "$wt"; then
     if [[ -d "$wt" ]]; then
+      declare -F aid_worktree_env_ensure >/dev/null || source "${SCRIPT_DIR}/lib/aid-worktree-env.sh"
+      aid_worktree_env_ensure "$root" "$wt" "$root" >&2 || true
       printf '%s' "$wt"
       return 0
     fi
@@ -1088,6 +1090,9 @@ _pfsm_worktree_add() {
     git -C "$root" worktree list >&2 2>/dev/null || true
     return 1
   fi
+  # 3.13.0: the untracked files and the setup the project names (project.yaml worktree.*); never fails the creation
+  declare -F aid_worktree_env_prepare >/dev/null || source "${SCRIPT_DIR}/lib/aid-worktree-env.sh"
+  aid_worktree_env_prepare "$root" "$wt" "$root" >&2 || true
 
   printf '%s' "$wt"
   return 0
@@ -2894,6 +2899,61 @@ plan_final_invalidate() {
 }
 
 # ---------------------------------------------------------------------------
+# _pfsm_freeze_release_check <root> <plan tree> <plan_id> <plan_branch> before|after — the release record
+# prepare-plan wrote (release-prep.json; none = a no-release plan, as before 3.13.0) against the candidate:
+#   before the sync — the version the plan branch carries is the one the record was made for (else
+#     release_prep_version_changed: never bump on a stale version), and a release's version is above the highest
+#     release tag reachable from the target branch (plan_version_not_above_target — before the sync, which would
+#     otherwise stop on the CHANGELOG conflict first; WAN P116 + W12 28. 10. 2026: both 0.45.0);
+#   after the sync — a record of another tree is rebound (aid-release.sh rebind: no bump; refused when the version
+#     changed). A record without candidate_version (before 3.13.0) is not checked; an unreadable one refuses.
+_pfsm_freeze_release_check() {
+  local root="$1" troot="$2" plan_id="$3" plan_branch="$4" when="$5" rec rel
+  rec="${root}/.aid-o/work/plan-state/${plan_id}/release-prep.json"
+  [[ -e "$rec" ]] || return 0
+  jq -e 'type == "object" and (.version | type) == "string"' "$rec" >/dev/null 2>&1 || {
+    echo "REFUSED (release_prep_stale): ${rec} is unreadable" >&2
+    echo "  next: bash ${SCRIPT_DIR}/aid-release.sh prepare-plan ${plan_id} --bump <the plan's bump> --plan-branch ${plan_branch} --project-root ${troot} (pipeline.md §When AID refuses: release_prep_stale)" >&2
+    return 1; }
+  [[ -n "$(jq -r '.candidate_version // ""' "$rec")" ]] || return 0
+  rel="${SCRIPT_DIR}/aid-release.sh"
+  if [[ "$when" == before ]]; then
+    local carried recorded intent version target top
+    # the pair the record was made for: the version the bump starts from | the newest CHANGELOG header
+    recorded="$(jq -r '"\(.candidate_version)|\(.changelog_version // "")"' "$rec")"; intent="$(jq -r '.intent // "release"' "$rec")"; version="$(jq -r .version "$rec")"
+    carried="$(bash "$rel" carried-version --project-root "$troot" --rev "refs/heads/${plan_branch}" 2>/dev/null)" || carried=""
+    if [[ "$carried" != "$recorded" ]]; then
+      echo "REFUSED (release_prep_version_changed): ${plan_id} was prepared for ${recorded} and the plan branch now carries ${carried:-no version}" >&2
+      if [[ "$intent" == none ]]; then
+        echo "  next: bash ${rel} rebind ${plan_id} --plan-branch ${plan_branch} --project-root ${troot} --adopt-version (it stays a no-release plan), or revert the change (pipeline.md §When AID refuses: release_prep_version_changed)" >&2
+      else
+        echo "  next: bash ${rel} prepare-plan ${plan_id} --bump none --plan-branch ${plan_branch} --project-root ${troot} (the carried version becomes the prepared one), or revert the change (pipeline.md §When AID refuses: release_prep_version_changed)" >&2
+      fi
+      return 1
+    fi
+    [[ "$intent" == release ]] || return 0
+    if [[ "$version" != "${recorded%%|*}" || ( -n "${recorded#*|}" && "${recorded#*|}" != "$version" ) ]]; then
+      echo "REFUSED (release_prep_version_changed): ${plan_id} is prepared as ${version} but the candidate carries ${recorded%%|*} (CHANGELOG ${recorded#*|}) — the CHANGELOG and the manifest disagree" >&2
+      echo "  next: make the CHANGELOG header and the version files agree, then bash ${rel} prepare-plan ${plan_id} --bump none --plan-branch ${plan_branch} --project-root ${troot} (pipeline.md §When AID refuses: release_prep_version_changed)" >&2
+      return 1
+    fi
+    target="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch' 2>/dev/null)" || target=""
+    [[ -n "$target" ]] || return 0
+    top="$(git -C "$troot" tag --merged "$target" 2>/dev/null | sed -n 's/^v\{0,1\}\([0-9]\+\.[0-9]\+\.[0-9]\+\)$/\1/p' | sort -V | tail -1)"   # vX.Y.Z or X.Y.Z
+    if [[ -n "$top" && "$(printf '%s\n%s\n' "$top" "$version" | sort -V | tail -1)" == "$top" ]]; then
+      echo "REFUSED (plan_version_not_above_target): ${plan_id} is prepared as ${version}, and ${target} already holds v${top} (another plan released meanwhile)" >&2
+      echo "  next: raise the plan's version above ${top} — bash ${rel} prepare-plan ${plan_id} --again --bump patch|minor|major --plan-branch ${plan_branch} --project-root ${troot} (--again prepares on top of the earlier prepare commit) — then freeze again (pipeline.md §When AID refuses: plan_version_not_above_target)" >&2
+      return 1
+    fi
+    return 0
+  fi
+  # after the sync: the record follows the final tree, never with a bump
+  [[ "$(jq -r '.tree // ""' "$rec")" == "$(git -C "$troot" rev-parse "refs/heads/${plan_branch}^{tree}" 2>/dev/null)" ]] && return 0
+  bash "$rel" rebind "$plan_id" --plan-branch "$plan_branch" --project-root "$troot" >&2 && return 0
+  echo "  next: the sync changed the carried version — prepare-plan again as above, then freeze again (pipeline.md §When AID refuses: release_prep_version_changed)" >&2
+  return 1
+}
+
 # _pfsm_finalize_sync <root> <plan_id>  — the first half of `--stage freeze`.
 # ---------------------------------------------------------------------------
 _pfsm_finalize_sync() {
@@ -3251,11 +3311,15 @@ _pfsm_finalize_freeze() {
     echo "plan-finalize --stage freeze: ${plan_branch} moved from the frozen candidate ${cur_candidate} to ${plan_head}; minting a new attempt (the previous run directory is left byte-identical)." >&2
   fi
 
+  # ── 3.13.0: the release record agrees with the candidate, and its version is above the target's ─────
+  _pfsm_freeze_release_check "$root" "$troot" "$plan_id" "$plan_branch" before || return 1
+
   # ── Sync: the target branch merged into the plan branch, every time ──────
   local src=0
   _pfsm_finalize_sync "$root" "$plan_id" >/dev/null || src=$?
   [[ "$src" -ne 0 ]] && return "$src"
   plan_head="$(git -C "$troot" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
+  _pfsm_freeze_release_check "$root" "$troot" "$plan_id" "$plan_branch" after || return 1
 
   # ── State precondition: freeze only out of PLAN_SYNC ─────────────────────
   local cur_state=""
@@ -5851,6 +5915,37 @@ cmd_plan_merge_to_main() {
     fi
   done
 
+  # ── 3.13.0: the release record is coherent and belongs to the frozen candidate — checked BEFORE anything is
+  #    merged (after the merge a wrong record could only mis-tag or skip the tag). A missing record is a
+  #    no-release plan, a record from before 3.13.0 (no tree) is read as before. ───────────────────────────
+  local _rp _rp_why="" _rp_run="${root}/${run_dir_rel}/release-prep.json" _rp_canon="${root}/.aid-o/work/plan-state/${plan_id}/release-prep.json"
+  _rp=""; [[ -e "$_rp_run" ]] && _rp="$_rp_run"
+  if [[ -z "$_rp" && -e "$_rp_canon" ]]; then
+    # freeze copies a 3.13.0 record into the attempt: without that copy only a pre-3.13.0 record may be read
+    jq -e 'has("intent") or has("candidate_version") or has("tree") or ((.schema_version // "") | test("^aid-release-prep-1\\.(1|[2-9])"))' "$_rp_canon" >/dev/null 2>&1 \
+      && _rp_why="the attempt holds no copy of ${_rp_canon} (freeze writes one)" || _rp="$_rp_canon"
+  fi
+  if [[ -n "$_rp" && -z "$_rp_why" ]]; then
+    if ! jq -e 'type == "object" and (.version | type) == "string"' "$_rp" >/dev/null 2>&1; then _rp_why="${_rp} is unreadable"
+    elif jq -e 'has("intent") or has("candidate_version") or has("tree") or ((.schema_version // "") | test("^aid-release-prep-1\\.(1|[2-9])"))' "$_rp" >/dev/null 2>&1; then
+      local _rp_at; _rp_at="$(bash "${SCRIPT_DIR}/aid-release.sh" carried-version --project-root "$root" --rev "$candidate" 2>/dev/null)"
+      if [[ "$(jq -r '.tree // ""' "$_rp")" != "$(git -C "$root" rev-parse "${candidate}^{tree}" 2>/dev/null)" ]]; then
+        _rp_why="${_rp} was made for another tree than the frozen candidate ${candidate:0:12}"
+      elif ! jq -e '(.intent == "release" and .version != "none") or (.intent == "none" and .version == "none")' "$_rp" >/dev/null 2>&1; then
+        _rp_why="${_rp} is incoherent (intent $(jq -r '.intent // "?"' "$_rp"), version $(jq -r .version "$_rp"))"
+      elif [[ "$(jq -r '"\(.candidate_version // "")|\(.changelog_version // "")"' "$_rp")" != "$_rp_at" ]]; then
+        _rp_why="${_rp} records $(jq -r '"\(.candidate_version)|\(.changelog_version)"' "$_rp") but the frozen candidate carries ${_rp_at}"
+      elif jq -e '.intent == "release" and .version != .candidate_version' "$_rp" >/dev/null 2>&1; then
+        _rp_why="${_rp} prepares $(jq -r .version "$_rp") but the candidate carries $(jq -r .candidate_version "$_rp")"
+      fi
+    fi
+  fi
+  if [[ -n "$_rp_why" ]]; then
+    echo "REFUSED (release_prep_stale): ${_rp_why} — nothing was merged" >&2
+    echo "  next: bash ${SCRIPT_DIR}/aid-release.sh rebind ${plan_id} --plan-branch <the plan branch> (no bump), or prepare-plan again, then plan-finalize --stage freeze and this command again (pipeline.md §When AID refuses: release_prep_stale)" >&2
+    exit 1
+  fi
+
   # ── AC3 (fail-closed freeze time): a manifest with no candidate_frozen_at, or
   #    one that is not a strict RFC 3339 UTC instant, is a DEGENERATE input and
   #    exits 1 — never "assume the decision is old enough". ─────────────────
@@ -6205,16 +6300,23 @@ cmd_plan_merge_to_main() {
 
   # The publish above moved the ref only; the checkout that has the target
   # branch out (the primary checkout) is still at the pre-merge state and its
-  # next plain commit would revert the merge — bring it forward or say so.
-  if declare -F _aid_lc_sync_checkout_of >/dev/null 2>&1; then
-    _aid_lc_sync_checkout_of "$root" "$target_branch" "$target_head" "$merge_commit"
-  fi
-
-
+  # next plain commit would revert the merge — it is brought forward below.
   local grc=0
   plan_op_mark_git_applied "$plan_id" "$op_id" "$merge_commit" || grc=$?
   _pfsm_crash_seam git_applied
   [[ "$grc" -ne 0 ]] && echo "WARN: plan-merge-to-main: the merge ${merge_commit} IS published on ${target_branch}, but the git_applied record could not be written (rc=${grc}) — a resumed run will re-verify from the ref itself." >&2
+
+  # 3.13.0: AFTER the published merge is on record (a resume finds it), the checkout goes to the branch's current tip
+  # (the lifecycle commit on a resume), never back to the merge, from the FROZEN pre-merge head (the live one may have
+  # moved on a retry); an overlap with local changes stops here — the merge stands, the next run resumes after it
+  _pfsm_merge_sync_or_refuse() {  # <from> — bring the checkout of the target branch to its tip, or refuse
+    declare -F _aid_lc_sync_checkout_of >/dev/null 2>&1 || return 0
+    _aid_lc_sync_checkout_of "$root" "$target_branch" "$1" "$(git -C "$root" rev-parse "refs/heads/${target_branch}")" && return 0
+    echo "REFUSED (merge_checkout_overlap): the merge ${merge_commit:0:12} IS published on ${target_branch}, but the checkout that has it out holds overlapping local changes (named above); nothing more was written" >&2
+    echo "  next: do as the warning says (no commit in that checkout), then run plan-merge-to-main again — it resumes after the merge (pipeline.md §When AID refuses: merge_checkout_overlap)" >&2
+    exit 1
+  }
+  _pfsm_merge_sync_or_refuse "${target_head_frozen:-$target_head}"
 
   # ── Tree identity + reachability, between publish and lifecycle commit ────
   local actual_tree=""
@@ -6245,6 +6347,9 @@ cmd_plan_merge_to_main() {
     echo "PRECONDITION FAIL: plan-merge-to-main: the merge ${merge_commit} IS published on ${target_branch}, but the lifecycle delivery bindings / CF1 re-scope were not committed (rc=${lrc}). The merge stands — do NOT re-merge; re-run this command (or plan-close-check) to re-apply the bindings idempotently. Detail: ${lout}" >&2
     exit 1
   fi
+  # the lifecycle commit's own sync ran inside the captured output above: check the checkout again, loudly
+  _pfsm_merge_sync_or_refuse "$merge_commit"
+  _pfsm_crash_seam lifecycle_bound   # 3.13.0: a crash between the lifecycle commit and the tag (WAN P116)
 
   # ── The ONE conditional tag (bindings first, so a crash between them cannot
   #    produce a tagged release with no closure path) ───────────────────────

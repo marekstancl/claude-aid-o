@@ -527,7 +527,7 @@ fi
 _release_version_sealed() {
   local ver="${1:-}" out=""
   [[ -n "$ver" ]] || return 1
-  if ! out="$(git -C "$REPO_ROOT" tag -l "v${ver}" 2>/dev/null)"; then
+  if ! out="$(git -C "$REPO_ROOT" tag -l "v${ver}" "${ver}" 2>/dev/null)"; then   # vX.Y.Z or a bare X.Y.Z tag (3.13.0)
     echo "ERROR: aid-release.sh: cannot list tags in ${REPO_ROOT}, so whether v${ver} is already released is unknown — refusing to rewrite a CHANGELOG heading on a guess. Set the new heading by hand, or run from the repository." >&2
     exit 1
   fi
@@ -1091,6 +1091,26 @@ _release_plan_state_dir() {
   printf '%s/.aid-o/work/plan-state/%s' "$root" "$plan_id"
 }
 
+# _release_carried_version — the version the checkout at REPO_ROOT carries now (the same reading the bump starts
+# from: plugin/marketplace/package JSON, pyproject.toml, else the newest CHANGELOG header); empty when none
+_release_carried_version() {   # [<rev>] [changelog] — of that commit (its files read from git), else of the checkout;
+  # the version the bump starts from (CURRENT), or with `changelog` the newest CHANGELOG header
+  local rev="${1:-}" which="${2:-current}" tmp f
+  if [[ -n "$rev" ]]; then
+    git -C "$REPO_ROOT" rev-parse -q --verify "${rev}^{commit}" >/dev/null 2>&1 || return 0
+    tmp="$(mktemp -d)" || return 0
+    for f in CHANGELOG.md plugins/aid-orchestrator/.claude-plugin/plugin.json .claude-plugin/marketplace.json package.json pyproject.toml; do
+      git -C "$REPO_ROOT" cat-file -e "${rev}:${f}" 2>/dev/null || continue
+      mkdir -p "${tmp}/$(dirname "$f")"; git -C "$REPO_ROOT" show "${rev}:${f}" > "${tmp}/${f}" 2>/dev/null
+    done
+    ( set +e; REPO_ROOT="$tmp"; BUMP_TYPE=patch; _release_detect_version >/dev/null 2>&1
+      [[ "$which" == changelog ]] && printf '%s' "$CHANGELOG_HEADER" || printf '%s' "$CURRENT" ) 2>/dev/null || true
+    rm -rf "$tmp"; return 0
+  fi
+  ( set +e; BUMP_TYPE=patch; _release_detect_version >/dev/null 2>&1
+    [[ "$which" == changelog ]] && printf '%s' "$CHANGELOG_HEADER" || printf '%s' "$CURRENT" ) 2>/dev/null || true
+}
+
 # _release_write_prep_record <plan_id> <plan_branch> <bump> <version|none>
 _release_write_prep_record() {
   local plan_id="$1" plan_branch="$2" bump="$3" version="$4"
@@ -1099,10 +1119,16 @@ _release_write_prep_record() {
   local head=""
   head="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" || head=""
   local ts; ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  # 3.13.0: the version the candidate CARRIES and the tree the record belongs to — freeze checks both, so a version
+  # changed after the preparation is caught at the freeze, not at the tag (WAN P116 28. 10. 2026: 0.45.0 recorded,
+  # 0.46.0 carried, the tag failed after the merge)
+  local carried tree clv; carried="$(_release_carried_version HEAD)"; clv="$(_release_carried_version HEAD changelog)"
+  tree="$(git -C "$REPO_ROOT" rev-parse 'HEAD^{tree}' 2>/dev/null)" || tree=""
   jq -n --arg p "$plan_id" --arg b "$plan_branch" --arg bump "$bump" \
-        --arg v "$version" --arg h "$head" --arg ts "$ts" \
-    '{schema_version:"aid-release-prep-1.0", plan_id:$p, plan_branch:$b,
-      bump_requested:$bump, version:$v, prepare_commit:$h, prepared_at:$ts}' \
+        --arg v "$version" --arg h "$head" --arg ts "$ts" --arg cv "$carried" --arg clv "$clv" --arg t "$tree" \
+    '{schema_version:"aid-release-prep-1.1", plan_id:$p, plan_branch:$b,
+      bump_requested:$bump, version:$v, prepare_commit:$h, prepared_at:$ts,
+      intent: (if $v == "none" then "none" else "release" end), candidate_version: $cv, changelog_version: $clv, tree: $t}' \
     > "${dir}/release-prep.json.tmp" \
     && mv "${dir}/release-prep.json.tmp" "${dir}/release-prep.json" \
     || { rm -f "${dir}/release-prep.json.tmp"; echo "PRECONDITION FAIL: could not write ${dir}/release-prep.json" >&2; return 1; }
@@ -1110,7 +1136,7 @@ _release_write_prep_record() {
 }
 
 cmd_prepare_plan() {
-  local plan_id="" bump="" plan_branch="" project_root="" dry=false
+  local plan_id="" bump="" plan_branch="" project_root="" dry=false again=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --bump)
@@ -1123,6 +1149,7 @@ cmd_prepare_plan() {
         [[ $# -ge 2 ]] || { echo "ERROR: prepare-plan: --project-root requires a value." >&2; exit 2; }
         project_root="$2"; shift 2 ;;
       --dry-run) dry=true; shift ;;
+      --again) again=true; shift ;;   # 3.13.0: prepare once more on top of an earlier prepare commit (a higher version)
       --*) echo "ERROR: prepare-plan: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1"
@@ -1165,7 +1192,7 @@ cmd_prepare_plan() {
   # ── Crash-resume convergence: HEAD is already this plan's prepare commit ──
   local head_subject=""
   head_subject="$(git -C "$REPO_ROOT" log -1 --format=%s 2>/dev/null)" || head_subject=""
-  if [[ "$head_subject" =~ ^release:\ prepare\ v([0-9]+\.[0-9]+\.[0-9]+)\ for\ ${plan_id}$ ]]; then
+  if ! ${again:-false} && [[ "$head_subject" =~ ^release:\ prepare\ v([0-9]+\.[0-9]+\.[0-9]+)\ for\ ${plan_id}$ ]]; then
     echo "Already prepared: ${head_subject} (HEAD $(git -C "$REPO_ROOT" rev-parse --short HEAD)) — reusing the existing commit, no second bump." >&2
     # Re-assert the record on the resume path too: a crash between the commit and
     # the record would otherwise leave plan-merge-to-main with no way to know a
@@ -1384,8 +1411,65 @@ cmd_tag_plan() {
 # (`prepare-plan`, `tag-plan`) goes to the legacy entry point with its arguments
 # untouched — including the empty argument list.
 # =============================================================================
+# cmd_rebind <plan_id> --plan-branch <b> [--project-root <p>] [--adopt-version] (AID 3.13.0) — binds the plan's
+# release-prep.json to the checkout's current tree WITHOUT bumping: when the carried version is the recorded one, only
+# the tree and commit change; when it changed, a release refuses (release_prep_version_changed: prepare again with
+# --bump none to take the carried version as the prepared one, or revert the change); a no-release plan takes the
+# new carried version only with --adopt-version and stays a no-release plan. Exit 0 bound · 3 version changed · 1 error.
+cmd_rebind() {
+  local plan_id="" plan_branch="" project_root="" adopt=0
+  plan_id="${1:-}"; shift || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --plan-branch)  [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; plan_branch="$2"; shift 2 ;;
+      --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; project_root="$2"; shift 2 ;;
+      --adopt-version) adopt=1; shift ;;
+      *) echo "ERROR: rebind: unknown argument $1" >&2; exit 2 ;;
+    esac
+  done
+  [[ -n "$plan_id" && -n "$plan_branch" ]] || { echo "Usage: aid-release.sh rebind <plan_id> --plan-branch <b> [--project-root <p>] [--adopt-version]" >&2; exit 2; }
+  if [[ -n "$project_root" ]]; then REPO_ROOT="$(cd "$project_root" && git rev-parse --show-toplevel 2>/dev/null)" || exit 1; fi
+  local rec; rec="$(_release_plan_state_dir "$plan_id")/release-prep.json"
+  jq -e 'type == "object" and (.version | type) == "string"' "$rec" >/dev/null 2>&1 \
+    || { echo "REFUSED (release_prep_stale): ${rec} is missing or unreadable — run prepare-plan" >&2; exit 1; }
+  local intent recorded carried
+  intent="$(jq -r '.intent // (if .version == "none" then "none" else "release" end)' "$rec")"
+  # the plan BRANCH, not whatever the checkout has checked out (a plan without its own worktree runs from the primary)
+  local rev; rev="$(git -C "$REPO_ROOT" rev-parse -q --verify "refs/heads/${plan_branch}" 2>/dev/null || git -C "$REPO_ROOT" rev-parse HEAD)"
+  recorded="$(jq -r '"\(.candidate_version // "")|\(.changelog_version // "")"' "$rec")"
+  carried="$(_release_carried_version "$rev")|$(_release_carried_version "$rev" changelog)"
+  [[ "$recorded" == "|" ]] && recorded=""
+  if [[ -n "$recorded" && "$carried" != "$recorded" ]]; then
+    if [[ "$intent" == none && "$adopt" == 1 ]]; then :
+    elif [[ "$intent" == none ]]; then
+      echo "REFUSED (release_prep_version_changed): ${plan_id} carries ${carried:-no version}, its no-release record ${recorded}" >&2
+      echo "  next: aid-release.sh rebind ${plan_id} --plan-branch ${plan_branch} --adopt-version (it stays a no-release plan), or revert the change" >&2
+      exit 3
+    else
+      echo "REFUSED (release_prep_version_changed): ${plan_id} was prepared as ${recorded} and now carries ${carried:-no version} — a commit after the preparation changed it" >&2
+      echo "  next: aid-release.sh prepare-plan ${plan_id} --bump none --plan-branch ${plan_branch} (the carried version becomes the prepared one), or revert the change" >&2
+      exit 3
+    fi
+  elif (( adopt )); then
+    [[ "$intent" == none ]] || { echo "REFUSED: --adopt-version is for a no-release plan; ${plan_id} is prepared as $(jq -r .version "$rec")" >&2; exit 1; }
+  fi
+  local tmp="${rec}.tmp.$$"
+  jq --arg h "$rev" --arg t "$(git -C "$REPO_ROOT" rev-parse "${rev}^{tree}")" --arg cv "${carried%%|*}" --arg clv "${carried#*|}" \
+     --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+     '.prepare_commit = $h | .tree = $t | .candidate_version = $cv | .changelog_version = $clv | .intent = (.intent // (if .version == "none" then "none" else "release" end))
+      | .rebound_at = $at | .schema_version = "aid-release-prep-1.1"' "$rec" > "$tmp" && mv "$tmp" "$rec" \
+    || { rm -f "$tmp"; echo "ERROR: could not rebind ${rec}" >&2; exit 1; }
+  echo "rebound ${plan_id}: $(jq -r '"\(.intent) \(.version), carried \(.candidate_version)"' "$rec") at ${rev:0:8}"
+}
+
 main() {
   case "${1:-}" in
+    rebind)       shift; cmd_rebind "$@" ;;
+    carried-version) shift   # [--project-root <p>] [--rev <commit>]
+      local _cv_rev=""; while [[ $# -gt 0 ]]; do case "$1" in
+        --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; REPO_ROOT="$(cd "$2" && git rev-parse --show-toplevel)"; shift 2 ;;
+        --rev) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; _cv_rev="$2"; shift 2 ;; *) shift ;; esac; done
+      printf '%s|%s\n' "$(_release_carried_version "$_cv_rev")" "$(_release_carried_version "$_cv_rev" changelog)" ;;
     prepare-plan) shift; cmd_prepare_plan "$@" ;;
     tag-plan)     shift; cmd_tag_plan "$@" ;;
     *) _release_legacy_bump "$@" ;;

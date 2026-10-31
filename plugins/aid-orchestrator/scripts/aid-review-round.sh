@@ -536,7 +536,15 @@ cmd_prepare() {
       prev="$(_round_dir $((ROUND - 1)))"
       if [[ "$MODE" != plan ]]; then
         [[ -f "${prev}/measurement.json" ]] || _die "round $((ROUND - 1)) is not closed"
-        [[ "$(jq -r .head_sha "${prev}/round.json")" != "$(_head)" ]] \
+        # 3.13.0: the takeover's replaced commands are evidence the round judged — when they changed since the last
+        # round (aid-step-land.sh --recheck with another --check/--reason), a new round reviews them at the same HEAD
+        local _repl_now="" _repl_was=""
+        if [[ "$CHECKPOINT" == cp2 && -n "${STEP:-}" ]]; then
+          local _lf; _lf="${EVID}/steps/$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "${EVID}/plan.json" 2>/dev/null || true)/land.json"
+          [[ -f "$_lf" ]] && _repl_now="$(jq -r '(.replacements // [])[] | "- AC\(.ac): `\(.command)` instead of `\(.plan_command)` — \(.reason)"' "$_lf" 2>/dev/null || true)"
+          _repl_was="$(grep -E '^- AC[0-9]+: `.*` instead of `' "${prev}/packet/dod.md" 2>/dev/null || true)"
+        fi
+        [[ "$(jq -r .head_sha "${prev}/round.json")" != "$(_head)" || -n "$_repl_now" && "$_repl_now" != "$_repl_was" ]] \
           || _die "HEAD has not moved since round $((ROUND - 1)); a confirmation round reviews a fix"
         [[ "$(jq -r '.verdict // ""' "${prev}/measurement.json")" == pass ]] && delta=1
       fi
@@ -690,13 +698,13 @@ cmd_prepare() {
   # The bracket is copied, never composed: a controller that dispatched without
   # it back-dated one to get out (P010) — the forgery the detector exists for.
   if [[ "$MODE" == step ]]; then
-    echo "  brackets — run start BEFORE each dispatch and complete AFTER it (a bracket written after the answer is a forgery):"
+    echo "  brackets — run start BEFORE each dispatch and complete AFTER it (a bracket written after the answer is a forgery); start prints nonce=<n>: pass it to complete (and cancel) as --nonce <n>, it is what lets AID-WAIT end the turn while the reviewer runs:"
     for role in "${roles[@]}"; do
       _is_carried "$dir" "$role" && continue
       i="$(aid_review_role_index "$role")"
       [[ "${RC_PROVIDER[$i]}" == claude ]] || continue
       echo "    bash \"\$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh\" start --focus $(_focus "$role") --agent-id aid-orchestrator:review --evidence-dir ${dir}"
-      echo "    bash \"\$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh\" complete --focus $(_focus "$role") --output-file ${dir}/reviewer-${role}.json --evidence-dir ${dir}"
+      echo "    bash \"\$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh\" complete --focus $(_focus "$role") --output-file ${dir}/reviewer-${role}.json --evidence-dir ${dir} --nonce <its start's nonce>"
     done
   fi
 }
@@ -1029,8 +1037,15 @@ _token_value() {
 _bracket_last() {
   local tl="$1/timeline.jsonl" focus; focus="${3:-$(_focus "$2")}"   # P112: an exact focus (the delegate's)
   [[ -f "$tl" ]] || { echo none; return 0; }
-  jq -r --arg f "$focus" 'select(.focus == $f and (.event | IN("verifier_dispatch_start", "verifier_dispatch_complete", "verifier_dispatch_cancel"))) | .event' "$tl" 2>/dev/null \
-    | tail -1 | sed 's/^verifier_dispatch_//; s/^$/none/' | grep . || echo none
+  # 3.13.0: with nonces, what counts is the LAST start and whatever ended THAT start (a later complete or cancel of an
+  # older start of the same focus says nothing about it); events without a nonce keep the old reading
+  jq -rs --arg f "$focus" '
+    [.[] | select(.focus == $f and (.event | IN("verifier_dispatch_start", "verifier_dispatch_complete", "verifier_dispatch_cancel")))] as $ev
+    | ([$ev[] | select(.event == "verifier_dispatch_start")] | last) as $s
+    | if $s == null then "none"
+      elif (($s.nonce // "") | IN("", "null")) then ($ev | last | .event)
+      else ([$ev[] | select(.event != "verifier_dispatch_start" and .nonce == $s.nonce)] | last | .event) // "verifier_dispatch_start"
+      end' "$tl" 2>/dev/null | sed 's/^verifier_dispatch_//; s/^$/none/' | grep . || echo none
 }
 _dispatch_recorded() {
   local tl="$1/timeline.jsonl" focus; focus="${3:-$(_focus "$2")}"
@@ -1040,11 +1055,19 @@ _dispatch_recorded() {
   jq -c --arg f "$focus" 'select(.event == "verifier_dispatch_start" and .focus == $f)' "$tl" 2>/dev/null | grep -q . || return 1
   # the LAST complete of the focus is the one that counts, and it must name this role's file
   if [[ -n "${4:-}" ]]; then   # P112: the complete names exactly this file
-    [[ "$(jq -r --arg f "$focus" 'select(.event == "verifier_dispatch_complete" and .focus == $f) | .output_file // ""' "$tl" 2>/dev/null | tail -1)" == "$4" ]]
+    [[ "$(_dispatch_last_complete "$tl" "$focus")" == "$4" ]]
     return
   fi
-  jq -r --arg f "$focus" 'select(.event == "verifier_dispatch_complete" and .focus == $f) | .output_file // ""' "$tl" 2>/dev/null | tail -1 \
-    | grep -Eq "reviewer-${2}\.(json|missing)$"
+  _dispatch_last_complete "$tl" "$focus" | grep -Eq "reviewer-${2}\.(json|missing)$"
+}
+# _dispatch_last_complete <timeline> <focus> — the output_file of the complete that ended the LAST start (by its nonce;
+# a timeline without nonces: the last complete of the focus, as before 3.13.0)
+_dispatch_last_complete() {
+  jq -rs --arg f "$2" '
+    ([.[] | select(.focus == $f and .event == "verifier_dispatch_start")] | last) as $s
+    | [.[] | select(.focus == $f and .event == "verifier_dispatch_complete")] as $c
+    | if (($s.nonce // "") | IN("", "null")) then ($c | last | .output_file // "")
+      else ([$c[] | select(.nonce == $s.nonce)] | last | .output_file // "") end' "$1" 2>/dev/null
 }
 
 # ── the semantic file of a whole-plan (cp7) round ─────────────────────────────
@@ -1292,7 +1315,7 @@ to close the round at the revision the reviewers saw; the fix is confirmed by th
   done
   local fixer=null
   if [[ -n "$FIXER" ]]; then
-    [[ "$FIXER" =~ ^([a-z_-]+)=([^:]+):([0-9]+|unknown):([0-9]+|unknown)$ ]] || _die "--fixer takes <role>=<model>:<tokens_in>:<tokens_out>" 2
+    [[ "$FIXER" =~ ^([a-z][a-z0-9_-]*)=([^:]+):([0-9]+|unknown):([0-9]+|unknown)$ ]] || _die "--fixer takes <role>=<model>:<tokens_in>:<tokens_out>" 2
     local fusd; fusd="$(aid_review_usd "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" 0 0)"
     fixer="$(jq -nc --arg r "${BASH_REMATCH[1]}" --arg m "${BASH_REMATCH[2]}" --arg i "${BASH_REMATCH[3]}" --arg o "${BASH_REMATCH[4]}" --arg u "$fusd" \
       '{role: $r, model: $m, tokens_in: ($i | tonumber? // $i), tokens_out: ($o | tonumber? // $o),
@@ -1391,7 +1414,9 @@ _check_fix() {
   if [[ -n "$ALSO_STEPS" ]]; then
     [[ -n "$REASON" ]] || _die "--also-steps needs --reason: say which fix made these steps change (the next round's card names it)" 2
     [[ "$ALSO_STEPS" =~ ^[0-9]+(,[0-9]+)*$ ]] || _die "--also-steps takes step numbers: 5 or 5,6" 2
-    if [[ "$allowed" == none ]]; then allowed="$ALSO_STEPS"; else allowed="${allowed},${ALSO_STEPS}"; fi
+    # a plan-level finding already allows any step: the steps are only recorded (WAN P116 28. 10. 2026: `any,8,9,11`
+    # narrowed the check to 8, 9 and 11 and refused the legitimate fix)
+    if [[ "$allowed" == none ]]; then allowed="$ALSO_STEPS"; elif [[ "$allowed" != any ]]; then allowed="${allowed},${ALSO_STEPS}"; fi
   fi
   "${SCRIPT_DIR}/aid-plan-check.sh" "$PLAN" --project-root "$ROOT" --snapshot "${dir}/packet/plan.md" \
     --fixes "$allowed" --json "$out" --quiet || rc=$?
@@ -1621,7 +1646,7 @@ _dlg_kind() { [[ "$(jq -r .status <<< "$1")" == disputed ]] && echo dispute || e
 # finding already answered in this round, or classed brief|money|data, is not.
 _dlg_pending() {
   jq -r --argjson last "$2" '.findings[]
-    | select(.delegated == null and (.dispute.delegated // null) == null)
+    | select(.delegated == null and (.dispute.delegated // null) == null and (.dispute.handed_to_confirmation // null) == null)
     | select(.status == "disputed" or ($last == 1 and (.status | IN("open", "form_invalid")) and (.severity == "blocker" or .severity == "major")))
     | .fingerprint' "$1/merged.json" 2>/dev/null
 }
@@ -1701,9 +1726,29 @@ cmd_delegate() {
   fi
   [[ "$(jq -r .status <<< "$finding")" == fixed && -z "$VERDICT" ]] && _die "finding ${FINGERPRINT} is fixed — nothing to settle"
   kind="$(_dlg_kind "$finding")"
-  if [[ -z "$VERDICT" ]] && _dlg_fix_touched "$dir" "$finding"; then
-    _dlg_refuse delegation_fix_pending "a commit after round ${ROUND} changed the lines finding ${FINGERPRINT} cites ($(jq -r '.evidence' <<< "$finding" | cut -d';' -f1)) — a fix is judged by the next round, not by an adjudicator" \
-      "freeze the new candidate (cp7) or prepare the next round (cp2): its confirmation lists the finding and the fix"
+  if [[ -z "$VERDICT" && "$CHECKPOINT" == cp7 ]] && _dlg_fix_touched "$dir" "$finding"; then
+    # a CP7 fix is a new candidate: the next attempt's confirmation judges it (no adjudicator, no handoff here)
+    _dlg_refuse delegation_fix_pending "a commit after round ${ROUND} changed the lines finding ${FINGERPRINT} cites ($(jq -r '.evidence' <<< "$finding" | cut -d';' -f1)) — a fix is judged by the next attempt's confirmation, not by an adjudicator" \
+      "freeze the new candidate: its confirmation round lists the finding and the fix"
+  fi
+  if [[ -z "$VERDICT" && "$CHECKPOINT" == cp2 ]] && _dlg_fix_touched "$dir" "$finding"; then
+    # 3.13.0: a commit after the round changed the lines the finding cites — the fix is the next round's to confirm.
+    # The dispute is handed to that round: the finding stays OPEN and blocking, so this round closes (as failed while a
+    # blocker stays) and the next one confirms or reopens it (WAN P115 25. 10. 2026: delegate refused, close waited
+    # for the dispute, the next round waited for the close — only the PM's card was left). No round is added: past the
+    # budget the next prepare refuses as before (REVIEW_EXHAUSTED → the stand-in); nobody judges the fix at a moved HEAD.
+    local _hc; _hc="$(git -C "$ROOT" rev-parse HEAD)"
+    jq --arg f "$FINGERPRINT" --arg c "$_hc" --arg at "$(_now)" \
+       '.findings |= map(if .fingerprint == $f then
+          (if .status == "disputed" then .status = "open" else . end)
+          | .dispute = ((.dispute // {}) + {handed_to_confirmation: {commit: $c, at: $at,
+              reason: "a commit after the round changed the lines the finding cites; the next round confirms the fix"}})
+        else . end)' "${dir}/merged.json" > "${dir}/merged.json.tmp" && mv "${dir}/merged.json.tmp" "${dir}/merged.json"
+    _dlg_resync "$dir" handed
+    _log delegation_handed_to_confirmation fingerprint="$FINGERPRINT" commit="$_hc"
+    echo "finding ${FINGERPRINT}: a commit after round ${ROUND} changed the lines it cites — handed to the next round's confirmation; it stays open and blocking"
+    echo "next: close the round at its reviewed head (bash ${SCRIPT_DIR}/aid-review-round.sh close --checkpoint ${CHECKPOINT} --evidence-dir ${EVID}${STEP:+ --step ${STEP}} --round ${ROUND} --at $(jq -r .head_sha "${dir}/round.json") --tokens …), then $( [[ "$CHECKPOINT" == cp7 ]] && echo "freeze the new candidate" || echo "prepare the next round (past the round budget: REVIEW_EXHAUSTED, the stand-in decides)")"
+    return 0
   fi
   [[ "$kind" == dispute ]] || (( last )) \
     || _die "finding ${FINGERPRINT} is open but round ${ROUND} is not the last one the plan allows — the fix loop goes on; nothing is escalated yet"
@@ -1737,7 +1782,7 @@ cmd_delegate() {
     if (( rc != 0 )); then
       # what the worktree looked like before the stand-in: its record refuses files it adds (F14)
       _dlg_tree_state "$dir" > "${dir}/adjudicator-delegated-${fp16}.status-before" || true
-      echo "STAND-IN: no codex verdict (${why}); dispatch ${prompt} to an independent general-purpose agent at model ${RC_STAND_IN_MODEL} inside the bracket adjudicator-delegated-${fp16} (aid-emit-dispatch.sh start --focus adjudicator-delegated-${fp16} --agent-id claude:adjudicator-delegated --evidence-dir ${dir}; complete … --output-file ${vfile}), have it write ${vfile} with \"provider\": \"claude\", then: aid-review-round.sh delegate --checkpoint ${CHECKPOINT} --evidence-dir ${EVID}${STEP:+ --step ${STEP}} --round ${ROUND} --fingerprint ${FINGERPRINT} --verdict ${vfile}"
+      echo "STAND-IN: no codex verdict (${why}); dispatch ${prompt} to an independent general-purpose agent at model ${RC_STAND_IN_MODEL} inside the bracket adjudicator-delegated-${fp16} (aid-emit-dispatch.sh start --focus adjudicator-delegated-${fp16} --agent-id claude:adjudicator-delegated --evidence-dir ${dir}; complete … --output-file ${vfile} --nonce <its start's nonce>), have it write ${vfile} with \"provider\": \"claude\", then: aid-review-round.sh delegate --checkpoint ${CHECKPOINT} --evidence-dir ${EVID}${STEP:+ --step ${STEP}} --round ${ROUND} --fingerprint ${FINGERPRINT} --verdict ${vfile}"
       exit 4
     fi
     jq '.provider = "codex"' "$vfile" > "${vfile}.tmp" && mv "${vfile}.tmp" "$vfile"
@@ -1770,7 +1815,7 @@ cmd_delegate() {
     { _dispatch_recorded "$dir" "" "adjudicator-delegated-${fp16}" "$VERDICT" \
       && [[ "$(jq -r --arg f "adjudicator-delegated-${fp16}" 'select(.event == "verifier_dispatch_start" and .focus == $f) | .agent_id // ""' "${dir}/timeline.jsonl" 2>/dev/null | tail -1)" == claude:adjudicator-delegated ]]; } \
       || _dlg_refuse delegation_missing "a Claude verdict without its closed bracket adjudicator-delegated-${fp16} (agent claude:adjudicator-delegated) naming ${VERDICT}" \
-           "dispatch the stand-in inside the bracket (aid-emit-dispatch.sh start/complete --focus adjudicator-delegated-${fp16}), then record again"
+           "dispatch the stand-in inside the bracket (aid-emit-dispatch.sh start/complete --focus adjudicator-delegated-${fp16}; pass the nonce start prints to complete --nonce), then record again"
   fi
   local before="${dir}/adjudicator-delegated-${fp16}.status-before" left
   if [[ "$provider" != codex ]]; then

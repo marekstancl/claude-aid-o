@@ -122,7 +122,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v3.12.1** (current) — odložené nálezy se značí i ve velkém repozitáři (WAN); zástupce dostává svoje pokyny (chyběla šablona)
+- **v3.13.0** (current) — běh plánu bez ručních obchvatů: převzetí kroku s náhradním příkazem, prostředí pracovních stromů, spor po opravě jde do dalšího kola, obnova sloučení se nezacyklí, kontroly vydání před sloučením
+- **v3.12.1** — odložené nálezy se značí i ve velkém repozitáři (WAN); zástupce dostává svoje pokyny (chyběla šablona)
 - **v3.12.0** — uzávěr plánu konverguje: po opravě potvrzovací kolo místo nové plné revize, nový drobný nález mimo opravu jde do backlogu (`follow_up`), rozhodnutí PM platí pro věc napříč koly a pokusy a karta nese otisky nálezů, takže projde napoprvé; uzávěr jmenuje brány, které běží znovu jen kvůli chybějícímu `inputs:`
 - **v3.11.0** — převzetí vráceného kroku na pozadí (`aid-step-land.sh`): sloučení a testy kroku běží mimo hlavní okno, plán se posune až po zelených kontrolách a `increment-step` ověří záznam; konec tahu s otevřeným krokem pustí `AID-WAIT` na vlastní převzetí; kontrola na konci tahu čte dlouhý přepis pod sekundu; volba bez hodnoty skript nezacyklí
 - **v3.10.1** — studio `/aid-ui`: strukturu role hodnotí jen na kostře (stálá adresa servíruje čistou kostru, ne starý web), přestavěná kostra webu zneplatní verdikt struktury, brány nad fakty a zákonem nejde obejít „nejde posoudit“

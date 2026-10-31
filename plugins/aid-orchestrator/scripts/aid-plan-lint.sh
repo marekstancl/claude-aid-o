@@ -223,6 +223,15 @@ _strict_finding() {
 # names a new suite, and the Reuse-check and documentation passes read it.
 _project_root="$(_aid_plan_project_root "$PLAN")" || _project_root=""
 
+# AID 3.13.0: a criterion that begins with ONE backticked word is a name, not a command (lib/aid-ac-command.sh):
+# the takeover will not run it. Advisory — say so where the plan is written, so a plan meaning a command writes one.
+if [[ "$QUIET" -eq 0 ]]; then
+  while IFS=: read -r _bn _bl; do
+    echo "${PLAN}:${_bn}: WARN ac_bare_name \`${_bl}\` is read as a name, not a command — to run it, write the command (\`${_bl} <args>\`, \`./${_bl}\`)" >&2
+  done < <(grep -nE '^[[:space:]]*- \[[ x]\] `[^` /]+`' "$PLAN" \
+             | sed -E 's/^([0-9]+):[[:space:]]*- \[[ x]\] `([^`]+)`.*/\1:\2/')
+fi
+
 # ---------------------------------------------------------------------------
 # The plan carries the brief (P109 Step 2). ERRORs in both modes, except a
 # legacy plan that names no brief, which gets the legacy warning.

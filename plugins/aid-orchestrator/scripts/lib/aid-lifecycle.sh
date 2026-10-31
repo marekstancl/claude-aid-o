@@ -320,8 +320,8 @@ _aid_lc_precheck_write() {
 #   tree from BEFORE the write. The next ordinary `git commit` there commits
 #   that stale index and silently REVERTS the write (WAN P099: a plan merge
 #   undone twice by one-file commits). So: find that worktree and bring its
-#   index and tree forward with a two-tree read-tree, which refuses rather than
-#   overwrite local edits; when it refuses, say loudly what to run first.
+#   index and tree forward path by path (3.13.0, see below), refusing — and
+#   changing nothing — wherever the user's work overlaps; return 1 then.
 _aid_lc_sync_checkout_of() {
   local root="$1" branch="$2" old="$3" new="$4"
   [[ -n "$old" && -n "$new" && "$old" != "$new" ]] || return 0
@@ -329,24 +329,88 @@ _aid_lc_sync_checkout_of() {
   wt="$(git -C "$root" worktree list --porcelain 2>/dev/null \
         | awk -v b="branch refs/heads/${branch}" '/^worktree /{w=substr($0,10)} $0==b{print w; exit}')"
   [[ -n "$wt" ]] || return 0
-  # A file the write committed may already sit in that tree, untracked and
-  # byte-identical (the close writes its receipt there before committing it):
-  # read-tree refuses to overwrite it and the receipt shows as deleted + new.
-  # Staging exactly those files lets a second read go through.
-  local synced=0 p
-  git -C "$wt" read-tree -m -u "$old" "$new" 2>/dev/null && synced=1
-  if (( ! synced )); then
-    while IFS= read -r p; do
-      [[ -f "${wt}/${p}" && "$(git -C "$wt" hash-object -- "$p")" == "$(git -C "$wt" rev-parse -q --verify "${new}:${p}")" ]] \
-        && git -C "$wt" add -f -- "$p" 2>/dev/null
-    done < <(git -C "$wt" -c core.quotepath=false diff --name-only "$old" "$new")
-    git -C "$wt" read-tree -m -u "$old" "$new" 2>/dev/null && synced=1
+  # 3.13.0: bring it to the branch's CURRENT tip, path by path. A resumed merge called this with old = the pre-merge
+  # head and new = the merge while the branch had moved on to its lifecycle commit: the read-tree took the index BACK
+  # to the merge and the lifecycle files showed as staged (WAN P116 28. 10. 2026). Every path the writes changed
+  # (old → tip and new → tip, both sides of a rename) is judged on its own:
+  #   index at the tip's version — done, except a file on disk still at old's or new's version (stale), which is
+  #   brought to the tip too (an unstaged edit of the user's own stays);
+  #   index at old's or new's version (or absent where that commit has none) AND the file unchanged against the index,
+  #   or an untracked file under .aid-lifecycle/ byte-identical to the tip's (the close's receipt) — brought to the tip;
+  #   anything else — the user's work overlaps: refused, NOTHING is changed, and a backup is offered only when tar
+  #   verifiably holds every overlapping file (otherwise the warning says to save them by hand first).
+  local tip p T I W O N; local -a span=() upd=() bad=()
+  # paths are literal (a file named `a*` is that file, never a pattern) and NUL-separated (any name)
+  local -x GIT_LITERAL_PATHSPECS=1
+  tip="$(git -C "$root" rev-parse -q --verify "refs/heads/${branch}" 2>/dev/null)" || tip="$new"
+  mapfile -d '' -t span < <({ git -C "$wt" diff -z --no-renames --name-only "$old" "$tip"
+                              git -C "$wt" diff -z --no-renames --name-only "$new" "$tip"; } | sort -zu)
+  (( ${#span[@]} )) || return 0
+  # an entry is "<mode> <blob>" — a change of only the executable bit is a change
+  _ent()  { git -C "$wt" ls-tree "$1" -- "$2" 2>/dev/null | awk 'NR==1{print $1" "$3}'; }
+  _ient() { git -C "$wt" ls-files -s -- "$1" 2>/dev/null | awk 'NR==1{print $1" "$2}'; }
+  _went() {
+    local f="${wt}/$1"
+    [[ -L "$f" ]] && { printf '120000 %s' "$(readlink -n -- "$f" | git -C "$wt" hash-object --stdin)"; return; }   # the exact target bytes
+    [[ -f "$f" ]] || { [[ -e "$f" ]] && printf 'other'; return; }
+    printf '%s %s' "$( [[ -x "$f" ]] && echo 100755 || echo 100644)" "$(git -C "$wt" hash-object --no-filters -- "$1" 2>/dev/null)"
+  }
+  for p in "${span[@]}"; do
+    T="$(_ent "$tip" "$p")"; O="$(_ent "$old" "$p")"; N="$(_ent "$new" "$p")"; I="$(_ient "$p")"; W="$(_went "$p")"
+    if [[ "$I" == "$T" ]]; then
+      # the index is at the tip; the file on disk still at the old or merge version is stale, not the user's edit
+      [[ "$W" != "$T" && ( "$W" == "$O" || "$W" == "$N" ) ]] && upd+=("$p")
+      continue
+    elif [[ ( "$I" == "$O" || "$I" == "$N" ) && "$W" == "$I" ]]; then upd+=("$p")
+    elif [[ -z "$I" && -n "$T" && "$W" == "$T" && "$p" == .aid-lifecycle/* ]]; then upd+=("$p")   # AID's own record
+    else bad+=("$p"); fi
+  done
+  if (( ${#bad[@]} )); then
+    local report; report="$(printf '%q ' "${bad[@]}")"; report="${report% }"
+    # AID itself keeps the user's state of those files before anyone touches them: the files, links and modes on disk
+    # (a tar) and what was staged (the index entries and their blobs), in a new directory inside .git — outside the
+    # tree, never overwriting anything
+    local bk="" e m h st f
+    bk="$(git -C "$wt" rev-parse --path-format=absolute --git-dir 2>/dev/null)/aid-merge-sync-backup-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    if mkdir -p -- "${bk}/staged" 2>/dev/null; then
+      ( cd -- "$wt" && tar --ignore-failed-read -cf "${bk}/worktree.tar" -- "${bad[@]}" ) 2>/dev/null || true
+      git -C "$wt" ls-files -s -z -- "${bad[@]}" > "${bk}/index-entries" 2>/dev/null || true
+      while IFS= read -r -d '' e; do
+        h="$(awk '{print $2}' <<< "$e")"; f="${e#*$'\t'}"
+        git -C "$wt" cat-file blob "$h" > "${bk}/staged/$(printf '%s' "$f" | sha256sum | cut -c1-16)" 2>/dev/null || true
+        printf '%s\t%s\n' "$(printf '%s' "$f" | sha256sum | cut -c1-16)" "$e" >> "${bk}/staged/INDEX" 2>/dev/null || true
+      done < "${bk}/index-entries"
+      # the backup counts only when tar listed every overlapping path that exists on disk
+      local ok=1
+      for f in "${bad[@]}"; do
+        [[ -e "${wt}/${f}" || -L "${wt}/${f}" ]] || continue
+        tar -tf "${bk}/worktree.tar" 2>/dev/null | grep -qxF -- "$f" || { ok=0; break; }
+      done
+      (( ok )) || bk=""
+    else
+      bk=""
+    fi
+    local -a at_tip=() gone=()
+    for f in "${bad[@]}"; do [[ -n "$(_ent "$tip" "$f")" ]] && at_tip+=("$f") || gone+=("$f"); done
+    local fix="cd -- $(printf '%q' "$wt")"
+    (( ${#at_tip[@]} )) && fix+=" && GIT_LITERAL_PATHSPECS=1 git checkout ${tip:0:12} -- $(printf '%q ' "${at_tip[@]}")&& GIT_LITERAL_PATHSPECS=1 git reset -q -- $(printf '%q ' "${at_tip[@]}")"
+    (( ${#gone[@]} )) && fix+=" && GIT_LITERAL_PATHSPECS=1 git rm -q --cached --ignore-unmatch -- $(printf '%q ' "${gone[@]}")&& rm -f -- $(printf '%q ' "${gone[@]}")"
+    if [[ -n "$bk" ]]; then
+      echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree are not at ${tip:0:12}: local changes overlap with: ${report}. Nothing was changed. A plain 'git commit' there would REVERT this write — do not commit there. Your state of those files is saved in ${bk} (worktree.tar: the files, links and modes on disk; index-entries and staged/: what was staged). Take the branch's version, run the AID command again, then bring your edits back by hand from that directory: ${fix}" >&2
+    else
+      echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree are not at ${tip:0:12}: local changes overlap with: ${report}. Nothing was changed. A plain 'git commit' there would REVERT this write — do not commit there. AID could NOT save a backup of those files: save them by hand first (copy the files and note what is staged), and only then take the branch's version and run the AID command again." >&2
+    fi
+    return 1
   fi
-  if (( synced )); then
-    echo "NOTE: ${branch} is checked out in ${wt} — its index and tree were brought forward to ${new:0:12}, so the next commit there does not revert this write." >&2
-  else
-    echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree still show the state BEFORE ${new:0:12} (local changes overlap). A plain 'git commit' there would REVERT this write. Before any commit in ${wt} run: git -C ${wt} reset --merge" >&2
-  fi
+  (( ${#upd[@]} )) || return 0
+  for p in "${upd[@]}"; do
+    if [[ -n "$(_ent "$tip" "$p")" ]]; then
+      git -C "$wt" checkout -q "$tip" -- "$p" 2>/dev/null || { echo "WARNING: could not bring ${p} in ${wt} to ${tip:0:12}" >&2; return 1; }
+    else
+      git -C "$wt" rm -q --cached --ignore-unmatch -- "$p" 2>/dev/null; rm -f -- "${wt}/${p}"
+    fi
+  done
+  echo "NOTE: ${branch} is checked out in ${wt} — its index and tree were brought forward to ${tip:0:12}, so the next commit there does not revert this write." >&2
   return 0
 }
 
@@ -403,7 +467,8 @@ _aid_lc_isolated_commit() {
       # Advance the CAS base so a SECOND plan-mode commit in the same pass (the
       # receipt, Step 6) chains onto this one instead of re-CASing against a
       # commit the ref has already left.
-      [[ -n "$newsha" ]] && { _aid_lc_sync_checkout_of "$root" "$tb" "$parent" "$newsha"; _AID_LC_PLAN_PARENT="$newsha"; }
+      # (an overlap is reported by the sync; the lifecycle commit itself stands and is idempotent)
+      [[ -n "$newsha" ]] && { _aid_lc_sync_checkout_of "$root" "$tb" "$parent" "$newsha" || true; _AID_LC_PLAN_PARENT="$newsha"; }
       # Restore the worktree copies: the content is durable on the target branch,
       # and leaving the plan branch dirty would fail the next stage's clean-tree
       # precondition for a change that is not the plan branch's.

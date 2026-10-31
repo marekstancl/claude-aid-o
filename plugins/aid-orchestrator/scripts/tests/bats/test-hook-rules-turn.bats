@@ -231,3 +231,82 @@ _takeover_gone() { kill "$TAKEOVER_PID" 2>/dev/null; wait "$TAKEOVER_PID" 2>/dev
   [[ "$(jq -r '.hookSpecificOutput.additionalContext' <<< "$output")" == *"lib/other.sh"* ]]
   grep -q '"rule":"turn_write_scope","outcome":"inject"' "$AID_HOOK_AUDIT"
 }
+
+# ── AID 3.13.0: a reviewer or fixer of the step running in the background ────
+_cp2_start() {  # <round> <focus> [age seconds] — a start in the round's pending ledger, its nonce echoed in this transcript
+  local rd="$EV/cp2/step-0/round-$1" n="n$RANDOM$RANDOM" at; mkdir -p "$rd"
+  at="$(date -u -d "-${3:-5} seconds" +%Y-%m-%dT%H:%M:%SZ)"
+  jq -nc --arg ts "$at" --arg f "$2" --arg n "$n" --arg rd "$rd" '{ts: $ts, event: "start", focus: $f, agent_id: "x", step_n: 0, evidence_dir: $rd, expected_duration_max: 600, nonce: $n}' >> "$rd/pending-dispatches.jsonl"
+  jq -nc --arg f "$2" --arg n "$n" --arg ts "$at" '{ts: $ts, event: "verifier_dispatch_start", focus: $f, nonce: $n}' >> "$rd/timeline.jsonl"
+  local id="toolu_s$RANDOM$RANDOM"
+  jq -nc --arg id "$id" --arg c "bash \"/p/scripts/aid-emit-dispatch.sh\" start --focus $2 --agent-id aid-orchestrator:review --evidence-dir $rd" \
+    '{type:"assistant",message:{content:[{type:"tool_use",id:$id,name:"Bash",input:{command:$c,run_in_background:false}}]}}' >> "$TRANSCRIPT"
+  jq -nc --arg id "$id" --arg t "nonce=$n focus=$2 evidence=$rd" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:$id,content:$t}]}}' >> "$TRANSCRIPT"
+  LAST_NONCE="$n"
+}
+@test "turn (3.13.0): AID-WAIT ends the turn while this session's CP2 reviewer or fixer of the open step runs, and not after" {
+  _cp2_start 1 cp2-step-0-step-generalist; _say "AID-WAIT: revize kroku 1"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; echo "$output"; [ "$status" -eq 3 ]
+  # complete removes the start from the ledger: nothing to wait on
+  : > "$EV/cp2/step-0/round-1/pending-dispatches.jsonl"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  # a fixer of the step counts the same way
+  _cp2_start 1 fix-cp2-0-r1; _say "AID-WAIT: oprava kroku 1"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 3 ]
+}
+@test "turn (3.13.0): another session's start, a start past its time limit, or another step's round does not excuse the step" {
+  # another session: in the ledger, but its nonce never appears in this transcript
+  mkdir -p "$EV/cp2/step-0/round-1"
+  jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{ts: $ts, event: "start", focus: "cp2-step-0-step-generalist", expected_duration_max: 600, nonce: "foreign1"}' >> "$EV/cp2/step-0/round-1/pending-dispatches.jsonl"
+  _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  # past its own limit
+  : > "$EV/cp2/step-0/round-1/pending-dispatches.jsonl"; _cp2_start 1 cp2-step-0-step-generalist 900; _say "AID-WAIT: revize"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  # another step's round
+  rm -rf "$EV/cp2"; mkdir -p "$EV/cp2/step-3/round-1"; n="n$RANDOM"
+  jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg n "$n" '{ts: $ts, event: "start", focus: "cp2-step-3-x", expected_duration_max: 600, nonce: $n}' >> "$EV/cp2/step-3/round-1/pending-dispatches.jsonl"
+  printf '{"type":"user","message":{"content":"nonce=%s focus=x evidence=y"}}\n' "$n" >> "$TRANSCRIPT"
+  _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+}
+
+@test "turn (3.13.0): an older start of a focus whose newer start ended, a nonce the model only typed, or another evidence dir does not excuse the step" {
+  _cp2_start 1 cp2-step-0-step-generalist; local a="$LAST_NONCE"
+  _cp2_start 1 cp2-step-0-step-generalist; local b="$LAST_NONCE"
+  # B completes: its line leaves the ledger, A stays — but A is not the focus's last start
+  jq -c --arg n "$b" 'select(.nonce != $n)' "$EV/cp2/step-0/round-1/pending-dispatches.jsonl" > "$TMP/p" && mv "$TMP/p" "$EV/cp2/step-0/round-1/pending-dispatches.jsonl"
+  _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  # a nonce in the model's own text, not in a tool result
+  rm -rf "$EV/cp2"; mkdir -p "$EV/cp2/step-0/round-1"
+  jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{ts: $ts, event: "start", focus: "cp2-step-0-step-generalist", expected_duration_max: 600, nonce: "typed1"}' >> "$EV/cp2/step-0/round-1/pending-dispatches.jsonl"
+  jq -nc '{event: "verifier_dispatch_start", focus: "cp2-step-0-step-generalist", nonce: "typed1"}' >> "$EV/cp2/step-0/round-1/timeline.jsonl"
+  _say "nonce=typed1 focus=cp2-step-0-step-generalist evidence=$EV/cp2/step-0/round-1"; _say "AID-WAIT: revize"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  # printed in a tool result, but for another evidence dir — or by another command (a cat of the ledger) than this start
+  printf '{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"x1","content":"nonce=typed1 focus=cp2-step-0-step-generalist evidence=/elsewhere"}]}}\n' >> "$TRANSCRIPT"
+  jq -nc '{type:"assistant",message:{content:[{type:"tool_use",id:"cat1",name:"Bash",input:{command:"cat pending-dispatches.jsonl"}}]}}' >> "$TRANSCRIPT"
+  jq -nc --arg t "nonce=typed1 focus=cp2-step-0-step-generalist evidence=$EV/cp2/step-0/round-1" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:"cat1",content:$t}]}}' >> "$TRANSCRIPT"
+  _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+}
+
+@test "turn (3.13.0): a start of round 1 superseded by the same focus in round 2 does not count once round 2's ended" {
+  _cp2_start 1 cp2-step-0-step-generalist; sleep 1; _cp2_start 2 cp2-step-0-step-generalist
+  : > "$EV/cp2/step-0/round-2/pending-dispatches.jsonl"            # round 2's start completed
+  _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+}
+
+@test "turn (3.13.0): the background agent and the takeover are still recognised (3.11.0 paths kept)" {
+  _takeover_running; _bg_call toolu_land; _say "AID-WAIT: převzetí kroku 0"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; _takeover_gone; [ "$status" -eq 3 ]
+}
+
+@test "turn (3.13.0): a pending line in another round's ledger with the last start's nonce does not count" {
+  _cp2_start 1 cp2-step-0-step-generalist; local n="$LAST_NONCE"
+  mkdir -p "$EV/cp2/step-0/round-2"; mv "$EV/cp2/step-0/round-1/pending-dispatches.jsonl" "$EV/cp2/step-0/round-2/pending-dispatches.jsonl"
+  _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+}
+
+@test "turn (3.13.0): a pending line whose evidence_dir names another run does not count" {
+  _cp2_start 1 cp2-step-0-step-generalist
+  jq -c '.evidence_dir = "/other/run/cp2/step-0/round-1"' "$EV/cp2/step-0/round-1/pending-dispatches.jsonl" > "$TMP/p" && mv "$TMP/p" "$EV/cp2/step-0/round-1/pending-dispatches.jsonl"
+  _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+}

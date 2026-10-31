@@ -4341,3 +4341,126 @@ _seed_named_project() {
   echo "$output"; [ "$status" -eq 0 ]
   [[ "$output" == *"PASS [test_named_after_plan]"* ]]
 }
+
+# ─── 3.13.0: the release record against the candidate at the freeze ─────────
+_rel_ready() {   # <carried> <record json filter> — a bootstrapped plan whose plan branch carries <carried> in CHANGELOG
+  _bootstrap; _add_epic "$PLAN_ID" "E-068-1_2"
+  _commit_on "plan/$PLAN_ID" CHANGELOG.md "## [$1] — x"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  jq -n "{schema_version: \"aid-release-prep-1.1\", plan_id: \"$PLAN_ID\", plan_branch: \"plan/$PLAN_ID\", bump_requested: \"minor\", tree: \"stale\"} | $2" \
+    > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"
+}
+_rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"; }
+
+@test "freeze (3.13.0): a version changed after the preparation is refused before anything is bumped or merged" {
+  _rel_ready 0.46.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0" | .changelog_version = "0.45.0"'
+  _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"REFUSED (release_prep_version_changed)"* && "$output" == *"--bump none"* ]]
+  [ "$(_rec .version)" = 0.45.0 ]
+}
+
+@test "freeze (3.13.0): a release version not above the target's highest tag is refused before the sync" {
+  _rel_ready 0.45.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0" | .changelog_version = "0.45.0"'
+  git -C "$TEST_PROJECT_ROOT" tag v0.45.0 main
+  _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"REFUSED (plan_version_not_above_target)"* ]]
+  git -C "$TEST_PROJECT_ROOT" tag -d v0.45.0 >/dev/null; git -C "$TEST_PROJECT_ROOT" tag v0.9.0 main
+  _rel_ready 0.10.0 '.version = "0.10.0" | .intent = "release" | .candidate_version = "0.10.0" | .changelog_version = "0.10.0"'   # numerically above
+  _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -eq 0 ]
+  # the record follows the final tree, without a bump
+  [ "$(_rec .version)" = 0.10.0 ]; [ "$(_rec .tree)" != stale ]
+}
+
+@test "freeze (3.13.0): a no-release plan whose carried version moved takes it only with --adopt-version, and stays no-release" {
+  _rel_ready 0.47.0 '.version = "none" | .intent = "none" | .candidate_version = "0.46.0" | .changelog_version = "0.46.0"'
+  _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"--adopt-version"* ]]
+  run bash "$AID_PLUGIN_PATH/scripts/aid-release.sh" rebind "$PLAN_ID" --plan-branch "plan/$PLAN_ID" --project-root "$TEST_PROJECT_ROOT" --adopt-version
+  echo "$output"; [ "$status" -eq 0 ]; [ "$(_rec .intent)" = none ]; [ "$(_rec .version)" = none ]; [ "$(_rec .candidate_version)" = 0.47.0 ]
+}
+
+@test "freeze (3.13.0): no record, or one from before 3.13.0, is not checked; an unreadable one is refused" {
+  _rel_ready 0.45.0 '.version = "0.45.0"'                        # no candidate_version: a 3.12 record
+  _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -eq 0 ]
+  _rel_ready 0.45.0 '.'; printf '{broken' > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"
+  _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"REFUSED (release_prep_stale)"* ]]
+}
+
+@test "prepare-plan (3.13.0): --again prepares a higher version on top of an earlier prepare commit; the record binds the commit" {
+  _bootstrap; _seed_version_project
+  _prepare "$PLAN_ID"; [ "$status" -eq 0 ]
+  local head1; head1="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  _prepare "$PLAN_ID" --again; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" != *"Already prepared"* ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")" != "$head1" ]
+  local rec="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"
+  [ "$(jq -r .tree "$rec")" = "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/${PLAN_ID}^{tree}")" ]
+  [ "$(jq -r .intent "$rec")" = release ]
+}
+
+@test "freeze (3.13.0): a record whose version is not the one the candidate carries is refused; a bare X.Y.Z tag counts like vX.Y.Z" {
+  _rel_ready 0.45.0 '.version = "0.44.0" | .intent = "release" | .candidate_version = "0.45.0" | .changelog_version = "0.45.0"'
+  _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"the CHANGELOG and the manifest disagree"* ]]
+  _rel_ready 0.45.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0" | .changelog_version = "0.45.0"'
+  git -C "$TEST_PROJECT_ROOT" tag 0.45.0 main
+  _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"plan_version_not_above_target"*"--again"* ]]
+}
+
+@test "merge (3.13.0): a release record of another tree than the frozen candidate is refused before anything is merged" {
+  _seed_merge_project
+  jq -n '{schema_version: "aid-release-prep-1.1", version: "9.9.9", intent: "release", candidate_version: "9.9.9", tree: "0000000000000000000000000000000000000000"}' > "$(_run_dir)/release-prep.json"
+  local before; before="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
+  _merge; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"REFUSED (release_prep_stale)"*"nothing was merged"* ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse main)" = "$before" ]
+}
+
+@test "merge (3.13.0): an incoherent record, a 3.13 record without its tree, or a canonical record the attempt has no copy of is refused" {
+  _seed_merge_project
+  local cand; cand="$(plan_manifest_get "$PLAN_ID" '.plan_boundary_manifest.candidate_sha')"
+  local tree; tree="$(git -C "$TEST_PROJECT_ROOT" rev-parse "${cand}^{tree}")"
+  jq -n --arg t "$tree" '{schema_version: "aid-release-prep-1.1", version: "none", intent: "release", candidate_version: "", changelog_version: "", tree: $t}' > "$(_run_dir)/release-prep.json"
+  _merge; [ "$status" -ne 0 ]; [[ "$output" == *"incoherent"* ]]
+  jq -n '{schema_version: "aid-release-prep-1.1", version: "9.9.9", intent: "release", candidate_version: "9.9.9"}' > "$(_run_dir)/release-prep.json"
+  _merge; [ "$status" -ne 0 ]; [[ "$output" == *"another tree"* ]]
+  jq -n '{schema_version: "aid-release-prep-1.1", version: "9.9.9"}' > "$(_run_dir)/release-prep.json"   # a 1.1 record stripped of its bindings
+  _merge; [ "$status" -ne 0 ]; [[ "$output" == *"another tree"* ]]
+  rm "$(_run_dir)/release-prep.json"; mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  jq -n --arg t "$tree" '{version: "9.9.9", intent: "release", candidate_version: "9.9.9", tree: $t}' > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"
+  _merge; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"holds no copy"* ]]
+}
+
+@test "merge (3.13.0): a crash after the lifecycle commit resumes to the tag — the checkout ends at the tip, nothing staged, local work kept" {
+  _seed_merge_project
+  jq -n '{schema_version:"aid-release-prep-1.0", version:"9.9.9"}' > "$(_run_dir)/release-prep.json"
+  echo "my unrelated work" > "$TEST_PROJECT_ROOT/notes-local.txt"                     # untracked work in the checkout
+  git -C "$TEST_PROJECT_ROOT" checkout -q main                                          # the checkout that has main out
+  AID_PLAN_FSM_CRASH_AFTER=lifecycle_bound _merge; echo "$output"; [ "$status" -eq 99 ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" tag -l)" = "" ]
+  _merge; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" tag -l)" = "v9.9.9" ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" log main --merges --grep "merge(plan): ${PLAN_ID}" --pretty=%H | wc -l)" -eq 1 ]
+  git -C "$TEST_PROJECT_ROOT" diff --cached --quiet                                     # nothing staged (WAN P116: the manifests were)
+  [ "$(git -C "$TEST_PROJECT_ROOT" status --porcelain --untracked-files=no)" = "" ]
+  [ "$(cat "$TEST_PROJECT_ROOT/notes-local.txt")" = "my unrelated work" ]
+}
+
+@test "merge (3.13.0): the checkout sync goes to the branch tip from where the index stands, and an overlap is reported, not passed" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh"
+  local g="$BATS_TEST_TMPDIR/sync"; mkdir -p "$g"; git -C "$g" init -q -b main; git -C "$g" config user.email t@t; git -C "$g" config user.name t
+  echo a > "$g/a.txt"; git -C "$g" add -A; git -C "$g" commit -qm base; local old; old="$(git -C "$g" rev-parse HEAD)"
+  # two plumbing commits on main past the checkout: the merge, then a lifecycle commit
+  local t1 c1 t2 c2
+  t1="$(printf '100644 blob %s\tb.txt\n100644 blob %s\ta.txt\n' "$(echo b | git -C "$g" hash-object -w --stdin)" "$(echo a | git -C "$g" hash-object -w --stdin)" | git -C "$g" mktree)"
+  c1="$(git -C "$g" commit-tree "$t1" -p "$old" -m merge)"
+  t2="$(printf '100644 blob %s\tb.txt\n100644 blob %s\ta.txt\n100644 blob %s\tlife.yaml\n' "$(echo b | git -C "$g" hash-object -w --stdin)" "$(echo a | git -C "$g" hash-object -w --stdin)" "$(echo l | git -C "$g" hash-object -w --stdin)" | git -C "$g" mktree)"
+  c2="$(git -C "$g" commit-tree "$t2" -p "$c1" -m lifecycle)"; git -C "$g" update-ref refs/heads/main "$c2"
+  echo "staged unrelated" > "$g/mine.txt"; git -C "$g" add mine.txt                       # the user's staged work
+  # called as the resume did (old → merge) while the tip is the lifecycle commit
+  run _aid_lc_sync_checkout_of "$g" main "$old" "$c1"; echo "$output"; [ "$status" -eq 0 ]
+  [ -f "$g/life.yaml" ]; [ -f "$g/b.txt" ]
+  [ "$(git -C "$g" diff --cached --name-only)" = "mine.txt" ]                              # only the user's file is staged
+  # an overlap: the checkout edits b.txt, the next write changes it
+  git -C "$g" reset -q --hard main; echo "local edit" > "$g/b.txt"
+  local t3 c3; t3="$(printf '100644 blob %s\tb.txt\n100644 blob %s\ta.txt\n' "$(echo B | git -C "$g" hash-object -w --stdin)" "$(echo a | git -C "$g" hash-object -w --stdin)" | git -C "$g" mktree)"
+  c3="$(git -C "$g" commit-tree "$t3" -p "$c2" -m next)"; git -C "$g" update-ref refs/heads/main "$c3"
+  run _aid_lc_sync_checkout_of "$g" main "$c2" "$c3"; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"local changes overlap with: b.txt"* ]]
+  [ "$(cat "$g/b.txt")" = "local edit" ]
+}

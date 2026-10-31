@@ -41,17 +41,39 @@ aid_land_record_verify() {
           and (.command | type) == "string" and (.exit | type) == "number")' "$rec" >/dev/null 2>&1 \
     || { echo "the takeover record's checks are not a list of {ac, command, exit}"; return 1; }
   local missing
-  missing="$(jq -r --argjson i "$n" --slurpfile rec "$rec" '
+  [[ -n "${AID_AC_COMMAND_JQ:-}" ]] || source "$(dirname "${BASH_SOURCE[0]}")/aid-ac-command.sh"
+  missing="$(jq -r --argjson i "$n" --slurpfile rec "$rec" "${AID_AC_COMMAND_JQ}"'
     ($rec[0].checks // []) as $ch
     | .steps[$i].acceptance_criteria // [] | to_entries[]
-    | select(.value | type == "string" and startswith("`"))
-    | (.key + 1) as $k | (.value | capture("^`(?<c>[^`]+)`").c) as $cmd
+    | (.value | ac_command) as $cmd | select($cmd != null)
+    | (.key + 1) as $k
     | [$ch[] | select(.ac == $k)] as $m
     | if ($m | length) != 1 then "AC\($k) checked \($m | length) times, not once"
-      elif $m[0].command != $cmd then "AC\($k) ran another command than the plan names"
+      elif ($m[0] | has("plan_command") or has("reason")) and ($m[0].command == $cmd)
+        then "AC\($k) carries replacement metadata on the command the plan names"
+      elif $m[0].command != $cmd and (($m[0].plan_command != $cmd)
+            or (($m[0].reason | type) != "string") or (($m[0].reason | gsub("^\\s+|\\s+$"; "") | length) < 10)
+            or (($m[0].command | gsub("\\s"; "") | length) == 0))
+        then "AC\($k) ran another command than the plan names, without its reason"
       elif $m[0].exit != 0 or $m[0].timed_out == true then "AC\($k) did not pass (exit \($m[0].exit))"
       else empty end' "$pj" 2>/dev/null)" || { echo "the takeover record's checks could not be read against the plan"; return 1; }
   missing="${missing%%$'\n'*}"
+  # 3.13.0: the full mapping of replaced criteria (written before any check ran) agrees with the plan and the checks
+  if [[ -z "$missing" ]]; then
+    missing="$(jq -r --argjson i "$n" --slurpfile rec "$rec" "${AID_AC_COMMAND_JQ}"'
+      ([.steps[$i].acceptance_criteria // [] | to_entries[] | {k: (.key + 1), c: (.value | ac_command)} | select(.c != null)]) as $plan
+      | ($rec[0].replacements // []) as $rp
+      | if ($rp | type) != "array" then "the record'"'"'s replacements are not a list"
+        else first(($rp[] | . as $r
+            | if ([$plan[] | select(.k == $r.ac and .c == $r.plan_command)] | length) != 1 then "replacement of AC\($r.ac) names another plan command"
+              elif (($r.reason | type) != "string") or (($r.reason | gsub("^\\s+|\\s+$"; "") | length) < 10) then "replacement of AC\($r.ac) has no reason"
+              elif $r.command == $r.plan_command then "replacement of AC\($r.ac) replaces nothing"
+              else empty end),
+          ($rec[0].checks[]? | . as $c | select(.plan_command != null)
+            | select([$rp[] | select(.ac == $c.ac and .command == $c.command and .reason == $c.reason)] | length != 1)
+            | "AC\(.ac) ran a replacement the record'"'"'s replacements do not hold")) // empty end' "$pj" 2>/dev/null)" \
+      || missing="the takeover record's replacements could not be read against the plan"
+  fi
   [[ -z "$missing" ]] || { echo "the takeover record does not prove the step's command criteria: ${missing}"; return 1; }
   local extra
   extra="$(jq -r '[.checks[].ac] | group_by(.) | map(select(length > 1)) | length' "$rec")" || extra=x

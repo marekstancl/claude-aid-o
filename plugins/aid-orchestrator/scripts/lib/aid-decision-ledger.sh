@@ -95,7 +95,7 @@ aid_decision_ledger_settle() {
     '"${AID_DECISION_LIVE_JQ}"' [$d[] | select(.revokes == null) | select(live($d))] as $dec
     | .findings |= map(
       if (.status | IN("open", "form_invalid")) and (.settled_by == null) and (.dispute.pm == null)
-         and (.dispute.delegated == null) and (.delegated == null) then
+         and (.dispute.delegated == null) and (.delegated == null) and (.dispute.handed_to_confirmation == null) then
         . as $x
         | ([$dec[] | select(.match == $x.match and ($x.severity | rank) <= (.severity | rank))]
            + [$dec[] | select(.source == "pm" and (.first_citation | startswith("zadani.md:"))

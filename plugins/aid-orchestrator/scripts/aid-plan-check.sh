@@ -665,7 +665,7 @@ if [[ -n "$SNAPSHOT" ]]; then
   # `--fixes none`: the revision may change no step (plan-level findings only).
   # `--fixes any` (2.114.0): an open plan-level blocker or major — its fix lands
   # in some step, so C4/C5 do not fire; every other check runs unchanged.
-  FIX_ANY=0; [[ "$FIXES" == any ]] && FIX_ANY=1
+  FIX_ANY=0; [[ ",${FIXES}," == *,any,* ]] && FIX_ANY=1   # `any` anywhere in the list allows every step
   FIX_STEPS="$(tr ',' '\n' <<< "$FIXES" | tr -d ' ' | grep -vxE 'none|any|')"
   # C2 — new claims: paths and identifiers on added lines, checked again. Plan
   # review evidence paths (cp1/, round-N/, packet/, evidence/<plan>/) are exempt:
