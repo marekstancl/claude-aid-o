@@ -40,16 +40,18 @@ aid_follow_up_added_lines() {
 }
 
 aid_follow_up_mark() {
-  local rd="$1" run="$2" root="$3" patch added n
+  local rd="$1" run="$2" root="$3" patch n
   [[ "$(jq -r '.mode // "full"' "${rd}/round.json" 2>/dev/null)" == confirmation ]] || { echo 0; return 0; }
   patch="${rd}/packet/fix.patch"
   [[ -f "$patch" && -f "${rd}/packet/open-findings.json" && -f "${rd}/merged.json" ]] || { echo 0; return 0; }
-  added="$(aid_follow_up_added_lines "$patch" | jq -R . | jq -sc .)" || return 1
+  # both lists go to jq through files: a repository of thousands of files does not fit on a command line
+  # (`jq: Argument list too long`, WAN P116 28. 10. and P118 30. 10. 2026 — no follow-up was ever marked there)
+  local tmp="${rd}/merged.json.fu.$$" head
+  aid_follow_up_added_lines "$patch" | jq -R . | jq -s . > "${tmp}.added" || { rm -f "${tmp}".*; return 1; }
   # the reviewed candidate's files (its tree, not the checkout's index): a citation of another repository's file is never a follow-up
-  local tracked head; head="$(jq -r '.head_sha // "HEAD"' "${rd}/round.json")"
-  tracked="$(git -C "$root" ls-tree -r --name-only "$head" | jq -R . | jq -sc .)" || return 1
-  local tmp="${rd}/merged.json.fu.$$"
-  jq --argjson added "$added" --argjson tracked "$tracked" --slurpfile open "${rd}/packet/open-findings.json" \
+  head="$(jq -r '.head_sha // "HEAD"' "${rd}/round.json")"
+  git -C "$root" ls-tree -r --name-only "$head" | jq -R . | jq -s . > "${tmp}.tracked" || { rm -f "${tmp}".*; return 1; }
+  jq --slurpfile added "${tmp}.added" --slurpfile tracked "${tmp}.tracked" --slurpfile open "${rd}/packet/open-findings.json" \
      --arg round "$(basename "$rd")" --arg run "$(basename "$run")" '
     ([$open[0].findings[]?.match] | map(select(. != null))) as $openm
     # a finding still open there, reworded or cited at another place, is that finding, not a new one: its rule or the
@@ -57,8 +59,8 @@ aid_follow_up_mark() {
     | ([$open[0].findings[]? | .rule // empty | select(. != "")]) as $openr
     | ([$open[0].findings[]? | ((.evidence // "") | split(";")[0] | gsub("^\\s+|\\s+$"; "") | sub(":[0-9].*$"; ""))
         | select(. != "")]) as $openf
-    | ($added | map({(.): true}) | add // {}) as $isadd
-    | ($tracked | map({(.): true}) | add // {}) as $istr
+    | ($added[0] | map({(.): true}) | add // {}) as $isadd
+    | ($tracked[0] | map({(.): true}) | add // {}) as $istr
     | def first_cit: ((.evidence // "") | split(";")[0] | gsub("^\\s+|\\s+$"; ""));
       def fu_ok:
         (first(first_cit | capture("^(?<p>[^:\\s]+):(?<a>[0-9]+)(-(?<b>[0-9]+))?$")) // null) as $c   # no match = null, never empty: an empty here would DROP the finding
@@ -74,8 +76,8 @@ aid_follow_up_mark() {
          and ((.reported_by // []) | index("final_criteria") | not)
          and fu_ok
       then .status = "follow_up" | .follow_up = {round: $round, run: $run} else . end)
-  ' "${rd}/merged.json" > "$tmp" || { rm -f "$tmp"; return 1; }
-  mv "$tmp" "${rd}/merged.json" || return 1
+  ' "${rd}/merged.json" > "$tmp" || { rm -f "$tmp" "${tmp}".*; return 1; }
+  rm -f "${tmp}".*; mv "$tmp" "${rd}/merged.json" || return 1
   # the plan's list, one line per thing (match), for the close card and the project's backlog
   local list; list="$(dirname "$run")/follow-ups.jsonl"
   jq -c --arg round "$(basename "$rd")" --arg run "$(basename "$run")" '
