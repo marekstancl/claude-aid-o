@@ -144,10 +144,11 @@ _aid_hrt_step_call_pending() {
           for rd in "${run_dir}/cp2/step-${idx}"/round-*; do
             [[ -f "${rd}/timeline.jsonl" ]] || continue
             jq -c --arg rd "$rd" --arg r "${rd##*round-}" 'select(.event == "verifier_dispatch_start") + {rd: $rd, rn: ($r | tonumber? // 0)}' "${rd}/timeline.jsonl" 2>/dev/null
-          done | jq -rs --arg i "$idx" --slurpfile pend <(cat "${run_dir}/cp2/step-${idx}"/round-*/pending-dispatches.jsonl 2>/dev/null) '
+          done | jq -rs --arg i "$idx" --slurpfile pend <(for rd in "${run_dir}/cp2/step-${idx}"/round-*; do
+              [[ -s "${rd}/pending-dispatches.jsonl" ]] && jq -c --arg rd "$rd" '. + {rd: $rd}' "${rd}/pending-dispatches.jsonl" 2>/dev/null; done) '
             [.[] | select(.focus | test("^(cp2-step-" + $i + "-|fix-cp2-" + $i + "-r)"))]
             | group_by(.focus)[] | sort_by(.ts, .rn) | last as $s
-            | $pend[] | select(.event == "start" and .nonce == $s.nonce and .focus == $s.focus
+            | $pend[] | select(.event == "start" and .nonce == $s.nonce and .focus == $s.focus and .rd == $s.rd
                                and ((.step_n // -1) | tostring) == $i)
             | "\(.focus)\t\(.nonce)\t\(.ts)\t\(.expected_duration_max // "")\t\($s.rd)"')
       fi

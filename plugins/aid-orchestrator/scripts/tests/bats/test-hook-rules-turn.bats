@@ -298,3 +298,9 @@ _cp2_start() {  # <round> <focus> [age seconds] — a start in the round's pendi
   _takeover_running; _bg_call toolu_land; _say "AID-WAIT: převzetí kroku 0"
   run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; _takeover_gone; [ "$status" -eq 3 ]
 }
+
+@test "turn (3.13.0): a pending line in another round's ledger with the last start's nonce does not count" {
+  _cp2_start 1 cp2-step-0-step-generalist; local n="$LAST_NONCE"
+  mkdir -p "$EV/cp2/step-0/round-2"; mv "$EV/cp2/step-0/round-1/pending-dispatches.jsonl" "$EV/cp2/step-0/round-2/pending-dispatches.jsonl"
+  _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+}

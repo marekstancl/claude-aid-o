@@ -8,5 +8,5 @@
   local f="$BATS_TEST_DIRNAME/../../../commands/aid-run.md"
   [ "$(grep -c "fix_of: <the ABSOLUTE " "$f")" -eq 2 ]
   grep -q "fix_of: <the ABSOLUTE " "$BATS_TEST_DIRNAME/../../../commands/aid-plan.md"
-  [ "$(grep -c 'outside the .* worktree: read merged.json by this absolute path' "$f")" -eq 2 ]
+  [ "$(grep -c 'outside the .*worktree.*: read merged.json by this absolute path' "$f")" -eq 2 ]
 }

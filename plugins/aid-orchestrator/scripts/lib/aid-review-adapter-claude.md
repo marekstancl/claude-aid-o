@@ -43,8 +43,12 @@ one at a time:
 
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus <focus> \
-     --output-file <answer> --evidence-dir <round dir>
+     --output-file <answer> --evidence-dir <round dir> --nonce <the nonce its start printed>
    ```
+
+   `start` prints `nonce=<n> focus=<focus> evidence=<round dir>` (AID 3.13.0): pass that nonce to `complete` and
+   `cancel`. It closes exactly that start, the round's bracket check reads the LAST start of the focus, and a
+   reviewer still running in the background lets the turn end with `AID-WAIT: <what>`.
 
    A step round's `close` refuses a reviewer file with no such start/complete
    bracket in `<round dir>/timeline.jsonl` (`no_dispatch_record`; `prepare` prints the
@@ -61,7 +65,7 @@ one at a time:
 
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" cancel --focus <focus> \
-     --evidence-dir <round dir> --reason "<why, 20+ characters>"
+     --evidence-dir <round dir> --reason "<why, 20+ characters>" --nonce <its start's nonce>
    ```
 
    A cancelled start is not a complete: an answer filed under it has no
@@ -96,12 +100,12 @@ bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" close <review> --round K \
 ```
 
 When `close` reports `fail` on a step round and a round remains
-(`rounds_default`, or the PM's `override`), the fix is the step's own role's:
+(`rounds_default`, or the PM's `override`), the fix is the step's own role's. Bracket the fixer like a reviewer (AID 3.13.0): `aid-emit-dispatch.sh start --focus fix-cp2-<N>-r<K> --agent-id aid-orchestrator:<role> --evidence-dir <round dir>` before it, and after it write its report to `<round dir>/fixer-report.md` and `complete --focus fix-cp2-<N>-r<K> --output-file <round dir>/fixer-report.md --evidence-dir <round dir> --nonce <the start's nonce>` — a fixer in the background then lets the turn end with `AID-WAIT: oprava kroku N`:
 
 ```
 Agent(subagent_type: <"aid-orchestrator:implementer-light" when the step's role card says **Effort:** low, else "aid-orchestrator:implementer">,
       model: <the **Model:** of the step's role card in skills/role-cards.md>,
-      prompt: "fix_of: <round dir>; role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
+      prompt: "fix_of: <the ABSOLUTE round dir in the state root> (the evidence lies in the primary checkout's .aid-o/work, outside the worktree you work in: read merged.json by this absolute path); role: <the step's role card name>. Read <round dir>/merged.json, fix every finding with status open (blocker and major first), commit with the message prefix fix(review):, and report the finding fingerprints you addressed. For a blocker or major, fix its rule (the finding's `rule`, or state it) everywhere it can fail in the change, not only at the cited line, at the root (an allowlist over a blocklist, one check every path passes), and test the rule once, on the path the finding names — a second case only when it takes a different code path, and say which. Touch nothing outside the rules the findings name.")
 ```
 
 Then `aid-step-check.sh` again (the range now ends at the fix commit) and
