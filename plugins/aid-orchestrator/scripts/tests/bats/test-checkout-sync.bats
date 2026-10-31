@@ -124,3 +124,30 @@ teardown() { rm -rf "$T"; }
   run _aid_lc_sync_checkout_of "$T/side" main "$L" "$N2"; echo "$output"; [ "$status" -eq 0 ]
   [ "$(cat a.txt)" = three ]; [ "$(readlink link)" = b.txt ]                # the unchanged local link was at its old target
 }
+
+@test "3.13.0: an index already at the tip with the file on disk still at the old version is brought to the tip" {
+  git read-tree "$NEW"                                   # index at the tip, a.txt on disk still "one"
+  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$(cat a.txt)" == "two" ]]; [[ -z "$(git status --porcelain)" ]]
+}
+
+@test "3.13.0: an untracked identical file outside AID's records is the user's — refused, not taken in" {
+  echo new > b.txt                                       # same bytes as the tip's b.txt, but nobody said it is AID's
+  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; [ "$status" -eq 1 ]; [[ "$output" == *"b.txt"* ]]
+}
+
+@test "3.13.0: no checkout command is printed when the backup could not be verified" {
+  echo mine > a.txt
+  tar() { [[ "$1" == "-tf" ]] && return 0; command tar "$@"; }; export -f tar     # tar lists nothing
+  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; unset -f tar; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"could NOT save a backup"* ]]; [[ "$output" != *"git checkout"* ]]
+  [[ "$(cat a.txt)" == "mine" ]]
+}
+
+@test "3.13.0: a file the tip deleted is removed from the index and the disk by the printed repair" {
+  ( cd ../side && git rm -q a.txt && git commit -qm drop )
+  local N2; N2="$(git -C ../side rev-parse HEAD)"; git update-ref refs/heads/main "$N2"
+  echo mine > a.txt
+  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$N2"; echo "$output"; [ "$status" -eq 1 ]
+  [[ "$output" == *"git rm -q --cached"*"a.txt"* && "$output" == *"rm -f -- a.txt"* ]]
+}

@@ -307,6 +307,14 @@ _rr_step() {   # a declared foreign repository "docs" with a worktree on plan/P1
   [ "$(_json .verdict cp2/step-0)" = review ]; [[ "$(_json .reason cp2/step-0)" == *"setup failed (cd ui && npm ci"* ]]
 }
 
+@test "3.13.0: a setup killed half-way (its record still says running) is review like a failed one" {
+  echo "one line" >> "$R/src/app.py"; _commit s0 >/dev/null
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-worktree-env.sh"; local rec; rec="$(aid_worktree_env_record_path "$R" "$R")"; mkdir -p "$(dirname "$rec")"
+  jq -n --arg t "$(realpath "$R")" '{tree: $t, setup: [], status: "running"}' > "$rec"
+  run _run --checkpoint cp2 --step 0; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_json .verdict cp2/step-0)" = review ]; [[ "$(_json .reason cp2/step-0)" == *"did not finish"* ]]
+}
+
 @test "3.13.0: a setup failure next to a security pattern keeps review+security and adds its reason" {
   echo 'subprocess.run(cmd, shell=True)' >> "$R/src/app.py"; _commit s0 >/dev/null
   source "$AID_PLUGIN_PATH/scripts/lib/aid-worktree-env.sh"; local rec; rec="$(aid_worktree_env_record_path "$R" "$R")"; mkdir -p "$(dirname "$rec")"

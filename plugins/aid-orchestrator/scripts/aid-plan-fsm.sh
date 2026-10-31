@@ -1055,6 +1055,8 @@ _pfsm_worktree_add() {
 
   if _pfsm_worktree_registered "$root" "$wt"; then
     if [[ -d "$wt" ]]; then
+      declare -F aid_worktree_env_ensure >/dev/null || source "${SCRIPT_DIR}/lib/aid-worktree-env.sh"
+      aid_worktree_env_ensure "$root" "$wt" "$root" >&2 || true
       printf '%s' "$wt"
       return 0
     fi
@@ -6307,13 +6309,14 @@ cmd_plan_merge_to_main() {
   # 3.13.0: AFTER the published merge is on record (a resume finds it), the checkout goes to the branch's current tip
   # (the lifecycle commit on a resume), never back to the merge, from the FROZEN pre-merge head (the live one may have
   # moved on a retry); an overlap with local changes stops here — the merge stands, the next run resumes after it
-  if declare -F _aid_lc_sync_checkout_of >/dev/null 2>&1; then
-    _aid_lc_sync_checkout_of "$root" "$target_branch" "${target_head_frozen:-$target_head}" "$merge_commit" || {
-      echo "REFUSED (merge_checkout_overlap): the merge ${merge_commit:0:12} IS published on ${target_branch}, but the checkout that has it out holds overlapping local changes (named above); nothing more was written" >&2
-      echo "  next: do as the warning says (no commit in that checkout), then run plan-merge-to-main again — it resumes after the merge (pipeline.md §When AID refuses: merge_checkout_overlap)" >&2
-      exit 1
-    }
-  fi
+  _pfsm_merge_sync_or_refuse() {  # <from> — bring the checkout of the target branch to its tip, or refuse
+    declare -F _aid_lc_sync_checkout_of >/dev/null 2>&1 || return 0
+    _aid_lc_sync_checkout_of "$root" "$target_branch" "$1" "$(git -C "$root" rev-parse "refs/heads/${target_branch}")" && return 0
+    echo "REFUSED (merge_checkout_overlap): the merge ${merge_commit:0:12} IS published on ${target_branch}, but the checkout that has it out holds overlapping local changes (named above); nothing more was written" >&2
+    echo "  next: do as the warning says (no commit in that checkout), then run plan-merge-to-main again — it resumes after the merge (pipeline.md §When AID refuses: merge_checkout_overlap)" >&2
+    exit 1
+  }
+  _pfsm_merge_sync_or_refuse "${target_head_frozen:-$target_head}"
 
   # ── Tree identity + reachability, between publish and lifecycle commit ────
   local actual_tree=""
@@ -6344,6 +6347,8 @@ cmd_plan_merge_to_main() {
     echo "PRECONDITION FAIL: plan-merge-to-main: the merge ${merge_commit} IS published on ${target_branch}, but the lifecycle delivery bindings / CF1 re-scope were not committed (rc=${lrc}). The merge stands — do NOT re-merge; re-run this command (or plan-close-check) to re-apply the bindings idempotently. Detail: ${lout}" >&2
     exit 1
   fi
+  # the lifecycle commit's own sync ran inside the captured output above: check the checkout again, loudly
+  _pfsm_merge_sync_or_refuse "$merge_commit"
   _pfsm_crash_seam lifecycle_bound   # 3.13.0: a crash between the lifecycle commit and the tag (WAN P116)
 
   # ── The ONE conditional tag (bindings first, so a crash between them cannot

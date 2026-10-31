@@ -71,3 +71,13 @@ _cfg() { printf '%s\n' "$@" > "$S/.aid-o/config/project.yaml"; }
   aid_worktree_env_prepare "$S" "$W2" "$S" 2>/dev/null
   [ ! -e "$T/elsewhere/local.env" ]
 }
+
+@test "the record says running before the first command; an adopted tree is prepared again only when its setup did not succeed" {
+  local rec; rec="$(aid_worktree_env_record_path "$S" "$W")"
+  _cfg 'worktree:' "  setup: [\"jq -r .status '$rec' > seen; echo x >> runs; test -f ok\"]"
+  aid_worktree_env_prepare "$S" "$W" "$S" 2>/dev/null
+  [ "$(cat "$W/seen")" = running ]; jq -e '.status == "done"' "$rec"
+  aid_worktree_env_ensure "$S" "$W" "$S" 2>/dev/null; [ "$(wc -l < "$W/runs")" -eq 2 ]     # failed before: run again
+  touch "$W/ok"; aid_worktree_env_ensure "$S" "$W" "$S" 2>/dev/null; [ "$(wc -l < "$W/runs")" -eq 3 ]
+  aid_worktree_env_ensure "$S" "$W" "$S" 2>/dev/null; [ "$(wc -l < "$W/runs")" -eq 3 ]     # succeeded: left alone
+}

@@ -275,7 +275,7 @@ _round1_closed() {
   run "$ROUND_SH" finalize "$PLAN"
   [ "$status" -eq 1 ]; [[ "$output" == *"outside the fix list"* ]]
 }
-@test "fix-check (3.13.0): a plan-level finding allows any step; --also-steps only records, it does not narrow (WAN P116)" {
+@test "fix-check (3.13.0): a plan-level finding allows any step; --also-steps only records, it does not narrow" {
   _round1_closed '.findings[0].severity = "blocker" | .findings[0].step = null'
   jq -e ".findings | any(.status == \"open\" and .severity == \"blocker\" and .step == null)" "$CP1/round-1/merged.json"
   # step 1 changes (the plan-level fix) and step 2 restates it: with `any,2` the old code allowed only step 2
@@ -1058,6 +1058,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [[ "$output" == *"focus cp7-final-criteria"* && "$output" == *"focus cp7-final-generalist"* && "$output" != *"final-claims"* ]]
   grep -q "CHANGELOG" "$(FD 1)/packet/claims.patch"
   grep -q "every EPIC together" "$(FD 1)/prompt-final_generalist.md"
+  grep -q "security_and_operations" "$(FD 1)/prompt-final_generalist.md"           # the nine security and operations questions reach the reviewer
   grep -q '^+60$' "$(FD 1)/prompt-final_generalist.md"                       # a small diff is inline
   # a diff too large for one prompt is pointed at, with its files, never truncated
   rm -rf "$E/cp7/round-1" "$E/cp7/rounds.json"
@@ -2136,6 +2137,7 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   [ "$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .dispute.handed_to_confirmation != null' "$m")" = true ]
   run _S close --round 1 --at "$h1" --tokens step_generalist=5 step_security=unknown; echo "$output"; [ "$status" -eq 0 ]
   [[ "$output" != *"await an independent verdict"* ]]
+  [ "$(jq -r .verdict "$(D 1)/measurement.json")" = fail ]                   # the handed blocker keeps the round failed
   # a change elsewhere is still the adjudicator's
   cp "$BATS_TEST_TMPDIR/m0" "$m"; rm -f "$(D 1)/measurement.json"
   git -C "$R" reset -q --hard HEAD~1

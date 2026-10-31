@@ -294,7 +294,7 @@ fi
 for wt_tree in "${wt_trees[@]}"; do
   wt_r="$(aid_worktree_env_record_path "$CFG_ROOT" "$wt_tree")"
   [[ -f "$wt_r" && "$(jq -r '.tree // ""' "$wt_r" 2>/dev/null)" == "$(realpath -m -- "$wt_tree")" ]] || continue
-  wt_f="$(jq -r '[.setup[]? | select(.exit != 0) | .command] | join("; ")' "$wt_r" 2>/dev/null || true)"
+  wt_f="$(jq -r 'if .status == "running" then "setup did not finish (killed or still running)" else [.setup[]? | select(.exit != 0) | .command] | join("; ") end' "$wt_r" 2>/dev/null || true)"
   [[ -n "$wt_f" ]] && { wt_setup_failed="${wt_setup_failed:+${wt_setup_failed}; }${wt_f}"; wt_rec="$wt_r"; }
 done
 verdict="" reason=""

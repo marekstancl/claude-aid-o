@@ -125,6 +125,8 @@ aid_parallel_step_worktree() {
   local wt branch; wt="$(_aid_pd_step_worktree_path "$root" "$step" "$wbase")"; branch="$(_aid_pd_step_branch "$step")"
   git -C "$root" worktree prune >/dev/null 2>&1 || true
   if [[ -d "$wt" ]] && git -C "$wt" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    declare -F aid_worktree_env_ensure >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/aid-worktree-env.sh"
+    aid_worktree_env_ensure "$root" "$wt" "$(cd "$root" && aid_state_root 2>/dev/null || printf '%s' "$root")" >&2 || true
     printf '%s\n' "$wt"; return 0
   fi
   mkdir -p "$(dirname "$wt")" 2>/dev/null || true

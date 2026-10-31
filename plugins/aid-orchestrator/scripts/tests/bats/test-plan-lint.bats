@@ -547,3 +547,11 @@ _ac_cmd() { printf '\n## Acceptance Criteria\n\n- [ ] AC1: it is there\n  ```yam
   run _aid_classify_files_bullet '- Remove: `src/old.sh` — replaced'
   [ "$output" = "error:no-verb-label" ]
 }
+
+@test "lint-ac-command: a done-when line starting with one backticked word warns that it is a name, a command does not" {
+  _plan p.md strict '- Modify: `src/a.ts` — edit'
+  printf '\n**Done when:**\n- [ ] `pytest` passes\n- [ ] `npm test` passes\n- [ ] `./run.sh` passes\n' >> p.md
+  run bash "$LINT" p.md; echo "$output"
+  [[ "$output" == *"WARN ac_bare_name \`pytest\`"* ]]
+  [ "$(grep -c 'ac_bare_name' <<< "$output")" -eq 1 ]
+}

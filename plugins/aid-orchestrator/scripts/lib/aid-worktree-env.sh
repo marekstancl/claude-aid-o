@@ -3,7 +3,8 @@
 # lib/aid-worktree-env.sh — what a new plan or step worktree needs that git does not carry (AID 3.13.0)
 #
 #   aid_worktree_env_prepare <source checkout> <new tree> <state root>
-#   aid_worktree_env_record_path <state root> <tree>        .aid-o/work/worktree-env/<tree name>.json
+#   aid_worktree_env_ensure <source checkout> <tree> <state root>   the same for an adopted tree, unless it is done
+#   aid_worktree_env_record_path <state root> <tree>        .aid-o/work/worktree-env/<tree name>-<hash>.json
 #
 # `.aid-o/config/project.yaml`:
 #   worktree.copy_untracked: [".env", …]   ignored, untracked files copied from the source checkout (never over an
@@ -80,16 +81,29 @@ with os.fdopen(fi, "rb") as a, os.fdopen(fo, "wb") as b: shutil.copyfileobj(a, b
     copies="$(jq -c --arg p "$p" --arg o "$(_wte_copy "$p")" '. + [{path: $p, outcome: $o}]' <<< "$copies")"
   done
   mkdir -p "$(dirname "$rec")"; rm -f "${rec%.json}".setup-*.log 2>/dev/null
+  # written BEFORE the first command: a setup killed half-way leaves `running`, which the step check reads as failed
+  if (( ${#su_list[@]} )); then
+    jq -n --arg t "$rt" --arg s "$rs" --argjson c "$copies" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{tree: $t, source: $s, copies: $c, setup: [], status: "running", at: $at}' > "$rec"
+  fi
   for cmd in "${su_list[@]}"; do
     [[ -n "$cmd" ]] || continue
     log="${rec%.json}.setup-$(( $(jq 'length' <<< "$setups") + 1 )).log"; t0=$(date +%s); rc=0
-    ( cd "$rt" && timeout -k 10 "${AID_WORKTREE_SETUP_TIMEOUT:-900}" bash -c "$cmd" ) > "$log" 2>&1 || rc=$?
+    ( cd "$rt" && timeout -k 10 "${AID_WORKTREE_SETUP_TIMEOUT:-540}" bash -c "$cmd" ) > "$log" 2>&1 || rc=$?
     setups="$(jq -c --arg c "$cmd" --argjson rc "$rc" --argjson d "$(( $(date +%s) - t0 ))" --arg l "$log" \
       '. + [{command: $c, exit: $rc, duration_s: $d, log: $l}]' <<< "$setups")"
     (( rc == 0 )) || echo "worktree: setup failed in ${tree} (exit ${rc}): ${cmd} — log ${log}" >&2
   done
   jq -n --arg t "$rt" --arg s "$rs" --argjson c "$copies" --argjson u "$setups" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    '{tree: $t, source: $s, copies: $c, setup: $u, at: $at}' > "$rec"
+    '{tree: $t, source: $s, copies: $c, setup: $u, status: "done", at: $at}' > "$rec"
   jq -r '.copies[] | select(.outcome != "copied") | "worktree: \(.path) \(.outcome)"' "$rec" >&2
   return 0
+}
+
+# aid_worktree_env_ensure <source> <tree> <state root> — for a tree that already existed (adopted, not created):
+# prepare it again only when its record is missing, still `running` (killed half-way) or names a failed command
+aid_worktree_env_ensure() {
+  local rec; rec="$(aid_worktree_env_record_path "$3" "$2")"
+  [[ -f "$rec" ]] && jq -e '.status == "done" and all(.setup[]?; .exit == 0)' "$rec" >/dev/null 2>&1 && return 0
+  aid_worktree_env_prepare "$@"
 }

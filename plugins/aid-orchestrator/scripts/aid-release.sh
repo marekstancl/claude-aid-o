@@ -1467,8 +1467,8 @@ main() {
     rebind)       shift; cmd_rebind "$@" ;;
     carried-version) shift   # [--project-root <p>] [--rev <commit>]
       local _cv_rev=""; while [[ $# -gt 0 ]]; do case "$1" in
-        --project-root) REPO_ROOT="$(cd "$2" && git rev-parse --show-toplevel)"; shift 2 ;;
-        --rev) _cv_rev="$2"; shift 2 ;; *) shift ;; esac; done
+        --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; REPO_ROOT="$(cd "$2" && git rev-parse --show-toplevel)"; shift 2 ;;
+        --rev) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; _cv_rev="$2"; shift 2 ;; *) shift ;; esac; done
       printf '%s|%s\n' "$(_release_carried_version "$_cv_rev")" "$(_release_carried_version "$_cv_rev" changelog)" ;;
     prepare-plan) shift; cmd_prepare_plan "$@" ;;
     tag-plan)     shift; cmd_tag_plan "$@" ;;
