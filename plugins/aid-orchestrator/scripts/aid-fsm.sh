@@ -5588,6 +5588,39 @@ cmd_amend_contract() {
   aid_amend_contract_rename "$sf" "${pair%%=*}" "${pair#*=}" "$reason" "$auth" "$card"
 }
 
+# _amend_scope_named_in_ac <plan.json> <step index> <evidence dir> <path>... — prints [{path, ac}] when EVERY path
+# is named by an acceptance criterion of the step: its exact relative path in backticks, or a backticked file name
+# that matches exactly ONE file of the repository (tracked or new) and that file is the path. The protected-impact
+# detector of the stand-in must find nothing. Returns 1 otherwise (the caller falls back to the stand-in or the PM).
+_amend_scope_named_in_ac() {
+  local plan="$1" i="$2" ev="$3"; shift 3
+  local root files acs out='[]' p hit name n
+  root="$(aid_invoke_root 2>/dev/null || pwd)"
+  acs="$(jq -r --argjson i "$i" '.steps[$i].acceptance_criteria // [] | to_entries[] | "\(.key + 1)\t\(.value | if type == "object" then (.text // .criterion // "") else . end)"' "$plan" 2>/dev/null)" || return 1
+  [[ -n "$acs" ]] || return 1
+  files="$( { git -C "$root" ls-files; git -C "$root" ls-files -o --exclude-standard; } 2>/dev/null | sort -u)"
+  for p in "$@"; do
+    [[ "$p" != /* && "$p" != *..* ]] || return 1
+    hit=""
+    while IFS=$'\t' read -r n text; do
+      if grep -qF -- "\`${p}\`" <<< "$text"; then hit="AC${n}"; break; fi
+      name="${p##*/}"
+      if [[ "$name" != "$p" ]] && grep -qF -- "\`${name}\`" <<< "$text" \
+         && [[ "$(grep -cE "(^|/)${name//./\\.}\$" <<< "$files")" == 1 ]] && grep -qxF -- "$p" <<< "$files"; then
+        hit="AC${n}"; break
+      fi
+    done <<< "$acs"
+    [[ -n "$hit" ]] || return 1
+    out="$(jq -c --arg p "$p" --arg a "$hit" '. + [{path: $p, ac: $a}]' <<< "$out")"
+  done
+  declare -F aid_protected_impact >/dev/null || source "${SCRIPT_DIR}/lib/aid-protected.sh"
+  local prop; prop="$(mktemp)" || return 1
+  jq -n --argjson s "$i" '{kind: "scope_extension", step: $s, paths: $ARGS.positional}' --args "$@" > "$prop"
+  aid_protected_impact "$(aid_state_root 2>/dev/null || echo "$root")" "$root" "$prop" "$ev" >/dev/null || { rm -f "$prop"; return 1; }
+  rm -f "$prop"
+  printf '%s\n' "$out"
+}
+
 cmd_amend_scope() {
   local state_file="" reason="" pm_card="" stand_in=""; local -a add=()
   while [[ $# -gt 0 ]]; do
@@ -5619,7 +5652,7 @@ cmd_amend_scope() {
   # only for a point of the brief, named in --reason: the current step's points
   # in EXECUTE, any step's in GATES (a gate fix serves the whole plan). Checked
   # BEFORE anything is retired or written. A plan without a brief traces null.
-  local _zp_plan _zp_cs _zp_total _zp_point="" _zp_set="" _pm_decision=""
+  local _zp_plan _zp_cs _zp_total _zp_point="" _zp_set="" _pm_decision="" _named=""
   _zp_plan="$(cd "$(dirname "$state_file")" && pwd)/plan.json"
   if [[ -f "$_zp_plan" ]] && [[ -n "$(jq -r '.zadani_sha256 // ""' "$_zp_plan" 2>/dev/null)" ]]; then
     _zp_cs=$(yaml_field "$state_file" current_step); _zp_cs="${_zp_cs:-0}"
@@ -5649,6 +5682,10 @@ cmd_amend_scope() {
         || die "amend-scope: --stand-in ${stand_in} does not permit this widening: ${_si_why}"
       _pm_decision="$(jq -nc --arg a "$stand_in" --arg s "$(jq -r .verdict_sha256 "$stand_in")" '{stand_in: $a, verdict_sha256: $s}')"
       _SI_CONSUME="$stand_in"; _SI_EXPECT="$_si_exp"
+    elif _named=$(_amend_scope_named_in_ac "$_zp_plan" "$_zp_cs" "$(dirname "$state_file")" "${add[@]}"); then
+      # AID 3.13.0: every added path is a file the step's own acceptance criterion names — routine, no stand-in
+      # (WAN P116 28. 10. 2026: a test file the AC named went to the stand-in); protected impacts were checked
+      _pm_decision="$(jq -nc --argjson n "$_named" '{named_in_ac: $n}')"
     elif [[ -z "$_zp_set" ]]; then
       echo "amend-scope: step $(( _zp_cs + 1 )) closes no point of the brief — a widening here is a scope change for the PM (rule 11)" >&2
       _fsm_refusal_next amend_scope_no_brief_point || true

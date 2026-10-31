@@ -679,8 +679,9 @@ _mplan() {
   _S prepare --round 2 >/dev/null
   _sanswer 2 step_generalist '.findings = [] | .no_findings_reason = "fixed"'
   _S collect --round 2 >/dev/null; _bracket 2 step_generalist
-  run _S close --round 2 --tokens step_generalist=7 --fixer backend=opus:unknown:unknown
+  run _S close --round 2 --tokens step_generalist=7 --fixer e2e=opus:unknown:unknown   # 3.13.0: a role with a digit (WAN P116)
   [ "$status" -eq 0 ]
+  [ "$(jq -r '.fixer.role // .fixer.name // empty' "$(D 2)/measurement.json")" = e2e ] || jq -e '.fixer | tostring | test("e2e")' "$(D 2)/measurement.json"
   [ "$(jq -r '.fixer.tokens' "$(D 2)/measurement.json")" = unknown ]
   [ "$(jq -r '.verdict' "$(D 2)/measurement.json")" = pass ]
 }
@@ -939,7 +940,7 @@ FD() { printf '%s/cp7/round-%s' "$E" "$1"; }
 # _fanswer <round> <role> [jq filter] — a cp7 answer with no findings, bracketed like a dispatched agent
 _fanswer() {
   local d; d="$(FD "$1")"
-  jq -n --arg r "$2" '{role: $r, checkpoint: "cp7", findings: [], no_findings_reason: "fixture"}' | jq "${3:-.}" > "$d/reviewer-$2.json"
+  jq -n --arg r "$2" '{role: $r, checkpoint: "cp7", findings: [], no_findings_reason: "fixture"} + (if $r == "final_generalist" then {security_and_operations: (["personal_data","host_layout","ci_dependencies","docs_build","log_leaks","account_boundaries","injection","paths_deletion","forged_trust"] | map({(.): {answer: "none"}}) | add)} else {} end)' | jq "${3:-.}" > "$d/reviewer-$2.json"
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "cp7-${2//_/-}" --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "cp7-${2//_/-}" --output-file "$d/reviewer-$2.json" --evidence-dir "$d" >/dev/null
 }
@@ -1043,7 +1044,8 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
 @test "cp7: close refuses a reviewer file nobody dispatched" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
   _fanswer 1 final_criteria
-  jq -n '{role: "final_generalist", checkpoint: "cp7", findings: [], no_findings_reason: "hand-written"}' > "$(FD 1)/reviewer-final_generalist.json"
+  jq -n '{role: "final_generalist", checkpoint: "cp7", findings: [], no_findings_reason: "hand-written",
+         security_and_operations: (["personal_data","host_layout","ci_dependencies","docs_build","log_leaks","account_boundaries","injection","paths_deletion","forged_trust"] | map({(.): {answer: "none"}}) | add)}' > "$(FD 1)/reviewer-final_generalist.json"
   _F collect --round 1 >/dev/null
   run _F close --round 1 --tokens final_criteria=5 final_generalist=5
   [ "$status" -eq 1 ]; [[ "$output" == *"no_dispatch_record"* ]]
@@ -1073,6 +1075,18 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [ "$(jq -r .mode "$(FD 1)/round.json")" = confirmation ]
   grep -q "FIRST evidence citation must be a line the fix added" "$(FD 1)/prompt-final_generalist.md"
   ! grep -q "This is a FULL round over the new candidate" "$(FD 1)/prompt-final_generalist.md"
+}
+
+@test "cp7 (3.13.0): final_generalist answers each security and operations question; a missing one is a form re-ask, an unknown one is refused" {
+  _frepo; _fsc; _F prepare --round 1 >/dev/null
+  _fanswer 1 final_criteria; _fanswer 1 final_generalist 'del(.security_and_operations.forged_trust)'
+  run _F collect --round 1; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"retry only: final_generalist"* ]]
+  jq -r '.invalid[0].reason' "$(FD 1)/collect.json" | grep -q "forged_trust"
+  _fanswer 1 final_generalist '.security_and_operations.extra = {answer: "none"}'
+  run _F collect --round 1; [ "$status" -eq 1 ]; jq -r '.invalid[0].reason' "$(FD 1)/collect.json" | grep -q "unknown key extra"
+  # WAN P115 25. 10. 2026: the stand-in filled the field the role asks for — it is collected, not refused
+  _fanswer 1 final_generalist '.security_and_operations.log_leaks = {answer: "checked", note: "no new log line"}'
+  run _F collect --round 1; echo "$output"; [ "$status" -eq 0 ]
 }
 
 @test "cp7: a finding of a final role validates against the finding schema's checkpoint and role lists" {

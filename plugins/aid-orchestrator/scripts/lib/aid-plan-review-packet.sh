@@ -294,6 +294,11 @@ aid_plan_review_answer_error() {
       elif ((keys - $top_keys) | length) > 0 then "unknown key \((keys - $top_keys) | join(", "))"
       elif (.role | IN($roles[]) | not) then "role must be one of \($roles | join(", "))"
       elif (.findings | type) != "array" then "findings must be an array"
+      # AID 3.13.0: the generalist answers each security and operations question (WAN P115: a stand-in filled the
+      # field the role asks for and collect rejected it as an unknown key)
+      elif ($cp == "cp7" and .role == "final_generalist") and ((.security_and_operations | type) != "object") then "security_and_operations is required for final_generalist (one answer per question)"
+      elif (.security_and_operations != null) and ([$schema.properties.security_and_operations.required[] as $k | select((.security_and_operations[$k].answer // "") | IN("none", "checked", "finding") | not) | $k] | length) > 0 then "security_and_operations: each of \($schema.properties.security_and_operations.required | join(", ")) needs answer none, checked or finding"
+      elif (.security_and_operations != null) and (((.security_and_operations | keys) - $schema.properties.security_and_operations.required) | length) > 0 then "security_and_operations: unknown key \(((.security_and_operations | keys) - $schema.properties.security_and_operations.required) | join(", "))"
       elif (.findings | length) == 0 and ((.no_findings_reason // "") == "") then "no_findings_reason is required when findings is empty"
       else first(.findings[] | finding_error) // empty end
   ' "$file" 2>&1)" || { echo "answer check failed: ${err}"; return 1; }

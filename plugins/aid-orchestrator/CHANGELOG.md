@@ -3,6 +3,17 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.13.0] — Unreleased
+
+Běh plánu bez ručních obchvatů (rozbor plugin issues 31. 10. 2026, volby PM 3A-9A, 11A, 12B). Zadání: `docs/plans/2026-10-31-zadani-3130-beh-planu.md`.
+
+### Fixed
+- **Drobnosti z běhů WANu (Z12):**
+  - `close --fixer` přijme roli s číslicí, třeba `e2e`.
+  - `amend-scope` rozšíří krok bez zástupce o soubor, který akceptační bod kroku jmenuje přesně, nebo jménem souboru, které je v repu jedinečné. Záznam je `named_in_ac`. Dvojznačné jméno, mix a chráněná cesta jdou dál cestou zástupce a PM.
+  - Pokyny opravářům (CP1, CP2, CP7) říkají, že `fix_of` je absolutní cesta do state rootu, mimo strom plánu.
+  - Odpověď `final_generalist` v CP7 nese typované pole `security_and_operations`: devět otázek, každá `none` / `checked` / `finding`. Chybějící položka je oprava formy, neznámá je odmítnutá. Do 3.12 sběr odmítl i správně vyplněné pole.
+
 ## [3.12.1] — 2026-10-31
 
 Oprava 3.12.0 z hlášení WANu (rozbor plugin issues 31. 10. 2026, `docs/plans/2026-10-31-roadmapa-plugin-issues.md` body 1 a 2).

@@ -1292,7 +1292,7 @@ to close the round at the revision the reviewers saw; the fix is confirmed by th
   done
   local fixer=null
   if [[ -n "$FIXER" ]]; then
-    [[ "$FIXER" =~ ^([a-z_-]+)=([^:]+):([0-9]+|unknown):([0-9]+|unknown)$ ]] || _die "--fixer takes <role>=<model>:<tokens_in>:<tokens_out>" 2
+    [[ "$FIXER" =~ ^([a-z][a-z0-9_-]*)=([^:]+):([0-9]+|unknown):([0-9]+|unknown)$ ]] || _die "--fixer takes <role>=<model>:<tokens_in>:<tokens_out>" 2
     local fusd; fusd="$(aid_review_usd "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" 0 0)"
     fixer="$(jq -nc --arg r "${BASH_REMATCH[1]}" --arg m "${BASH_REMATCH[2]}" --arg i "${BASH_REMATCH[3]}" --arg o "${BASH_REMATCH[4]}" --arg u "$fusd" \
       '{role: $r, model: $m, tokens_in: ($i | tonumber? // $i), tokens_out: ($o | tonumber? // $o),
