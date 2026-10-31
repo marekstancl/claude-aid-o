@@ -134,7 +134,7 @@ rozpočtu platí dnešní cesta (`REVIEW_EXHAUSTED` → zástupce). Platí pro C
 
 **Z12 – drobnosti**
 1. `close --fixer` přijme roli s číslicí (`^[a-z][a-z0-9_-]*=`).
-2. `amend-scope` bez zástupce [R11, R11b]:
+2. `amend-scope` bez zástupce [R11, R11b], **jen pro testovací soubory** (`test_*`, `*_test.*`, `*.test.*`, `*.spec.*`, `tests/`, `__tests__/`; zúženo po bezpečnostní kontrole 31. 10.: zmínka jiného souboru v bodu kroku neznamená svolení ho měnit), a jen pro kanonickou cestu bez symlinku ven:
    - pro cestu, kterou akceptační bod kroku jmenuje přesně (normalizovaná relativní cesta);
    - pro jméno souboru, které odpovídá **jedinému** souboru v celém repu (verzované i nové soubory kroku).
 
