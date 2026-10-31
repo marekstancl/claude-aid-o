@@ -349,7 +349,7 @@ _aid_lc_sync_checkout_of() {
   _ient() { git -C "$wt" ls-files -s -- "$1" 2>/dev/null | awk 'NR==1{print $1" "$2}'; }
   _went() {
     local f="${wt}/$1"
-    [[ -L "$f" ]] && { printf '120000 %s' "$(readlink -- "$f" | git -C "$wt" hash-object --stdin)"; return; }
+    [[ -L "$f" ]] && { printf '120000 %s' "$(readlink -n -- "$f" | git -C "$wt" hash-object --stdin)"; return; }   # the exact target bytes
     [[ -f "$f" ]] || { [[ -e "$f" ]] && printf 'other'; return; }
     printf '%s %s' "$( [[ -x "$f" ]] && echo 100755 || echo 100644)" "$(git -C "$wt" hash-object --no-filters -- "$1" 2>/dev/null)"
   }
@@ -362,7 +362,7 @@ _aid_lc_sync_checkout_of() {
   done
   if (( ${#bad[@]} )); then
     local report q=""; report="$(printf '%q ' "${bad[@]}")"; report="${report% }"
-    echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree are not at ${tip:0:12}: local changes overlap with: ${report}. A plain 'git commit' there would REVERT this write — do not commit there. Keep your staged and unstaged edits as two patches against the state they were made on (the pre-merge ${old:0:12}), take the branch's version, then put them back: cd ${wt} && git diff --cached --binary ${old:0:12} -- ${report} > /tmp/aid-staged.patch && git diff --binary -- ${report} > /tmp/aid-unstaged.patch && git checkout ${tip:0:12} -- ${report} && git reset -q -- ${report}; run the AID command again; then git apply --3way --index /tmp/aid-staged.patch && git apply --3way /tmp/aid-unstaged.patch" >&2
+    echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree are not at ${tip:0:12}: local changes overlap with: ${report}. Nothing was changed. A plain 'git commit' there would REVERT this write — do not commit there. Save both versions of each of those files, take the branch's version, run the AID command again, then bring your edits back by hand: cd ${wt}; for each file F: git show :F > F.aid-staged (the staged version) and cp F F.aid-worktree (the file on disk); then GIT_LITERAL_PATHSPECS=1 git checkout ${tip:0:12} -- ${report} && GIT_LITERAL_PATHSPECS=1 git reset -q -- ${report}" >&2
     return 1
   fi
   (( ${#upd[@]} )) || return 0

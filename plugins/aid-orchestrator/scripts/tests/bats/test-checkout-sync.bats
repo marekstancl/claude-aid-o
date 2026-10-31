@@ -79,15 +79,13 @@ teardown() { rm -rf "$T"; }
   [ "$status" -eq 1 ]; [[ "$output" == *"b.txt"* ]]
 }
 
-@test "3.13.0: refusal, the printed repair, then the same call again: the checkout is at the tip and the user's edit is back" {
+@test "3.13.0: refusal, the printed repair, then the same call again: the checkout is at the tip and the user's edit is kept aside" {
   echo mine > a.txt
-  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; [ "$status" -eq 1 ]
-  git diff --cached --binary "$OLD" -- a.txt > "$T/staged.patch"; git diff --binary -- a.txt > "$T/my.patch"
-  git checkout -q "$NEW" -- a.txt; git reset -q -- a.txt
+  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; [ "$status" -eq 1 ]; [[ "$output" == *"Nothing was changed"* ]]
+  git show :a.txt > a.txt.aid-staged; cp a.txt a.txt.aid-worktree
+  GIT_LITERAL_PATHSPECS=1 git checkout -q "$NEW" -- a.txt; GIT_LITERAL_PATHSPECS=1 git reset -q -- a.txt
   run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; echo "$output"; [ "$status" -eq 0 ]
-  [[ "$(cat b.txt)" == "new" ]]
-  git apply --3way "$T/my.patch" 2>/dev/null || true
-  grep -q mine a.txt                                    # the edit is back (here as a conflict with the merge's "two")
+  [[ "$(cat b.txt)" == "new" ]]; [[ "$(cat a.txt)" == "two" ]]; [[ "$(cat a.txt.aid-worktree)" == "mine" ]]
 }
 
 @test "3.13.0: a write that only changes the executable bit is brought forward; a local mode change on a written file refuses" {
@@ -106,13 +104,22 @@ teardown() { rm -rf "$T"; }
   [ "$(cat 'a*')" = star ]; [ "$(cat a.txt)" = "my edit" ]
 }
 
-@test "3.13.0: distinct staged and unstaged edits survive the printed repair" {
+@test "3.13.0: distinct staged and unstaged edits are both kept by the printed repair" {
   echo staged > a.txt; git add a.txt; echo unstaged > a.txt
   run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; [ "$status" -eq 1 ]
-  git diff --cached --binary "$OLD" -- a.txt > "$T/s.patch"; git diff --binary -- a.txt > "$T/u.patch"
-  git checkout -q "$NEW" -- a.txt; git reset -q -- a.txt
+  [ "$(git show :a.txt)" = staged ]; [ "$(cat a.txt)" = unstaged ]                # nothing was changed
+  git show :a.txt > a.txt.aid-staged; cp a.txt a.txt.aid-worktree
+  GIT_LITERAL_PATHSPECS=1 git checkout -q "$NEW" -- a.txt; GIT_LITERAL_PATHSPECS=1 git reset -q -- a.txt
   run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; [ "$status" -eq 0 ]
-  grep -q '^+staged' "$T/s.patch"; grep -q '^+unstaged' "$T/u.patch"        # both kept, apart
-  git apply --3way --index "$T/s.patch" 2>/dev/null || true
-  git show :3:a.txt 2>/dev/null | grep -q staged || git show :a.txt | grep -q staged   # back in the index (here a conflict with the merge's line)
+  [ "$(cat a.txt.aid-staged)" = staged ]; [ "$(cat a.txt.aid-worktree)" = unstaged ]
+}
+
+@test "3.13.0: a local mode change on a file the write changed refuses; an unchanged symlink is not taken for a change" {
+  ln -s a.txt link; git add link; git commit -qm link; local L; L="$(git rev-parse HEAD)"
+  ( cd ../side && git merge -q --ff-only "$L" 2>/dev/null || git reset -q --hard "$L"; echo three > a.txt; git add a.txt; git commit -qm three )
+  local N2; N2="$(git -C ../side rev-parse HEAD)"; git update-ref refs/heads/main "$N2"
+  chmod +x a.txt                                         # the user's local mode change on the written file
+  run _aid_lc_sync_checkout_of "$T/side" main "$L" "$N2"; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"a.txt"* ]]
+  chmod -x a.txt
+  run _aid_lc_sync_checkout_of "$T/side" main "$L" "$N2"; [ "$status" -eq 0 ]; [ "$(cat a.txt)" = three ]; [ -L link ]
 }
