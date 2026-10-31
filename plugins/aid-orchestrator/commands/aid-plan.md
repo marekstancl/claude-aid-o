@@ -683,7 +683,10 @@ to the same reviewer; it is asked once, and a second malformed finding is droppe
    not smuggled: `fix-check <plan> --round 1 --also-steps B --reason "<what the fix
    of A changed in B>"`; the record lands in `fix-diff.json` and the next round's
    packet names it ("Consequential edits the author declared"), so a reviewer
-   reads the edit instead of a silent contradiction. Round 2 asks only the
+   reads the edit instead of a silent contradiction. `finalize` after the last round
+   takes the same `--also-steps B --reason "…"`, recorded in `finalize.json`; with a
+   plan-level finding (fix list `any`) every step is already allowed and the steps are
+   only recorded (AID 3.13.0). Round 2 asks only the
    reviewers whose findings touch a changed step, plus every reviewer that
    reported a blocker.
 

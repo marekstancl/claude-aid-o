@@ -1399,7 +1399,9 @@ _check_fix() {
   if [[ -n "$ALSO_STEPS" ]]; then
     [[ -n "$REASON" ]] || _die "--also-steps needs --reason: say which fix made these steps change (the next round's card names it)" 2
     [[ "$ALSO_STEPS" =~ ^[0-9]+(,[0-9]+)*$ ]] || _die "--also-steps takes step numbers: 5 or 5,6" 2
-    if [[ "$allowed" == none ]]; then allowed="$ALSO_STEPS"; else allowed="${allowed},${ALSO_STEPS}"; fi
+    # a plan-level finding already allows any step: the steps are only recorded (WAN P116 28. 10. 2026: `any,8,9,11`
+    # narrowed the check to 8, 9 and 11 and refused the legitimate fix)
+    if [[ "$allowed" == none ]]; then allowed="$ALSO_STEPS"; elif [[ "$allowed" != any ]]; then allowed="${allowed},${ALSO_STEPS}"; fi
   fi
   "${SCRIPT_DIR}/aid-plan-check.sh" "$PLAN" --project-root "$ROOT" --snapshot "${dir}/packet/plan.md" \
     --fixes "$allowed" --json "$out" --quiet || rc=$?
