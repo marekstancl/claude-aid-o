@@ -178,11 +178,15 @@ aid_test_names_plan_refs() {
   else
     diff="$(git -C "$repo" -c core.quotePath=false diff -M --unified=0 --no-color --no-ext-diff "$base" -- 2>/dev/null)" || return 2
     if [[ "$end" == worktree ]]; then
+      local others one rc
+      others="$(git -C "$repo" ls-files --others --exclude-standard)" || return 2
       while IFS= read -r f; do
         [[ -n "$f" ]] || continue
-        # --no-index exits 1 when the files differ, which is always here
-        diff+=$'\n'"$(cd "$repo" && git -c core.quotePath=false diff --no-index --unified=0 --no-color -- /dev/null "$f" 2>/dev/null; true)"
-      done < <(git -C "$repo" ls-files --others --exclude-standard 2>/dev/null)
+        # --no-index exits 1 when the files differ (always, against /dev/null); anything else is a failure to read
+        rc=0; one="$(cd "$repo" && git -c core.quotePath=false diff --no-index --unified=0 --no-color -- /dev/null "$f" 2>/dev/null)" || rc=$?
+        (( rc <= 1 )) || return 2
+        diff+=$'\n'"$one"
+      done <<< "$others"
     fi
   fi
   hits="$(awk '

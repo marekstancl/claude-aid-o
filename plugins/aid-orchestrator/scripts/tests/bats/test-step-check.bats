@@ -277,6 +277,13 @@ _rr_step() {   # a declared foreign repository "docs" with a worktree on plan/P1
   rm -rf "$E/cp2"; run _run --checkpoint cp2 --step 0; [ "$status" -eq 0 ]
 }
 
+@test "3.13.0: an untracked file the check cannot read stops the step check, it is not passed unchecked" {
+  printf "describe('x', () => {})\n" > "$R/tests/new.test.ts"; chmod 000 "$R/tests/new.test.ts"
+  run _run --checkpoint cp2 --step 0 --worktree; chmod 644 "$R/tests/new.test.ts"; echo "$output"
+  [ "$(id -u)" -eq 0 ] && skip "root reads any file"
+  [ "$status" -ne 0 ]; [[ "$output" == *"could not be read"* ]]
+}
+
 @test "3.13.0: --worktree checks the untracked new test too" {
   printf "describe('a new one — P114', () => {})\n" > "$R/tests/new.test.ts"
   run _run --checkpoint cp2 --step 0 --worktree; echo "$output"; [ "$status" -eq 1 ]
