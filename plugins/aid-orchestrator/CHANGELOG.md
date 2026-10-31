@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [3.13.0] — Unreleased
+## [3.13.0] — 2026-10-31
 
 Běh plánu bez ručních obchvatů (rozbor plugin issues 31. 10. 2026, volby PM 3A-9A, 11A, 12B). Zadání: `docs/plans/2026-10-31-zadani-3130-beh-planu.md`.
 
