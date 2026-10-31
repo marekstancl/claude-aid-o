@@ -95,7 +95,10 @@ answers. A turn may end with:
 - a Decision card or a Blocked card (`skills/communication.md`) — the PM gets one
   "agent is waiting" message; the PM's "zastav se" is answered with a Blocked card;
 - a last line `AID-WAIT: <what>` while a background gate job AID owns is live
-  (`aid-job.sh`); the harness brings you back when it finishes;
+  (`aid-job.sh`); the harness brings you back when it finishes. An open step's own
+  background work counts the same: its takeover, its agent, and (AID 3.13.0) its CP2
+  reviewers and fixer started with `aid-emit-dispatch.sh start` (pass the printed
+  nonce to `complete --nonce`);
 - the budget spent, or an account limit — the PM gets the same one message.
 
 Requires `autonomous_mode: true` in `.aid-o/config/permissions.yaml`.
@@ -603,7 +606,7 @@ bash "$AID_PLUGIN_PATH/scripts/aid-review-round.sh" close <review> --round K \
 ```
 
 When `close` reports `fail` on a step round and a round remains
-(`rounds_default`, or the PM's `override`), the fix is the step's own role's:
+(`rounds_default`, or the PM's `override`), the fix is the step's own role's. Bracket the fixer like a reviewer (AID 3.13.0): `aid-emit-dispatch.sh start --focus fix-cp2-<N>-r<K> --agent-id aid-orchestrator:<role> --evidence-dir <round dir>` before it, and after it write its report to `<round dir>/fixer-report.md` and `complete --focus fix-cp2-<N>-r<K> --output-file <round dir>/fixer-report.md --evidence-dir <round dir> --nonce <the start's nonce>` — a fixer in the background then lets the turn end with `AID-WAIT: oprava kroku N`:
 
 ```
 Agent(subagent_type: <"aid-orchestrator:implementer-light" when the step's role card says **Effort:** low, else "aid-orchestrator:implementer">,

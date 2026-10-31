@@ -820,6 +820,11 @@ refuses to close the turn and names the transition: validate the return, commit,
 verify file, `increment-step` — or hand over explicitly with a Decision card or a Blocked card
 (`skills/communication.md`). A `Write`/`Edit` outside every open step's paths is named by
 `turn_write_scope` as context before it lands; it does not block, the validation above does.
+A last line `AID-WAIT: <what>` ends the turn while the step's own background work runs: its takeover
+(`aid-step-land.sh`, below), the agent dispatched with its packet, or (AID 3.13.0) a reviewer or fixer of its CP2
+rounds — a start in `cp2/step-<N>/round-*/pending-dispatches.jsonl` whose `nonce=` this session's transcript holds
+(`aid-emit-dispatch.sh start` prints it; `complete`/`cancel --nonce` close exactly it) and younger than its
+`expected_duration_max`. Another session's start, another step's round or any other background call does not.
 
 **Taking a step over in the background (AID 3.11.0, the default).** The mechanical half of what follows —
 validate the return, commit, (in a wave) merge, run the step's command criteria, the plan's measurer — is one

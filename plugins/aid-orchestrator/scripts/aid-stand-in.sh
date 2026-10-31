@@ -98,7 +98,7 @@ cmd_ask() {
       VERDICT="${d}/verdict.json"; cmd_record; return $?
     fi
   fi
-  echo "STAND-IN: no codex verdict; dispatch ${d}/prompt.md to an independent general-purpose agent at model opus inside the bracket stand-in-${ID} (aid-emit-dispatch.sh start --focus stand-in-${ID} --agent-id claude:stand-in --evidence-dir ${EVID}; complete --focus stand-in-${ID} --output-file ${d}/verdict.json --evidence-dir ${EVID}), have it write ${d}/verdict.json with \"provider\": \"claude\", then: aid-stand-in.sh record --evidence-dir ${EVID} --id ${ID} --verdict ${d}/verdict.json"
+  echo "STAND-IN: no codex verdict; dispatch ${d}/prompt.md to an independent general-purpose agent at model opus inside the bracket stand-in-${ID} (aid-emit-dispatch.sh start --focus stand-in-${ID} --agent-id claude:stand-in --evidence-dir ${EVID}; complete --focus stand-in-${ID} --output-file ${d}/verdict.json --evidence-dir ${EVID} --nonce <its start's nonce>), have it write ${d}/verdict.json with \"provider\": \"claude\", then: aid-stand-in.sh record --evidence-dir ${EVID} --id ${ID} --verdict ${d}/verdict.json"
   exit 4
 }
 

@@ -698,13 +698,13 @@ cmd_prepare() {
   # The bracket is copied, never composed: a controller that dispatched without
   # it back-dated one to get out (P010) — the forgery the detector exists for.
   if [[ "$MODE" == step ]]; then
-    echo "  brackets — run start BEFORE each dispatch and complete AFTER it (a bracket written after the answer is a forgery):"
+    echo "  brackets — run start BEFORE each dispatch and complete AFTER it (a bracket written after the answer is a forgery); start prints nonce=<n>: pass it to complete (and cancel) as --nonce <n>, it is what lets AID-WAIT end the turn while the reviewer runs:"
     for role in "${roles[@]}"; do
       _is_carried "$dir" "$role" && continue
       i="$(aid_review_role_index "$role")"
       [[ "${RC_PROVIDER[$i]}" == claude ]] || continue
       echo "    bash \"\$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh\" start --focus $(_focus "$role") --agent-id aid-orchestrator:review --evidence-dir ${dir}"
-      echo "    bash \"\$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh\" complete --focus $(_focus "$role") --output-file ${dir}/reviewer-${role}.json --evidence-dir ${dir}"
+      echo "    bash \"\$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh\" complete --focus $(_focus "$role") --output-file ${dir}/reviewer-${role}.json --evidence-dir ${dir} --nonce <its start's nonce>"
     done
   fi
 }

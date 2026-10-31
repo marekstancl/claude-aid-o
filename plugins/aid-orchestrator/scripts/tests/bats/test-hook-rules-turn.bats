@@ -231,3 +231,36 @@ _takeover_gone() { kill "$TAKEOVER_PID" 2>/dev/null; wait "$TAKEOVER_PID" 2>/dev
   [[ "$(jq -r '.hookSpecificOutput.additionalContext' <<< "$output")" == *"lib/other.sh"* ]]
   grep -q '"rule":"turn_write_scope","outcome":"inject"' "$AID_HOOK_AUDIT"
 }
+
+# ── AID 3.13.0: a reviewer or fixer of the step running in the background ────
+_cp2_start() {  # <round> <focus> [age seconds] — a start in the round's pending ledger, its nonce echoed in this transcript
+  local rd="$EV/cp2/step-0/round-$1" n="n$RANDOM$RANDOM" at; mkdir -p "$rd"
+  at="$(date -u -d "-${3:-5} seconds" +%Y-%m-%dT%H:%M:%SZ)"
+  jq -nc --arg ts "$at" --arg f "$2" --arg n "$n" '{ts: $ts, event: "start", focus: $f, agent_id: "x", step_n: 0, evidence_dir: "d", expected_duration_max: 600, nonce: $n}' >> "$rd/pending-dispatches.jsonl"
+  printf '{"type":"user","message":{"content":[{"type":"tool_result","content":"nonce=%s focus=%s evidence=%s"}]}}\n' "$n" "$2" "$rd" >> "$TRANSCRIPT"
+  LAST_NONCE="$n"
+}
+@test "turn (3.13.0): AID-WAIT ends the turn while this session's CP2 reviewer or fixer of the open step runs, and not after" {
+  _cp2_start 1 cp2-step-0-step-generalist; _say "AID-WAIT: revize kroku 1"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; echo "$output"; [ "$status" -eq 3 ]
+  # complete removes the start from the ledger: nothing to wait on
+  : > "$EV/cp2/step-0/round-1/pending-dispatches.jsonl"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  # a fixer of the step counts the same way
+  _cp2_start 1 fix-cp2-0-r1; _say "AID-WAIT: oprava kroku 1"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 3 ]
+}
+@test "turn (3.13.0): another session's start, a start past its time limit, or another step's round does not excuse the step" {
+  # another session: in the ledger, but its nonce never appears in this transcript
+  mkdir -p "$EV/cp2/step-0/round-1"
+  jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{ts: $ts, event: "start", focus: "cp2-step-0-step-generalist", expected_duration_max: 600, nonce: "foreign1"}' >> "$EV/cp2/step-0/round-1/pending-dispatches.jsonl"
+  _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  # past its own limit
+  : > "$EV/cp2/step-0/round-1/pending-dispatches.jsonl"; _cp2_start 1 cp2-step-0-step-generalist 900; _say "AID-WAIT: revize"
+  run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+  # another step's round
+  rm -rf "$EV/cp2"; mkdir -p "$EV/cp2/step-3/round-1"; n="n$RANDOM"
+  jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg n "$n" '{ts: $ts, event: "start", focus: "cp2-step-3-x", expected_duration_max: 600, nonce: $n}' >> "$EV/cp2/step-3/round-1/pending-dispatches.jsonl"
+  printf '{"type":"user","message":{"content":"nonce=%s focus=x evidence=y"}}\n' "$n" >> "$TRANSCRIPT"
+  _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+}

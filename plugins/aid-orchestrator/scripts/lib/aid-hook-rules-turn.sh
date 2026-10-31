@@ -113,7 +113,24 @@ aid_turn_open_steps() {
 #     state file through a variable, quoted or not — so the record does);
 #   or its agent — an Agent/Task launched in the background whose prompt carries this step's contract header.
 _aid_hrt_step_call_pending() {
-  local t="$1" c="$2" sess="${3:-}" ver rec pid
+  local t="$1" c="$2" sess="${3:-}" idx="${4:-}" ver rec pid
+  # 3.13.0: a reviewer or fixer of THIS step dispatched in the background by THIS session — its start's nonce is in
+  # this transcript (aid-emit-dispatch.sh prints it), the start is still in the round's pending ledger (complete and
+  # cancel remove exactly their line) and it is younger than its own time limit (WAN P114 26. 10. 2026: the turn
+  # was refused while the CP2 reviewers ran, AID-WAIT knew only aid-job.sh)
+  if [[ "$idx" =~ ^[0-9]+$ ]]; then
+    local run_dir pl ln nonce ts exp now; run_dir="$(dirname "$(dirname "$(dirname "$c")")")"; now="$(date -u +%s)"
+    for pl in "$run_dir"/cp2/step-"$idx"/round-*/pending-dispatches.jsonl; do
+      [[ -s "$pl" ]] || continue
+      while IFS=$'\t' read -r nonce ts exp; do
+        [[ -n "$nonce" && "$nonce" != null ]] || continue
+        grep -qF "nonce=${nonce} " "$t" 2>/dev/null || continue
+        ts="$(date -u -d "$ts" +%s 2>/dev/null)" || continue
+        [[ "$exp" =~ ^[0-9]+$ ]] || exp=3600
+        (( now - ts <= exp )) && return 0
+      done < <(jq -r 'select(.event == "start") | "\(.nonce)\t\(.ts)\t\(.expected_duration_max // "")"' "$pl" 2>/dev/null)
+    done
+  fi
   ver="$(jq -r '.version // ""' "$c" 2>/dev/null)"; rec="$(dirname "$c")/land.json"
   local candidates answered
   candidates="$( { grep -F 'aid-step-land.sh' "$t" 2>/dev/null \
@@ -208,7 +225,7 @@ aid_hook_rule_turn_step_open() {
     # the agent dispatched with its packet still works — a declared wait on THAT, unanswered, ends the turn; the
     # notification starts the next one. Any other background call does not excuse an open step.
     if [[ "$(printf '%s' "$last" | grep -v '^[[:space:]]*$' | tail -1)" == AID-WAIT:* ]]; then
-      if _aid_hrt_step_call_pending "$transcript" "$(cut -f5 <<< "$line")" "$sess"; then
+      if _aid_hrt_step_call_pending "$transcript" "$(cut -f5 <<< "$line")" "$sess" "$idx"; then
         echo "step ${idx} (${sid}) of ${epic} is open; the turn waits on a background call (AID-WAIT)" >&2
         return 3
       fi

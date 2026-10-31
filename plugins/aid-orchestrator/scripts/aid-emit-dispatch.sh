@@ -21,8 +21,9 @@ usage() {
   cat >&2 <<EOF
 Usage:
   aid-emit-dispatch.sh start --focus <id> --agent-id <id> --evidence-dir <path> [--expected-duration-max <seconds>]
-  aid-emit-dispatch.sh complete --focus <id> --output-file <path> --evidence-dir <path>
-  aid-emit-dispatch.sh cancel --focus <id> --evidence-dir <path> --reason "<why, 20+ chars>"
+  aid-emit-dispatch.sh complete --focus <id> --output-file <path> --evidence-dir <path> [--nonce <the start's nonce>]
+  aid-emit-dispatch.sh cancel --focus <id> --evidence-dir <path> --reason "<why, 20+ chars>" [--nonce <n>]
+  (start prints `nonce=<n> focus=<id> evidence=<path>` — 3.13.0)
       withdraws an open start (a role the round does not have, a reviewer that never ran)
       without inventing an output; a cancelled start is NOT a complete, so an answer
       filed under it still has no provenance
@@ -136,7 +137,7 @@ cmd_start() {
   # Emit timeline event
   log_event "${evidence_dir}/timeline.jsonl" "verifier_dispatch_start" \
     focus="$focus" agent_id="$agent_id" step_n="$step_n" \
-    evidence_dir="$evidence_dir" expected_duration_max="$exp_dur"
+    evidence_dir="$evidence_dir" expected_duration_max="$exp_dur" nonce="$nonce"
 
   # Build the pending-ledger line with jq -nc + --arg/--argjson so EVERY field is
   # RFC-8259-escaped (HIGH-1 fix). Raw printf interpolation of --focus/--evidence-dir
@@ -165,17 +166,21 @@ cmd_start() {
   (
     flock -x -w 5 200 || { echo "ERROR: flock timeout on $lockfile" >&2; exit 2; }
     printf '%s\n' "$pending_line" >> "$pending"
-  ) 200>"$lockfile"
+  ) 200>"$lockfile" || return $?
+  # 3.13.0: the nonce is this dispatch's identity — complete/cancel --nonce closes exactly it, and the Stop rule
+  # (AID-WAIT) excuses an open step only for a dispatch whose start this session's transcript holds
+  echo "nonce=${nonce} focus=${focus} evidence=${evidence_dir}"
 }
 
 cmd_complete() {
   # Parse args ...
-  local focus="" output_file="" evidence_dir=""
+  local focus="" output_file="" evidence_dir="" want_nonce=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --focus)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; focus="$2"; shift 2 ;;
       --output-file)   [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; output_file="$2"; shift 2 ;;
       --evidence-dir)  [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; evidence_dir="$2"; shift 2 ;;
+      --nonce)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; want_nonce="$2"; shift 2 ;;   # 3.13.0: exactly this start
       *) echo "ERROR: unknown arg $1" >&2; exit 1 ;;
     esac
   done
@@ -209,7 +214,7 @@ cmd_complete() {
     flock -x -w 5 200 || { echo "ERROR: flock timeout on $lockfile" >&2; exit 2; }
 
     # Find most recent unmatched start for this focus
-    match=$(jq -c --arg f "$focus" 'select(.focus == $f and .event == "start")' "$pending" | tail -1)
+    match=$(jq -c --arg f "$focus" --arg n "$want_nonce" 'select(.focus == $f and .event == "start" and ($n == "" or .nonce == $n))' "$pending" | tail -1)
     if [[ -z "$match" ]]; then
       echo "ERROR: orphan complete — no matching start for focus=$focus in $pending" >&2
       exit 2
@@ -256,7 +261,7 @@ cmd_complete() {
   log_event "${evidence_dir}/timeline.jsonl" "verifier_dispatch_complete" \
     focus="$focus" agent_id="$agent_id" step_n="$step_n" \
     evidence_dir="$evidence_dir" output_file="$output_file" output_sha256="$out_sha" \
-    duration_sec="$duration_sec"
+    duration_sec="$duration_sec" nonce="${want_nonce:-}"
 
   if [[ -n "$late_flag" ]]; then
     echo "WARNING: dispatch complete arrived late$late_flag" >&2
@@ -271,11 +276,12 @@ cmd_complete() {
 # focus, so a reviewer file filed under a cancelled start is an answer without
 # provenance and close refuses it (no_dispatch_record).
 cmd_cancel() {
-  local focus="" evidence_dir="" reason=""
+  local focus="" evidence_dir="" want_nonce="" reason=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --focus)        [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; focus="$2"; shift 2 ;;
       --evidence-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; evidence_dir="$2"; shift 2 ;;
+      --nonce)         [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; want_nonce="$2"; shift 2 ;;   # 3.13.0: exactly this start
       --reason)       [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; reason="$2"; shift 2 ;;
       *) echo "ERROR: unknown arg $1" >&2; exit 1 ;;
     esac
@@ -288,7 +294,7 @@ cmd_cancel() {
   touch "$lockfile"; rm -f "$resultf"
   (
     flock -x -w 5 200 || { echo "ERROR: flock timeout on $lockfile" >&2; exit 2; }
-    match=$(jq -c --arg f "$focus" 'select(.focus == $f and .event == "start")' "$pending" | tail -1)
+    match=$(jq -c --arg f "$focus" --arg n "$want_nonce" 'select(.focus == $f and .event == "start" and ($n == "" or .nonce == $n))' "$pending" | tail -1)
     if [[ -z "$match" ]]; then
       echo "ERROR: nothing to cancel — no open start for focus=$focus in $pending" >&2
       exit 2
@@ -310,7 +316,7 @@ cmd_cancel() {
   local start_ts agent_id
   IFS=$'\t' read -r start_ts agent_id < "$resultf"; rm -f "$resultf"
   log_event "${evidence_dir}/timeline.jsonl" "verifier_dispatch_cancel" \
-    focus="$focus" agent_id="$agent_id" evidence_dir="$evidence_dir" started_at="$start_ts" reason="$reason"
+    focus="$focus" agent_id="$agent_id" evidence_dir="$evidence_dir" started_at="$start_ts" reason="$reason" nonce="${want_nonce:-}"
   echo "cancelled start ${focus} (started ${start_ts}): ${reason}"
 }
 
