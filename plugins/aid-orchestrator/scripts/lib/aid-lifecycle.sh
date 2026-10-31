@@ -338,29 +338,36 @@ _aid_lc_sync_checkout_of() {
   #   or an untracked file byte-identical to the tip's (the close's receipt) — brought to the tip's version;
   #   anything else — the user's work overlaps: refused, and NOTHING is changed.
   local tip p T I W O N; local -a span=() upd=() bad=()
+  # paths are literal (a file named `a*` is that file, never a pattern) and NUL-separated (any name)
+  local -x GIT_LITERAL_PATHSPECS=1
   tip="$(git -C "$root" rev-parse -q --verify "refs/heads/${branch}" 2>/dev/null)" || tip="$new"
-  mapfile -t span < <({ git -C "$wt" -c core.quotepath=false diff --no-renames --name-only "$old" "$tip"
-                        git -C "$wt" -c core.quotepath=false diff --no-renames --name-only "$new" "$tip"; } | sort -u)
+  mapfile -d '' -t span < <({ git -C "$wt" diff -z --no-renames --name-only "$old" "$tip"
+                              git -C "$wt" diff -z --no-renames --name-only "$new" "$tip"; } | sort -zu)
   (( ${#span[@]} )) || return 0
-  _blob() { git -C "$wt" rev-parse -q --verify "$1:$2" 2>/dev/null || true; }
+  # an entry is "<mode> <blob>" — a change of only the executable bit is a change
+  _ent()  { git -C "$wt" ls-tree "$1" -- "$2" 2>/dev/null | awk 'NR==1{print $1" "$3}'; }
+  _ient() { git -C "$wt" ls-files -s -- "$1" 2>/dev/null | awk 'NR==1{print $1" "$2}'; }
+  _went() {
+    local f="${wt}/$1"
+    [[ -L "$f" ]] && { printf '120000 %s' "$(readlink -- "$f" | git -C "$wt" hash-object --stdin)"; return; }
+    [[ -f "$f" ]] || { [[ -e "$f" ]] && printf 'other'; return; }
+    printf '%s %s' "$( [[ -x "$f" ]] && echo 100755 || echo 100644)" "$(git -C "$wt" hash-object --no-filters -- "$1" 2>/dev/null)"
+  }
   for p in "${span[@]}"; do
-    T="$(_blob "$tip" "$p")"; O="$(_blob "$old" "$p")"; N="$(_blob "$new" "$p")"
-    I="$(git -C "$wt" ls-files -s -- "$p" 2>/dev/null | awk 'NR==1{print $2}')"
-    W=""; [[ -f "${wt}/${p}" && ! -L "${wt}/${p}" ]] && W="$(git -C "$wt" hash-object -- "$p" 2>/dev/null)"
-    [[ -e "${wt}/${p}" && -z "$W" ]] && W="(not a plain file)"
+    T="$(_ent "$tip" "$p")"; O="$(_ent "$old" "$p")"; N="$(_ent "$new" "$p")"; I="$(_ient "$p")"; W="$(_went "$p")"
     if [[ "$I" == "$T" ]]; then continue
     elif [[ ( "$I" == "$O" || "$I" == "$N" ) && "$W" == "$I" ]]; then upd+=("$p")
     elif [[ -z "$I" && -n "$T" && "$W" == "$T" ]]; then upd+=("$p")
     else bad+=("$p"); fi
   done
   if (( ${#bad[@]} )); then
-    local report; report="$(printf '%s ' "${bad[@]}")"; report="${report% }"
-    echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree are not at ${tip:0:12}: local changes overlap with: ${report}. A plain 'git commit' there would REVERT this write — do not commit there. Keep your edits as a patch against the state they were made on, take the branch's version, then put them back: git -C ${wt} diff --binary ${old:0:12} -- ${report} > /tmp/aid-my-edits.patch && git -C ${wt} checkout ${tip:0:12} -- ${report} && git -C ${wt} reset -q -- ${report}; run the AID command again; then git -C ${wt} apply --3way /tmp/aid-my-edits.patch (the patch keeps the content of your staged and unstaged edits together, not which part was staged)." >&2
+    local report q=""; report="$(printf '%q ' "${bad[@]}")"; report="${report% }"
+    echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree are not at ${tip:0:12}: local changes overlap with: ${report}. A plain 'git commit' there would REVERT this write — do not commit there. Keep your staged and unstaged edits as two patches against the state they were made on (the pre-merge ${old:0:12}), take the branch's version, then put them back: cd ${wt} && git diff --cached --binary ${old:0:12} -- ${report} > /tmp/aid-staged.patch && git diff --binary -- ${report} > /tmp/aid-unstaged.patch && git checkout ${tip:0:12} -- ${report} && git reset -q -- ${report}; run the AID command again; then git apply --3way --index /tmp/aid-staged.patch && git apply --3way /tmp/aid-unstaged.patch" >&2
     return 1
   fi
   (( ${#upd[@]} )) || return 0
   for p in "${upd[@]}"; do
-    if [[ -n "$(_blob "$tip" "$p")" ]]; then
+    if [[ -n "$(_ent "$tip" "$p")" ]]; then
       git -C "$wt" checkout -q "$tip" -- "$p" 2>/dev/null || { echo "WARNING: could not bring ${p} in ${wt} to ${tip:0:12}" >&2; return 1; }
     else
       git -C "$wt" rm -q --cached --ignore-unmatch -- "$p" 2>/dev/null; rm -f -- "${wt}/${p}"

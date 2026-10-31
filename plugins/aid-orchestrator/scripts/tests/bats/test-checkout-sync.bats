@@ -82,9 +82,37 @@ teardown() { rm -rf "$T"; }
 @test "3.13.0: refusal, the printed repair, then the same call again: the checkout is at the tip and the user's edit is back" {
   echo mine > a.txt
   run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; [ "$status" -eq 1 ]
-  git diff --binary "$OLD" -- a.txt > "$T/my.patch"; git checkout -q "$NEW" -- a.txt; git reset -q -- a.txt
+  git diff --cached --binary "$OLD" -- a.txt > "$T/staged.patch"; git diff --binary -- a.txt > "$T/my.patch"
+  git checkout -q "$NEW" -- a.txt; git reset -q -- a.txt
   run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; echo "$output"; [ "$status" -eq 0 ]
   [[ "$(cat b.txt)" == "new" ]]
   git apply --3way "$T/my.patch" 2>/dev/null || true
   grep -q mine a.txt                                    # the edit is back (here as a conflict with the merge's "two")
+}
+
+@test "3.13.0: a write that only changes the executable bit is brought forward; a local mode change on a written file refuses" {
+  ( cd ../side && chmod +x a.txt && git add a.txt && git commit -qm mode )
+  local N2; N2="$(git -C ../side rev-parse HEAD)"; git update-ref refs/heads/main "$N2"
+  git reset -q --hard "$NEW"; git update-ref refs/heads/main "$N2"
+  run _aid_lc_sync_checkout_of "$T/side" main "$NEW" "$N2"; echo "$output"; [ "$status" -eq 0 ]
+  [ -x a.txt ]; [ "$(git ls-files -s a.txt | cut -c1-6)" = 100755 ]
+}
+
+@test "3.13.0: a written file named like a pattern is that one file — another file it would match keeps its edit" {
+  ( cd ../side && echo star > 'a*' && git add -- 'a*' && git commit -qm star )
+  local N2; N2="$(git -C ../side rev-parse HEAD)"
+  git reset -q --hard "$NEW"; echo "my edit" > a.txt; git update-ref refs/heads/main "$N2"
+  run _aid_lc_sync_checkout_of "$T/side" main "$NEW" "$N2"; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(cat 'a*')" = star ]; [ "$(cat a.txt)" = "my edit" ]
+}
+
+@test "3.13.0: distinct staged and unstaged edits survive the printed repair" {
+  echo staged > a.txt; git add a.txt; echo unstaged > a.txt
+  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; [ "$status" -eq 1 ]
+  git diff --cached --binary "$OLD" -- a.txt > "$T/s.patch"; git diff --binary -- a.txt > "$T/u.patch"
+  git checkout -q "$NEW" -- a.txt; git reset -q -- a.txt
+  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; [ "$status" -eq 0 ]
+  grep -q '^+staged' "$T/s.patch"; grep -q '^+unstaged' "$T/u.patch"        # both kept, apart
+  git apply --3way --index "$T/s.patch" 2>/dev/null || true
+  git show :3:a.txt 2>/dev/null | grep -q staged || git show :a.txt | grep -q staged   # back in the index (here a conflict with the merge's line)
 }
