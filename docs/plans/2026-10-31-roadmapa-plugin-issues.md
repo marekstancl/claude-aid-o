@@ -4,6 +4,8 @@
 položku dodá, ji tu ve stejném commitu označí `HOTOVO vX.Y.Z`. Do zdrojového hlášení projektu se dopíše
 `> **HOTOVO vX.Y.Z (datum):** …` až při vydání. Rozbor dělá skill `rozbor-plugin-issues`.
 
+Zadání 3.13.0: `docs/plans/2026-10-31-zadani-3130-beh-planu.md` (7 kol revize Codexem, resolved).
+
 Volby PM 31. 10. 2026: „beru tvoje doporučení“ = 1A, 2A, 3A, 4A, 5A, 6A, 7A, 8A, 9A, 10A, 11A, 12B;
 nové věci z companionu přihodit; **studio (`/aid-ui`) teď neřešit**.
 
