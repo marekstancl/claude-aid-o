@@ -5920,12 +5920,12 @@ cmd_plan_merge_to_main() {
   _rp=""; [[ -e "$_rp_run" ]] && _rp="$_rp_run"
   if [[ -z "$_rp" && -e "$_rp_canon" ]]; then
     # freeze copies a 3.13.0 record into the attempt: without that copy only a pre-3.13.0 record may be read
-    jq -e 'has("intent") or has("candidate_version") or has("tree")' "$_rp_canon" >/dev/null 2>&1 \
+    jq -e 'has("intent") or has("candidate_version") or has("tree") or ((.schema_version // "") | test("^aid-release-prep-1\\.(1|[2-9])"))' "$_rp_canon" >/dev/null 2>&1 \
       && _rp_why="the attempt holds no copy of ${_rp_canon} (freeze writes one)" || _rp="$_rp_canon"
   fi
   if [[ -n "$_rp" && -z "$_rp_why" ]]; then
     if ! jq -e 'type == "object" and (.version | type) == "string"' "$_rp" >/dev/null 2>&1; then _rp_why="${_rp} is unreadable"
-    elif jq -e 'has("intent") or has("candidate_version") or has("tree")' "$_rp" >/dev/null 2>&1; then
+    elif jq -e 'has("intent") or has("candidate_version") or has("tree") or ((.schema_version // "") | test("^aid-release-prep-1\\.(1|[2-9])"))' "$_rp" >/dev/null 2>&1; then
       local _rp_at; _rp_at="$(bash "${SCRIPT_DIR}/aid-release.sh" carried-version --project-root "$root" --rev "$candidate" 2>/dev/null)"
       if [[ "$(jq -r '.tree // ""' "$_rp")" != "$(git -C "$root" rev-parse "${candidate}^{tree}" 2>/dev/null)" ]]; then
         _rp_why="${_rp} was made for another tree than the frozen candidate ${candidate:0:12}"

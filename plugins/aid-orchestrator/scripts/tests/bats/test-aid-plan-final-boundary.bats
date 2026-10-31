@@ -4420,6 +4420,8 @@ _rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/releas
   _merge; [ "$status" -ne 0 ]; [[ "$output" == *"incoherent"* ]]
   jq -n '{schema_version: "aid-release-prep-1.1", version: "9.9.9", intent: "release", candidate_version: "9.9.9"}' > "$(_run_dir)/release-prep.json"
   _merge; [ "$status" -ne 0 ]; [[ "$output" == *"another tree"* ]]
+  jq -n '{schema_version: "aid-release-prep-1.1", version: "9.9.9"}' > "$(_run_dir)/release-prep.json"   # a 1.1 record stripped of its bindings
+  _merge; [ "$status" -ne 0 ]; [[ "$output" == *"another tree"* ]]
   rm "$(_run_dir)/release-prep.json"; mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
   jq -n --arg t "$tree" '{version: "9.9.9", intent: "release", candidate_version: "9.9.9", tree: $t}' > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"
   _merge; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"holds no copy"* ]]
