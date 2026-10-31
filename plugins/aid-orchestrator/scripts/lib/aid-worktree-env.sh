@@ -11,7 +11,8 @@
 #                                          ignored source is refused)
 #   worktree.setup: ["cd ui && npm ci --prefer-offline", …]   commands run IN the new tree after it is created — the
 #                                          tree gets its own dependencies; nothing is shared with the source checkout
-# Both default to []: nothing happens. A failing setup command does not stop the run: the record says which, and the
+# Both default to []: nothing happens. One record per tree path, replaced when the tree is created again: a new tree
+# is a new environment, and the record describes the tree under review (older generations are not kept on purpose). A failing setup command does not stop the run: the record says which, and the
 # step check names it. WAN P114 26. 10. and P116 28. 10. 2026: step trees had no .env and an empty ui/node_modules;
 # agents copied .env by hand and a brief point came out `absent` for the environment alone.
 # NO top-level `set -e` — sourced under the caller's own strict shell.
@@ -49,17 +50,27 @@ aid_worktree_env_prepare() {
     ! git -C "$rs" ls-files --error-unmatch -- "$p" >/dev/null 2>&1 || { echo "refused: tracked — git carries it"; return; }
     git -C "$rs" check-ignore -q -- "$p" 2>/dev/null || { echo "refused: not ignored (it would show as a new file in the tree)"; return; }
     [[ ! -e "${rt}/${p}" && ! -L "${rt}/${p}" ]] || { echo "skipped: already in the tree (never overwritten)"; return; }
-    mkdir -p "$(dirname "${rt}/${p}")" || { echo "failed: copy"; return; }
-    # read without following a symlink, create exclusively without following one: a file swapped in between the checks
-    # and the copy is refused, never followed or overwritten
+    # every component is opened relative to its parent with O_NOFOLLOW: no directory or file swapped for a symlink
+    # between the checks and the copy is followed, and the destination is created exclusively (never overwritten)
     python3 -c '
 import os, sys, shutil
-src, dst = sys.argv[1], sys.argv[2]
-fi = os.open(src, os.O_RDONLY | os.O_NOFOLLOW)
+src_root, dst_root, rel = sys.argv[1], sys.argv[2], sys.argv[3]
+parts = rel.split("/")
+D = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+def walk(root, create):
+    fd = os.open(root, D)
+    for name in parts[:-1]:
+        if create:
+            try: os.mkdir(name, 0o755, dir_fd=fd)
+            except FileExistsError: pass
+        nfd = os.open(name, D, dir_fd=fd); os.close(fd); fd = nfd
+    return fd
+sd = walk(src_root, False); dd = walk(dst_root, True)
+fi = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=sd)
 st = os.fstat(fi)
-fo = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, st.st_mode & 0o777)
+fo = os.open(parts[-1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, st.st_mode & 0o777, dir_fd=dd)
 with os.fdopen(fi, "rb") as a, os.fdopen(fo, "wb") as b: shutil.copyfileobj(a, b)
-' "${rs}/${p}" "${rt}/${p}" 2>/dev/null && echo copied || echo "failed: copy (the file changed during the copy, or the tree already has it)"
+' "$rs" "$rt" "$p" 2>/dev/null && echo copied || echo "failed: copy (the file changed during the copy, or the tree already has it)"
   }
   for p in "${cp_list[@]}"; do
     copies="$(jq -c --arg p "$p" --arg o "$(_wte_copy "$p")" '. + [{path: $p, outcome: $o}]' <<< "$copies")"

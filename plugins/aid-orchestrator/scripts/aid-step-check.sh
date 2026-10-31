@@ -283,10 +283,15 @@ fi
 # (the plan's tree, and the step's own tree when a wave dispatched it — the step may have been merged and its tree gone)
 wt_setup_failed="" wt_rec=""
 declare -F aid_worktree_env_record_path >/dev/null || source "$SCRIPT_DIR/lib/aid-worktree-env.sh"
-for wt_tree in "$ROOT" $( [[ "$CHECKPOINT" == cp2 && -n "${STEP:-}" && -f "$PLAN_JSON" ]] && {
-    _sid="$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "$PLAN_JSON" 2>/dev/null || true)"
-    [[ -n "$_sid" ]] && { source "$SCRIPT_DIR/lib/aid-parallel-dispatch.sh" 2>/dev/null
-      _aid_pd_step_worktree_path "$ROOT" "$_sid" "$(aid_orchestration_value "$CFG_ROOT" .dispatch.worktree_base 2>/dev/null | cut -f1)" 2>/dev/null; }; } || true ); do
+wt_trees=("$ROOT")
+if [[ "$CHECKPOINT" == cp2 && -n "${STEP:-}" && -f "$PLAN_JSON" ]]; then
+  _sid="$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "$PLAN_JSON" 2>/dev/null || true)"
+  if [[ -n "$_sid" ]] && source "$SCRIPT_DIR/lib/aid-parallel-dispatch.sh" 2>/dev/null; then
+    _swt="$(_aid_pd_step_worktree_path "$ROOT" "$_sid" "$(aid_orchestration_value "$CFG_ROOT" .dispatch.worktree_base 2>/dev/null | cut -f1)" 2>/dev/null || true)"
+    [[ -n "$_swt" ]] && wt_trees+=("$_swt")
+  fi
+fi
+for wt_tree in "${wt_trees[@]}"; do
   wt_r="$(aid_worktree_env_record_path "$CFG_ROOT" "$wt_tree")"
   [[ -f "$wt_r" && "$(jq -r '.tree // ""' "$wt_r" 2>/dev/null)" == "$(realpath -m -- "$wt_tree")" ]] || continue
   wt_f="$(jq -r '[.setup[]? | select(.exit != 0) | .command] | join("; ")' "$wt_r" 2>/dev/null || true)"

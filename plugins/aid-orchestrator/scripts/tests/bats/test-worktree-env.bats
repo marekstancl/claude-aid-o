@@ -61,3 +61,13 @@ _cfg() { printf '%s\n' "$@" > "$S/.aid-o/config/project.yaml"; }
   : > "$S/.aid-o/config/project.yaml"; aid_worktree_env_prepare "$S" "$W" "$S"; [ ! -e "$rec" ]
   mkdir -p "$T/a" "$T/b"; [ "$(aid_worktree_env_record_path "$S" "$T/a/tree")" != "$(aid_worktree_env_record_path "$S" "$T/b/tree")" ]
 }
+
+@test "a nested file is copied through real directories; a directory swapped for a symlink is refused" {
+  mkdir -p "$S/conf"; echo "x=1" > "$S/conf/local.env"; printf 'conf/local.env\n' >> "$S/.gitignore"
+  _cfg 'worktree:' '  copy_untracked: ["conf/local.env"]'
+  aid_worktree_env_prepare "$S" "$W" "$S" 2>/dev/null; [ "$(cat "$W/conf/local.env")" = "x=1" ]
+  local W2="$T/tree2"; git -C "$S" worktree add -q "$W2" HEAD 2>/dev/null
+  mkdir -p "$T/elsewhere"; ln -s "$T/elsewhere" "$W2/conf"            # the destination's directory is a symlink out
+  aid_worktree_env_prepare "$S" "$W2" "$S" 2>/dev/null
+  [ ! -e "$T/elsewhere/local.env" ]
+}
