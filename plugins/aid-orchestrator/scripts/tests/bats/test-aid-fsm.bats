@@ -1871,6 +1871,22 @@ _zp_state() {   # <td> <state> <current_step>
   # mixed: one named, one not
   run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add tests/test_vemex.py --add src.py --reason "the step's criteria name one of these files"
   [ "$status" -ne 0 ]; [[ "$output" == *"amend_scope_no_brief_point"* ]]
+  # a path that is not canonical, or leads out through a symlink, does not take the short way
+  jq '.steps[0].acceptance_criteria += ["`./tests/test_vemex.py` and `tests//test_vemex.py`", "`link/x.py` passes"]' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"; _zp_state "$td" EXECUTE 0
+  mkdir -p "$BATS_TEST_TMPDIR/outside"; : > "$BATS_TEST_TMPDIR/outside/x.py"; ln -s "$BATS_TEST_TMPDIR/outside" "$g/link"
+  local alias; for alias in ./tests/test_vemex.py tests//test_vemex.py link/x.py; do
+    run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add "$alias" --reason "the step's criteria name this file here"
+    [[ "$output" != *"named_in_ac"* ]]; ! cat "$td"/steps/*/scope-amendment.json | jq -e --arg p "$alias" '.[] | select(.pm_decision.named_in_ac? // [] | any(.path == $p))' >/dev/null
+  done
+  # a file name with regex characters counts literally: t[1].py twice is ambiguous even with a decoy t1.py
+  mkdir -p "$g/decoy"; : > "$g/tests/t[1].py"; : > "$g/other/t[1].py"; : > "$g/decoy/t1.py"
+  jq '.steps[0].acceptance_criteria += ["`t[1].py` passes"]' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"; _zp_state "$td" EXECUTE 0
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add "tests/t[1].py" --reason "the step's criteria name this test file"
+  [ "$status" -ne 0 ]; [[ "$output" == *"amend_scope_no_brief_point"* ]]
+  # a named file that is not a test does not take the short way ("`src.py` must not change")
+  jq '.steps[0].acceptance_criteria += ["`src.py` must not change"]' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"; _zp_state "$td" EXECUTE 0
+  run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add src.py --reason "the step's criteria name this file here"
+  [ "$status" -ne 0 ]; [[ "$output" == *"amend_scope_no_brief_point"* ]]
   # protected (.env) even when named
   run bash "$FSM" amend-scope "$td/fsm-state.yaml" --add .env --reason "the step's criteria name the env file here"
   [ "$status" -ne 0 ]; [[ "$output" == *"amend_scope_no_brief_point"* ]]

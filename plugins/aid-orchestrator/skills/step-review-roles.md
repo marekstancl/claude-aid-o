@@ -251,7 +251,7 @@ what they left open); you look for what none of them could see.
 4. Does the range remove or weaken an existing behaviour that no criterion of the plan asked to change?
 5. Is a finding the step reviews left open still true at the candidate? Report it once, with today's evidence.
 6. Claims (`claims.patch`: CHANGELOG, README and docs hunks): does the code at the candidate do every behavioural claim, and does a binding instruction for whoever deploys or operates this live only outside the delivered files? (A project that keeps `final_claims` has that role ask this too.)
-7. Security and operations, across the range — answer each in your answer's `security_and_operations` object (keys in brackets; `{"answer": "none"|"checked"|"finding", "note": "…"}` — `none` when it does not apply, `finding` when it is in `findings`; a missing key is `form_invalid`, AID 3.13.0):
+7. Security and operations, across the range — answer each in your answer's `security_and_operations` object (keys in brackets; `{"answer": "none"|"checked"|"finding", "note": "<text, may be empty>"}`, both required, nothing else — `none` when it does not apply, `finding` when it is in `findings`; a missing key is `form_invalid`, AID 3.13.0):
    - [`personal_data`] a new personal datum: where is it stored, and how is it deleted (retention, the user's request)?
    - [`host_layout`] repository layout vs. host layout: does a path, mount, port or file the code expects exist on the host it deploys to?
    - [`ci_dependencies`] new dependencies, per CI job: is each one installed in every job that runs the code (a library the tests import, a binary a script calls)?

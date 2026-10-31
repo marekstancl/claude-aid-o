@@ -5589,7 +5589,7 @@ cmd_amend_contract() {
 }
 
 # _amend_scope_named_in_ac <plan.json> <step index> <evidence dir> <path>... — prints [{path, ac}] when EVERY path
-# is named by an acceptance criterion of the step: its exact relative path in backticks, or a backticked file name
+# is a TEST file (test_*, *_test.*, *.test.*, *.spec.*, under tests/ or __tests__/) named by an acceptance criterion of the step: its exact relative path in backticks, or a backticked file name
 # that matches exactly ONE file of the repository (tracked or new) and that file is the path. The protected-impact
 # detector of the stand-in must find nothing. Returns 1 otherwise (the caller falls back to the stand-in or the PM).
 _amend_scope_named_in_ac() {
@@ -5598,15 +5598,24 @@ _amend_scope_named_in_ac() {
   root="$(aid_invoke_root 2>/dev/null || pwd)"
   acs="$(jq -r --argjson i "$i" '.steps[$i].acceptance_criteria // [] | to_entries[] | "\(.key + 1)\t\(.value | if type == "object" then (.text // .criterion // "") else . end)"' "$plan" 2>/dev/null)" || return 1
   [[ -n "$acs" ]] || return 1
-  files="$( { git -C "$root" ls-files; git -C "$root" ls-files -o --exclude-standard; } 2>/dev/null | sort -u)"
+  local tracked others
+  tracked="$(git -C "$root" ls-files)" || return 1; others="$(git -C "$root" ls-files -o --exclude-standard)" || return 1
+  files="$(printf '%s\n%s\n' "$tracked" "$others" | sed '/^$/d' | sort -u)"
+  local r_root; r_root="$(realpath -m -- "$root")"
   for p in "$@"; do
     [[ "$p" != /* && "$p" != *..* ]] || return 1
+    # only a TEST file takes the short way (the WAN case): a mention of any other file is not a licence to change it
+    # ("`x.py` must not change"), and CI, workflow and gate files are never tests (security review 31. 10. 2026)
+    [[ "${p##*/}" =~ ^test_.+\.[a-z]+$|^.+_test\.[a-z]+$|^.+\.(test|spec)\.[a-z]+$ || "$p" =~ (^|/)(tests?|__tests__)/ ]] || return 1
+    # only a canonical path takes the short way: ./x, a//b or a symlink out keep the stand-in's and the PM's checks
+    [[ "$(realpath -m --relative-to="$r_root" -- "${r_root}/${p}")" == "$p" ]] || return 1
+    [[ "$(realpath -m -- "${r_root}/${p}")" == "${r_root}/${p}" ]] || return 1
     hit=""
     while IFS=$'\t' read -r n text; do
       if grep -qF -- "\`${p}\`" <<< "$text"; then hit="AC${n}"; break; fi
       name="${p##*/}"
       if [[ "$name" != "$p" ]] && grep -qF -- "\`${name}\`" <<< "$text" \
-         && [[ "$(grep -cE "(^|/)${name//./\\.}\$" <<< "$files")" == 1 ]] && grep -qxF -- "$p" <<< "$files"; then
+         && [[ "$(awk -F/ -v n="$name" '$NF == n' <<< "$files" | wc -l)" == 1 ]] && grep -qxF -- "$p" <<< "$files"; then
         hit="AC${n}"; break
       fi
     done <<< "$acs"

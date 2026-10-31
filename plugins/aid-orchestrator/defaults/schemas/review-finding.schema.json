@@ -36,7 +36,7 @@
     }
   ],
   "$defs": {
-    "so_answer": {"type": "object", "additionalProperties": false, "required": ["answer"], "properties": {"answer": {"enum": ["none", "checked", "finding"]}, "note": {"type": "string"}}},
+    "so_answer": {"type": "object", "additionalProperties": false, "required": ["answer", "note"], "properties": {"answer": {"enum": ["none", "checked", "finding"]}, "note": {"type": "string"}}},
     "checkpoint": { "enum": ["cp1", "cp2", "cp6", "cp7"] },
     "roles_cp1": {
       "enum": ["generalist_a", "generalist_b", "behaviour_edges", "feasibility_deps", "reuse", "enforcement_tests"]

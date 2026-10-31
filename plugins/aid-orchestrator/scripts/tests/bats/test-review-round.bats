@@ -940,7 +940,7 @@ FD() { printf '%s/cp7/round-%s' "$E" "$1"; }
 # _fanswer <round> <role> [jq filter] — a cp7 answer with no findings, bracketed like a dispatched agent
 _fanswer() {
   local d; d="$(FD "$1")"
-  jq -n --arg r "$2" '{role: $r, checkpoint: "cp7", findings: [], no_findings_reason: "fixture"} + (if $r == "final_generalist" then {security_and_operations: (["personal_data","host_layout","ci_dependencies","docs_build","log_leaks","account_boundaries","injection","paths_deletion","forged_trust"] | map({(.): {answer: "none"}}) | add)} else {} end)' | jq "${3:-.}" > "$d/reviewer-$2.json"
+  jq -n --arg r "$2" '{role: $r, checkpoint: "cp7", findings: [], no_findings_reason: "fixture"} + (if $r == "final_generalist" then {security_and_operations: (["personal_data","host_layout","ci_dependencies","docs_build","log_leaks","account_boundaries","injection","paths_deletion","forged_trust"] | map({(.): {answer: "none", note: ""}}) | add)} else {} end)' | jq "${3:-.}" > "$d/reviewer-$2.json"
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "cp7-${2//_/-}" --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "cp7-${2//_/-}" --output-file "$d/reviewer-$2.json" --evidence-dir "$d" >/dev/null
 }
@@ -1045,7 +1045,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   _frepo; _fsc; _F prepare --round 1 >/dev/null
   _fanswer 1 final_criteria
   jq -n '{role: "final_generalist", checkpoint: "cp7", findings: [], no_findings_reason: "hand-written",
-         security_and_operations: (["personal_data","host_layout","ci_dependencies","docs_build","log_leaks","account_boundaries","injection","paths_deletion","forged_trust"] | map({(.): {answer: "none"}}) | add)}' > "$(FD 1)/reviewer-final_generalist.json"
+         security_and_operations: (["personal_data","host_layout","ci_dependencies","docs_build","log_leaks","account_boundaries","injection","paths_deletion","forged_trust"] | map({(.): {answer: "none", note: ""}}) | add)}' > "$(FD 1)/reviewer-final_generalist.json"
   _F collect --round 1 >/dev/null
   run _F close --round 1 --tokens final_criteria=5 final_generalist=5
   [ "$status" -eq 1 ]; [[ "$output" == *"no_dispatch_record"* ]]
@@ -1084,6 +1084,10 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   jq -r '.invalid[0].reason' "$(FD 1)/collect.json" | grep -q "forged_trust"
   _fanswer 1 final_generalist '.security_and_operations.extra = {answer: "none"}'
   run _F collect --round 1; [ "$status" -eq 1 ]; jq -r '.invalid[0].reason' "$(FD 1)/collect.json" | grep -q "unknown key extra"
+  local bad; for bad in '.security_and_operations.injection.extra = true' '.security_and_operations.injection.note = 42' 'del(.security_and_operations.injection.note)'; do
+    _fanswer 1 final_generalist "$bad"
+    run _F collect --round 1; [ "$status" -eq 1 ]; jq -r '.invalid[0].reason' "$(FD 1)/collect.json" | grep -q "needs exactly"
+  done
   # WAN P115 25. 10. 2026: the stand-in filled the field the role asks for — it is collected, not refused
   _fanswer 1 final_generalist '.security_and_operations.log_leaks = {answer: "checked", note: "no new log line"}'
   run _F collect --round 1; echo "$output"; [ "$status" -eq 0 ]

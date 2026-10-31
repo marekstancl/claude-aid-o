@@ -92,7 +92,7 @@ _blockers() { jq -r '[.release_decision.blockers[].input_id] | sort | join(",")'
 # _answer <role> [jq filter] — a no-finding cp7 answer, dispatched like an agent's
 _answer() {
   local d; d="$(_run_dir)/cp7/round-${N:-1}"
-  jq -n --arg r "$1" '{role: $r, checkpoint: "cp7", findings: [], no_findings_reason: "fixture"} + (if $r == "final_generalist" then {security_and_operations: (["personal_data","host_layout","ci_dependencies","docs_build","log_leaks","account_boundaries","injection","paths_deletion","forged_trust"] | map({(.): {answer: "none"}}) | add)} else {} end)' | jq "${2:-.}" > "$d/reviewer-$1.json"
+  jq -n --arg r "$1" '{role: $r, checkpoint: "cp7", findings: [], no_findings_reason: "fixture"} + (if $r == "final_generalist" then {security_and_operations: (["personal_data","host_layout","ci_dependencies","docs_build","log_leaks","account_boundaries","injection","paths_deletion","forged_trust"] | map({(.): {answer: "none", note: ""}}) | add)} else {} end)' | jq "${2:-.}" > "$d/reviewer-$1.json"
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" start --focus "cp7-${1//_/-}" --agent-id aid-orchestrator:review --evidence-dir "$d" >/dev/null
   bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus "cp7-${1//_/-}" --output-file "$d/reviewer-$1.json" --evidence-dir "$d" >/dev/null
 }
