@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 
 ## [3.13.0] — 2026-10-31
 
-Běh plánu bez ručních obchvatů (rozbor plugin issues 31. 10. 2026, volby PM 3A-9A, 11A, 12B). Zadání: `docs/plans/2026-10-31-zadani-3130-beh-planu.md`.
+Běh plánu bez ručních obchvatů (rozbor plugin issues 31. 10. 2026, volby PM 3A-9A, 11A, 12B). Zadání: `docs/archive/2026-10-31-zadani-3130-beh-planu.md`.
 
 ### Fixed
 - **Obnova sloučení do main se nezacyklí (Z8).** Po pádu mezi commitem uzávěru a označením vydání se hlavní checkout srovná na skutečný konec cílové větve, a to podle stavu, ve kterém index opravdu je. Dřív se vracel zpět na samotné sloučení a soubory uzávěru vypadaly jako připravené k zápisu, takže se `aid_lifecycle_plan_merge_bind` nedal odblokovat (WAN P116). Rozpracované změny uživatele, připravené i nepřipravené, zůstanou. Překrývající se změna se ohlásí se jmény souborů a sloučení se zastaví (`merge_checkout_overlap`), místo dnešního tichého „hotovo“. Srovnání jde soubor po souboru: posune jen soubor, který je v indexu i na disku ve starém nebo sloučeném stavu, a neverzovaný soubor převezme jen u záznamů AID (`.aid-lifecycle/`), když je shodný s koncem větve. Při překryvu se nic nezmění, a AID nejdřív uloží zálohu dotčených souborů do `.git/aid-merge-sync-backup-…`; příkaz na převzetí verze z větve vypíše jen tehdy, když se záloha ověřeně podařila, jinak řekne, ať je uživatel nejdřív uloží sám. Záznam „sloučení zveřejněno“ se zapíše před srovnáním checkoutu, takže obnova po odmítnutí sloučení pozná. Verzi pro označení hlídá Z9.
