@@ -1,3 +1,5 @@
+> Archivováno 2026-10-31: zadání vydáno jako AID 3.13.0. Náhrada: žádná (stav bodů v `docs/plans/2026-10-31-roadmapa-plugin-issues.md`).
+
 # AID 3.13.0 – běh plánu bez ručních obchvatů (zadání)
 
 Zdroj: rozbor plugin issues 31. 10. 2026, volby PM 3A-9A, 11A, 12B (body 12.1-12.4).
