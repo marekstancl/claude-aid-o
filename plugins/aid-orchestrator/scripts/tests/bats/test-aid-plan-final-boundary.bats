@@ -4431,7 +4431,8 @@ _rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/releas
   _seed_merge_project
   jq -n '{schema_version:"aid-release-prep-1.0", version:"9.9.9"}' > "$(_run_dir)/release-prep.json"
   echo "my unrelated work" > "$TEST_PROJECT_ROOT/notes-local.txt"                     # untracked work in the checkout
-  AID_PLAN_FSM_CRASH_AFTER=lifecycle_bound _merge; [ "$status" -eq 99 ]
+  git -C "$TEST_PROJECT_ROOT" checkout -q main                                          # the checkout that has main out
+  AID_PLAN_FSM_CRASH_AFTER=lifecycle_bound _merge; echo "$output"; [ "$status" -eq 99 ]
   [ "$(git -C "$TEST_PROJECT_ROOT" tag -l)" = "" ]
   _merge; echo "$output"; [ "$status" -eq 0 ]
   [ "$(git -C "$TEST_PROJECT_ROOT" tag -l)" = "v9.9.9" ]

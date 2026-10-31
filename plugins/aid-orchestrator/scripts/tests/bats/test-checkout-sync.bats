@@ -30,7 +30,10 @@ teardown() { rm -rf "$T"; }
 }
 
 @test "a committed file already on disk untracked and identical (the close's receipt) is taken in, the index ends clean" {
-  echo new > b.txt                                      # written before the plumbing commit
+  # the receipt lives under .aid-lifecycle/ (3.13.0: only AID's generated records are taken in)
+  ( cd ../side && mkdir -p .aid-lifecycle/receipts && echo r > .aid-lifecycle/receipts/P1.yaml && git add . && git commit -qm receipt )
+  NEW="$(git -C ../side rev-parse HEAD)"; git update-ref refs/heads/main "$NEW"
+  mkdir -p .aid-lifecycle/receipts; echo r > .aid-lifecycle/receipts/P1.yaml   # written before the plumbing commit
   run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"
   [ "$status" -eq 0 ]
   [[ "$output" == *"brought forward"* ]]
@@ -41,8 +44,8 @@ teardown() { rm -rf "$T"; }
 @test "an overlapping local edit is not overwritten — a loud warning names the command instead" {
   echo mine > a.txt
   run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"WARNING"* && "$output" == *"reset --merge"* ]]
+  [ "$status" -eq 1 ]                                   # 3.13.0: an overlap is reported as a failure, never passed
+  [[ "$output" == *"WARNING"* && "$output" == *"do not commit there"* && "$output" == *"a.txt"* ]]
   [[ "$(cat a.txt)" == "mine" ]]
 }
 
@@ -50,4 +53,20 @@ teardown() { rm -rf "$T"; }
   git update-ref refs/heads/other "$OLD"
   run _aid_lc_sync_checkout_of "$T/side" other "$OLD" "$NEW"
   [ "$status" -eq 0 ]; [[ -z "$output" ]]
+}
+
+@test "3.13.0: a mixed index (one written file at its old version, another edited) is refused and nothing changes" {
+  ( cd ../side && echo three > a.txt && echo newer > b.txt && git add . && git commit -qm three )
+  local N2; N2="$(git -C ../side rev-parse HEAD)"; git update-ref refs/heads/main "$N2"
+  echo half > b.txt; git add b.txt                      # b.txt staged at a version none of the commits has
+  local before; before="$(git ls-files -s | sha256sum)"
+  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"b.txt"* ]]
+  [ "$(git ls-files -s | sha256sum)" = "$before" ]      # the real index is untouched
+}
+
+@test "3.13.0: an unrelated staged change of the user stays staged when the checkout is brought forward" {
+  echo note > mine.txt; git add mine.txt
+  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; [ "$status" -eq 0 ]
+  [[ "$(cat a.txt)" == "two" ]]; [ "$(git diff --cached --name-only)" = "mine.txt" ]
 }

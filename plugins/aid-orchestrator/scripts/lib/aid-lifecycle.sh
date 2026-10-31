@@ -329,40 +329,60 @@ _aid_lc_sync_checkout_of() {
   wt="$(git -C "$root" worktree list --porcelain 2>/dev/null \
         | awk -v b="branch refs/heads/${branch}" '/^worktree /{w=substr($0,10)} $0==b{print w; exit}')"
   [[ -n "$wt" ]] || return 0
-  # 3.13.0: bring it to the branch's CURRENT tip, from the state its index really is at. A resumed merge called this
+  # 3.13.0: bring it to the branch's CURRENT tip, from the state its index really holds. A resumed merge called this
   # with old = the pre-merge head and new = the merge while the branch had moved on to its lifecycle commit: the
   # read-tree took the index BACK to the merge and the lifecycle files showed as staged (WAN P116 28. 10. 2026).
+  # Where the index stands is judged only on the paths the writes changed (old → tip), so the user's other work,
+  # staged or not, never decides it: all of them at the tip's version — done; all at old's, or at new's — read from
+  # there; anything mixed — refused, nothing changed.
   local tip from="" c
   tip="$(git -C "$root" rev-parse -q --verify "refs/heads/${branch}" 2>/dev/null)" || tip="$new"
-  # where the index stands: the first of old, new whose versions the index holds on every path that differs from the
-  # tip (unrelated staged or unstaged work of the user does not matter here); none of them — it is at the tip already
-  local -a changed=()
-  for c in "$old" "$new"; do
-    [[ "$c" != "$tip" ]] || continue
-    mapfile -t changed < <(git -C "$wt" -c core.quotepath=false diff --name-only "$c" "$tip")
-    (( ${#changed[@]} )) || continue
-    git -C "$wt" diff --cached --quiet "$c" -- "${changed[@]}" 2>/dev/null && { from="$c"; break; }
-  done
-  [[ -n "$from" ]] || return 0   # the index already holds the tip's versions
-  # A file the write committed may already sit in that tree, untracked and byte-identical (the close writes its
-  # receipt there before committing it): read-tree refuses to overwrite it. Only AID's own generated records
-  # (.aid-lifecycle/**, the close's receipts under .aid-o/) are staged to let a second read go through.
-  local synced=0 p
-  git -C "$wt" read-tree -m -u "$from" "$tip" 2>/dev/null && synced=1
-  if (( ! synced )); then
-    while IFS= read -r p; do
-      case "$p" in .aid-lifecycle/*|.aid-o/*) ;; *) continue ;; esac
-      git -C "$wt" ls-files --error-unmatch -- "$p" >/dev/null 2>&1 && continue   # tracked: never re-staged
-      [[ -f "${wt}/${p}" && "$(git -C "$wt" hash-object -- "$p")" == "$(git -C "$wt" rev-parse -q --verify "${tip}:${p}")" ]] \
-        && git -C "$wt" add -f -- "$p" 2>/dev/null
-    done < <(git -C "$wt" -c core.quotepath=false diff --name-only "$from" "$tip")
-    git -C "$wt" read-tree -m -u "$from" "$tip" 2>/dev/null && synced=1
-  fi
-  if (( synced )); then
-    echo "NOTE: ${branch} is checked out in ${wt} — its index and tree were brought forward to ${tip:0:12}, so the next commit there does not revert this write." >&2
+  local -a span=()
+  mapfile -t span < <(git -C "$wt" -c core.quotepath=false diff --name-only "$old" "$tip")
+  (( ${#span[@]} )) || return 0
+  if git -C "$wt" diff --cached --quiet "$tip" -- "${span[@]}" 2>/dev/null; then
     return 0
   fi
-  echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree still show an older state than ${tip:0:12}: local changes overlap with: $(git -C "$wt" -c core.quotepath=false diff --name-only "$from" "$tip" | paste -sd' ' -). A plain 'git commit' there would REVERT this write. Before any commit in ${wt}: commit or stash those local changes, then git -C ${wt} reset --merge ${tip:0:12}" >&2
+  for c in "$old" "$new"; do
+    [[ "$c" != "$tip" ]] || continue
+    git -C "$wt" diff --cached --quiet "$c" -- "${span[@]}" 2>/dev/null && { from="$c"; break; }
+  done
+  local report
+  if [[ -z "$from" ]]; then
+    report="$(git -C "$wt" -c core.quotepath=false diff --cached --name-only "$tip" -- "${span[@]}" | paste -sd' ' -)"
+  else
+    # A file the write committed may already sit in that tree, untracked and byte-identical (the close writes its
+    # receipt there before committing it): read-tree refuses to overwrite it. Only AID's generated records
+    # (.aid-lifecycle/**) are taken in, and all of it happens in a COPY of the index: a failed attempt leaves the
+    # real index exactly as it was.
+    local gi tmpi synced=0 p
+    gi="$(git -C "$wt" rev-parse --path-format=absolute --git-path index 2>/dev/null)"
+    tmpi="$(mktemp)" && cp -p "$gi" "$tmpi" 2>/dev/null || { rm -f "$tmpi"; tmpi=""; }
+    if [[ -n "$tmpi" ]]; then
+      GIT_INDEX_FILE="$tmpi" git -C "$wt" read-tree -m -u "$from" "$tip" 2>/dev/null && synced=1
+      if (( ! synced )); then
+        cp -p "$gi" "$tmpi"
+        while IFS= read -r p; do
+          case "$p" in .aid-lifecycle/*) ;; *) continue ;; esac
+          GIT_INDEX_FILE="$tmpi" git -C "$wt" ls-files --error-unmatch -- "$p" >/dev/null 2>&1 && continue
+          [[ -f "${wt}/${p}" && "$(git -C "$wt" hash-object -- "$p")" == "$(git -C "$wt" rev-parse -q --verify "${tip}:${p}")" ]] \
+            && GIT_INDEX_FILE="$tmpi" git -C "$wt" add -f -- "$p" 2>/dev/null
+        done < <(git -C "$wt" -c core.quotepath=false diff --name-only "$from" "$tip")
+        GIT_INDEX_FILE="$tmpi" git -C "$wt" read-tree -m -u "$from" "$tip" 2>/dev/null && synced=1
+      fi
+      if (( synced )); then
+        mv -f "$tmpi" "$gi" || { rm -f "$tmpi"; synced=0; }
+      else
+        rm -f "$tmpi"
+      fi
+    fi
+    if (( synced )); then
+      echo "NOTE: ${branch} is checked out in ${wt} — its index and tree were brought forward to ${tip:0:12}, so the next commit there does not revert this write." >&2
+      return 0
+    fi
+    report="$(git -C "$wt" -c core.quotepath=false status --porcelain -- "${span[@]}" | cut -c4- | paste -sd' ' -)"
+  fi
+  echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree are not at ${tip:0:12}: local changes overlap with: ${report:-the files the write changed}. A plain 'git commit' there would REVERT this write — do not commit there. Copy your edits of those files aside, take the branch's version with: git -C ${wt} checkout ${tip:0:12} -- <those files>, then run the AID command again, then re-apply your edits." >&2
   return 1
 }
 

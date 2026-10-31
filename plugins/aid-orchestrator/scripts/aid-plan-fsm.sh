@@ -6298,22 +6298,22 @@ cmd_plan_merge_to_main() {
 
   # The publish above moved the ref only; the checkout that has the target
   # branch out (the primary checkout) is still at the pre-merge state and its
-  # next plain commit would revert the merge — bring it forward or say so.
-  # 3.13.0: on a resume it goes to the branch's current tip (the lifecycle commit), never back to the merge; an
-  # overlap with local changes stops here — the merge stands, the next run resumes after the checkout is cleaned
-  if declare -F _aid_lc_sync_checkout_of >/dev/null 2>&1; then
-    _aid_lc_sync_checkout_of "$root" "$target_branch" "$target_head" "$merge_commit" || {
-      echo "REFUSED (merge_checkout_overlap): the merge ${merge_commit:0:12} IS published on ${target_branch}, but the checkout that has it out holds overlapping local changes (named above); nothing more was written" >&2
-      echo "  next: clean them as the warning says, then run plan-merge-to-main again — it resumes after the merge (pipeline.md §When AID refuses: merge_checkout_overlap)" >&2
-      exit 1
-    }
-  fi
-
-
+  # next plain commit would revert the merge — it is brought forward below.
   local grc=0
   plan_op_mark_git_applied "$plan_id" "$op_id" "$merge_commit" || grc=$?
   _pfsm_crash_seam git_applied
   [[ "$grc" -ne 0 ]] && echo "WARN: plan-merge-to-main: the merge ${merge_commit} IS published on ${target_branch}, but the git_applied record could not be written (rc=${grc}) — a resumed run will re-verify from the ref itself." >&2
+
+  # 3.13.0: AFTER the published merge is on record (a resume finds it), the checkout goes to the branch's current tip
+  # (the lifecycle commit on a resume), never back to the merge, from the FROZEN pre-merge head (the live one may have
+  # moved on a retry); an overlap with local changes stops here — the merge stands, the next run resumes after it
+  if declare -F _aid_lc_sync_checkout_of >/dev/null 2>&1; then
+    _aid_lc_sync_checkout_of "$root" "$target_branch" "${target_head_frozen:-$target_head}" "$merge_commit" || {
+      echo "REFUSED (merge_checkout_overlap): the merge ${merge_commit:0:12} IS published on ${target_branch}, but the checkout that has it out holds overlapping local changes (named above); nothing more was written" >&2
+      echo "  next: do as the warning says (no commit in that checkout), then run plan-merge-to-main again — it resumes after the merge (pipeline.md §When AID refuses: merge_checkout_overlap)" >&2
+      exit 1
+    }
+  fi
 
   # ── Tree identity + reachability, between publish and lifecycle commit ────
   local actual_tree=""
