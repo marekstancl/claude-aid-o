@@ -46,12 +46,13 @@ aid_follow_up_mark() {
   [[ -f "$patch" && -f "${rd}/packet/open-findings.json" && -f "${rd}/merged.json" ]] || { echo 0; return 0; }
   # both lists go to jq through files: a repository of thousands of files does not fit on a command line
   # (`jq: Argument list too long`, WAN P116 28. 10. and P118 30. 10. 2026 — no follow-up was ever marked there)
-  local tmp="${rd}/merged.json.fu.$$" head
-  aid_follow_up_added_lines "$patch" | jq -R . | jq -s . > "${tmp}.added" || { rm -f "${tmp}".*; return 1; }
+  # the lists in a directory of their own outside the evidence: an interrupted run leaves nothing in the round
+  local tmp="${rd}/merged.json.fu.$$" head lists; lists="$(mktemp -d)" || return 1
+  aid_follow_up_added_lines "$patch" | jq -R . | jq -s . > "${lists}/added" || { rm -rf "$lists"; return 1; }
   # the reviewed candidate's files (its tree, not the checkout's index): a citation of another repository's file is never a follow-up
   head="$(jq -r '.head_sha // "HEAD"' "${rd}/round.json")"
-  git -C "$root" ls-tree -r --name-only "$head" | jq -R . | jq -s . > "${tmp}.tracked" || { rm -f "${tmp}".*; return 1; }
-  jq --slurpfile added "${tmp}.added" --slurpfile tracked "${tmp}.tracked" --slurpfile open "${rd}/packet/open-findings.json" \
+  git -C "$root" ls-tree -r --name-only "$head" | jq -R . | jq -s . > "${lists}/tracked" || { rm -rf "$lists"; return 1; }
+  jq --slurpfile added "${lists}/added" --slurpfile tracked "${lists}/tracked" --slurpfile open "${rd}/packet/open-findings.json" \
      --arg round "$(basename "$rd")" --arg run "$(basename "$run")" '
     ([$open[0].findings[]?.match] | map(select(. != null))) as $openm
     # a finding still open there, reworded or cited at another place, is that finding, not a new one: its rule or the
@@ -76,8 +77,8 @@ aid_follow_up_mark() {
          and ((.reported_by // []) | index("final_criteria") | not)
          and fu_ok
       then .status = "follow_up" | .follow_up = {round: $round, run: $run} else . end)
-  ' "${rd}/merged.json" > "$tmp" || { rm -f "$tmp" "${tmp}".*; return 1; }
-  rm -f "${tmp}".*; mv "$tmp" "${rd}/merged.json" || return 1
+  ' "${rd}/merged.json" > "$tmp" || { rm -f "$tmp"; rm -rf "$lists"; return 1; }
+  rm -rf "$lists"; mv "$tmp" "${rd}/merged.json" || { rm -f "$tmp"; return 1; }
   # the plan's list, one line per thing (match), for the close card and the project's backlog
   local list; list="$(dirname "$run")/follow-ups.jsonl"
   jq -c --arg round "$(basename "$rd")" --arg run "$(basename "$run")" '

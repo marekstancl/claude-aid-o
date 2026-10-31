@@ -2405,6 +2405,18 @@ _pm_card() {  # <fingerprint> — a rendered card quoting it, answered by the PM
   run aid_follow_up_mark "$rd" "$run" "$g"; echo "$output"; [ "$status" -eq 0 ]; [ "$output" = 1 ]
   [ "$(jq -r '.findings[0].status' "$rd/merged.json")" = follow_up ]
   [ -z "$(ls "$rd" | grep '\.fu\.')" ]                                                     # no temporary file left
+  # the other list: a fix that adds more lines than fit in one argument (a small repository)
+  local s="$BATS_TEST_TMPDIR/small"; mkdir -p "$s"; git -C "$s" init -q; printf 'a\n' > "$s/y.py"; seq 1 30000 | sed 's/^/l/' > "$s/big.py"
+  git -C "$s" add -A; git -C "$s" -c user.email=t@t -c user.name=t commit -qm base
+  run="$s/.aid-o/work/evidence/P9/R-P9-final-2"; rd="$run/cp7/round-1"; mkdir -p "$rd/packet"
+  jq -n --arg h "$(git -C "$s" rev-parse HEAD)" '{mode: "confirmation", head_sha: $h}' > "$rd/round.json"
+  { printf -- '--- /dev/null\n+++ b/big.py\n@@ -0,0 +1,30000 @@\n'; seq 1 30000 | sed 's/^/+l/'; } > "$rd/packet/fix.patch"
+  [ "$(aid_follow_up_added_lines "$rd/packet/fix.patch" | jq -R . | jq -sc . | wc -c)" -gt 131072 ]
+  jq -n '{findings: []}' > "$rd/packet/open-findings.json"
+  jq -n '{findings: [{claim: "on the fix", severity: "minor", status: "open", evidence: "big.py:29999"},
+                     {claim: "outside", severity: "minor", status: "open", evidence: "y.py:1"}]}' > "$rd/merged.json"
+  run aid_follow_up_mark "$rd" "$run" "$s"; echo "$output"; [ "$status" -eq 0 ]; [ "$output" = 1 ]
+  [ "$(jq -r '[.findings[].status] | join(" ")' "$rd/merged.json")" = "open follow_up" ]
 }
 
 @test "decisions: only decisions in force reach the reviewer; a NO revokes by citation only on the brief" {

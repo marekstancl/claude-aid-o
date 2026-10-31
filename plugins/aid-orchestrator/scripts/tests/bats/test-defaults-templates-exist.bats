@@ -20,6 +20,16 @@ setup() {
   [[ -z "$missing" ]] || { echo "missing:$missing"; false; }
 }
 
+@test "every artifact template an aid_artifact_render call names exists (artifact-<id>.html)" {
+  cd "$AID_PLUGIN_PATH"
+  local ids missing="" id
+  ids="$(grep -rhE 'aid_artifact_render [a-z]' scripts --include='*.sh' --exclude-dir=tests | grep -vE '^[[:space:]]*#' \
+           | grep -oE 'aid_artifact_render [a-z][a-z0-9-]*' | awk '{print $2}' | sort -u)"
+  [[ -n "$ids" ]]                                                            # the scan found the calls at all
+  for id in $ids; do [[ -f "defaults/templates/artifact-${id}.html" ]] || missing+=" $id"; done
+  [[ -z "$missing" ]] || { echo "missing artifact templates:$missing"; false; }
+}
+
 @test "the stand-in's prompt opens with its instructions, not a cat error" {
   grep -q '^# Independent decision on one run decision' "$AID_PLUGIN_PATH/defaults/templates/stand-in-decision.md"
   grep -q 'technical' "$AID_PLUGIN_PATH/defaults/templates/stand-in-decision.md"
