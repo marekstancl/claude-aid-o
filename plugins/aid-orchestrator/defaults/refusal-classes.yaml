@@ -20,6 +20,7 @@ codes:
   abandon_needs_reason: {class: pm, how: "opuštění běhu je rozhodnutí PM"}
   accept_risk_not_protected: {class: agent_fix, how: "v --auto technický nález nejdřív k delegátovi; na kartu PM jen to, co poslal jako chráněné"}
   pm_decision_unverified: {class: agent_fix, how: "nález uzavřený dřívějším rozhodnutím, které nejde ověřit: znovu collect kola; zůstane-li otevřený, karta PM s otiskem v quotes"}
+  step_test_named_after_plan: {class: agent_fix, how: "test pojmenovaný podle plánu, nálezu nebo backlogu: role kroku ho přejmenuje podle chování a kontrola kroku se pustí znovu"}
   accepted_risk_stale: {class: pm, how: "přijetí rizika PM platí jen pro svého kandidáta a svou sadu nálezů: nová karta"}
   active_runs_unreadable: {class: incident, how: "poškozený soubor stavu"}
   active_runs_write_failed: {class: incident, how: "zápis stavu selhal"}

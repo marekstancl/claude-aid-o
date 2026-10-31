@@ -8,7 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 Běh plánu bez ručních obchvatů (rozbor plugin issues 31. 10. 2026, volby PM 3A-9A, 11A, 12B). Zadání: `docs/plans/2026-10-31-zadani-3130-beh-planu.md`.
 
 ### Fixed
-- **Test pojmenovaný podle plánu se chytí už v revizi kroku (Z4).** `aid-step-check.sh` pustí tutéž kontrolu jako brána uzávěru (`aid_test_names_plan_refs`). Nález jde do kola jako závažný nález kontroly kroku a krok se tím nepřeskočí. Do 3.12 ho chytila až brána uzávěru a stálo to zmrazení navíc (WAN P115, P114).
+- **Test pojmenovaný podle plánu se chytí už v kontrole kroku (Z4).** `aid-step-check.sh` pustí tutéž kontrolu jako brána uzávěru, a to přesně nad úsekem, který revize hodnotí. V režimu `--worktree` zahrne i nové neverzované soubory. Takový test kontrolu kroku odmítne dřív, než začne kolo (`step_test_named_after_plan`, opraví role kroku). Do 3.12 ho chytila až brána uzávěru a stálo to zmrazení navíc (WAN P115, P114).
 - **Drobnosti z běhů WANu (Z12):**
   - `close --fixer` přijme roli s číslicí, třeba `e2e`.
   - `amend-scope` rozšíří krok bez zástupce o **testovací** soubor, který akceptační bod kroku jmenuje přesně, nebo jménem souboru, které je v repu jedinečné. Jiné soubory, cesty, které nejsou kanonické, a symlinky ven zástupce neobejdou. Záznam je `named_in_ac`. Dvojznačné jméno, mix a chráněná cesta jdou dál cestou zástupce a PM.

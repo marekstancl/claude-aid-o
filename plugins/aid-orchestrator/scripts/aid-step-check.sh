@@ -257,16 +257,22 @@ MAX_LINES="$(_cfg '.review_checkpoints.step_review.skip_threshold.max_lines' 120
 STREAMLINED=false
 [[ -f "$STATE" ]] && STREAMLINED="$(yq -r '.streamlined_mode // false' "$STATE" 2>/dev/null || echo false)"
 
-# AID 3.13.0: a test the step adds is named after what it guards, not after the plan — the same check as the close's
-# gate (aid_test_names_plan_refs), here so the step review sees it (WAN P115 25. 10., P114 27. 10. 2026: twelve and
+# AID 3.13.0: a test the step adds is named after what it guards — the close gate's own check, run on exactly the
+# change under review, refuses before any round as the gate does (WAN P115 25. 10., P114 27. 10. 2026: twelve and
 # nine step reviews passed `describe('… — P114')`, the close refused it, one freeze more each time)
 tn_hits="" tn_rc=0
-tn_base="$range_base"; (( WORKTREE )) && tn_base="$HEAD_SHA"     # the worktree mode diffs the uncommitted change against HEAD
-tn_hits="$(aid_test_names_plan_refs "$ROOT" "$tn_base")" || tn_rc=$?
+if (( WORKTREE )); then tn_hits="$(aid_test_names_plan_refs "$ROOT" HEAD worktree)" || tn_rc=$?
+else tn_hits="$(aid_test_names_plan_refs "$ROOT" "$range_base" "$HEAD_SHA")" || tn_rc=$?; fi
+if (( tn_rc == 1 )); then
+  while IFS=$'\t' read -r tn_f tn_n; do echo "step-check: ${tn_f}: \"${tn_n}\" is named after a plan, finding or backlog item" >&2; done <<< "$tn_hits"
+  echo "REFUSED (step_test_named_after_plan): name each test after the behaviour it guards (the plan, finding or backlog number belongs in the commit message); the close's gate refuses the same names" >&2
+  echo "  next: rename the tests above in the step's own commit, then run aid-step-check.sh again (pipeline.md §When AID refuses: step_test_named_after_plan)" >&2
+  exit 1
+elif (( tn_rc != 0 )); then
+  die "the names of the added tests could not be read (${RANGE}); run the check again" 1
+fi
 verdict="" reason=""
-if (( tn_rc == 2 )); then verdict=review; reason="the names of the added tests could not be read (the range ${RANGE} does not diff)"
-elif (( tn_rc == 1 )); then verdict=review; reason="test named after a plan, finding or backlog item: $(cut -f1 <<< "$tn_hits" | sort -u | paste -sd, -)"
-elif (( ${#OTHER_MISSING[@]} > 0 )); then verdict=review; reason="declared repository with no commits named in the step's return (repo_commits): ${OTHER_MISSING[*]}"
+if (( ${#OTHER_MISSING[@]} > 0 )); then verdict=review; reason="declared repository with no commits named in the step's return (repo_commits): ${OTHER_MISSING[*]}"
 elif (( ${#OUTSIDE_GIT[@]} > 0 )); then verdict=review; reason="declared path(s) outside any git repository — no diff shows them, the reviewers read them as they are: ${OUTSIDE_GIT[*]}"
 elif (( ${#FILES[@]} == 0 )); then verdict=no_change; reason="the range $RANGE has no changes"
 elif [[ "$STREAMLINED" == true ]]; then verdict=skip; reason="streamlined"
@@ -292,13 +298,6 @@ if (( ${#forbidden[@]} > 0 )); then
   script_findings="$(for f in "${forbidden[@]}"; do jq -nc --arg f "$f" --arg cp "$CHECKPOINT" \
     '{id: "step_check-forbidden", checkpoint: $cp, severity: "blocker", role: "step_check",
       claim: ("the diff touches a forbidden path: " + $f), evidence: ($f + ":0"), command: ("git diff --name-only -- " + $f), fix: "revert the change to this path or amend the step scope"}'; done | jq -s .)"
-fi
-if (( tn_rc == 1 )); then
-  script_findings="$(jq -c --arg cp "$CHECKPOINT" --arg hits "$tn_hits" '. + [$hits | split("\n")[] | select(. != "") | split("\t") as [$f, $n]
-    | {id: ("step_check-test-name-" + ($f | gsub("[^A-Za-z0-9]"; "-"))), checkpoint: $cp, severity: "major", role: "step_check",
-       claim: ("a test the step adds is named after a plan, finding or backlog item: \"" + $n + "\""), evidence: ($f + ":0"),
-       command: ("grep -n " + ($n | @sh) + " " + $f), fix: "name the behaviour the test guards; the plan, finding or backlog number belongs in the commit message",
-       rule: "a test is named after what it guards (the close gate test_named_after_plan refuses it)"}]' <<< "$script_findings")"
 fi
 dod_json='null'; [[ -n "$DOD_FILE" ]] && dod_json="$(jq -Rs . "$DOD_FILE")"
 tmp="$(mktemp "$CPDIR/.step-check.XXXXXX")"

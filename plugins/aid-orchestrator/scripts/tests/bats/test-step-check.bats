@@ -262,15 +262,23 @@ _rr_step() {   # a declared foreign repository "docs" with a worktree on plan/P1
   [[ "$(_json .reason cp2/step-0)" == *"outside any git repository"* ]]
 }
 
-@test "3.13.0: a small diff adding a test named after a plan is review with a major script finding, never skip" {
+@test "3.13.0: a test named after a plan refuses the step check before any round — on exactly the reviewed range" {
   # WAN P115 25. 10. and P114 27. 10. 2026: step reviews passed `describe('… — P114')`, the close gate refused it
   printf "describe('owner reassign — P114', () => {})\n" > "$R/tests/owner.test.ts"; _commit s0 >/dev/null
-  run _run --checkpoint cp2 --step 0; echo "$output"; [ "$status" -eq 0 ]
-  [ "$(_json .verdict cp2/step-0)" = review ]; [[ "$(_json .reason cp2/step-0)" == *"tests/owner.test.ts"* ]]
-  jq -e '.script_findings[] | select(.severity == "major" and (.claim | test("P114")) and (.evidence == "tests/owner.test.ts:0"))' "$E/cp2/step-0/step-check.json" >/dev/null
-  # the same file named after its behaviour carries no such finding
-  printf "describe('owner reassign keeps the history', () => {})\n" > "$R/tests/owner.test.ts"; _commit s0b >/dev/null
+  # an uncommitted rename does not hide the committed name: the range base..HEAD is what is reviewed
+  printf "describe('owner reassign keeps the history', () => {})\n" > "$R/tests/owner.test.ts"
+  run _run --checkpoint cp2 --step 0; echo "$output"; [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSED (step_test_named_after_plan)"* ]]; [[ "$output" == *"tests/owner.test.ts"*"P114"* ]]
+  [ ! -f "$E/cp2/step-0/step-check.json" ]
+  git -C "$R" commit -qam rename
+  run _run --checkpoint cp2 --step 0; [ "$status" -eq 0 ]
+  # an uncommitted bad name does not stain a clean reviewed range
+  printf "describe('x — IMP-700', () => {})\n" > "$R/tests/later.test.ts"
   rm -rf "$E/cp2"; run _run --checkpoint cp2 --step 0; [ "$status" -eq 0 ]
-  [ "$(jq '[.script_findings[] | select(.id | startswith("step_check-test-name"))] | length' "$E/cp2/step-0/step-check.json")" -eq 0 ]
-  [[ "$(_json .reason cp2/step-0)" != *"named after a plan"* ]]
+}
+
+@test "3.13.0: --worktree checks the untracked new test too" {
+  printf "describe('a new one — P114', () => {})\n" > "$R/tests/new.test.ts"
+  run _run --checkpoint cp2 --step 0 --worktree; echo "$output"; [ "$status" -eq 1 ]
+  [[ "$output" == *"REFUSED (step_test_named_after_plan)"* ]]; [[ "$output" == *"tests/new.test.ts"* ]]
 }
