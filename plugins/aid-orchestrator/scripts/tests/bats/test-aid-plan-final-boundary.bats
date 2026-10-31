@@ -4341,3 +4341,46 @@ _seed_named_project() {
   echo "$output"; [ "$status" -eq 0 ]
   [[ "$output" == *"PASS [test_named_after_plan]"* ]]
 }
+
+# ─── 3.13.0: the release record against the candidate at the freeze ─────────
+_rel_ready() {   # <carried> <record json filter> — a bootstrapped plan whose plan branch carries <carried> in CHANGELOG
+  _bootstrap; _add_epic "$PLAN_ID" "E-068-1_2"
+  _commit_on "plan/$PLAN_ID" CHANGELOG.md "## [$1] — x"
+  plan_manifest_set_epic_status "$PLAN_ID" "E-068-1_2" "merged_to_plan" "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  mkdir -p "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}"
+  jq -n "{schema_version: \"aid-release-prep-1.1\", plan_id: \"$PLAN_ID\", plan_branch: \"plan/$PLAN_ID\", bump_requested: \"minor\", tree: \"stale\"} | $2" \
+    > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"
+}
+_rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"; }
+
+@test "freeze (3.13.0): a version changed after the preparation is refused before anything is bumped or merged" {
+  _rel_ready 0.46.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0"'
+  _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"REFUSED (release_prep_version_changed)"* && "$output" == *"--bump none"* ]]
+  [ "$(_rec .version)" = 0.45.0 ]
+}
+
+@test "freeze (3.13.0): a release version not above the target's highest tag is refused before the sync" {
+  _rel_ready 0.45.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0"'
+  git -C "$TEST_PROJECT_ROOT" tag v0.45.0 main
+  _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"REFUSED (plan_version_not_above_target)"* ]]
+  git -C "$TEST_PROJECT_ROOT" tag -d v0.45.0 >/dev/null; git -C "$TEST_PROJECT_ROOT" tag v0.9.0 main
+  _rel_ready 0.10.0 '.version = "0.10.0" | .intent = "release" | .candidate_version = "0.10.0"'   # numerically above
+  _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -eq 0 ]
+  # the record follows the final tree, without a bump
+  [ "$(_rec .version)" = 0.10.0 ]; [ "$(_rec .tree)" != stale ]
+}
+
+@test "freeze (3.13.0): a no-release plan whose carried version moved takes it only with --adopt-version, and stays no-release" {
+  _rel_ready 0.47.0 '.version = "none" | .intent = "none" | .candidate_version = "0.46.0"'
+  _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"--adopt-version"* ]]
+  run bash "$AID_PLUGIN_PATH/scripts/aid-release.sh" rebind "$PLAN_ID" --plan-branch "plan/$PLAN_ID" --project-root "$TEST_PROJECT_ROOT" --adopt-version
+  echo "$output"; [ "$status" -eq 0 ]; [ "$(_rec .intent)" = none ]; [ "$(_rec .version)" = none ]; [ "$(_rec .candidate_version)" = 0.47.0 ]
+}
+
+@test "freeze (3.13.0): no record, or one from before 3.13.0, is not checked; an unreadable one is refused" {
+  _rel_ready 0.45.0 '.version = "0.45.0"'                        # no candidate_version: a 3.12 record
+  _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -eq 0 ]
+  _rel_ready 0.45.0 '.'; printf '{broken' > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"
+  _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"REFUSED (release_prep_stale)"* ]]
+}

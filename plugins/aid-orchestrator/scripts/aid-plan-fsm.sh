@@ -2897,6 +2897,55 @@ plan_final_invalidate() {
 }
 
 # ---------------------------------------------------------------------------
+# _pfsm_freeze_release_check <root> <plan tree> <plan_id> <plan_branch> before|after — the release record
+# prepare-plan wrote (release-prep.json; none = a no-release plan, as before 3.13.0) against the candidate:
+#   before the sync — the version the plan branch carries is the one the record was made for (else
+#     release_prep_version_changed: never bump on a stale version), and a release's version is above the highest
+#     release tag reachable from the target branch (plan_version_not_above_target — before the sync, which would
+#     otherwise stop on the CHANGELOG conflict first; WAN P116 + W12 28. 10. 2026: both 0.45.0);
+#   after the sync — a record of another tree is rebound (aid-release.sh rebind: no bump; refused when the version
+#     changed). A record without candidate_version (before 3.13.0) is not checked; an unreadable one refuses.
+_pfsm_freeze_release_check() {
+  local root="$1" troot="$2" plan_id="$3" plan_branch="$4" when="$5" rec rel
+  rec="${root}/.aid-o/work/plan-state/${plan_id}/release-prep.json"
+  [[ -e "$rec" ]] || return 0
+  jq -e 'type == "object" and (.version | type) == "string"' "$rec" >/dev/null 2>&1 || {
+    echo "REFUSED (release_prep_stale): ${rec} is unreadable" >&2
+    echo "  next: bash ${SCRIPT_DIR}/aid-release.sh prepare-plan ${plan_id} --bump <the plan's bump> --plan-branch ${plan_branch} --project-root ${troot} (pipeline.md §When AID refuses: release_prep_stale)" >&2
+    return 1; }
+  [[ -n "$(jq -r '.candidate_version // ""' "$rec")" ]] || return 0
+  rel="${SCRIPT_DIR}/aid-release.sh"
+  if [[ "$when" == before ]]; then
+    local carried recorded intent version target top
+    recorded="$(jq -r .candidate_version "$rec")"; intent="$(jq -r '.intent // "release"' "$rec")"; version="$(jq -r .version "$rec")"
+    carried="$(bash "$rel" carried-version --project-root "$troot" --rev "refs/heads/${plan_branch}" 2>/dev/null)" || carried=""
+    if [[ "$carried" != "$recorded" ]]; then
+      echo "REFUSED (release_prep_version_changed): ${plan_id} was prepared for ${recorded} and the plan branch now carries ${carried:-no version}" >&2
+      if [[ "$intent" == none ]]; then
+        echo "  next: bash ${rel} rebind ${plan_id} --plan-branch ${plan_branch} --project-root ${troot} --adopt-version (it stays a no-release plan), or revert the change (pipeline.md §When AID refuses: release_prep_version_changed)" >&2
+      else
+        echo "  next: bash ${rel} prepare-plan ${plan_id} --bump none --plan-branch ${plan_branch} --project-root ${troot} (the carried version becomes the prepared one), or revert the change (pipeline.md §When AID refuses: release_prep_version_changed)" >&2
+      fi
+      return 1
+    fi
+    [[ "$intent" == release ]] || return 0
+    target="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch' 2>/dev/null)" || target=""
+    [[ -n "$target" ]] || return 0
+    top="$(git -C "$troot" tag --merged "$target" --list 'v[0-9]*' 2>/dev/null | sed -n 's/^v\([0-9]\+\.[0-9]\+\.[0-9]\+\)$/\1/p' | sort -V | tail -1)"
+    if [[ -n "$top" && "$(printf '%s\n%s\n' "$top" "$version" | sort -V | tail -1)" == "$top" ]]; then
+      echo "REFUSED (plan_version_not_above_target): ${plan_id} is prepared as ${version}, and ${target} already holds v${top} (another plan released meanwhile)" >&2
+      echo "  next: raise the plan's version — bash ${rel} prepare-plan ${plan_id} --bump patch|minor|major --plan-branch ${plan_branch} --project-root ${troot} — then freeze again (pipeline.md §When AID refuses: plan_version_not_above_target)" >&2
+      return 1
+    fi
+    return 0
+  fi
+  # after the sync: the record follows the final tree, never with a bump
+  [[ "$(jq -r '.tree // ""' "$rec")" == "$(git -C "$troot" rev-parse "refs/heads/${plan_branch}^{tree}" 2>/dev/null)" ]] && return 0
+  bash "$rel" rebind "$plan_id" --plan-branch "$plan_branch" --project-root "$troot" >&2 && return 0
+  echo "  next: the sync changed the carried version — prepare-plan again as above, then freeze again (pipeline.md §When AID refuses: release_prep_version_changed)" >&2
+  return 1
+}
+
 # _pfsm_finalize_sync <root> <plan_id>  — the first half of `--stage freeze`.
 # ---------------------------------------------------------------------------
 _pfsm_finalize_sync() {
@@ -3254,11 +3303,15 @@ _pfsm_finalize_freeze() {
     echo "plan-finalize --stage freeze: ${plan_branch} moved from the frozen candidate ${cur_candidate} to ${plan_head}; minting a new attempt (the previous run directory is left byte-identical)." >&2
   fi
 
+  # ── 3.13.0: the release record agrees with the candidate, and its version is above the target's ─────
+  _pfsm_freeze_release_check "$root" "$troot" "$plan_id" "$plan_branch" before || return 1
+
   # ── Sync: the target branch merged into the plan branch, every time ──────
   local src=0
   _pfsm_finalize_sync "$root" "$plan_id" >/dev/null || src=$?
   [[ "$src" -ne 0 ]] && return "$src"
   plan_head="$(git -C "$troot" rev-parse --verify --quiet "refs/heads/${plan_branch}" 2>/dev/null)" || plan_head=""
+  _pfsm_freeze_release_check "$root" "$troot" "$plan_id" "$plan_branch" after || return 1
 
   # ── State precondition: freeze only out of PLAN_SYNC ─────────────────────
   local cur_state=""
