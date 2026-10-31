@@ -102,9 +102,10 @@ cmd_start() {
   # P112: the delegated adjudicator is no reviewer of the round
   # 3.13.0: a fixer is no reviewer either; its focus names this round's step and number
   if [[ "$focus" == fix-* && -f "${evidence_dir}/round.json" ]]; then
-    local fs fr; fs="$(jq -r '.step // ""' "${evidence_dir}/round.json")"; fr="$(jq -r '.round // ""' "${evidence_dir}/round.json")"
-    [[ "$focus" == "fix-cp2-${fs}-r${fr}" || "$focus" == "fix-cp7-r${fr}" ]] \
-      || { echo "ERROR: fixer focus ${focus} does not name this round (step ${fs:-none}, round ${fr}): fix-cp2-${fs}-r${fr} or fix-cp7-r${fr}" >&2; exit 1; }
+    local fs fr fc; fs="$(jq -r '.step // ""' "${evidence_dir}/round.json")"; fr="$(jq -r '.round // ""' "${evidence_dir}/round.json")"
+    fc="$(jq -r '.checkpoint // ""' "${evidence_dir}/round.json")"
+    [[ ( "$fc" == cp2 && "$focus" == "fix-cp2-${fs}-r${fr}" ) || ( "$fc" == cp7 && "$focus" == "fix-cp7-r${fr}" ) ]] \
+      || { echo "ERROR: fixer focus ${focus} does not name this round (${fc:-?} step ${fs:-none}, round ${fr}): fix-cp2-${fs}-r${fr} in a cp2 round, fix-cp7-r${fr} in a cp7 round" >&2; exit 1; }
   fi
   if [[ -f "${evidence_dir}/round.json" && "$focus" != adjudicator-delegated-* && "$focus" != fix-* ]]; then
     local role_of_focus roles

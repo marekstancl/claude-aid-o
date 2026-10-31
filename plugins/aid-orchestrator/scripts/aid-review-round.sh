@@ -1782,7 +1782,7 @@ cmd_delegate() {
     if (( rc != 0 )); then
       # what the worktree looked like before the stand-in: its record refuses files it adds (F14)
       _dlg_tree_state "$dir" > "${dir}/adjudicator-delegated-${fp16}.status-before" || true
-      echo "STAND-IN: no codex verdict (${why}); dispatch ${prompt} to an independent general-purpose agent at model ${RC_STAND_IN_MODEL} inside the bracket adjudicator-delegated-${fp16} (aid-emit-dispatch.sh start --focus adjudicator-delegated-${fp16} --agent-id claude:adjudicator-delegated --evidence-dir ${dir}; complete … --output-file ${vfile}), have it write ${vfile} with \"provider\": \"claude\", then: aid-review-round.sh delegate --checkpoint ${CHECKPOINT} --evidence-dir ${EVID}${STEP:+ --step ${STEP}} --round ${ROUND} --fingerprint ${FINGERPRINT} --verdict ${vfile}"
+      echo "STAND-IN: no codex verdict (${why}); dispatch ${prompt} to an independent general-purpose agent at model ${RC_STAND_IN_MODEL} inside the bracket adjudicator-delegated-${fp16} (aid-emit-dispatch.sh start --focus adjudicator-delegated-${fp16} --agent-id claude:adjudicator-delegated --evidence-dir ${dir}; complete … --output-file ${vfile} --nonce <its start's nonce>), have it write ${vfile} with \"provider\": \"claude\", then: aid-review-round.sh delegate --checkpoint ${CHECKPOINT} --evidence-dir ${EVID}${STEP:+ --step ${STEP}} --round ${ROUND} --fingerprint ${FINGERPRINT} --verdict ${vfile}"
       exit 4
     fi
     jq '.provider = "codex"' "$vfile" > "${vfile}.tmp" && mv "${vfile}.tmp" "$vfile"

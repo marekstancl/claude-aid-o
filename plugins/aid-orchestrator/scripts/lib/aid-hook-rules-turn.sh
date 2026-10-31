@@ -116,36 +116,44 @@ _aid_hrt_step_call_pending() {
   local t="$1" c="$2" sess="${3:-}" idx="${4:-}" ver rec pid
   # 3.13.0: a reviewer or fixer of THIS step dispatched in the background by THIS session (WAN P114 26. 10. 2026: the
   # turn was refused while the CP2 reviewers ran, AID-WAIT knew only aid-job.sh). It counts when, for its focus, the
-  # LAST start in the round's timeline is still in the round's pending ledger (complete and cancel remove exactly their
-  # line), is younger than its own time limit, and its printed line `nonce=… focus=… evidence=<this round>` is in a
-  # TOOL RESULT of this transcript (one pass; text the model wrote is not read).
+  # LAST start among all rounds of the step is still in its round's pending ledger (complete and cancel remove exactly
+  # their line) with this step and round dir, is younger than its own time limit, and the line it printed —
+  # `nonce=… focus=… evidence=<that round>` — is the RESULT of this transcript's own `aid-emit-dispatch.sh start` call
+  # (matched by tool_use_id; one pass over the transcript, text the model wrote is never read).
   if [[ "$idx" =~ ^[0-9]+$ ]]; then
-    local run_dir rd printed now f nonce ts exp
+    local run_dir printed now f nonce ts exp rdir
     run_dir="$(dirname "$(dirname "$(dirname "$c")")")"; now="$(date -u +%s)"
     if compgen -G "${run_dir}/cp2/step-${idx}/round-*/pending-dispatches.jsonl" >/dev/null; then
-      printed="$(grep -F 'nonce=' "$t" 2>/dev/null | jq -rR 'fromjson? | select(.type == "user") | .message.content
-          | if type == "array" then .[] | select(.type? == "tool_result") | .content
-              | if type == "array" then (map(.text? // "") | join("\n")) else tostring end
-            else empty end' 2>/dev/null | grep -oE 'nonce=[^ ]+ focus=[^ ]+ evidence=[^ "\\]+' | sort -u)"
+      printed="$(grep -E 'aid-emit-dispatch\.sh|nonce=' "$t" 2>/dev/null | jq -rRn '
+          [inputs | fromjson? | select(.type == "assistant" or .type == "user")] as $l
+          | ([$l[] | select(.type == "assistant") | .message.content[]?
+               | select(.type? == "tool_use" and .name == "Bash" and ((.input.command // "") | test("aid-emit-dispatch\\.sh\"? +start ")))
+               | .id] | map({(.): true}) | add // {}) as $starts
+          | $l[] | select(.type == "user") | .message.content | if type == "array" then .[] else empty end
+          | select(.type? == "tool_result" and ($starts[.tool_use_id // ""] // false))
+          | .content | if type == "array" then (map(.text? // "") | join("\n")) else tostring end' 2>/dev/null \
+        | grep -oE 'nonce=[^ ]+ focus=[^ ]+ evidence=[^ "\\]+' | sort -u)"
       if [[ -n "$printed" ]]; then
-        for rd in "${run_dir}/cp2/step-${idx}"/round-*; do
-          [[ -s "${rd}/pending-dispatches.jsonl" && -f "${rd}/timeline.jsonl" ]] || continue
-          while IFS=$'\t' read -r f nonce ts exp; do
-            [[ -n "$nonce" ]] || continue
-            grep -qxF "nonce=${nonce} focus=${f} evidence=$(realpath -m -- "$rd")" <<< "$printed" || continue
-            ts="$(date -u -d "$ts" +%s 2>/dev/null)" || continue
-            [[ "$exp" =~ ^[0-9]+$ ]] || exp=3600
-            (( now - ts <= exp )) && return 0
-          done < <(jq -rs --slurpfile tl "${rd}/timeline.jsonl" --arg i "$idx" '
-              [.[] | select(.event == "start" and (.focus | test("^(cp2-step-" + $i + "-|fix-cp2-" + $i + "-r)")))] as $open
-              | [$open[].focus] | unique[] as $f
-              | ([$tl[] | select(.event == "verifier_dispatch_start" and .focus == $f)] | last | .nonce) as $last
-              | $open[] | select(.focus == $f and .nonce == $last)
-              | "\(.focus)\t\(.nonce)\t\(.ts)\t\(.expected_duration_max // "")"' "${rd}/pending-dispatches.jsonl" 2>/dev/null)
-        done
+        while IFS=$'\t' read -r f nonce ts exp rdir; do
+          [[ -n "$nonce" ]] || continue
+          grep -qxF "nonce=${nonce} focus=${f} evidence=$(realpath -m -- "$rdir")" <<< "$printed" || continue
+          ts="$(date -u -d "$ts" +%s 2>/dev/null)" || continue
+          [[ "$exp" =~ ^[0-9]+$ ]] || exp=3600
+          (( now - ts <= exp )) && return 0
+        done < <(
+          for rd in "${run_dir}/cp2/step-${idx}"/round-*; do
+            [[ -f "${rd}/timeline.jsonl" ]] || continue
+            jq -c --arg rd "$rd" --arg r "${rd##*round-}" 'select(.event == "verifier_dispatch_start") + {rd: $rd, rn: ($r | tonumber? // 0)}' "${rd}/timeline.jsonl" 2>/dev/null
+          done | jq -rs --arg i "$idx" --slurpfile pend <(cat "${run_dir}/cp2/step-${idx}"/round-*/pending-dispatches.jsonl 2>/dev/null) '
+            [.[] | select(.focus | test("^(cp2-step-" + $i + "-|fix-cp2-" + $i + "-r)"))]
+            | group_by(.focus)[] | sort_by(.ts, .rn) | last as $s
+            | $pend[] | select(.event == "start" and .nonce == $s.nonce and .focus == $s.focus
+                               and ((.step_n // -1) | tostring) == $i)
+            | "\(.focus)\t\(.nonce)\t\(.ts)\t\(.expected_duration_max // "")\t\($s.rd)"')
       fi
     fi
   fi
+  ver="$(jq -r '.version // ""' "$c" 2>/dev/null)"; rec="$(dirname "$c")/land.json"
   local candidates answered
   candidates="$( { grep -F 'aid-step-land.sh' "$t" 2>/dev/null \
       | jq -rR 'fromjson? | select(.type == "assistant") | .message.content[]?

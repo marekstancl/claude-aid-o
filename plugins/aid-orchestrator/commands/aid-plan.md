@@ -559,7 +559,7 @@ one at a time:
 
    ```bash
    bash "$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" complete --focus <focus> \
-     --output-file <answer> --evidence-dir <round dir>
+     --output-file <answer> --evidence-dir <round dir> --nonce <the nonce its start printed>
    ```
 
    A step round's `close` refuses a reviewer file with no such start/complete

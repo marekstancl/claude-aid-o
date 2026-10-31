@@ -322,12 +322,14 @@ teardown() {
 }
 
 @test "3.13.0: a fixer is bracketed under fix-cp2-<step>-r<round> / fix-cp7-r<round> of THIS round, never another" {
-  jq -n '{step: 2, round: 1, reviewers_expected: ["step_generalist"]}' > "$EVID/round.json"
+  jq -n '{checkpoint: "cp2", step: 2, round: 1, reviewers_expected: ["step_generalist"]}' > "$EVID/round.json"
   run bash "$SCRIPT" start --focus fix-cp2-2-r1 --agent-id aid-orchestrator:backend --evidence-dir "$EVID"
   echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == nonce=* ]]
   [ "$(jq -r 'select(.event == "start") | .step_n' "$PENDING")" = 2 ]
   run bash "$SCRIPT" start --focus fix-cp2-3-r1 --agent-id aid-orchestrator:backend --evidence-dir "$EVID"
   [ "$status" -ne 0 ]; [[ "$output" == *"does not name this round"* ]]
   run bash "$SCRIPT" start --focus fix-cp2-2-r9 --agent-id aid-orchestrator:backend --evidence-dir "$EVID"
+  [ "$status" -ne 0 ]
+  run bash "$SCRIPT" start --focus fix-cp7-r1 --agent-id aid-orchestrator:backend --evidence-dir "$EVID"   # a cp7 fixer in a cp2 round
   [ "$status" -ne 0 ]
 }

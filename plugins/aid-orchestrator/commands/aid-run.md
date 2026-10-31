@@ -665,7 +665,7 @@ pending and prints the list):
    **Exit 4 + `STAND-IN:`** — Codex is out (absent, over its limit, no answer):
    dispatch the prompt to an independent `general-purpose` agent with a clean
    context inside the bracket
-   `aid-emit-dispatch.sh start --focus adjudicator-delegated-<fp16> --agent-id claude:adjudicator-delegated --evidence-dir <round dir>` … `complete … --output-file <verdict>`,
+   `aid-emit-dispatch.sh start --focus adjudicator-delegated-<fp16> --agent-id claude:adjudicator-delegated --evidence-dir <round dir>` … `complete … --output-file <verdict> --nonce <the nonce its start printed>`,
    then record: `… delegate … --fingerprint <fp> --verdict <verdict file>`.
 3. Next fingerprint; never a PM turn in between.
 
