@@ -52,3 +52,12 @@ _cfg() { printf '%s\n' "$@" > "$S/.aid-o/config/project.yaml"; }
   local wt; wt="$(cd "$S" && aid_parallel_step_worktree "$S" step_1_backend HEAD .aid-worktrees 2>/dev/null)"
   [ -n "$wt" ]; [ "$(cat "$wt/.env")" = "KEY=1" ]
 }
+
+@test "a multi-line setup command runs as one shell; removing the keys removes the old record; two trees of one name keep their own" {
+  printf 'worktree:\n  setup:\n    - |\n      cd ui\n      pwd > here\n' > "$S/.aid-o/config/project.yaml"
+  mkdir -p "$W/ui"; aid_worktree_env_prepare "$S" "$W" "$S" 2>/dev/null
+  [ "$(cat "$W/ui/here")" = "$(realpath "$W/ui")" ]
+  local rec; rec="$(aid_worktree_env_record_path "$S" "$W")"; [ -f "$rec" ]
+  : > "$S/.aid-o/config/project.yaml"; aid_worktree_env_prepare "$S" "$W" "$S"; [ ! -e "$rec" ]
+  mkdir -p "$T/a" "$T/b"; [ "$(aid_worktree_env_record_path "$S" "$T/a/tree")" != "$(aid_worktree_env_record_path "$S" "$T/b/tree")" ]
+}

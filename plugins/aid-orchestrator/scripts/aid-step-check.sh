@@ -280,14 +280,20 @@ if [[ "$CHECKPOINT" == cp2 && -n "${STEP:-}" && -f "$PLAN_JSON" ]]; then
 fi
 # 3.13.0: a setup command the project names for its worktrees failed in THIS tree — the reviewers must know the tests
 # may have run without it (never a skip)
-wt_setup_failed=""
+# (the plan's tree, and the step's own tree when a wave dispatched it — the step may have been merged and its tree gone)
+wt_setup_failed="" wt_rec=""
 declare -F aid_worktree_env_record_path >/dev/null || source "$SCRIPT_DIR/lib/aid-worktree-env.sh"
-wt_rec="$(aid_worktree_env_record_path "$CFG_ROOT" "$ROOT")"
-[[ -f "$wt_rec" ]] && wt_setup_failed="$(jq -r '[.setup[]? | select(.exit != 0) | .command] | join("; ")' "$wt_rec" 2>/dev/null || true)"
+for wt_tree in "$ROOT" $( [[ "$CHECKPOINT" == cp2 && -n "${STEP:-}" && -f "$PLAN_JSON" ]] && {
+    _sid="$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "$PLAN_JSON" 2>/dev/null || true)"
+    [[ -n "$_sid" ]] && { source "$SCRIPT_DIR/lib/aid-parallel-dispatch.sh" 2>/dev/null
+      _aid_pd_step_worktree_path "$ROOT" "$_sid" "$(aid_orchestration_value "$CFG_ROOT" .dispatch.worktree_base 2>/dev/null | cut -f1)" 2>/dev/null; }; } || true ); do
+  wt_r="$(aid_worktree_env_record_path "$CFG_ROOT" "$wt_tree")"
+  [[ -f "$wt_r" && "$(jq -r '.tree // ""' "$wt_r" 2>/dev/null)" == "$(realpath -m -- "$wt_tree")" ]] || continue
+  wt_f="$(jq -r '[.setup[]? | select(.exit != 0) | .command] | join("; ")' "$wt_r" 2>/dev/null || true)"
+  [[ -n "$wt_f" ]] && { wt_setup_failed="${wt_setup_failed:+${wt_setup_failed}; }${wt_f}"; wt_rec="$wt_r"; }
+done
 verdict="" reason=""
-if [[ -n "$wt_setup_failed" ]]; then verdict=review; reason="the worktree's setup failed (${wt_setup_failed}; ${wt_rec})"
-elif (( land_repl > 0 )); then verdict=review; reason="${land_repl} criterion(s) measured with another command than the plan names (land.json replacements)"
-elif (( ${#OTHER_MISSING[@]} > 0 )); then verdict=review; reason="declared repository with no commits named in the step's return (repo_commits): ${OTHER_MISSING[*]}"
+if (( ${#OTHER_MISSING[@]} > 0 )); then verdict=review; reason="declared repository with no commits named in the step's return (repo_commits): ${OTHER_MISSING[*]}"
 elif (( ${#OUTSIDE_GIT[@]} > 0 )); then verdict=review; reason="declared path(s) outside any git repository — no diff shows them, the reviewers read them as they are: ${OUTSIDE_GIT[*]}"
 elif (( ${#FILES[@]} == 0 )); then verdict=no_change; reason="the range $RANGE has no changes"
 elif [[ "$STREAMLINED" == true ]]; then verdict=skip; reason="streamlined"
@@ -302,6 +308,15 @@ elif (( ${#handler_ids[@]} > 0 )); then verdict=review; reason="handler pattern:
 elif [[ "$CHECKPOINT" != cp7 ]] && (( ${#FILES[@]} <= MAX_FILES && LINES <= MAX_LINES )); then verdict=skip; reason="${#FILES[@]} file(s), $LINES line(s), inside scope, no pattern matched"
 else verdict=review; reason="${#FILES[@]} file(s), $LINES line(s)"
 fi
+
+# 3.13.0: these never let a step be skipped, and never weaken a stronger verdict (review+security stays): they
+# turn skip/no_change into review and add their reason
+for _extra in "$( (( land_repl > 0 )) && echo "${land_repl} criterion(s) measured with another command than the plan names (land.json replacements)")" \
+              "$( [[ -n "$wt_setup_failed" ]] && echo "the worktree's setup failed (${wt_setup_failed}; ${wt_rec})")"; do
+  [[ -n "$_extra" ]] || continue
+  [[ "$verdict" == skip || "$verdict" == no_change ]] && { verdict=review; reason="$_extra"; continue; }
+  reason="${reason}; ${_extra}"
+done
 
 # ── 6. write, bind, index ───────────────────────────────────────────────────
 [[ "$(git_ rev-parse HEAD)" == "$HEAD_SHA" ]] || die "HEAD moved while the check ran; run it again"

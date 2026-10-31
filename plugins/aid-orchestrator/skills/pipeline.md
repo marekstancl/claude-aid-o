@@ -1027,8 +1027,9 @@ created, gets what `.aid-o/config/project.yaml` names (`lib/aid-worktree-env.sh`
 the tree has; a path out of the repository, a symlink, a tracked or a not ignored source is refused) — and
 `worktree.setup: ["cd ui && npm ci --prefer-offline", …]` — commands run in the NEW tree, so it has its own
 dependencies (what they create must be ignored, or the step's return sees it). The record is
-`.aid-o/work/worktree-env/<tree>.json`; a failed setup never stops the creation, and the step check then says
-`review` naming the command. Measure a step in its tree — not with `docker compose exec` into a container that mounts
+`.aid-o/work/worktree-env/<tree>-<path hash>.json` (one per tree path, replaced on each creation); a failed setup
+never stops the creation, and the step check (the plan's tree and the step's own wave tree) then turns a skip into
+`review` naming the command, without weakening `review+security`. A setup element may span lines: it runs as one shell. Measure a step in its tree — not with `docker compose exec` into a container that mounts
 the main checkout (WAN P114, P116).
 
 `serial` is returned — with the reason — for a wave of one, for `dispatch.max_parallel: 1`

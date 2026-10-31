@@ -19,16 +19,25 @@
 [[ -n "${_AID_WORKTREE_ENV_SH_LOADED:-}" ]] && return 0
 _AID_WORKTREE_ENV_SH_LOADED=1
 
-aid_worktree_env_record_path() { printf '%s/.aid-o/work/worktree-env/%s.json' "$1" "$(basename "$2")"; }
+# keyed by the tree's canonical path (two trees with one directory name never share a record)
+aid_worktree_env_record_path() {
+  printf '%s/.aid-o/work/worktree-env/%s-%s.json' "$1" "$(basename "$2")" "$(realpath -m -- "$2" | sha256sum | cut -c1-12)"
+}
 
 aid_worktree_env_prepare() {
   local src="$1" tree="$2" sroot="$3" cfg p rec copies='[]' setups='[]' cmd rc t0 log
   cfg="${sroot}/.aid-o/config/project.yaml"
-  [[ -f "$cfg" ]] || return 0
   local -a cp_list=() su_list=()
-  mapfile -t cp_list < <(yq -r '(.worktree.copy_untracked // [])[]' "$cfg" 2>/dev/null)
-  mapfile -t su_list < <(yq -r '(.worktree.setup // [])[]' "$cfg" 2>/dev/null)
-  (( ${#cp_list[@]} + ${#su_list[@]} > 0 )) || return 0
+  if [[ -f "$cfg" ]]; then
+    mapfile -t cp_list < <(yq -r '(.worktree.copy_untracked // [])[]' "$cfg" 2>/dev/null)
+    # one array element = one command, newlines and all (a YAML block `cd ui` + `npm ci` stays one shell)
+    while IFS= read -r -d '' cmd; do su_list+=("$cmd"); done < <(yq -o=json '(.worktree.setup // [])' "$cfg" 2>/dev/null | jq -j '.[] | tostring, "\u0000"' 2>/dev/null)
+  fi
+  rec="$(aid_worktree_env_record_path "$sroot" "$tree")"
+  if (( ${#cp_list[@]} + ${#su_list[@]} == 0 )); then
+    # nothing named: no record — and an old one of a tree at this path (created before the keys were removed) goes
+    rm -f "$rec" "${rec%.json}".setup-*.log 2>/dev/null; return 0
+  fi
   local rs rt; rs="$(realpath -m -- "$src")"; rt="$(realpath -m -- "$tree")"
   _wte_copy() {  # <path> — prints the outcome word
     local p="$1"
@@ -40,12 +49,22 @@ aid_worktree_env_prepare() {
     ! git -C "$rs" ls-files --error-unmatch -- "$p" >/dev/null 2>&1 || { echo "refused: tracked — git carries it"; return; }
     git -C "$rs" check-ignore -q -- "$p" 2>/dev/null || { echo "refused: not ignored (it would show as a new file in the tree)"; return; }
     [[ ! -e "${rt}/${p}" && ! -L "${rt}/${p}" ]] || { echo "skipped: already in the tree (never overwritten)"; return; }
-    mkdir -p "$(dirname "${rt}/${p}")" && cp -p -- "${rs}/${p}" "${rt}/${p}" && echo copied || echo "failed: copy"
+    mkdir -p "$(dirname "${rt}/${p}")" || { echo "failed: copy"; return; }
+    # read without following a symlink, create exclusively without following one: a file swapped in between the checks
+    # and the copy is refused, never followed or overwritten
+    python3 -c '
+import os, sys, shutil
+src, dst = sys.argv[1], sys.argv[2]
+fi = os.open(src, os.O_RDONLY | os.O_NOFOLLOW)
+st = os.fstat(fi)
+fo = os.open(dst, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, st.st_mode & 0o777)
+with os.fdopen(fi, "rb") as a, os.fdopen(fo, "wb") as b: shutil.copyfileobj(a, b)
+' "${rs}/${p}" "${rt}/${p}" 2>/dev/null && echo copied || echo "failed: copy (the file changed during the copy, or the tree already has it)"
   }
   for p in "${cp_list[@]}"; do
     copies="$(jq -c --arg p "$p" --arg o "$(_wte_copy "$p")" '. + [{path: $p, outcome: $o}]' <<< "$copies")"
   done
-  rec="$(aid_worktree_env_record_path "$sroot" "$tree")"; mkdir -p "$(dirname "$rec")"
+  mkdir -p "$(dirname "$rec")"; rm -f "${rec%.json}".setup-*.log 2>/dev/null
   for cmd in "${su_list[@]}"; do
     [[ -n "$cmd" ]] || continue
     log="${rec%.json}.setup-$(( $(jq 'length' <<< "$setups") + 1 )).log"; t0=$(date +%s); rc=0
