@@ -13,7 +13,7 @@ setup() {
 }
 
 # the two lists: a name the scripts write under .aid-o/work is one or the other
-RUNTIME="evidence plan-final quick timeline.jsonl interim- audit-log.jsonl lifecycle-migration.log active.md active-runs.json active-run-pointer.json auto-mode-state.yaml codex-probe.json test-durations.jsonl release-force- companion superseded-runs locks runs test-audits"
+RUNTIME="evidence plan-final quick timeline.jsonl interim- audit-log.jsonl lifecycle-migration.log active.md active-runs.json active-run-pointer.json auto-mode-state.yaml codex-probe.json test-durations.jsonl release-force- companion superseded-runs locks runs test-audits worktree-env"
 VERSIONED="backlog.md aid-plugin-issues.md plan-state brainstorm backlog"
 
 @test "gitignore: AID's runtime files are ignored, the plans' records are not" {
