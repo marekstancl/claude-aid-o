@@ -349,7 +349,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   local args=(--checkpoint cp7 --evidence-dir "$(_run_dir)" --project-root "$R" --round 1) d role
   "$ROUND" prepare "${args[@]}" >/dev/null; d="$(_run_dir)/cp7/round-1"
   for role in $(jq -r '.reviewers_expected[]' "$d/round.json"); do
-    jq -n --arg r "$role" '{role: $r, checkpoint: "cp7", findings: [], no_findings_reason: "forged"}' > "$d/reviewer-$role.json"
+    jq -n --arg r "$role" '{role: $r, checkpoint: "cp7", findings: [], no_findings_reason: "forged"} + (if $r == "final_generalist" then {security_and_operations: (["personal_data","host_layout","ci_dependencies","docs_build","log_leaks","account_boundaries","injection","paths_deletion","forged_trust"] | map({(.): {answer: "none", note: ""}}) | add)} else {} end)' > "$d/reviewer-$role.json"
   done
   "$ROUND" collect "${args[@]}" >/dev/null
   run "$ROUND" close "${args[@]}" --tokens final_criteria=1 final_generalist=1
