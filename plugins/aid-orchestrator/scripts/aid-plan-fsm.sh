@@ -1088,6 +1088,9 @@ _pfsm_worktree_add() {
     git -C "$root" worktree list >&2 2>/dev/null || true
     return 1
   fi
+  # 3.13.0: the untracked files and the setup the project names (project.yaml worktree.*); never fails the creation
+  declare -F aid_worktree_env_prepare >/dev/null || source "${SCRIPT_DIR}/lib/aid-worktree-env.sh"
+  aid_worktree_env_prepare "$root" "$wt" "$root" >&2 || true
 
   printf '%s' "$wt"
   return 0

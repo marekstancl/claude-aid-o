@@ -1021,6 +1021,16 @@ decision="$(aid_parallel_decide "$plan_path" "$state_root" "$wave_name" "$wave_s
 # concurrent slots=<max_parallel> | serial: <reason>   — exit 0 either way; log the line to timeline.jsonl
 ```
 
+**What a new tree needs that git does not carry (AID 3.13.0).** Every plan worktree and every step worktree, as it is
+created, gets what `.aid-o/config/project.yaml` names (`lib/aid-worktree-env.sh`; both default to `[]`):
+`worktree.copy_untracked: [".env", …]` — ignored, untracked files copied from the source checkout (never over a file
+the tree has; a path out of the repository, a symlink, a tracked or a not ignored source is refused) — and
+`worktree.setup: ["cd ui && npm ci --prefer-offline", …]` — commands run in the NEW tree, so it has its own
+dependencies (what they create must be ignored, or the step's return sees it). The record is
+`.aid-o/work/worktree-env/<tree>.json`; a failed setup never stops the creation, and the step check then says
+`review` naming the command. Measure a step in its tree — not with `docker compose exec` into a container that mounts
+the main checkout (WAN P114, P116).
+
 `serial` is returned — with the reason — for a wave of one, for `dispatch.max_parallel: 1`
 (the brake, `defaults/orchestration.yaml`), for a `dispatch.strategy` other than `worktrees`,
 when git cannot hand out worktrees, when `aid-plan-parallel-check.sh --group <wave>` finds two

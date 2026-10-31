@@ -278,8 +278,15 @@ if [[ "$CHECKPOINT" == cp2 && -n "${STEP:-}" && -f "$PLAN_JSON" ]]; then
   land_f="$(dirname "$PLAN_JSON")/steps/$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "$PLAN_JSON" 2>/dev/null || true)/land.json"
   [[ -f "$land_f" ]] && land_repl="$(jq '(.replacements // []) | length' "$land_f" 2>/dev/null || echo 0)"
 fi
+# 3.13.0: a setup command the project names for its worktrees failed in THIS tree — the reviewers must know the tests
+# may have run without it (never a skip)
+wt_setup_failed=""
+declare -F aid_worktree_env_record_path >/dev/null || source "$SCRIPT_DIR/lib/aid-worktree-env.sh"
+wt_rec="$(aid_worktree_env_record_path "$CFG_ROOT" "$ROOT")"
+[[ -f "$wt_rec" ]] && wt_setup_failed="$(jq -r '[.setup[]? | select(.exit != 0) | .command] | join("; ")' "$wt_rec" 2>/dev/null || true)"
 verdict="" reason=""
-if (( land_repl > 0 )); then verdict=review; reason="${land_repl} criterion(s) measured with another command than the plan names (land.json replacements)"
+if [[ -n "$wt_setup_failed" ]]; then verdict=review; reason="the worktree's setup failed (${wt_setup_failed}; ${wt_rec})"
+elif (( land_repl > 0 )); then verdict=review; reason="${land_repl} criterion(s) measured with another command than the plan names (land.json replacements)"
 elif (( ${#OTHER_MISSING[@]} > 0 )); then verdict=review; reason="declared repository with no commits named in the step's return (repo_commits): ${OTHER_MISSING[*]}"
 elif (( ${#OUTSIDE_GIT[@]} > 0 )); then verdict=review; reason="declared path(s) outside any git repository — no diff shows them, the reviewers read them as they are: ${OUTSIDE_GIT[*]}"
 elif (( ${#FILES[@]} == 0 )); then verdict=no_change; reason="the range $RANGE has no changes"

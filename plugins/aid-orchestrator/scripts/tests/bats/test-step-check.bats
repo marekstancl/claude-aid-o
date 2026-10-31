@@ -298,3 +298,11 @@ _rr_step() {   # a declared foreign repository "docs" with a worktree on plan/P1
   run _run --checkpoint cp2 --step 0; echo "$output"; [ "$status" -eq 0 ]
   [ "$(_json .verdict cp2/step-0)" = review ]; [[ "$(_json .reason cp2/step-0)" == *"another command than the plan names"* ]]
 }
+
+@test "3.13.0: a tree whose project setup failed is review, never skip, naming the command" {
+  echo "one line" >> "$R/src/app.py"; _commit s0 >/dev/null
+  mkdir -p "$R/.aid-o/work/worktree-env"
+  jq -n '{setup: [{command: "cd ui && npm ci", exit: 1}]}' > "$R/.aid-o/work/worktree-env/$(basename "$R").json"
+  run _run --checkpoint cp2 --step 0; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_json .verdict cp2/step-0)" = review ]; [[ "$(_json .reason cp2/step-0)" == *"setup failed (cd ui && npm ci"* ]]
+}

@@ -131,6 +131,9 @@ aid_parallel_step_worktree() {
   local err
   err="$(git -C "$root" worktree add -B "$branch" "$wt" "$base" 2>&1)" \
     || { echo "worktree: git refused ${wt} on ${branch} at ${base}: ${err}" >&2; return 1; }
+  # 3.13.0: what the project's step needs that git does not carry (project.yaml worktree.*), from the plan's tree
+  declare -F aid_worktree_env_prepare >/dev/null || source "$(dirname "${BASH_SOURCE[0]}")/aid-worktree-env.sh"
+  aid_worktree_env_prepare "$root" "$wt" "$(cd "$root" && aid_state_root 2>/dev/null || printf '%s' "$root")" >&2 || true
   printf '%s\n' "$wt"
 }
 
