@@ -82,10 +82,11 @@ teardown() { rm -rf "$T"; }
 @test "3.13.0: refusal, the printed repair, then the same call again: the checkout is at the tip and the user's edit is kept aside" {
   echo mine > a.txt
   run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; [ "$status" -eq 1 ]; [[ "$output" == *"Nothing was changed"* ]]
-  git show :a.txt > a.txt.aid-staged; cp a.txt a.txt.aid-worktree
+  local bk; bk="$(ls -d .git/aid-merge-sync-backup-* | head -1)"; [ -s "$bk/worktree.tar" ]
   GIT_LITERAL_PATHSPECS=1 git checkout -q "$NEW" -- a.txt; GIT_LITERAL_PATHSPECS=1 git reset -q -- a.txt
   run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; echo "$output"; [ "$status" -eq 0 ]
-  [[ "$(cat b.txt)" == "new" ]]; [[ "$(cat a.txt)" == "two" ]]; [[ "$(cat a.txt.aid-worktree)" == "mine" ]]
+  [[ "$(cat b.txt)" == "new" ]]; [[ "$(cat a.txt)" == "two" ]]
+  [ "$(tar -xOf "$bk/worktree.tar" a.txt)" = mine ]                       # the user's version is kept
 }
 
 @test "3.13.0: a write that only changes the executable bit is brought forward; a local mode change on a written file refuses" {
@@ -108,18 +109,18 @@ teardown() { rm -rf "$T"; }
   echo staged > a.txt; git add a.txt; echo unstaged > a.txt
   run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; [ "$status" -eq 1 ]
   [ "$(git show :a.txt)" = staged ]; [ "$(cat a.txt)" = unstaged ]                # nothing was changed
-  git show :a.txt > a.txt.aid-staged; cp a.txt a.txt.aid-worktree
-  GIT_LITERAL_PATHSPECS=1 git checkout -q "$NEW" -- a.txt; GIT_LITERAL_PATHSPECS=1 git reset -q -- a.txt
-  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; [ "$status" -eq 0 ]
-  [ "$(cat a.txt.aid-staged)" = staged ]; [ "$(cat a.txt.aid-worktree)" = unstaged ]
+  local bk; bk="$(ls -d .git/aid-merge-sync-backup-* | head -1)"
+  [ "$(tar -xOf "$bk/worktree.tar" a.txt)" = unstaged ]
+  [ "$(cat "$bk/staged/$(cut -f1 "$bk/staged/INDEX" | head -1)")" = staged ]; grep -q 'a.txt' "$bk/staged/INDEX"
 }
 
-@test "3.13.0: a local mode change on a file the write changed refuses; an unchanged symlink is not taken for a change" {
+@test "3.13.0: a local mode change on a file the write changed refuses; a symlink the write changed is brought forward exactly" {
   ln -s a.txt link; git add link; git commit -qm link; local L; L="$(git rev-parse HEAD)"
-  ( cd ../side && git merge -q --ff-only "$L" 2>/dev/null || git reset -q --hard "$L"; echo three > a.txt; git add a.txt; git commit -qm three )
+  ( cd ../side && git reset -q --hard "$L" && echo three > a.txt && ln -sfn b.txt link && git add -A && git commit -qm three )
   local N2; N2="$(git -C ../side rev-parse HEAD)"; git update-ref refs/heads/main "$N2"
   chmod +x a.txt                                         # the user's local mode change on the written file
   run _aid_lc_sync_checkout_of "$T/side" main "$L" "$N2"; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"a.txt"* ]]
   chmod -x a.txt
-  run _aid_lc_sync_checkout_of "$T/side" main "$L" "$N2"; [ "$status" -eq 0 ]; [ "$(cat a.txt)" = three ]; [ -L link ]
+  run _aid_lc_sync_checkout_of "$T/side" main "$L" "$N2"; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(cat a.txt)" = three ]; [ "$(readlink link)" = b.txt ]                # the unchanged local link was at its old target
 }

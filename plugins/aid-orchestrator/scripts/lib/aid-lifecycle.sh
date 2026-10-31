@@ -361,8 +361,25 @@ _aid_lc_sync_checkout_of() {
     else bad+=("$p"); fi
   done
   if (( ${#bad[@]} )); then
-    local report q=""; report="$(printf '%q ' "${bad[@]}")"; report="${report% }"
-    echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree are not at ${tip:0:12}: local changes overlap with: ${report}. Nothing was changed. A plain 'git commit' there would REVERT this write — do not commit there. Save both versions of each of those files, take the branch's version, run the AID command again, then bring your edits back by hand: cd ${wt}; for each file F: git show :F > F.aid-staged (the staged version) and cp F F.aid-worktree (the file on disk); then GIT_LITERAL_PATHSPECS=1 git checkout ${tip:0:12} -- ${report} && GIT_LITERAL_PATHSPECS=1 git reset -q -- ${report}" >&2
+    local report; report="$(printf '%q ' "${bad[@]}")"; report="${report% }"
+    # AID itself keeps the user's state of those files before anyone touches them: the files, links and modes on disk
+    # (a tar) and what was staged (the index entries and their blobs), in a new directory inside .git — outside the
+    # tree, never overwriting anything
+    local bk="" e m h st f
+    bk="$(git -C "$wt" rev-parse --path-format=absolute --git-dir 2>/dev/null)/aid-merge-sync-backup-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+    if mkdir -p -- "${bk}/staged" 2>/dev/null; then
+      ( cd -- "$wt" && tar --ignore-failed-read -cf "${bk}/worktree.tar" -- "${bad[@]}" ) 2>/dev/null || true
+      git -C "$wt" ls-files -s -z -- "${bad[@]}" > "${bk}/index-entries" 2>/dev/null || true
+      while IFS= read -r -d '' e; do
+        h="$(awk '{print $2}' <<< "$e")"; f="${e#*$'\t'}"
+        git -C "$wt" cat-file blob "$h" > "${bk}/staged/$(printf '%s' "$f" | sha256sum | cut -c1-16)" 2>/dev/null || true
+        printf '%s\t%s\n' "$(printf '%s' "$f" | sha256sum | cut -c1-16)" "$e" >> "${bk}/staged/INDEX" 2>/dev/null || true
+      done < "${bk}/index-entries"
+      [[ -s "${bk}/worktree.tar" || -s "${bk}/index-entries" ]] || bk=""
+    else
+      bk=""
+    fi
+    echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree are not at ${tip:0:12}: local changes overlap with: ${report}. Nothing was changed. A plain 'git commit' there would REVERT this write — do not commit there. ${bk:+Your state of those files is saved in ${bk} (worktree.tar: the files, links and modes on disk; index-entries and staged/: what was staged). }Take the branch's version, run the AID command again, then bring your edits back by hand${bk:+ from that directory}: cd -- $(printf '%q' "$wt") && GIT_LITERAL_PATHSPECS=1 git checkout ${tip:0:12} -- ${report} && GIT_LITERAL_PATHSPECS=1 git reset -q -- ${report}" >&2
     return 1
   fi
   (( ${#upd[@]} )) || return 0
