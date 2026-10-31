@@ -134,8 +134,10 @@ _aid_hrt_step_call_pending() {
           | .content | if type == "array" then (map(.text? // "") | join("\n")) else tostring end' 2>/dev/null \
         | grep -oE 'nonce=[^ ]+ focus=[^ ]+ evidence=[^ "\\]+' | sort -u)"
       if [[ -n "$printed" ]]; then
-        while IFS=$'\t' read -r f nonce ts exp rdir; do
+        local evd
+        while IFS=$'\t' read -r f nonce ts exp rdir evd; do
           [[ -n "$nonce" ]] || continue
+          [[ -n "$evd" && "$(realpath -m -- "$evd")" == "$(realpath -m -- "$rdir")" ]] || continue   # the ledger's own round
           grep -qxF "nonce=${nonce} focus=${f} evidence=$(realpath -m -- "$rdir")" <<< "$printed" || continue
           ts="$(date -u -d "$ts" +%s 2>/dev/null)" || continue
           [[ "$exp" =~ ^[0-9]+$ ]] || exp=3600
@@ -150,7 +152,7 @@ _aid_hrt_step_call_pending() {
             | group_by(.focus)[] | sort_by(.ts, .rn) | last as $s
             | $pend[] | select(.event == "start" and .nonce == $s.nonce and .focus == $s.focus and .rd == $s.rd
                                and ((.step_n // -1) | tostring) == $i)
-            | "\(.focus)\t\(.nonce)\t\(.ts)\t\(.expected_duration_max // "")\t\($s.rd)"')
+            | "\(.focus)\t\(.nonce)\t\(.ts)\t\(.expected_duration_max // "")\t\($s.rd)\t\(.evidence_dir // "")"')
       fi
     fi
   fi

@@ -236,7 +236,7 @@ _takeover_gone() { kill "$TAKEOVER_PID" 2>/dev/null; wait "$TAKEOVER_PID" 2>/dev
 _cp2_start() {  # <round> <focus> [age seconds] — a start in the round's pending ledger, its nonce echoed in this transcript
   local rd="$EV/cp2/step-0/round-$1" n="n$RANDOM$RANDOM" at; mkdir -p "$rd"
   at="$(date -u -d "-${3:-5} seconds" +%Y-%m-%dT%H:%M:%SZ)"
-  jq -nc --arg ts "$at" --arg f "$2" --arg n "$n" '{ts: $ts, event: "start", focus: $f, agent_id: "x", step_n: 0, evidence_dir: "d", expected_duration_max: 600, nonce: $n}' >> "$rd/pending-dispatches.jsonl"
+  jq -nc --arg ts "$at" --arg f "$2" --arg n "$n" --arg rd "$rd" '{ts: $ts, event: "start", focus: $f, agent_id: "x", step_n: 0, evidence_dir: $rd, expected_duration_max: 600, nonce: $n}' >> "$rd/pending-dispatches.jsonl"
   jq -nc --arg f "$2" --arg n "$n" --arg ts "$at" '{ts: $ts, event: "verifier_dispatch_start", focus: $f, nonce: $n}' >> "$rd/timeline.jsonl"
   local id="toolu_s$RANDOM$RANDOM"
   jq -nc --arg id "$id" --arg c "bash \"/p/scripts/aid-emit-dispatch.sh\" start --focus $2 --agent-id aid-orchestrator:review --evidence-dir $rd" \
@@ -302,5 +302,11 @@ _cp2_start() {  # <round> <focus> [age seconds] — a start in the round's pendi
 @test "turn (3.13.0): a pending line in another round's ledger with the last start's nonce does not count" {
   _cp2_start 1 cp2-step-0-step-generalist; local n="$LAST_NONCE"
   mkdir -p "$EV/cp2/step-0/round-2"; mv "$EV/cp2/step-0/round-1/pending-dispatches.jsonl" "$EV/cp2/step-0/round-2/pending-dispatches.jsonl"
+  _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
+}
+
+@test "turn (3.13.0): a pending line whose evidence_dir names another run does not count" {
+  _cp2_start 1 cp2-step-0-step-generalist
+  jq -c '.evidence_dir = "/other/run/cp2/step-0/round-1"' "$EV/cp2/step-0/round-1/pending-dispatches.jsonl" > "$TMP/p" && mv "$TMP/p" "$EV/cp2/step-0/round-1/pending-dispatches.jsonl"
   _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
 }
