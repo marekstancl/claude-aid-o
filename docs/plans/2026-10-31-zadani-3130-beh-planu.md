@@ -133,7 +133,7 @@ Je to jen údaj o sporu: **nález zůstane otevřený a blokující**. Adjudikac
 stejně jako `settled_by`. Kolo se pak uzavře obvyklou cestou nad zkontrolovaným commitem (`close --at <head kola>`,
 protože HEAD se pohnul). U otevřeného blokujícího nálezu se uzavře jako neúspěšné. `next:` u delegate to řekne
 přesně. Další kolo nález potvrdí nebo otevře nad změněným kandidátem. Kola navíc to nedává: po vyčerpání
-rozpočtu platí dnešní cesta (`REVIEW_EXHAUSTED` → zástupce). Platí pro CP2 i CP7.
+rozpočtu platí dnešní cesta (`REVIEW_EXHAUSTED` → zástupce). Platí pro CP2 i CP7. **Po revizi kroku 31. 10.:** předání platí jen pro revizi kroku (CP2). V CP7 je oprava nový kandidát, takže zůstává původní odmítnutí a opravu posoudí potvrzení dalšího pokusu. Zástupce nikdy nesoudí opravu nad posunutým HEAD.
 
 **Z12 – drobnosti**
 1. `close --fixer` přijme roli s číslicí (`^[a-z][a-z0-9_-]*=`).
