@@ -2929,12 +2929,17 @@ _pfsm_freeze_release_check() {
       return 1
     fi
     [[ "$intent" == release ]] || return 0
+    if [[ "$version" != "$recorded" ]]; then
+      echo "REFUSED (release_prep_version_changed): ${plan_id} is prepared as ${version} but the candidate carries ${recorded} (the CHANGELOG and the manifest disagree)" >&2
+      echo "  next: make the CHANGELOG header and the version files agree, then bash ${rel} prepare-plan ${plan_id} --bump none --plan-branch ${plan_branch} --project-root ${troot} (pipeline.md §When AID refuses: release_prep_version_changed)" >&2
+      return 1
+    fi
     target="$(plan_manifest_get "$plan_id" '.plan_boundary_manifest.target_branch' 2>/dev/null)" || target=""
     [[ -n "$target" ]] || return 0
-    top="$(git -C "$troot" tag --merged "$target" --list 'v[0-9]*' 2>/dev/null | sed -n 's/^v\([0-9]\+\.[0-9]\+\.[0-9]\+\)$/\1/p' | sort -V | tail -1)"
+    top="$(git -C "$troot" tag --merged "$target" 2>/dev/null | sed -n 's/^v\{0,1\}\([0-9]\+\.[0-9]\+\.[0-9]\+\)$/\1/p' | sort -V | tail -1)"   # vX.Y.Z or X.Y.Z
     if [[ -n "$top" && "$(printf '%s\n%s\n' "$top" "$version" | sort -V | tail -1)" == "$top" ]]; then
       echo "REFUSED (plan_version_not_above_target): ${plan_id} is prepared as ${version}, and ${target} already holds v${top} (another plan released meanwhile)" >&2
-      echo "  next: raise the plan's version — bash ${rel} prepare-plan ${plan_id} --bump patch|minor|major --plan-branch ${plan_branch} --project-root ${troot} — then freeze again (pipeline.md §When AID refuses: plan_version_not_above_target)" >&2
+      echo "  next: raise the plan's version above ${top} — bash ${rel} prepare-plan ${plan_id} --again --bump patch|minor|major --plan-branch ${plan_branch} --project-root ${troot} (--again prepares on top of the earlier prepare commit) — then freeze again (pipeline.md §When AID refuses: plan_version_not_above_target)" >&2
       return 1
     fi
     return 0
@@ -5906,6 +5911,28 @@ cmd_plan_merge_to_main() {
       exit 1
     fi
   done
+
+  # ── 3.13.0: the release record is coherent and belongs to the frozen candidate — checked BEFORE anything is
+  #    merged (after the merge a wrong record could only mis-tag or skip the tag). A missing record is a
+  #    no-release plan, a record from before 3.13.0 (no tree) is read as before. ───────────────────────────
+  local _rp _rp_why=""
+  for _rp in "${root}/${run_dir_rel}/release-prep.json" "${root}/.aid-o/work/plan-state/${plan_id}/release-prep.json"; do
+    [[ -e "$_rp" ]] || continue
+    if ! jq -e 'type == "object" and (.version | type) == "string"' "$_rp" >/dev/null 2>&1; then _rp_why="${_rp} is unreadable"
+    elif [[ -n "$(jq -r '.tree // ""' "$_rp")" ]]; then
+      if [[ "$(jq -r .tree "$_rp")" != "$(git -C "$root" rev-parse "${candidate}^{tree}" 2>/dev/null)" ]]; then
+        _rp_why="${_rp} was made for another tree than the frozen candidate ${candidate:0:12}"
+      elif jq -e '(.intent // "release") == "release" and .version != "none" and (.candidate_version // .version) != .version' "$_rp" >/dev/null 2>&1; then
+        _rp_why="${_rp} prepares $(jq -r .version "$_rp") but the candidate carries $(jq -r .candidate_version "$_rp")"
+      fi
+    fi
+    break
+  done
+  if [[ -n "$_rp_why" ]]; then
+    echo "REFUSED (release_prep_stale): ${_rp_why} — nothing was merged" >&2
+    echo "  next: bash ${SCRIPT_DIR}/aid-release.sh rebind ${plan_id} --plan-branch <the plan branch> (no bump), or prepare-plan again, then plan-finalize --stage freeze and this command again (pipeline.md §When AID refuses: release_prep_stale)" >&2
+    exit 1
+  fi
 
   # ── AC3 (fail-closed freeze time): a manifest with no candidate_frozen_at, or
   #    one that is not a strict RFC 3339 UTC instant, is a DEGENERATE input and

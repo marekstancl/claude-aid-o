@@ -1119,7 +1119,7 @@ _release_write_prep_record() {
   # 3.13.0: the version the candidate CARRIES and the tree the record belongs to — freeze checks both, so a version
   # changed after the preparation is caught at the freeze, not at the tag (WAN P116 28. 10. 2026: 0.45.0 recorded,
   # 0.46.0 carried, the tag failed after the merge)
-  local carried tree; carried="$(_release_carried_version)"; tree="$(git -C "$REPO_ROOT" rev-parse 'HEAD^{tree}' 2>/dev/null)" || tree=""
+  local carried tree; carried="$(_release_carried_version HEAD)"; tree="$(git -C "$REPO_ROOT" rev-parse 'HEAD^{tree}' 2>/dev/null)" || tree=""
   jq -n --arg p "$plan_id" --arg b "$plan_branch" --arg bump "$bump" \
         --arg v "$version" --arg h "$head" --arg ts "$ts" --arg cv "$carried" --arg t "$tree" \
     '{schema_version:"aid-release-prep-1.1", plan_id:$p, plan_branch:$b,
@@ -1132,7 +1132,7 @@ _release_write_prep_record() {
 }
 
 cmd_prepare_plan() {
-  local plan_id="" bump="" plan_branch="" project_root="" dry=false
+  local plan_id="" bump="" plan_branch="" project_root="" dry=false again=false
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --bump)
@@ -1145,6 +1145,7 @@ cmd_prepare_plan() {
         [[ $# -ge 2 ]] || { echo "ERROR: prepare-plan: --project-root requires a value." >&2; exit 2; }
         project_root="$2"; shift 2 ;;
       --dry-run) dry=true; shift ;;
+      --again) again=true; shift ;;   # 3.13.0: prepare once more on top of an earlier prepare commit (a higher version)
       --*) echo "ERROR: prepare-plan: unknown flag: $1" >&2; exit 2 ;;
       *)
         if [[ -z "$plan_id" ]]; then plan_id="$1"
@@ -1187,7 +1188,7 @@ cmd_prepare_plan() {
   # ── Crash-resume convergence: HEAD is already this plan's prepare commit ──
   local head_subject=""
   head_subject="$(git -C "$REPO_ROOT" log -1 --format=%s 2>/dev/null)" || head_subject=""
-  if [[ "$head_subject" =~ ^release:\ prepare\ v([0-9]+\.[0-9]+\.[0-9]+)\ for\ ${plan_id}$ ]]; then
+  if ! ${again:-false} && [[ "$head_subject" =~ ^release:\ prepare\ v([0-9]+\.[0-9]+\.[0-9]+)\ for\ ${plan_id}$ ]]; then
     echo "Already prepared: ${head_subject} (HEAD $(git -C "$REPO_ROOT" rev-parse --short HEAD)) — reusing the existing commit, no second bump." >&2
     # Re-assert the record on the resume path too: a crash between the commit and
     # the record would otherwise leave plan-merge-to-main with no way to know a

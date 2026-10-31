@@ -4384,3 +4384,30 @@ _rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/releas
   _rel_ready 0.45.0 '.'; printf '{broken' > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"
   _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"REFUSED (release_prep_stale)"* ]]
 }
+
+@test "prepare-plan (3.13.0): --again prepares a higher version on top of an earlier prepare commit; the record binds the commit" {
+  _bootstrap; _seed_version_project
+  _prepare "$PLAN_ID"; [ "$status" -eq 0 ]
+  local head1; head1="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
+  _prepare "$PLAN_ID" --again; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" != *"Already prepared"* ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")" != "$head1" ]
+  local rec="$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"
+  [ "$(jq -r .tree "$rec")" = "$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/${PLAN_ID}^{tree}")" ]
+  [ "$(jq -r .intent "$rec")" = release ]
+}
+
+@test "freeze (3.13.0): a record whose version is not the one the candidate carries is refused; a bare X.Y.Z tag counts like vX.Y.Z" {
+  _rel_ready 0.45.0 '.version = "0.44.0" | .intent = "release" | .candidate_version = "0.45.0"'
+  _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"the CHANGELOG and the manifest disagree"* ]]
+  _rel_ready 0.45.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0"'
+  git -C "$TEST_PROJECT_ROOT" tag 0.45.0 main
+  _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"plan_version_not_above_target"*"--again"* ]]
+}
+
+@test "merge (3.13.0): a release record of another tree than the frozen candidate is refused before anything is merged" {
+  _seed_merge_project
+  jq -n '{schema_version: "aid-release-prep-1.1", version: "9.9.9", intent: "release", candidate_version: "9.9.9", tree: "0000000000000000000000000000000000000000"}' > "$(_run_dir)/release-prep.json"
+  local before; before="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
+  _merge; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"REFUSED (release_prep_stale)"*"nothing was merged"* ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse main)" = "$before" ]
+}
