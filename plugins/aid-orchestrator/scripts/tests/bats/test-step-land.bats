@@ -405,8 +405,47 @@ _verify_file() {  # the bound step-0-verify.md at HEAD
   [ "$(jq -r '.checks[0] | "\(.command)|\(.plan_command)|\(.reason)"' "$REC")" = "test -e a.txt|test -f a.txt|the plan measures the main checkout, this the plan tree" ]
   run _verify; [ "$status" -eq 0 ]
   cp "$REC" "$BATS_TEST_TMPDIR/good"
-  for e in 'del(.checks[0].reason)' '.checks[0].reason = "x"' '.checks[0].plan_command = "true"' 'del(.checks[0].plan_command)'; do
+  for e in 'del(.checks[0].reason)' '.checks[0].reason = "x"' '.checks[0].plan_command = "true"' 'del(.checks[0].plan_command)' \
+           '.checks[0].reason = 1234567890123' '.checks[0].reason = "            "' '.checks[0].command = "   "' \
+           '.checks[0].command = .checks[0].plan_command'; do
     cp "$BATS_TEST_TMPDIR/good" "$REC"; _edit "$e"
     run _verify; [ "$status" -eq 1 ] || { echo "accepted after: $e"; false; }
   done
+}
+
+@test "3.13.0: an empty replacement is refused; --recheck keeps the replacement" {
+  _agent .
+  run bash "$LAND" "$S" 0 --check '1:   ' --reason '1:a long enough reason here'
+  [ "$status" -eq 1 ]; [[ "$output" == *"an empty command checks nothing"* ]]
+  run bash "$LAND" "$S" 0 --check '1:test -e a.txt' --reason '1:the plan measures the main checkout, this the plan tree'
+  [ "$status" -eq 0 ]
+  # a fixer's commit: --recheck with the plan's command again is a change, with the same replacement it inherits the reason
+  git commit -q --allow-empty -m "fix(review): nothing"
+  run bash "$LAND" "$S" 0 --recheck --check '1:test -f a.txt'
+  [ "$status" -eq 1 ]; [[ "$output" == *"was measured with"*"test -e a.txt"* ]]
+  run bash "$LAND" "$S" 0 --recheck --check '1:test -e a.txt'
+  echo "$output"; [ "$status" -eq 0 ]
+  [ "$(jq -r '.checks[0].reason' "$REC")" = "the plan measures the main checkout, this the plan tree" ]
+  [ -z "$(ls "$D" | grep 'land.json.prev')" ]
+}
+
+@test "3.13.0: the command-criterion rule, case by case (independent of what is installed)" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-ac-command.sh"
+  local t want got
+  while IFS='|' read -r t want; do
+    got="$(jq -rn --arg t "$t" "${AID_AC_COMMAND_JQ}"'$t | ac_command // "NAME"')"
+    [ "$got" = "$want" ] || { echo "$t → $got, want $want"; false; }
+  done <<'CASES'
+`pytest -q x` passes|pytest -q x
+`./check.sh` passes|./check.sh
+`scripts/check.sh`|scripts/check.sh
+`VAR=v cmd` passes|VAR=v cmd
+`NAME=value`|NAME
+`pytest`|NAME
+`make`|NAME
+`test_regime_x` fails on main|NAME
+`a::b` passes|NAME
+`check.sh` exists|NAME
+plain text|NAME
+CASES
 }

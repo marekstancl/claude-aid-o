@@ -685,6 +685,13 @@ _mplan() {
   [ "$(jq -r '.fixer.tokens' "$(D 2)/measurement.json")" = unknown ]
   [ "$(jq -r '.verdict' "$(D 2)/measurement.json")" = pass ]
 }
+@test "cp2 (3.13.0): a criterion the takeover measured with another command is listed for the reviewers in dod.md" {
+  _repo; mkdir -p "$E/steps/step_1_backend"
+  jq -n '{checks: [{ac: 1, command: "test -e src/new.py", plan_command: "docker compose exec api test -e src/new.py", reason: "the container reads the main checkout", exit: 0}]}' > "$E/steps/step_1_backend/land.json"
+  _sc; _S prepare --round 1 >/dev/null
+  grep -q 'measured with another command than the plan names' "$(D 1)/packet/dod.md"
+  grep -q '^- AC1: `test -e src/new.py` instead of `docker compose exec api test -e src/new.py` (exit 0) — the container reads the main checkout$' "$(D 1)/packet/dod.md"
+}
 @test "step: a disputed cp2 blocker keeps blocking; --pm accepted needs the card quoting it and a PM prompt after the card, then the verdict flips" {
   _repo; _sc; _S prepare --round 1 >/dev/null
   _sanswer 1 step_generalist '.findings[0].severity = "blocker"'; _S collect --round 1 >/dev/null; _bracket 1 step_generalist

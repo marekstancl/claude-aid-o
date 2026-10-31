@@ -71,6 +71,13 @@ aid_step_review_packet_build() {
     [[ -f "$plan_json" ]] || { echo "prepare: no plan.json at ${plan_json}" >&2; return 1; }
     if [[ "$cp" == cp2 ]]; then
       jq -r --argjson s "$step" "${_AID_SR_STEP_NAME_JQ}"' .steps[$s] | "# \(step_name($s)): \(.objective // "")\n\n## Acceptance criteria\n" + ((.acceptance_criteria // []) | map("- " + .) | join("\n"))' "$plan_json" > "$dir/dod.md"
+      # 3.13.0: a criterion the takeover measured with another command than the plan's is the reviewers' to judge
+      local _land; _land="$(dirname "$plan_json")/steps/$(jq -r --argjson s "$step" '.steps[$s].id // ""' "$plan_json")/land.json"
+      if [[ -f "$_land" ]] && jq -e '[.checks[]? | select(.plan_command != null)] | length > 0' "$_land" >/dev/null 2>&1; then
+        { printf '\n## Criteria measured with another command than the plan names — judge whether each still measures its criterion\n'
+          jq -r '.checks[] | select(.plan_command != null) | "- AC\(.ac): `\(.command)` instead of `\(.plan_command)` (exit \(.exit)) — \(.reason)"' "$_land"
+        } >> "$dir/dod.md"
+      fi
       # "(tier: tN)" in an output is what the plan declared when it was written;
       # the suite's header is the tier, and step-check.json reports that (P103).
       jq --argjson s "$step" 'def notier: map(gsub(" ?\\(tier: t[0-9]\\)"; "")); .steps[$s] | {outputs: ((.outputs // []) | notier), allowed_paths: (.allowed_paths // []), forbidden_paths: (.forbidden_paths // []), scope_declared: true}' "$plan_json" > "$dir/files.json"

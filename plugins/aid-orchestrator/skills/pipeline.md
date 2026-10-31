@@ -843,9 +843,9 @@ step's role fixes it (in a wave on `step/<id>`, then the same takeover; on the s
 already stands — the fix is a commit on top, then `--recheck`); `merge_conflict` → `aid_parallel_step_reset` and dispatch again; `base_moved` → take it
 over again. A review fixer's commit moves HEAD: `aid-step-land.sh … --recheck` reruns the same checks on it.
 Which criteria are commands, and a replaced command (3.13.0): one rule (`lib/aid-ac-command.sh`) read by the takeover
-and by `increment-step` — a backticked opening with a space, a slash or `NAME=value` is a command; one bare word is a
+and by `increment-step` — a backticked opening with a space or a slash is a command; one bare word (also `NAME=value`) is a
 name. `--check "<n>:<other command>" --reason "<n>:<why, 10+ chars>"` records `plan_command` and `reason` beside the
-check. `aid-plan-lint.sh` warns `ac_bare_name` where a plan opens a criterion with one bare word.
+check; the CP2 packet's `dod.md` lists every replacement for the reviewers, and `--recheck` keeps it. `aid-plan-lint.sh` warns `ac_bare_name` where a plan opens a criterion with one bare word.
 `increment-step` refuses a step whose record does not hold (`land_record_invalid`). The manual path below stays
 valid for a step without a record. `<N>` is `current_step` (0-based: the plan's step N+1). After `--recheck` rewrite
 the binding of `step-N-verify.md` (`reviewed_commit` = the new HEAD). A refusal "another takeover … is running" is

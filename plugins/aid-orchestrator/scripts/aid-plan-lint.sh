@@ -228,7 +228,7 @@ _project_root="$(_aid_plan_project_root "$PLAN")" || _project_root=""
 if [[ "$QUIET" -eq 0 ]]; then
   while IFS=: read -r _bn _bl; do
     echo "${PLAN}:${_bn}: WARN ac_bare_name \`${_bl}\` is read as a name, not a command — to run it, write the command (\`${_bl} <args>\`, \`./${_bl}\`)" >&2
-  done < <(grep -nE '^[[:space:]]*- \[[ x]\] `[^` /]+`' "$PLAN" | grep -vE '^[0-9]+:[[:space:]]*- \[[ x]\] `[A-Za-z_][A-Za-z0-9_]*=' \
+  done < <(grep -nE '^[[:space:]]*- \[[ x]\] `[^` /]+`' "$PLAN" \
              | sed -E 's/^([0-9]+):[[:space:]]*- \[[ x]\] `([^`]+)`.*/\1:\2/')
 fi
 

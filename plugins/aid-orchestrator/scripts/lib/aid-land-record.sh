@@ -49,7 +49,11 @@ aid_land_record_verify() {
     | (.key + 1) as $k
     | [$ch[] | select(.ac == $k)] as $m
     | if ($m | length) != 1 then "AC\($k) checked \($m | length) times, not once"
-      elif $m[0].command != $cmd and ($m[0].plan_command != $cmd or (($m[0].reason // "") | length) < 10)
+      elif ($m[0] | has("plan_command") or has("reason")) and ($m[0].command == $cmd)
+        then "AC\($k) carries replacement metadata on the command the plan names"
+      elif $m[0].command != $cmd and (($m[0].plan_command != $cmd)
+            or (($m[0].reason | type) != "string") or (($m[0].reason | gsub("^\\s+|\\s+$"; "") | length) < 10)
+            or (($m[0].command | gsub("\\s"; "") | length) == 0))
         then "AC\($k) ran another command than the plan names, without its reason"
       elif $m[0].exit != 0 or $m[0].timed_out == true then "AC\($k) did not pass (exit \($m[0].exit))"
       else empty end' "$pj" 2>/dev/null)" || { echo "the takeover record's checks could not be read against the plan"; return 1; }

@@ -66,6 +66,7 @@ SID="$(jq -r --argjson i "$N" '.steps[$i].id // ""' "$PJ")"
 [[ -n "$SID" ]] || { echo "${0##*/}: plan.json has no step ${N}" >&2; exit 2; }
 SD="${EV}/steps/${SID}"; mkdir -p "$SD/land-logs"
 REC="${SD}/land.json"
+PREV_REC="${SD}/land.json.prev.$$"; [[ -f "$REC" ]] && cp -p "$REC" "$PREV_REC"   # the record a --recheck starts from
 EPIC="$(yq -r '.epic_id // ""' "$SF")"; RUN="$(yq -r '.run_id // ""' "$SF")"
 [[ -n "$TREE" ]] || TREE="$(git rev-parse --show-toplevel 2>/dev/null)"
 TREE="$(realpath "$TREE")"
@@ -132,6 +133,7 @@ _stop_group() {
   return 0
 }
 _on_exit() {
+  rm -f "$PREV_REC"
   [[ -n "$CHECK_TOKEN" ]] && _stop_group "$CHECK_TOKEN"
   if [[ "$STATUS" == running ]] && (( HAVE_LOCK && OWNED )); then
     [[ "$PATHKIND" == wave ]] && _back
@@ -143,7 +145,12 @@ trap _on_exit EXIT
 trap 'exit 130' INT TERM HUP
 
 # --- what the checks must be ---------------------------------------------------------------------------------
-declare -A WANT=() GOT=() GOTWHY=()
+declare -A WANT=() GOT=() GOTWHY=() PREVCMD=() PREVWHY=()
+# the replacements of the takeover a --recheck starts from (read before this run writes its own record)
+if (( RECHECK )) && [[ -f "$PREV_REC" ]]; then
+  while IFS=$'\t' read -r k c w; do [[ -n "$k" ]] && { PREVCMD[$k]="$c"; PREVWHY[$k]="$w"; }; done < <(
+    jq -r '.checks[]? | select(.plan_command != null) | "\(.ac)\t\(.command)\t\(.reason)"' "$PREV_REC" 2>/dev/null)
+fi
 while IFS=$'\t' read -r k cmd; do [[ -n "$k" ]] && WANT[$k]="$cmd"; done < <(
   jq -r --argjson i "$N" "${AID_AC_COMMAND_JQ}"'.steps[$i].acceptance_criteria // [] | to_entries[]
     | (.value | ac_command) as $c | select($c != null) | "\(.key + 1)\t\($c)"' "$PJ")
@@ -158,6 +165,13 @@ for c in "${CHECKS[@]+"${CHECKS[@]}"}"; do
   [[ -n "${WANT[$k]+x}" ]] || { REASON="AC${k} is not a command criterion (its text does not begin with a backticked command)"; break; }
   # 3.13.0: another command measures the same point elsewhere (the plan's `docker compose exec` reads the main
   # checkout) only with its reason, which the record and increment-step show
+  [[ -n "${cmd//[[:space:]]/}" ]] || { REASON="AC${k}: an empty command checks nothing"; break; }
+  # --recheck keeps the replacement the takeover it rechecks used: the same command inherits its reason, the
+  # plan's own command or a third one is a change that needs a reason of its own
+  if (( RECHECK )) && [[ -n "${PREVCMD[$k]+x}" && -z "${GOTWHY[$k]+x}" ]]; then
+    if [[ "$cmd" == "${PREVCMD[$k]}" ]]; then GOTWHY[$k]="${PREVWHY[$k]}"
+    else REASON="AC${k} was measured with \`${PREVCMD[$k]}\` (${PREVWHY[$k]}) in the takeover this rechecks — give that command again, or another one with --reason \"${k}:<why>\""; break; fi
+  fi
   if [[ "$cmd" != "${WANT[$k]}" ]] && (( ${#GOTWHY[$k]} < 10 )); then
     REASON="AC${k}: the command differs from the plan's — plan: ${WANT[$k]} · given: ${cmd} (a replacement needs --reason \"${k}:<why, 10+ chars>\")"; break
   fi
