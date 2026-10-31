@@ -33,10 +33,13 @@ Náhrada příkazu: stávající `--check <k>:<příkaz>`. Když se příkaz li�
 a záznam převzetí nese `{ac, plan_cmd, given_cmd, reason}`. `aid-land-record.sh` takový záznam přijme
 a `increment-step` ho vypíše. Náhrada smí měnit prostředí, ne tvrzení bodu, a revize kroku ji vidí.
 
-**Z4 – jména testů už v kontrole kroku** [R3]
+**Z4 – jména testů už v kontrole kroku** [R3; po revizi kroku 31. 10. změněno]
 `aid-step-check.sh` použije existující `aid_test_names_plan_refs` (`lib/aid-test-tier.sh`), stejný kód jako brána
-uzávěru. Nalezené jméno zabrání přeskočení kontroly (i u malé změny) a do balíku CP2 jde jako strukturovaný nález.
-Nečitelný diff se hlásí, nepřeskočí se.
+uzávěru, a to přesně nad úsekem, který revize hodnotí: `base..HEAD`, v `--worktree` neuložená změna proti HEAD
+včetně nových souborů. Nalezené jméno **kontrolu kroku odmítne dřív, než začne kolo** (`step_test_named_after_plan`,
+`agent_fix`), stejně jako to dělá brána. Původní návrh dávat jméno do kola jako nález kontroly kroku revize
+kroku zamítla: takový nález v dalším kole nikdo nepotvrdí, kolo by se zaseklo, různé názvy v jednom souboru by
+splynuly a nález by přebil bezpečnostní revizi.
 
 **Z5 – prostředí stromů plánu a kroků** (`aid-plan-fsm.sh` ř. ~1075, `lib/aid-parallel*.sh`) [R4, R4b]
 Do `project.yaml` přibudou dva klíče, oba s výchozí hodnotou `[]`:
