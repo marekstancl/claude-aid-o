@@ -11,8 +11,8 @@ nové věci z companionu přihodit; **studio (`/aid-ui`) teď neřešit**.
 
 | # | Co | Zdroj | Stav |
 |---|---|---|---|
-| 1 | Odložené nálezy (`follow_up`) se ve velkém repu neoznačí: `aid-follow-up.sh` předává seznam souborů repa jako argument (`jq: Argument list too long`). Předat přes soubor, test na repu s tisíci souborů. | WAN P116 28. 10., P118 30. 10. | čeká |
-| 2 | Chybí `defaults/templates/stand-in-decision.md`, kterou čte `aid-stand-in.sh ask`. Doplnit šablonu a test, že každá šablona, kterou skripty čtou, existuje. | WAN P115 25. 10., P116 28. 10. (3×) | čeká |
+| 1 | Odložené nálezy (`follow_up`) se ve velkém repu neoznačí: `aid-follow-up.sh` předává seznam souborů repa jako argument (`jq: Argument list too long`). Předat přes soubor, test na repu s tisíci souborů. | WAN P116 28. 10., P118 30. 10. | HOTOVO v3.12.1 |
+| 2 | Chybí `defaults/templates/stand-in-decision.md`, kterou čte `aid-stand-in.sh ask`. Doplnit šablonu a test, že každá šablona, kterou skripty čtou, existuje. | WAN P115 25. 10., P116 28. 10. (3×) | HOTOVO v3.12.1 |
 
 ## 3.13.0 - běh plánu
 

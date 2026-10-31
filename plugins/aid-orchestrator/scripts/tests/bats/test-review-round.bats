@@ -2389,6 +2389,36 @@ _pm_card() {  # <fingerprint> — a rendered card quoting it, answered by the PM
   [ "$(jq -r '.findings[1] | "\(.dispute.pm == null) \(.dispute.delegated.settled_by)"' "$M")" = "true d2" ]
 }
 
+@test "follow-up (3.12.1): a repository of thousands of files marks follow-ups (no list on the command line)" {
+  # WAN P116 28. 10. and P118 30. 10. 2026: the candidate's file list went to jq as one argument, which Linux caps
+  # at 128 KiB — `jq: Argument list too long`, and no follow-up was ever marked in a big repository
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-follow-up.sh"
+  local g="$BATS_TEST_TMPDIR/big" run rd i; mkdir -p "$g/src/a-fairly-long-directory-name-for-many-files"; git -C "$g" init -q
+  for i in $(seq 1 5000); do : > "$g/src/a-fairly-long-directory-name-for-many-files/module-file-number-$i.py"; done
+  printf '1\n2\n3\n' > "$g/x.py"; git -C "$g" add -A; git -C "$g" -c user.email=t@t -c user.name=t commit -qm base
+  [ "$(git -C "$g" ls-tree -r --name-only HEAD | jq -R . | jq -sc . | wc -c)" -gt 131072 ]   # over the one-argument cap
+  run="$g/.aid-o/work/evidence/P9/R-P9-final-2"; rd="$run/cp7/round-1"; mkdir -p "$rd/packet"
+  jq -n --arg h "$(git -C "$g" rev-parse HEAD)" '{mode: "confirmation", head_sha: $h}' > "$rd/round.json"
+  printf -- '--- a/x.py\n+++ b/x.py\n@@ -2,1 +2,2 @@\n 2\n+new\n' > "$rd/packet/fix.patch"
+  jq -n '{findings: []}' > "$rd/packet/open-findings.json"
+  jq -n '{findings: [{claim: "outside", severity: "minor", status: "open", evidence: "x.py:1"}]}' > "$rd/merged.json"
+  run aid_follow_up_mark "$rd" "$run" "$g"; echo "$output"; [ "$status" -eq 0 ]; [ "$output" = 1 ]
+  [ "$(jq -r '.findings[0].status' "$rd/merged.json")" = follow_up ]
+  [ -z "$(ls "$rd" | grep '\.fu\.')" ]                                                     # no temporary file left
+  # the other list: a fix that adds more lines than fit in one argument (a small repository)
+  local s="$BATS_TEST_TMPDIR/small"; mkdir -p "$s"; git -C "$s" init -q; printf 'a\n' > "$s/y.py"; seq 1 30000 | sed 's/^/l/' > "$s/big.py"
+  git -C "$s" add -A; git -C "$s" -c user.email=t@t -c user.name=t commit -qm base
+  run="$s/.aid-o/work/evidence/P9/R-P9-final-2"; rd="$run/cp7/round-1"; mkdir -p "$rd/packet"
+  jq -n --arg h "$(git -C "$s" rev-parse HEAD)" '{mode: "confirmation", head_sha: $h}' > "$rd/round.json"
+  { printf -- '--- /dev/null\n+++ b/big.py\n@@ -0,0 +1,30000 @@\n'; seq 1 30000 | sed 's/^/+l/'; } > "$rd/packet/fix.patch"
+  [ "$(aid_follow_up_added_lines "$rd/packet/fix.patch" | jq -R . | jq -sc . | wc -c)" -gt 131072 ]
+  jq -n '{findings: []}' > "$rd/packet/open-findings.json"
+  jq -n '{findings: [{claim: "on the fix", severity: "minor", status: "open", evidence: "big.py:29999"},
+                     {claim: "outside", severity: "minor", status: "open", evidence: "y.py:1"}]}' > "$rd/merged.json"
+  run aid_follow_up_mark "$rd" "$run" "$s"; echo "$output"; [ "$status" -eq 0 ]; [ "$output" = 1 ]
+  [ "$(jq -r '[.findings[].status] | join(" ")' "$rd/merged.json")" = "open follow_up" ]
+}
+
 @test "decisions: only decisions in force reach the reviewer; a NO revokes by citation only on the brief" {
   source "$AID_PLUGIN_PATH/scripts/lib/aid-decision-ledger.sh"
   L="$BATS_TEST_TMPDIR/l.jsonl"

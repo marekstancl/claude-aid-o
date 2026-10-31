@@ -3,6 +3,14 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.12.1] — 2026-10-31
+
+Oprava 3.12.0 z hlášení WANu (rozbor plugin issues 31. 10. 2026, `docs/plans/2026-10-31-roadmapa-plugin-issues.md` body 1 a 2).
+
+### Fixed
+- **Odložené nálezy se značí i ve velkém repozitáři.** Potvrzovací kolo celkové revize (CP7) předávalo seznam souborů kandidáta jako jeden argument příkazu; u repa s tisíci souborů (WAN) to skončilo `jq: Argument list too long`, žádný nový drobný nález se neodložil a kolo kvůli němu neprošlo (WAN P116 28. 10., P118 30. 10. 2026). Seznamy jdou teď přes soubory (`scripts/lib/aid-follow-up.sh`); hlídá to test s repem nad hranicí jednoho argumentu.
+- **Zástupce dostává svoje pokyny.** `aid-stand-in.sh ask` četl šablonu `defaults/templates/stand-in-decision.md`, která nikdy nevznikla: každé rozhodnutí zástupce od 3.8.0 šlo bez úvodu (kdo rozhoduje, jak ověřit návrh, které třídy patří PM) a vypsalo `cat: … No such file` (WAN P115, P116). Šablona je doplněná a nový test hlídá, že existuje každá šablona, kterou kód pluginu čte.
+
 ## [3.12.0] — 2026-10-25
 
 Uzávěr plánu konverguje a neptá se PM dvakrát na totéž (PM 25. 10. 2026, volby 1A, 2A, 3A: WAN P115 pět pokusů o uzávěr, Trading P004 sedm, PM odsouhlasil tutéž věc třikrát). Zadání: `docs/archive/2026-10-25-uzaver-konverguje.md`.
