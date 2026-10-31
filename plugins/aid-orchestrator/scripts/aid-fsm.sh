@@ -4896,7 +4896,8 @@ cmd_increment_step() {
               "PRECONDITION FAIL: step ${step} was taken over in the background and its record does not hold: ${_land_why}" \
               "Record: ${_c_dir}/land.json (scripts/aid-step-land.sh)"
           # 3.13.0: every replacement was in the packet of the step's last CP2 round — a replacement changed by a later
-          # --recheck needs a new round, not the old approval
+          # --recheck needs a new round, not the old approval. Going BACK to the plan's own command needs none: that
+          # command is the plan's, which the plan review approved; nothing weaker than the plan is measured.
           local _repl_n _lastr _dod _rl
           _repl_n="$(jq '(.replacements // []) | length' "${_c_dir}/land.json" 2>/dev/null || echo 0)"
           if (( _repl_n > 0 )); then

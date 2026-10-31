@@ -692,6 +692,17 @@ _mplan() {
   grep -q 'measured with another command than the plan names' "$(D 1)/packet/dod.md"
   grep -q '^- AC1: `test -e src/new.py` instead of `docker compose exec api test -e src/new.py` — the container reads the main checkout$' "$(D 1)/packet/dod.md"
 }
+@test "cp2 (3.13.0): at the same HEAD a new round is allowed only when the takeover's replacements changed" {
+  _repo; mkdir -p "$E/steps/step_1_backend"
+  jq -n '{replacements: [{ac: 1, command: "test -e src/new.py", plan_command: "docker compose exec api test -e src/new.py", reason: "the container reads the main checkout"}]}' > "$E/steps/step_1_backend/land.json"
+  _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist '.findings = [] | .no_findings_reason = "the replacement measures the same file"'
+  _S collect --round 1 >/dev/null; _bracket 1 step_generalist; _S close --round 1 --tokens step_generalist=5 >/dev/null
+  run _S prepare --round 2; [ "$status" -ne 0 ]; [[ "$output" == *"HEAD has not moved"* ]]
+  jq '.replacements[0].command = "test -f src/new.py"' "$E/steps/step_1_backend/land.json" > "$E/l" && mv "$E/l" "$E/steps/step_1_backend/land.json"
+  _sc; run _S prepare --round 2; echo "$output"; [ "$status" -eq 0 ]
+  grep -q '`test -f src/new.py` instead of' "$(D 2)/packet/dod.md"
+}
 @test "step: a disputed cp2 blocker keeps blocking; --pm accepted needs the card quoting it and a PM prompt after the card, then the verdict flips" {
   _repo; _sc; _S prepare --round 1 >/dev/null
   _sanswer 1 step_generalist '.findings[0].severity = "blocker"'; _S collect --round 1 >/dev/null; _bracket 1 step_generalist

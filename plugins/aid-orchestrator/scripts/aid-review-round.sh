@@ -536,7 +536,15 @@ cmd_prepare() {
       prev="$(_round_dir $((ROUND - 1)))"
       if [[ "$MODE" != plan ]]; then
         [[ -f "${prev}/measurement.json" ]] || _die "round $((ROUND - 1)) is not closed"
-        [[ "$(jq -r .head_sha "${prev}/round.json")" != "$(_head)" ]] \
+        # 3.13.0: the takeover's replaced commands are evidence the round judged — when they changed since the last
+        # round (aid-step-land.sh --recheck with another --check/--reason), a new round reviews them at the same HEAD
+        local _repl_now="" _repl_was=""
+        if [[ "$CHECKPOINT" == cp2 && -n "${STEP:-}" ]]; then
+          local _lf; _lf="${EVID}/steps/$(jq -r --argjson s "$STEP" '.steps[$s].id // ""' "${EVID}/plan.json" 2>/dev/null || true)/land.json"
+          [[ -f "$_lf" ]] && _repl_now="$(jq -r '(.replacements // [])[] | "- AC\(.ac): `\(.command)` instead of `\(.plan_command)` — \(.reason)"' "$_lf" 2>/dev/null || true)"
+          _repl_was="$(grep -E '^- AC[0-9]+: `.*` instead of `' "${prev}/packet/dod.md" 2>/dev/null || true)"
+        fi
+        [[ "$(jq -r .head_sha "${prev}/round.json")" != "$(_head)" || -n "$_repl_now" && "$_repl_now" != "$_repl_was" ]] \
           || _die "HEAD has not moved since round $((ROUND - 1)); a confirmation round reviews a fix"
         [[ "$(jq -r '.verdict // ""' "${prev}/measurement.json")" == pass ]] && delta=1
       fi
