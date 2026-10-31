@@ -329,25 +329,41 @@ _aid_lc_sync_checkout_of() {
   wt="$(git -C "$root" worktree list --porcelain 2>/dev/null \
         | awk -v b="branch refs/heads/${branch}" '/^worktree /{w=substr($0,10)} $0==b{print w; exit}')"
   [[ -n "$wt" ]] || return 0
-  # A file the write committed may already sit in that tree, untracked and
-  # byte-identical (the close writes its receipt there before committing it):
-  # read-tree refuses to overwrite it and the receipt shows as deleted + new.
-  # Staging exactly those files lets a second read go through.
+  # 3.13.0: bring it to the branch's CURRENT tip, from the state its index really is at. A resumed merge called this
+  # with old = the pre-merge head and new = the merge while the branch had moved on to its lifecycle commit: the
+  # read-tree took the index BACK to the merge and the lifecycle files showed as staged (WAN P116 28. 10. 2026).
+  local tip from="" c
+  tip="$(git -C "$root" rev-parse -q --verify "refs/heads/${branch}" 2>/dev/null)" || tip="$new"
+  # where the index stands: the first of old, new whose versions the index holds on every path that differs from the
+  # tip (unrelated staged or unstaged work of the user does not matter here); none of them — it is at the tip already
+  local -a changed=()
+  for c in "$old" "$new"; do
+    [[ "$c" != "$tip" ]] || continue
+    mapfile -t changed < <(git -C "$wt" -c core.quotepath=false diff --name-only "$c" "$tip")
+    (( ${#changed[@]} )) || continue
+    git -C "$wt" diff --cached --quiet "$c" -- "${changed[@]}" 2>/dev/null && { from="$c"; break; }
+  done
+  [[ -n "$from" ]] || return 0   # the index already holds the tip's versions
+  # A file the write committed may already sit in that tree, untracked and byte-identical (the close writes its
+  # receipt there before committing it): read-tree refuses to overwrite it. Only AID's own generated records
+  # (.aid-lifecycle/**, the close's receipts under .aid-o/) are staged to let a second read go through.
   local synced=0 p
-  git -C "$wt" read-tree -m -u "$old" "$new" 2>/dev/null && synced=1
+  git -C "$wt" read-tree -m -u "$from" "$tip" 2>/dev/null && synced=1
   if (( ! synced )); then
     while IFS= read -r p; do
-      [[ -f "${wt}/${p}" && "$(git -C "$wt" hash-object -- "$p")" == "$(git -C "$wt" rev-parse -q --verify "${new}:${p}")" ]] \
+      case "$p" in .aid-lifecycle/*|.aid-o/*) ;; *) continue ;; esac
+      git -C "$wt" ls-files --error-unmatch -- "$p" >/dev/null 2>&1 && continue   # tracked: never re-staged
+      [[ -f "${wt}/${p}" && "$(git -C "$wt" hash-object -- "$p")" == "$(git -C "$wt" rev-parse -q --verify "${tip}:${p}")" ]] \
         && git -C "$wt" add -f -- "$p" 2>/dev/null
-    done < <(git -C "$wt" -c core.quotepath=false diff --name-only "$old" "$new")
-    git -C "$wt" read-tree -m -u "$old" "$new" 2>/dev/null && synced=1
+    done < <(git -C "$wt" -c core.quotepath=false diff --name-only "$from" "$tip")
+    git -C "$wt" read-tree -m -u "$from" "$tip" 2>/dev/null && synced=1
   fi
   if (( synced )); then
-    echo "NOTE: ${branch} is checked out in ${wt} — its index and tree were brought forward to ${new:0:12}, so the next commit there does not revert this write." >&2
-  else
-    echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree still show the state BEFORE ${new:0:12} (local changes overlap). A plain 'git commit' there would REVERT this write. Before any commit in ${wt} run: git -C ${wt} reset --merge" >&2
+    echo "NOTE: ${branch} is checked out in ${wt} — its index and tree were brought forward to ${tip:0:12}, so the next commit there does not revert this write." >&2
+    return 0
   fi
-  return 0
+  echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree still show an older state than ${tip:0:12}: local changes overlap with: $(git -C "$wt" -c core.quotepath=false diff --name-only "$from" "$tip" | paste -sd' ' -). A plain 'git commit' there would REVERT this write. Before any commit in ${wt}: commit or stash those local changes, then git -C ${wt} reset --merge ${tip:0:12}" >&2
+  return 1
 }
 
 _aid_lc_isolated_commit() {
@@ -403,7 +419,8 @@ _aid_lc_isolated_commit() {
       # Advance the CAS base so a SECOND plan-mode commit in the same pass (the
       # receipt, Step 6) chains onto this one instead of re-CASing against a
       # commit the ref has already left.
-      [[ -n "$newsha" ]] && { _aid_lc_sync_checkout_of "$root" "$tb" "$parent" "$newsha"; _AID_LC_PLAN_PARENT="$newsha"; }
+      # (an overlap is reported by the sync; the lifecycle commit itself stands and is idempotent)
+      [[ -n "$newsha" ]] && { _aid_lc_sync_checkout_of "$root" "$tb" "$parent" "$newsha" || true; _AID_LC_PLAN_PARENT="$newsha"; }
       # Restore the worktree copies: the content is durable on the target branch,
       # and leaving the plan branch dirty would fail the next stage's clean-tree
       # precondition for a change that is not the plan branch's.

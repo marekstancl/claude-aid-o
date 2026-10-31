@@ -20,6 +20,7 @@ codes:
   abandon_needs_reason: {class: pm, how: "opuštění běhu je rozhodnutí PM"}
   accept_risk_not_protected: {class: agent_fix, how: "v --auto technický nález nejdřív k delegátovi; na kartu PM jen to, co poslal jako chráněné"}
   pm_decision_unverified: {class: agent_fix, how: "nález uzavřený dřívějším rozhodnutím, které nejde ověřit: znovu collect kola; zůstane-li otevřený, karta PM s otiskem v quotes"}
+  merge_checkout_overlap: {class: agent_fix, how: "sloučení je zveřejněné, ale checkout s cílovou větví má překrývající se rozpracované změny: uklidit je podle hlášky a pustit plan-merge-to-main znovu (pokračuje za sloučením)"}
   release_prep_stale: {class: agent_fix, how: "záznam přípravy vydání je nečitelný: pustit prepare-plan znovu"}
   release_prep_version_changed: {class: agent_fix, how: "verzi změnil commit po přípravě: prepare-plan --bump none (vydání) / rebind --adopt-version (bez vydání), nebo změnu vrátit"}
   plan_version_not_above_target: {class: agent_fix, how: "cíl má mezitím vyšší nebo stejný tag (souběžný plán): zvednout verzi prepare-plan --bump …"}

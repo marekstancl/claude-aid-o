@@ -6299,8 +6299,14 @@ cmd_plan_merge_to_main() {
   # The publish above moved the ref only; the checkout that has the target
   # branch out (the primary checkout) is still at the pre-merge state and its
   # next plain commit would revert the merge — bring it forward or say so.
+  # 3.13.0: on a resume it goes to the branch's current tip (the lifecycle commit), never back to the merge; an
+  # overlap with local changes stops here — the merge stands, the next run resumes after the checkout is cleaned
   if declare -F _aid_lc_sync_checkout_of >/dev/null 2>&1; then
-    _aid_lc_sync_checkout_of "$root" "$target_branch" "$target_head" "$merge_commit"
+    _aid_lc_sync_checkout_of "$root" "$target_branch" "$target_head" "$merge_commit" || {
+      echo "REFUSED (merge_checkout_overlap): the merge ${merge_commit:0:12} IS published on ${target_branch}, but the checkout that has it out holds overlapping local changes (named above); nothing more was written" >&2
+      echo "  next: clean them as the warning says, then run plan-merge-to-main again — it resumes after the merge (pipeline.md §When AID refuses: merge_checkout_overlap)" >&2
+      exit 1
+    }
   fi
 
 
@@ -6338,6 +6344,7 @@ cmd_plan_merge_to_main() {
     echo "PRECONDITION FAIL: plan-merge-to-main: the merge ${merge_commit} IS published on ${target_branch}, but the lifecycle delivery bindings / CF1 re-scope were not committed (rc=${lrc}). The merge stands — do NOT re-merge; re-run this command (or plan-close-check) to re-apply the bindings idempotently. Detail: ${lout}" >&2
     exit 1
   fi
+  _pfsm_crash_seam lifecycle_bound   # 3.13.0: a crash between the lifecycle commit and the tag (WAN P116)
 
   # ── The ONE conditional tag (bindings first, so a crash between them cannot
   #    produce a tagged release with no closure path) ───────────────────────

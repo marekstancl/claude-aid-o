@@ -89,3 +89,4 @@
 0	plan_finalize_refused	release_prep_version_changed
 0	plan_finalize_refused	plan_version_not_above_target
 0	plan_finalize_refused	step_test_named_after_plan
+0	plan_finalize_refused	merge_checkout_overlap

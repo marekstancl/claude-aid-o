@@ -4426,3 +4426,40 @@ _rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/releas
   jq -n --arg t "$tree" '{version: "9.9.9", intent: "release", candidate_version: "9.9.9", tree: $t}' > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"
   _merge; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"holds no copy"* ]]
 }
+
+@test "merge (3.13.0): a crash after the lifecycle commit resumes to the tag — the checkout ends at the tip, nothing staged, local work kept" {
+  _seed_merge_project
+  jq -n '{schema_version:"aid-release-prep-1.0", version:"9.9.9"}' > "$(_run_dir)/release-prep.json"
+  echo "my unrelated work" > "$TEST_PROJECT_ROOT/notes-local.txt"                     # untracked work in the checkout
+  AID_PLAN_FSM_CRASH_AFTER=lifecycle_bound _merge; [ "$status" -eq 99 ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" tag -l)" = "" ]
+  _merge; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" tag -l)" = "v9.9.9" ]
+  [ "$(git -C "$TEST_PROJECT_ROOT" log main --merges --grep "merge(plan): ${PLAN_ID}" --pretty=%H | wc -l)" -eq 1 ]
+  git -C "$TEST_PROJECT_ROOT" diff --cached --quiet                                     # nothing staged (WAN P116: the manifests were)
+  [ "$(git -C "$TEST_PROJECT_ROOT" status --porcelain --untracked-files=no)" = "" ]
+  [ "$(cat "$TEST_PROJECT_ROOT/notes-local.txt")" = "my unrelated work" ]
+}
+
+@test "merge (3.13.0): the checkout sync goes to the branch tip from where the index stands, and an overlap is reported, not passed" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh"
+  local g="$BATS_TEST_TMPDIR/sync"; mkdir -p "$g"; git -C "$g" init -q -b main; git -C "$g" config user.email t@t; git -C "$g" config user.name t
+  echo a > "$g/a.txt"; git -C "$g" add -A; git -C "$g" commit -qm base; local old; old="$(git -C "$g" rev-parse HEAD)"
+  # two plumbing commits on main past the checkout: the merge, then a lifecycle commit
+  local t1 c1 t2 c2
+  t1="$(printf '100644 blob %s\tb.txt\n100644 blob %s\ta.txt\n' "$(echo b | git -C "$g" hash-object -w --stdin)" "$(echo a | git -C "$g" hash-object -w --stdin)" | git -C "$g" mktree)"
+  c1="$(git -C "$g" commit-tree "$t1" -p "$old" -m merge)"
+  t2="$(printf '100644 blob %s\tb.txt\n100644 blob %s\ta.txt\n100644 blob %s\tlife.yaml\n' "$(echo b | git -C "$g" hash-object -w --stdin)" "$(echo a | git -C "$g" hash-object -w --stdin)" "$(echo l | git -C "$g" hash-object -w --stdin)" | git -C "$g" mktree)"
+  c2="$(git -C "$g" commit-tree "$t2" -p "$c1" -m lifecycle)"; git -C "$g" update-ref refs/heads/main "$c2"
+  echo "staged unrelated" > "$g/mine.txt"; git -C "$g" add mine.txt                       # the user's staged work
+  # called as the resume did (old → merge) while the tip is the lifecycle commit
+  run _aid_lc_sync_checkout_of "$g" main "$old" "$c1"; echo "$output"; [ "$status" -eq 0 ]
+  [ -f "$g/life.yaml" ]; [ -f "$g/b.txt" ]
+  [ "$(git -C "$g" diff --cached --name-only)" = "mine.txt" ]                              # only the user's file is staged
+  # an overlap: the checkout edits b.txt, the next write changes it
+  git -C "$g" reset -q --hard main; echo "local edit" > "$g/b.txt"
+  local t3 c3; t3="$(printf '100644 blob %s\tb.txt\n100644 blob %s\ta.txt\n' "$(echo B | git -C "$g" hash-object -w --stdin)" "$(echo a | git -C "$g" hash-object -w --stdin)" | git -C "$g" mktree)"
+  c3="$(git -C "$g" commit-tree "$t3" -p "$c2" -m next)"; git -C "$g" update-ref refs/heads/main "$c3"
+  run _aid_lc_sync_checkout_of "$g" main "$c2" "$c3"; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"local changes overlap with: b.txt"* ]]
+  [ "$(cat "$g/b.txt")" = "local edit" ]
+}
