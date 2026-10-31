@@ -70,3 +70,21 @@ teardown() { rm -rf "$T"; }
   run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; [ "$status" -eq 0 ]
   [[ "$(cat a.txt)" == "two" ]]; [ "$(git diff --cached --name-only)" = "mine.txt" ]
 }
+
+@test "3.13.0: a rename is checked on both sides — the index keeping the removed source is not 'at the tip'" {
+  ( cd ../side && git mv b.txt c.txt && git commit -qm rename )
+  local N2; N2="$(git -C ../side rev-parse HEAD)"; git update-ref refs/heads/main "$N2"
+  git read-tree "$N2"; git update-index --add --cacheinfo "100644,$(git rev-parse "${NEW}:b.txt"),b.txt"   # tip's c.txt and the old b.txt
+  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"b.txt"* ]]
+}
+
+@test "3.13.0: refusal, the printed repair, then the same call again: the checkout is at the tip and the user's edit is back" {
+  echo mine > a.txt
+  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; [ "$status" -eq 1 ]
+  git diff --binary "$OLD" -- a.txt > "$T/my.patch"; git checkout -q "$NEW" -- a.txt; git reset -q -- a.txt
+  run _aid_lc_sync_checkout_of "$T/side" main "$OLD" "$NEW"; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$(cat b.txt)" == "new" ]]
+  git apply --3way "$T/my.patch" 2>/dev/null || true
+  grep -q mine a.txt                                    # the edit is back (here as a conflict with the merge's "two")
+}

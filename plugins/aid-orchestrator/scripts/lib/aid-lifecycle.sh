@@ -329,61 +329,45 @@ _aid_lc_sync_checkout_of() {
   wt="$(git -C "$root" worktree list --porcelain 2>/dev/null \
         | awk -v b="branch refs/heads/${branch}" '/^worktree /{w=substr($0,10)} $0==b{print w; exit}')"
   [[ -n "$wt" ]] || return 0
-  # 3.13.0: bring it to the branch's CURRENT tip, from the state its index really holds. A resumed merge called this
-  # with old = the pre-merge head and new = the merge while the branch had moved on to its lifecycle commit: the
-  # read-tree took the index BACK to the merge and the lifecycle files showed as staged (WAN P116 28. 10. 2026).
-  # Where the index stands is judged only on the paths the writes changed (old → tip), so the user's other work,
-  # staged or not, never decides it: all of them at the tip's version — done; all at old's, or at new's — read from
-  # there; anything mixed — refused, nothing changed.
-  local tip from="" c
+  # 3.13.0: bring it to the branch's CURRENT tip, path by path. A resumed merge called this with old = the pre-merge
+  # head and new = the merge while the branch had moved on to its lifecycle commit: the read-tree took the index BACK
+  # to the merge and the lifecycle files showed as staged (WAN P116 28. 10. 2026). Every path the writes changed
+  # (old → tip and new → tip, both sides of a rename) is judged on its own:
+  #   index at the tip's version — done (an unstaged edit on top stays the user's);
+  #   index at old's or new's version (or absent where that commit has none) AND the file unchanged against the index,
+  #   or an untracked file byte-identical to the tip's (the close's receipt) — brought to the tip's version;
+  #   anything else — the user's work overlaps: refused, and NOTHING is changed.
+  local tip p T I W O N; local -a span=() upd=() bad=()
   tip="$(git -C "$root" rev-parse -q --verify "refs/heads/${branch}" 2>/dev/null)" || tip="$new"
-  local -a span=()
-  mapfile -t span < <(git -C "$wt" -c core.quotepath=false diff --name-only "$old" "$tip")
+  mapfile -t span < <({ git -C "$wt" -c core.quotepath=false diff --no-renames --name-only "$old" "$tip"
+                        git -C "$wt" -c core.quotepath=false diff --no-renames --name-only "$new" "$tip"; } | sort -u)
   (( ${#span[@]} )) || return 0
-  if git -C "$wt" diff --cached --quiet "$tip" -- "${span[@]}" 2>/dev/null; then
-    return 0
-  fi
-  for c in "$old" "$new"; do
-    [[ "$c" != "$tip" ]] || continue
-    git -C "$wt" diff --cached --quiet "$c" -- "${span[@]}" 2>/dev/null && { from="$c"; break; }
+  _blob() { git -C "$wt" rev-parse -q --verify "$1:$2" 2>/dev/null || true; }
+  for p in "${span[@]}"; do
+    T="$(_blob "$tip" "$p")"; O="$(_blob "$old" "$p")"; N="$(_blob "$new" "$p")"
+    I="$(git -C "$wt" ls-files -s -- "$p" 2>/dev/null | awk 'NR==1{print $2}')"
+    W=""; [[ -f "${wt}/${p}" && ! -L "${wt}/${p}" ]] && W="$(git -C "$wt" hash-object -- "$p" 2>/dev/null)"
+    [[ -e "${wt}/${p}" && -z "$W" ]] && W="(not a plain file)"
+    if [[ "$I" == "$T" ]]; then continue
+    elif [[ ( "$I" == "$O" || "$I" == "$N" ) && "$W" == "$I" ]]; then upd+=("$p")
+    elif [[ -z "$I" && -n "$T" && "$W" == "$T" ]]; then upd+=("$p")
+    else bad+=("$p"); fi
   done
-  local report
-  if [[ -z "$from" ]]; then
-    report="$(git -C "$wt" -c core.quotepath=false diff --cached --name-only "$tip" -- "${span[@]}" | paste -sd' ' -)"
-  else
-    # A file the write committed may already sit in that tree, untracked and byte-identical (the close writes its
-    # receipt there before committing it): read-tree refuses to overwrite it. Only AID's generated records
-    # (.aid-lifecycle/**) are taken in, and all of it happens in a COPY of the index: a failed attempt leaves the
-    # real index exactly as it was.
-    local gi tmpi synced=0 p
-    gi="$(git -C "$wt" rev-parse --path-format=absolute --git-path index 2>/dev/null)"
-    tmpi="$(mktemp)" && cp -p "$gi" "$tmpi" 2>/dev/null || { rm -f "$tmpi"; tmpi=""; }
-    if [[ -n "$tmpi" ]]; then
-      GIT_INDEX_FILE="$tmpi" git -C "$wt" read-tree -m -u "$from" "$tip" 2>/dev/null && synced=1
-      if (( ! synced )); then
-        cp -p "$gi" "$tmpi"
-        while IFS= read -r p; do
-          case "$p" in .aid-lifecycle/*) ;; *) continue ;; esac
-          GIT_INDEX_FILE="$tmpi" git -C "$wt" ls-files --error-unmatch -- "$p" >/dev/null 2>&1 && continue
-          [[ -f "${wt}/${p}" && "$(git -C "$wt" hash-object -- "$p")" == "$(git -C "$wt" rev-parse -q --verify "${tip}:${p}")" ]] \
-            && GIT_INDEX_FILE="$tmpi" git -C "$wt" add -f -- "$p" 2>/dev/null
-        done < <(git -C "$wt" -c core.quotepath=false diff --name-only "$from" "$tip")
-        GIT_INDEX_FILE="$tmpi" git -C "$wt" read-tree -m -u "$from" "$tip" 2>/dev/null && synced=1
-      fi
-      if (( synced )); then
-        mv -f "$tmpi" "$gi" || { rm -f "$tmpi"; synced=0; }
-      else
-        rm -f "$tmpi"
-      fi
-    fi
-    if (( synced )); then
-      echo "NOTE: ${branch} is checked out in ${wt} — its index and tree were brought forward to ${tip:0:12}, so the next commit there does not revert this write." >&2
-      return 0
-    fi
-    report="$(git -C "$wt" -c core.quotepath=false status --porcelain -- "${span[@]}" | cut -c4- | paste -sd' ' -)"
+  if (( ${#bad[@]} )); then
+    local report; report="$(printf '%s ' "${bad[@]}")"; report="${report% }"
+    echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree are not at ${tip:0:12}: local changes overlap with: ${report}. A plain 'git commit' there would REVERT this write — do not commit there. Keep your edits as a patch against the state they were made on, take the branch's version, then put them back: git -C ${wt} diff --binary ${old:0:12} -- ${report} > /tmp/aid-my-edits.patch && git -C ${wt} checkout ${tip:0:12} -- ${report} && git -C ${wt} reset -q -- ${report}; run the AID command again; then git -C ${wt} apply --3way /tmp/aid-my-edits.patch (the patch keeps the content of your staged and unstaged edits together, not which part was staged)." >&2
+    return 1
   fi
-  echo "WARNING: ${branch} is checked out in ${wt}, but its index and tree are not at ${tip:0:12}: local changes overlap with: ${report:-the files the write changed}. A plain 'git commit' there would REVERT this write — do not commit there. Copy your edits of those files aside, take the branch's version with: git -C ${wt} checkout ${tip:0:12} -- <those files>, then run the AID command again, then re-apply your edits." >&2
-  return 1
+  (( ${#upd[@]} )) || return 0
+  for p in "${upd[@]}"; do
+    if [[ -n "$(_blob "$tip" "$p")" ]]; then
+      git -C "$wt" checkout -q "$tip" -- "$p" 2>/dev/null || { echo "WARNING: could not bring ${p} in ${wt} to ${tip:0:12}" >&2; return 1; }
+    else
+      git -C "$wt" rm -q --cached --ignore-unmatch -- "$p" 2>/dev/null; rm -f -- "${wt}/${p}"
+    fi
+  done
+  echo "NOTE: ${branch} is checked out in ${wt} — its index and tree were brought forward to ${tip:0:12}, so the next commit there does not revert this write." >&2
+  return 0
 }
 
 _aid_lc_isolated_commit() {
