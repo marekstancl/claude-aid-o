@@ -1,0 +1,37 @@
+nazev: Objednávka
+druh: stav
+stav: dnes
+puvod: rozhovor
+kroky:
+- id: NOVA
+  jmeno: Nová
+  co: Zákazník objednávku odeslal.
+- id: ZAPLACENA
+  jmeno: Zaplacená
+  co: Platba dorazila.
+- id: ODESLANA
+  jmeno: Odeslaná
+  co: Balík je na cestě.
+  konec: ok
+- id: NEZAPLACENA
+  jmeno: Nezaplacená
+  co: Platba do 7 dní nedorazila.
+- id: STORNO
+  jmeno: Stornovaná
+  co: Objednávka je zrušená.
+  konec: bad
+prechody:
+- z: NOVA
+  do: ZAPLACENA
+  popis: platba
+- z: NOVA
+  do: NEZAPLACENA
+  popis: 7 dní nic
+- z: ZAPLACENA
+  do: ODESLANA
+- z: NEZAPLACENA
+  do: ZAPLACENA
+  popis: pozdní platba
+- z: NEZAPLACENA
+  do: STORNO
+  popis: storno
