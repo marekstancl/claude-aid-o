@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "font": "system-ui, -apple-system, 'Segoe UI', sans-serif",
+  "roles": {
+    "ok":       {"fill": "#dcfce7", "stroke": "#15803d", "label": "dobrý konec"},
+    "bad":      {"fill": "#fee2e2", "stroke": "#b91c1c", "label": "špatný konec"},
+    "warn":     {"fill": "#fef3c7", "stroke": "#b45309", "label": "zádrhel, vrací se zpět"},
+    "pm":       {"fill": "#dbeafe", "stroke": "#1d4ed8", "label": "čeká na člověka"},
+    "flag":     {"fill": null,      "stroke": "#b91c1c", "label": "tvoje označení"},
+    "question": {"fill": null,      "stroke": "#b45309", "dash": "6 3", "label": "otázka agenta"},
+    "added":    {"fill": null,      "stroke": "#15803d", "label": "nové proti schválené mapě"},
+    "removed":  {"fill": null,      "stroke": "#b91c1c", "dash": "4 4", "label": "zrušené proti schválené mapě"}
+  },
+  "sizes": {
+    "task": [120, 60],
+    "gateway": [50, 50],
+    "event": [36, 36],
+    "left": 40,
+    "top": 60,
+    "column_gap": 90,
+    "row_height": 60,
+    "row_gap": 50,
+    "lane_step": 8,
+    "track_step": 16,
+    "track_margin": 30,
+    "label_height": 14,
+    "char_width": 6
+  },
+  "texts": {
+    "odevsad": "z každého kroku",
+    "odevsad_ends": "z každého kroku i z konců",
+    "mark_only_shared": "Značit jde jen na sdílené stránce.",
+    "legend_title": "Legenda"
+  }
+}

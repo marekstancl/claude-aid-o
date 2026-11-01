@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aid:process-map",
+  "title": "Procesní mapa (docs/procesy/<jméno>.mapa.yaml)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["nazev", "druh", "stav", "puvod", "kroky", "prechody"],
+  "properties": {
+    "nazev": {"type": "string", "minLength": 1, "maxLength": 80},
+    "druh": {"enum": ["bpmn", "stav"]},
+    "stav": {"enum": ["dnes", "po", "schvaleno"]},
+    "puvod": {"enum": ["kod", "rozhovor"]},
+    "zdroj": {"type": "string", "minLength": 1},
+    "kroky": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "jmeno", "co"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$"},
+          "jmeno": {"type": "string", "minLength": 1, "maxLength": 40},
+          "co": {"type": "string", "minLength": 1, "maxLength": 300},
+          "konec": {"enum": ["none", "ok", "bad"], "default": "none"},
+          "kod": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "prechody": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["z", "do"],
+        "properties": {
+          "z": {"type": "string"},
+          "do": {"type": "string"},
+          "popis": {"type": "string", "minLength": 1, "maxLength": 40}
+        }
+      }
+    },
+    "odevsad": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["do", "popis"],
+        "properties": {
+          "do": {"type": "string"},
+          "popis": {"type": "string", "minLength": 1, "maxLength": 40},
+          "vcetne_koncu": {"type": "boolean", "default": false}
+        }
+      }
+    },
+    "otazky": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["cil", "text", "stav"],
+        "properties": {
+          "cil": {"type": "string"},
+          "text": {"type": "string", "minLength": 1},
+          "stav": {"enum": ["neovereno", "overeno", "zamitnuto"]}
+        }
+      }
+    },
+    "proti": {"type": "string", "pattern": "^[A-Za-z0-9._-]+\\.mapa\\.yaml$"}
+  }
+}
