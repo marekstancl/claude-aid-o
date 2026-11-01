@@ -1468,7 +1468,7 @@ VF
   [ "$(grep '^current_step:' "$state_file" | awk '{print $2}')" = "3" ]
 }
 
-@test "init with fewer than seven positional arguments is a usage error, not an unbound-variable crash (ACTA #16)" {
+@test "init with fewer than seven positional arguments is a usage error, not an unbound-variable crash" {
   run bash "$FSM" init E-1 R-1 5 full
   [ "$status" -eq 2 ]
   [[ "$output" == *"Usage: aid-fsm.sh init"* ]]
@@ -1854,7 +1854,7 @@ _zp_state() {   # <td> <state> <current_step>
   [ "$status" -ne 0 ]; [[ "$output" == *"closes no point of the brief"*"rule 11"* ]]; [[ "$output" == *"amend_scope_no_brief_point"* ]]
 }
 
-@test "amend-scope (3.13.0): a file the step's AC names is a routine widening — exact path or a file name unique in the repo; ambiguous, mixed or protected is not" {
+@test "amend-scope: a file the step's AC names is a routine widening — exact path or a file name unique in the repo; ambiguous, mixed or protected is not" {
   local td="$TEST_EVIDENCE_DIR" g="$BATS_TEST_TMPDIR/repo"; _zp_plan_json "$td"
   jq '.steps[0].zavira = [] | .steps[0].acceptance_criteria = ["`tests/test_vemex.py` passes", "`test_sep.py` fails on main and passes after", "`.env` loads"]' "$td/plan.json" > "$td/p" && mv "$td/p" "$td/plan.json"
   _zp_state "$td" EXECUTE 0

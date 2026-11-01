@@ -295,7 +295,7 @@ _snapraw() {
     echo "== $d"; [[ -d "$d" ]] && ls -A "$d"; done; return 0
 }
 
-@test "direct: a plan the CP1 gate refuses changes nothing — no transaction, no commit, no plan state, no branch (ACTA P027)" {
+@test "direct: a plan the CP1 gate refuses changes nothing — no transaction, no commit, no plan state, no branch" {
   rm -rf "$R/.aid-o/work/evidence/P900/cp1"            # no CP1 round: the gate refuses
   local before; before="$(_snap)"
   _run
@@ -305,14 +305,14 @@ _snapraw() {
   [ ! -f "$GEN/transaction.json" ]
 }
 
-@test "direct: a plan readiness refuses changes nothing either — no directory, no lock (3.9.1)" {
+@test "direct: a plan readiness refuses changes nothing either — no directory, no lock" {
   _break_plan
   local before; before="$(_snap)"
   _run
   [ "$status" -eq 7 ]; [ "$(_snap)" = "$before" ]
 }
 
-@test "direct: --force over a HARD CP1 refusal (unreadable round evidence) changes nothing (3.9.1)" {
+@test "direct: --force over a HARD CP1 refusal (unreadable round evidence) changes nothing" {
   echo '{not json' > "$R/.aid-o/work/evidence/P900/cp1/rounds.json"
   local before; before="$(_snap)"
   run bash "$PFSM" plan-run P900 --force --reason "test: the PM overrides the CP1 gate for this plan"
@@ -321,7 +321,7 @@ _snapraw() {
   [ "$(_snap)" = "$before" ]; [ ! -f "$GEN/transaction.json" ]
 }
 
-@test "direct: --force over a FORCEABLE CP1 refusal (no round) goes on to the seal, which records the override (3.9.1)" {
+@test "direct: --force over a FORCEABLE CP1 refusal (no round) goes on to the seal, which records the override" {
   rm -rf "$R/.aid-o/work/evidence/P900/cp1"
   run bash "$PFSM" plan-run P900 --force --reason "test: the PM overrides the CP1 gate for this plan"
   echo "$output"; [ "$status" -eq 0 ]                         # the run starts
@@ -331,7 +331,7 @@ _snapraw() {
   [ "$(jq -r '.force_reason' "$GEN/generation-authority.json")" = "test: the PM overrides the CP1 gate for this plan" ]
 }
 
-@test "direct: a plan started earlier (plan-start, no plan-run transaction) is checked before plan-run writes anything (3.9.1)" {
+@test "direct: a plan started earlier (plan-start, no plan-run transaction) is checked before plan-run writes anything" {
   bash "$PFSM" plan-start P900 --mode plan_branch --project-root "$R" --plan-file "$PLAN" --declared-epics E-900-1_1 >/dev/null 2>&1 || skip "plan-start refused the fixture"
   rm -f "$R/.aid-o/work/evidence/P900/plan-summary-artifact.html"
   local before; before="$(_snap)"
@@ -340,7 +340,7 @@ _snapraw() {
   [ "$(_snap)" = "$before" ]; [ ! -f "$GEN/transaction.json" ]
 }
 
-@test "direct: a plan whose PM page is missing changes nothing either (3.9.1)" {
+@test "direct: a plan whose PM page is missing changes nothing either" {
   rm -f "$R/.aid-o/work/evidence/P900/plan-summary-artifact.html"
   local before; before="$(_snap)"
   _run

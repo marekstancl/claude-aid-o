@@ -150,7 +150,7 @@ _mk_tracking_primary() {
   ( cd "$d" && git init -q -b main && git config user.email t@t && git config user.name t && git add -A && git commit -qm seed )
 }
 
-@test "a project that tracks plan-state: its LINKED worktree resolves to the primary, not to itself (agents P009)" {
+@test "a project that tracks plan-state: its LINKED worktree resolves to the primary, not to itself" {
   _mk_tracking_primary "$TEST_TMPDIR/tp"
   _mk_worktree "$TEST_TMPDIR/tp" "$TEST_TMPDIR/tpwt"
   [ -d "$TEST_TMPDIR/tpwt/.aid-o/work/plan-state" ]

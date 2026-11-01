@@ -353,7 +353,7 @@ STUB
   [ "$status" -eq 0 ]
 }
 
-@test "prepare: a stakes paragraph with only cost lines is named as such, not as a missing paragraph (agents 12. 10. 2026)" {
+@test "prepare: a stakes paragraph with only cost lines is named as such, not as a missing paragraph" {
   sed 's/^\*\*Co je v sázce:\*\*.*/**Co je v sázce:** 27,94 USD za kolo./' "$AID_PLUGIN_PATH/scripts/tests/fixtures/zadani/p014-zadani.md" > "$P/.aid-o/plans/P9-zadani.md"
   printf -- '---\nid: P9\nzadani: .aid-o/plans/P9-zadani.md\n---\n# Plan: x\n' > "$P/.aid-o/plans/P9-x.md"
   run aid_critic_prepare P9 --moment plan --plan "$P/.aid-o/plans/P9-x.md"

@@ -88,3 +88,18 @@ _commit() { git -C "$REPO" add -A; git -C "$REPO" commit -qm change; }
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
+
+@test "a release or a project report as the origin is reported; a version that is the subject of the sentence passes" {
+  {
+    printf '%s "3.14.0: refuses X" {\n}\n' '@test'
+    printf '%s "v2.95.5 (agents #8): keeps Y" {\n}\n' '@test'
+    printf '%s "merge (v3.14.0): resumes" {\n}\n' '@test'
+    printf '%s "close (WAN #3): names it" {\n}\n' '@test'
+    printf '%s "a 3.13 record without its tree is refused" {\n}\n' '@test'
+    printf '%s "schema 1.1 records carry the tree" {\n}\n' '@test'
+  } > "$REPO/tests/test-new.bats"
+  _commit
+  run aid_test_names_plan_refs "$REPO" "$BASE"; echo "$output"
+  [ "$status" -eq 1 ]; [ "$(wc -l <<<"$output")" -eq 4 ]
+  [[ "$output" != *"3.13 record"* && "$output" != *"1.1 records"* ]]
+}

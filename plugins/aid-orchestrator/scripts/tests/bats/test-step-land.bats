@@ -377,7 +377,7 @@ _verify_file() {  # the bound step-0-verify.md at HEAD
 }
 
 # ── 3.13.0: which criteria are commands, and a replaced command with its reason ───────────────────────────────
-@test "3.13.0: a criterion beginning with a test's name is not a command — the step lands without a --check for it" {
+@test "a criterion beginning with a test's name is not a command — the step lands without a --check for it" {
   # WAN P116 28. 10. and P118 30. 10. 2026: `test_regime_…` was demanded as a runnable command, so no takeover
   _plan '`test_regime_override` fails on main and'; _agent .
   run bash "$LAND" "$S" 0; echo "$output"; [ "$status" -eq 0 ]; [ "$(jq -r .status "$REC")" = landed ]
@@ -386,13 +386,13 @@ _verify_file() {  # the bound step-0-verify.md at HEAD
   [ "$status" -eq 1 ]; [[ "$output" == *"AC1 is not a command criterion"* ]]
 }
 
-@test "3.13.0: a command written as one (./x, a/b, NAME=v x) stays a command, and a missing program fails the check" {
+@test "a command written as one (./x, a/b, NAME=v x) stays a command, and a missing program fails the check" {
   _plan '`./check.sh`'; _agent .
   run bash "$LAND" "$S" 0; [ "$status" -eq 1 ]; [[ "$output" == *"AC1 is a command criterion and has no --check: ./check.sh"* ]]
   run bash "$LAND" "$S" 0 --check '1:./check.sh'; [ "$status" -eq 1 ]; [ "$(jq -r .status "$REC")" = check_failed ]
 }
 
-@test "3.13.0: another command than the plan's lands only with its reason, which the record keeps and verify checks" {
+@test "another command than the plan's lands only with its reason, which the record keeps and verify checks" {
   _agent .
   run bash "$LAND" "$S" 0 --check '1:test -e a.txt'
   [ "$status" -eq 1 ]; [[ "$output" == *"needs --reason"* ]]
@@ -413,7 +413,7 @@ _verify_file() {  # the bound step-0-verify.md at HEAD
   done
 }
 
-@test "3.13.0: an empty replacement is refused; --recheck keeps the replacement" {
+@test "an empty replacement is refused; --recheck keeps the replacement" {
   _agent .
   run bash "$LAND" "$S" 0 --check '1:   ' --reason '1:a long enough reason here'
   [ "$status" -eq 1 ]; [[ "$output" == *"an empty command checks nothing"* ]]
@@ -429,7 +429,7 @@ _verify_file() {  # the bound step-0-verify.md at HEAD
   [ -z "$(ls "$D" | grep 'land.json.prev')" ]
 }
 
-@test "3.13.0: the command-criterion rule, case by case (independent of what is installed)" {
+@test "the command-criterion rule, case by case (independent of what is installed)" {
   source "$AID_PLUGIN_PATH/scripts/lib/aid-ac-command.sh"
   local t want got
   while IFS='|' read -r t want; do
@@ -450,7 +450,7 @@ plain text|NAME
 CASES
 }
 
-@test "3.13.0: increment-step advances a replaced criterion only after a CP2 round whose packet listed exactly that replacement" {
+@test "increment-step advances a replaced criterion only after a CP2 round whose packet listed exactly that replacement" {
   _wave; _agent "$WT"
   bash "$LAND" "$S" 0 --check '1:test -e a.txt' --reason '1:the plan measures the main checkout, this the plan tree' >/dev/null
   [ "$(jq '.replacements | length' "$REC")" -eq 1 ]; _verify_file
@@ -462,7 +462,7 @@ CASES
   run bash "$FSM" increment-step "$S"; [[ "$output" != *"saw that replacement"* ]] || { echo "$output" | tail -8; false; }
 }
 
-@test "3.13.0: the record keeps every replacement even when an earlier check fails; a recheck may go back to the plan's command with a reason" {
+@test "the record keeps every replacement even when an earlier check fails; a recheck may go back to the plan's command with a reason" {
   jq '.steps[0].acceptance_criteria = ["`test -f nope.txt` passes", "`test -f a.txt` passes"]' "$TEST_EVIDENCE_DIR/plan.json" > "$TEST_EVIDENCE_DIR/p" && mv "$TEST_EVIDENCE_DIR/p" "$TEST_EVIDENCE_DIR/plan.json"
   _agent .
   run bash "$LAND" "$S" 0 --check '1:test -f nope.txt' --check '2:test -e a.txt' --reason '2:the plan measures the main checkout here'

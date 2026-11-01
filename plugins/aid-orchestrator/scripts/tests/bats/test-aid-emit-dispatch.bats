@@ -301,7 +301,7 @@ teardown() {
   [ "$status" -eq 0 ]
 }
 
-@test "3.13.0: start prints its nonce; complete --nonce closes exactly that start of two with the same focus; the timeline carries it" {
+@test "start prints its nonce; complete --nonce closes exactly that start of two with the same focus; the timeline carries it" {
   local o1 o2 n1 n2
   o1="$(bash "$SCRIPT" start --focus cp2-step-0-step-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID")"
   o2="$(bash "$SCRIPT" start --focus cp2-step-0-step-generalist --agent-id aid-orchestrator:review --evidence-dir "$EVID")"
@@ -321,7 +321,7 @@ teardown() {
   [ "$status" -ne 0 ]; [ "$(jq -s '[.[] | select(.event == "start")] | length' "$PENDING")" -eq 1 ]
 }
 
-@test "3.13.0: a fixer is bracketed under fix-cp2-<step>-r<round> / fix-cp7-r<round> of THIS round, never another" {
+@test "a fixer is bracketed under fix-cp2-<step>-r<round> / fix-cp7-r<round> of THIS round, never another" {
   jq -n '{checkpoint: "cp2", step: 2, round: 1, reviewers_expected: ["step_generalist"]}' > "$EVID/round.json"
   run bash "$SCRIPT" start --focus fix-cp2-2-r1 --agent-id aid-orchestrator:backend --evidence-dir "$EVID"
   echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == nonce=* ]]

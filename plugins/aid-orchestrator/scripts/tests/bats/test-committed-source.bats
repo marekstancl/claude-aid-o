@@ -55,7 +55,7 @@ _no_mutation() {
 
 # ─── tracked plan, not committed ──────────────────────────────────────────
 
-@test "v2.95.5 (WAN #1): a TRACKED but uncommitted plan is COMMITTED on main by plan-start itself" {
+@test "a TRACKED but uncommitted plan is COMMITTED on main by plan-start itself" {
   printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
   ( cd "$ROOT" && git add .aid-o/plans/plan.md )
 
@@ -67,7 +67,7 @@ _no_mutation() {
   [ "$( cd "$ROOT" && git show --stat --format= main | grep -c '|' )" = "1" ]
 }
 
-@test "v2.95.5 (WAN #1): an UNTRACKED plan on disk is committed too, and the plan branch carries it" {
+@test "an UNTRACKED plan on disk is committed too, and the plan branch carries it" {
   printf '# Plan untracked\n' > "$ROOT/.aid-o/plans/plan.md"
   run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md"
   [[ "$output" == *"committed .aid-o/plans/plan.md on main"* ]]
@@ -96,7 +96,7 @@ _no_mutation() {
   [ "$( cd "$ROOT" && git show main:.aid-o/plans/plan.md )" = "# Plan" ]
 }
 
-@test "v2.95.5 (WAN #1): from a checkout NOT on main plan-start does not commit — the old refusal speaks, with the reason" {
+@test "from a checkout NOT on main plan-start does not commit — the old refusal speaks, with the reason" {
   printf '# Plan\n' > "$ROOT/.aid-o/plans/plan.md"
   ( cd "$ROOT" && git checkout -q -b side )
   run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/.aid-o/plans/plan.md"
@@ -141,7 +141,7 @@ _no_mutation() {
   [[ "$output" != *"differs from the worktree copy"* ]]
 }
 
-@test "v2.95.5 (WAN #1): a plan OUTSIDE .aid-o/plans is never auto-committed — the refusal speaks" {
+@test "a plan OUTSIDE .aid-o/plans is never auto-committed — the refusal speaks" {
   printf '# Plan\n' > "$ROOT/docs/plan.md"
   run _pf plan-start P900 --mode legacy_epic_release_mode --plan-file "$ROOT/docs/plan.md"
   [ "$status" -ne 0 ]
@@ -150,7 +150,7 @@ _no_mutation() {
   _no_mutation
 }
 
-@test "v2.95.5 (WAN #1): a staged copy that differs from the file on disk is not chosen for the PM" {
+@test "a staged copy that differs from the file on disk is not chosen for the PM" {
   printf '# Plan v1\n' > "$ROOT/.aid-o/plans/plan.md"
   ( cd "$ROOT" && git add .aid-o/plans/plan.md )
   printf '# Plan v2\n' > "$ROOT/.aid-o/plans/plan.md"

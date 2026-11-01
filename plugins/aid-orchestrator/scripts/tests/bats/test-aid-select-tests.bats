@@ -350,7 +350,7 @@ commit_change() {
   [[ "$output" == *"--evidence-file requires a value"* ]]
 }
 
-@test "v2.95.8 (agents #9): outside the plugin's own repository the selector is INACTIVE — exit 2, relevance inactive, nothing selected, never pass" {
+@test "outside the plugin's own repository the selector is INACTIVE — exit 2, relevance inactive, nothing selected, never pass" {
   local other; other="$(mktemp -d)"
   ( cd "$other" && git init -q -b main && git config user.email t@t && git config user.name t \
     && mkdir -p bin && echo 'print(1)' > bin/app.py && git add . && git commit -qm one \
@@ -364,7 +364,7 @@ commit_change() {
   rm -rf "$other"
 }
 
-@test "v2.95.8 (agents #9): a consumer repo that VENDORS a copy of the selector is still not the plugin's repo — inactive" {
+@test "a consumer repo that VENDORS a copy of the selector is still not the plugin's repo — inactive" {
   local other; other="$(mktemp -d)"
   ( cd "$other" && git init -q -b main && git config user.email t@t && git config user.name t \
     && mkdir -p plugins/aid-orchestrator/scripts bin && cp "$SELECTOR" plugins/aid-orchestrator/scripts/ \

@@ -1279,7 +1279,7 @@ _ran() { wc -l < "$TEST_PROJECT_ROOT/.aid-o/work/ran_$1" | tr -d ' '; }
   [ "$(jq -r '.gates.docs_updated.reused_from' "$(_report)")" = "R-${PLAN_ID}-final-1" ]
 }
 
-@test "reuse (3.12.0): the stage names a passed gate that runs again only for lack of inputs:, not one with inputs, not plan_diff" {
+@test "reuse: the stage names a passed gate that runs again only for lack of inputs:, not one with inputs, not plan_diff" {
   _reuse_project
   _second_attempt src-fix.txt "a code fix"; [ "$status" -eq 0 ]
   [[ "$output" == *"shell_pipeline_smoke runs again only because it declares no inputs: (last time "* ]]
@@ -1287,7 +1287,7 @@ _ran() { wc -l < "$TEST_PROJECT_ROOT/.aid-o/work/ran_$1" | tr -d ' '; }
   [[ "$output" != *"plan_diff runs again only because"* ]]
 }
 
-@test "reuse (3.12.0): an empty inputs: [] is the whole tree too, and the stage names the gate" {
+@test "reuse: an empty inputs: [] is the whole tree too, and the stage names the gate" {
   _seed_gates_project; _write_exec_yaml
   local y="$TEST_PROJECT_ROOT/.aid-o/config/execution.yaml"
   yq -i '.gates.docs_updated.command = "echo x >> .aid-o/work/ran_docs_updated" | .gates.docs_updated.inputs = []' "$y"
@@ -4353,14 +4353,14 @@ _rel_ready() {   # <carried> <record json filter> — a bootstrapped plan whose 
 }
 _rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"; }
 
-@test "freeze (3.13.0): a version changed after the preparation is refused before anything is bumped or merged" {
+@test "freeze: a version changed after the preparation is refused before anything is bumped or merged" {
   _rel_ready 0.46.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0" | .changelog_version = "0.45.0"'
   _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -ne 0 ]
   [[ "$output" == *"REFUSED (release_prep_version_changed)"* && "$output" == *"--bump none"* ]]
   [ "$(_rec .version)" = 0.45.0 ]
 }
 
-@test "freeze (3.13.0): a release version not above the target's highest tag is refused before the sync" {
+@test "freeze: a release version not above the target's highest tag is refused before the sync" {
   _rel_ready 0.45.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0" | .changelog_version = "0.45.0"'
   git -C "$TEST_PROJECT_ROOT" tag v0.45.0 main
   _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"REFUSED (plan_version_not_above_target)"* ]]
@@ -4371,21 +4371,21 @@ _rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/releas
   [ "$(_rec .version)" = 0.10.0 ]; [ "$(_rec .tree)" != stale ]
 }
 
-@test "freeze (3.13.0): a no-release plan whose carried version moved takes it only with --adopt-version, and stays no-release" {
+@test "freeze: a no-release plan whose carried version moved takes it only with --adopt-version, and stays no-release" {
   _rel_ready 0.47.0 '.version = "none" | .intent = "none" | .candidate_version = "0.46.0" | .changelog_version = "0.46.0"'
   _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"--adopt-version"* ]]
   run bash "$AID_PLUGIN_PATH/scripts/aid-release.sh" rebind "$PLAN_ID" --plan-branch "plan/$PLAN_ID" --project-root "$TEST_PROJECT_ROOT" --adopt-version
   echo "$output"; [ "$status" -eq 0 ]; [ "$(_rec .intent)" = none ]; [ "$(_rec .version)" = none ]; [ "$(_rec .candidate_version)" = 0.47.0 ]
 }
 
-@test "freeze (3.13.0): no record, or one from before 3.13.0, is not checked; an unreadable one is refused" {
+@test "freeze: no record, or one from before 3.13.0, is not checked; an unreadable one is refused" {
   _rel_ready 0.45.0 '.version = "0.45.0"'                        # no candidate_version: a 3.12 record
   _finalize "$PLAN_ID" freeze; echo "$output"; [ "$status" -eq 0 ]
   _rel_ready 0.45.0 '.'; printf '{broken' > "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/release-prep.json"
   _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"REFUSED (release_prep_stale)"* ]]
 }
 
-@test "prepare-plan (3.13.0): --again prepares a higher version on top of an earlier prepare commit; the record binds the commit" {
+@test "prepare-plan: --again prepares a higher version on top of an earlier prepare commit; the record binds the commit" {
   _bootstrap; _seed_version_project
   _prepare "$PLAN_ID"; [ "$status" -eq 0 ]
   local head1; head1="$(git -C "$TEST_PROJECT_ROOT" rev-parse "plan/$PLAN_ID")"
@@ -4396,7 +4396,7 @@ _rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/releas
   [ "$(jq -r .intent "$rec")" = release ]
 }
 
-@test "freeze (3.13.0): a record whose version is not the one the candidate carries is refused; a bare X.Y.Z tag counts like vX.Y.Z" {
+@test "freeze: a record whose version is not the one the candidate carries is refused; a bare X.Y.Z tag counts like vX.Y.Z" {
   _rel_ready 0.45.0 '.version = "0.44.0" | .intent = "release" | .candidate_version = "0.45.0" | .changelog_version = "0.45.0"'
   _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"the CHANGELOG and the manifest disagree"* ]]
   _rel_ready 0.45.0 '.version = "0.45.0" | .intent = "release" | .candidate_version = "0.45.0" | .changelog_version = "0.45.0"'
@@ -4404,7 +4404,7 @@ _rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/releas
   _finalize "$PLAN_ID" freeze; [ "$status" -ne 0 ]; [[ "$output" == *"plan_version_not_above_target"*"--again"* ]]
 }
 
-@test "merge (3.13.0): a release record of another tree than the frozen candidate is refused before anything is merged" {
+@test "merge: a release record of another tree than the frozen candidate is refused before anything is merged" {
   _seed_merge_project
   jq -n '{schema_version: "aid-release-prep-1.1", version: "9.9.9", intent: "release", candidate_version: "9.9.9", tree: "0000000000000000000000000000000000000000"}' > "$(_run_dir)/release-prep.json"
   local before; before="$(git -C "$TEST_PROJECT_ROOT" rev-parse main)"
@@ -4412,7 +4412,7 @@ _rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/releas
   [ "$(git -C "$TEST_PROJECT_ROOT" rev-parse main)" = "$before" ]
 }
 
-@test "merge (3.13.0): an incoherent record, a 3.13 record without its tree, or a canonical record the attempt has no copy of is refused" {
+@test "merge: an incoherent record, a 3.13 record without its tree, or a canonical record the attempt has no copy of is refused" {
   _seed_merge_project
   local cand; cand="$(plan_manifest_get "$PLAN_ID" '.plan_boundary_manifest.candidate_sha')"
   local tree; tree="$(git -C "$TEST_PROJECT_ROOT" rev-parse "${cand}^{tree}")"
@@ -4427,7 +4427,7 @@ _rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/releas
   _merge; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"holds no copy"* ]]
 }
 
-@test "merge (3.13.0): a crash after the lifecycle commit resumes to the tag — the checkout ends at the tip, nothing staged, local work kept" {
+@test "merge: a crash after the lifecycle commit resumes to the tag — the checkout ends at the tip, nothing staged, local work kept" {
   _seed_merge_project
   jq -n '{schema_version:"aid-release-prep-1.0", version:"9.9.9"}' > "$(_run_dir)/release-prep.json"
   echo "my unrelated work" > "$TEST_PROJECT_ROOT/notes-local.txt"                     # untracked work in the checkout
@@ -4442,7 +4442,7 @@ _rec() { jq -r "$1" "$TEST_PROJECT_ROOT/.aid-o/work/plan-state/${PLAN_ID}/releas
   [ "$(cat "$TEST_PROJECT_ROOT/notes-local.txt")" = "my unrelated work" ]
 }
 
-@test "merge (3.13.0): the checkout sync goes to the branch tip from where the index stands, and an overlap is reported, not passed" {
+@test "merge: the checkout sync goes to the branch tip from where the index stands, and an overlap is reported, not passed" {
   source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh"
   local g="$BATS_TEST_TMPDIR/sync"; mkdir -p "$g"; git -C "$g" init -q -b main; git -C "$g" config user.email t@t; git -C "$g" config user.name t
   echo a > "$g/a.txt"; git -C "$g" add -A; git -C "$g" commit -qm base; local old; old="$(git -C "$g" rev-parse HEAD)"

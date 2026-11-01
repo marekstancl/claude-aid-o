@@ -159,7 +159,9 @@ aid_test_tier_list() {
 # aid_test_names_plan_refs <repo> <base> [<end commit>|worktree]
 #   Test cases ADDED since <base> — commits, index and the working tree of
 #   tracked files, which is what `git add -u` would sweep in — whose NAME cites
-#   a plan (P123), a review finding (CP2 F3) or a backlog item (IMP-612). A
+#   a plan (P123), a review finding (CP2 F3), a backlog item (IMP-612), a release (a leading "3.14.0: …" or
+#   "v2.95 …", or "(3.14.0)") or a project report ("(WAN #1)"); a version inside the sentence ("a 3.13 record")
+#   is a subject, not an origin, and passes. A
 #   name says what the test guards; where it came from is in git log. Prints
 #   "<file>\t<name>"; 0 none, 1 found, 2 cannot tell (bad base, git failed) —
 #   callers refuse on 2 as on 1. Declarations read: bats `@test`, pytest
@@ -218,7 +220,10 @@ aid_test_names_plan_refs() {
     { m = tolower(n)
       if (m ~ /(^|[^a-z0-9])p[0-9][0-9][0-9]([^a-z0-9]|$)/ ||
           m ~ /(^|[^a-z0-9])cp[0-9]+[ _\/-]?f[0-9]+([^a-z0-9]|$)/ ||
-          m ~ /(^|[^a-z0-9])imp-[0-9]+([^a-z0-9]|$)/) printf "%s\t%s\n", f, n }
+          m ~ /(^|[^a-z0-9])imp-[0-9]+([^a-z0-9]|$)/ ||
+          m ~ /^[ \t]*v?[0-9]+\.[0-9]+(\.[0-9]+)?[: ]/ ||
+          m ~ /\(v?[0-9]+\.[0-9]+(\.[0-9]+)?\)/ ||
+          m ~ /\((wan|agents|acta|apps)[^)]*\)/) printf "%s\t%s\n", f, n }
   ' <<<"$diff")" || return 2
   [[ -z "$hits" ]] && return 0
   printf '%s\n' "$hits"

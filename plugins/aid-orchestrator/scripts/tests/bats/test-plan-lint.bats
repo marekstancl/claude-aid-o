@@ -313,7 +313,7 @@ _plan_role() { # <file> <role>
   [[ "$output" != *"names another repository"* ]]
 }
 
-@test "lint advisory: an API route or a docs URL path in prose is no file; a missing file with an extension and an existing directory still are (WAN P113, 3.9.1)" {
+@test "lint advisory: an API route or a docs URL path in prose is no file; a missing file with an extension and an existing directory still are" {
   _plan p.md strict '- Modify: `src/a.ts` — edit'
   printf '\n**Implementation Detail:** endpoints `/month` and `/partner-facets`, page `/wan/provize`; also `/opt/eco/nowhere/x.md` and `%s`.\n' "$BATS_TEST_TMPDIR" >> p.md
   run "$LINT" p.md
@@ -322,7 +322,7 @@ _plan_role() { # <file> <role>
   [[ "$output" == *"\`${BATS_TEST_TMPDIR}\` names another repository"* ]]
 }
 
-@test "files grammar: a bullet without backticks naming a second path after ';' is refused by the lint and plan.json; in a backticked bullet's description it is the advisory; never dropped silently (agents P012, 3.9.1)" {
+@test "files grammar: a bullet without backticks naming a second path after ';' is refused by the lint and plan.json; in a backticked bullet's description it is the advisory; never dropped silently" {
   # backticked: a path in the description is the advisory, never dropped silently and never an error
   _plan p.md strict '- Modify: `src/a.ts` — edit; `src/b.ts` — the other one'
   run "$LINT" p.md
