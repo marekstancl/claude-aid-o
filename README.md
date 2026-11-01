@@ -175,7 +175,6 @@ See [CHANGELOG.md](CHANGELOG.md) for 2.90.0 and later, [CHANGELOG-archive.md](CH
 ## Repository layout
 
 - `plugins/aid-orchestrator/` — the plugin (what `/plugin install` ships)
-- `cockpit/` — AID Cockpit, a web UI over `.aid-o/` workspaces (own npm workspace, Dockerfile and compose; not part of the plugin)
 - `docs/` — contributor-facing notes (`extending-aid.md`, design principles) and the plan records of this repository's own AID runs
 - `bin/` — maintainer tools (plugin-issue collection)
 - `CONTRIBUTING.md` — what a change must update, how a release is cut, test tiers, the testbed

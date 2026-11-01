@@ -40,15 +40,6 @@ versioning:
     - plugins/aid-orchestrator/README.md
   app_paths:
     - plugins
-    - cockpit
-    # The cockpit's Dockerfile lives in cockpit/ and its COPY sources are
-    # relative to that context; the drift gate matches them literally, so the
-    # context-relative names stay listed next to the repo-relative `cockpit`.
-    - packages
-    - package.json
-    - package-lock.json*
-    - tsconfig.base.json
-    - Dockerfile
 
   files:
     - path: plugins/aid-orchestrator/CHANGELOG.md
