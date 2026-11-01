@@ -328,9 +328,9 @@ EOF
 _renamed_dev() {
   yq -i ".ui.dev_cmd = [\"node\", \"-e\", \"process.title='npm exec vite'; const {spawn}=require('child_process'); spawn('python3', ['-c', 'import signal,sys,http.server as h; signal.signal(signal.SIGTERM, signal.SIG_IGN) if sys.argv[2]==\\\"stubborn\\\" else None; h.test(HandlerClass=h.SimpleHTTPRequestHandler, port=int(sys.argv[1]), bind=\\\"127.0.0.1\\\")', process.argv[1], '$1'], {stdio: 'inherit'}); setInterval(()=>{}, 1000)\", \"{port}\"]" "$P/.aid-o/config/project.yaml"
 }
-_gone() {  # <pgid> <port>: no member left and the port closed
-  local rc=0; pgrep -g "$1" >/dev/null || rc=$?; [ "$rc" -eq 1 ]
-  [ -z "$(ss -ltnH "sport = :$2")" ]
+_gone() {  # <pgid> <port>: no member left and the port closed (a failing pgrep or ss is not "gone")
+  local rc=0 out; pgrep -g "$1" >/dev/null || rc=$?; [ "$rc" -eq 1 ]
+  out="$(ss -ltnH "sport = :$2")"; [ -z "$out" ]
 }
 
 @test "down stops a prototype whose leader renamed itself (npm exec vite) with its child, closes the port, spares another group" {
@@ -355,4 +355,12 @@ _gone() {  # <pgid> <port>: no member left and the port closed
   run _k down; echo "$output"; [ "$status" -ne 0 ]; [ -e "$D/proto.json" ]; [[ "$output" == *"still"* ]]
   kill -KILL -- "-$pg"; sleep 0.3; _gone "$pg" "$port"
   run _k down; [ "$status" -eq 0 ]; [ ! -e "$D/proto.json" ]                  # nothing left: the stale record goes
+}
+
+@test "down keeps the record of a group that is gone while its port is still taken" {
+  mkdir -p "$D"; python3 -c 'import socket,time; s=socket.socket(); s.bind(("127.0.0.1",0)); s.listen(); print(s.getsockname()[1], flush=True); time.sleep(60)' > "$BATS_TEST_TMPDIR/port" &
+  local holder=$!; sleep 0.3; local port; port="$(cat "$BATS_TEST_TMPDIR/port")"
+  jq -n --argjson port "$port" '{pid: 999999999, pgid: 999999999, starttime: "1", cmd: "x", port: $port, url: "x"}' > "$D/proto.json"
+  run _k down; echo "$output"; [ "$status" -ne 0 ]; [ -e "$D/proto.json" ]; [[ "$output" == *"port ${port} is still open"* ]]
+  kill "$holder"
 }
