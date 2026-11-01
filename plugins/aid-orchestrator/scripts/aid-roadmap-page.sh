@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/aid-roots.sh"
 step="${1:-}"; doc="${2:-}"
 [[ "$step" =~ ^(init|publish)$ && -n "$doc" ]] || { echo "usage: aid-roadmap-page.sh init <doc> --title \"<topic>\" | publish <doc> (--plan P<n> | --aid-do)" >&2; exit 2; }
-shift 2
+[[ $# -ge 2 ]] || { echo "${0##*/}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }; shift 2
 project="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "aid-roadmap-page: not inside a git repository" >&2; exit 2; }
 state="$(aid_state_root "$project" 2>/dev/null || printf '%s' "$project")"
 exec python3 -I "${SCRIPT_DIR}/lib/aid_roadmap_page.py" "$step" "$project" "$state" "$doc" "$@"
