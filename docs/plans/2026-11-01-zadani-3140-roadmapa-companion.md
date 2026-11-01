@@ -67,6 +67,10 @@ neúspěšné zveřejnění a změněné zadání; opakovaný uzávěr `CLOSED`,
 pokryté jen testem knihovny (`test-roadmap-page.bats`) — commit sloučení s daty roadmapy by fixture musela stavět
 s novým kandidátem plánu.
 
+**Po celkové revizi 1. 11. (R):** plán, jehož dnešní zadání roadmapu nejmenuje, se uzavírá jako před 3.14.0 (chybějící
+plán, nečitelné nebo po navázání změněné zadání jen varují) — zadání slibuje „Plán bez `roadmapa:` se chová jako dnes“.
+Známý strop: `roadmapa_dokument` smazaný ze zadání až po navázání se nepozná (navázaná verze zadání se neuchovává).
+
 **Při stavbě 1. 11. (AC10, WAN):** dnešní okno převodu klienta už vadu nemá (WAN 0.48.2). Kontrola ořezu je ověřená na
 komponentě z kopie P119 v kopii bez bloku kitu: telefon, tlačítko patičky +7 px, `show` možnost odmítl. Okna čerstvé
 kopie mají styly bez ručního `!src/components/ui/`. Administrativní uzávěr kontrolu nepouští
