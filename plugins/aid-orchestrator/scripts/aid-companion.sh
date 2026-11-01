@@ -131,47 +131,50 @@ _group_or_port_alive() {  # <pgid> <port>
   (( rc == 0 )) || { echo "ss failed (exit ${rc})"; return 1; }
   [[ -z "$out" ]] || { echo "port ${port} is still open"; return 1; }
 }
-# TERM to every member of the group, up to 5 s for it to empty, then KILL; done only when the group is gone and its
-# port closed. One process does it all while it HOLDS a pidfd on the leader, opened before the start time is
-# checked: while the pidfd is open the kernel cannot give the leader's number (= the group's) to another process,
-# so no new group can appear under it, and each member is signalled through its own pidfd (no reused pid is hit).
+# TERM, up to 5 s, then KILL — only to the processes that were members of the group while its leader was proven
+# alive (pid, start time). A pidfd is opened on each of them at that moment and every signal goes through it, so it
+# reaches exactly that process even if a number is reused later (a pidfd pins the process, not the number). A
+# member that appears afterwards is never signalled: down then reports the group as still alive and keeps the record.
 _stop_group() {  # <pid> <starttime> <pgid> <port>
   local pid="$1" st="$2" pg="$3" port="$4" left rc=0
   python3 -I -c '
-import os, sys, signal, time
+import os, sys, signal, select, time
 pid, st, pg = int(sys.argv[1]), sys.argv[2], int(sys.argv[3])
 def stat(p):
     with open(f"/proc/{p}/stat") as f: return f.read().rsplit(") ", 1)[1].split()
-def members():
-    out = []
-    for e in os.listdir("/proc"):
-        if e.isdigit():
-            try: out.append(int(e)) if int(stat(e)[2]) == pg else None
-            except (OSError, IndexError, ValueError): pass
-    return out
+def leader_ok():
+    try: return stat(pid)[19] == st and int(stat(pid)[2]) == pg
+    except OSError: return False
 try: lead = os.pidfd_open(pid)
 except OSError: sys.exit(3)
-try:
-    if stat(pid)[19] != st: sys.exit(3)
-except OSError: sys.exit(3)
+if not leader_ok(): sys.exit(3)
+fds = {}
+for e in os.listdir("/proc"):
+    if not e.isdigit(): continue
+    try: fd = os.pidfd_open(int(e))
+    except OSError: continue
+    try: ours = int(stat(e)[2]) == pg
+    except (OSError, IndexError, ValueError): ours = False
+    if ours: fds[int(e)] = fd
+    else: os.close(fd)
+if not leader_ok(): sys.exit(3)       # the leader lived through the whole scan: every pgid == pg seen was this group
+def alive():
+    out = {}
+    for m, fd in fds.items():
+        p = select.poll(); p.register(fd, select.POLLIN)
+        if not p.poll(0): out[m] = fd     # a pidfd turns readable when its process exits
+    return out
 def send(sig):
-    for m in members():
-        try: fd = os.pidfd_open(m)
-        except OSError: continue
-        try:
-            if int(stat(m)[2]) == pg: signal.pidfd_send_signal(fd, sig)
+    for fd in alive().values():
+        try: signal.pidfd_send_signal(fd, sig)
         except OSError: pass
-        finally: os.close(fd)
 def wait(sec):
     end = time.time() + sec
-    while time.time() < end:
-        if not members(): return True
-        time.sleep(0.1)
-    return not members()
+    while time.time() < end and alive(): time.sleep(0.1)
+    return not alive()
 send(signal.SIGTERM)
 if not wait(5): send(signal.SIGKILL); wait(2)
-os.close(lead)
-sys.exit(0 if not members() else 1)
+sys.exit(0 if not alive() else 1)
 ' "$pid" "$st" "$pg" || rc=$?
   (( rc == 3 )) && { echo "prototype: the leader ${pid} changed before it was signalled — nothing sent" >&2; return 1; }
   left="$(_group_or_port_alive "$pg" "$port")" || {
