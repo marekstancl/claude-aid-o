@@ -8,76 +8,74 @@ kroky:
   jmeno: Plán běží
   co: Plán je založený a na jeho větvi se staví kroky.
   kod:
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:2305
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:8596
+  - plugins/aid-orchestrator/scripts/lib/aid-plan-state.sh:537
 - id: EPIC_INTEGRATION
   jmeno: Slučování práce
   co: Hotové kroky se slučují do větve plánu.
   kod:
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:2307
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:2343
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:8642
 - id: PLAN_SYNC
   jmeno: Srovnání s main
   co: Větev plánu se dorovná s tím, co mezitím přibylo na main.
   kod:
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:2544
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:2757
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3034
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3093
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3307
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3341
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:2582
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:2795
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3072
 - id: PLAN_GATES
   jmeno: Brány
   co: Běží testy merge cesty a kontroly, jednou za pokus.
   kod:
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3278
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3542
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3316
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3580
 - id: PLAN_REVIEW
   jmeno: Revize celku
   co: Nezávislý revizor čte celý diff proti zadání.
   kod:
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:4340
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:4378
 - id: PLAN_FIX
   jmeno: Oprava nálezů
   co: Brány nebo revize našly vadu, agent ji opravuje.
   kod:
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3305
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:6021
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3343
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:6059
 - id: AWAITING_PM
   jmeno: Čeká na merge
   co: Rozhodnutí o vydání je ano, čeká se na merge.
   ceka: true
   kod:
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:5458
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:5496
 - id: PLAN_MERGING
   jmeno: Merge do main
   co: Výsledek se slučuje do hlavní větve.
   kod:
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:6488
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:8395
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:6526
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:8441
 - id: CONFLICT
   jmeno: Konflikt
   co: Slučování narazilo na konflikt, který se musí vyřešit.
   kod:
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3073
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:6277
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3111
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:6315
 - id: CLOSED
   jmeno: Hotovo
   co: Plán je na main a uzavřený.
   konec: ok
   kod:
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:7137
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:7179
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:7183
 - id: ROLLED_BACK
   jmeno: Vráceno zpět
   co: Plán se mergnul a pak se správně vrátil.
   konec: bad
   kod:
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:9496
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:9542
 - id: ABORTED
   jmeno: Zrušeno
   co: Plán byl vědomě zrušen, main se nezměnil.
   konec: bad
   kod:
-  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:6022
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:6060
 prechody:
 - z: OPEN
   do: EPIC_INTEGRATION

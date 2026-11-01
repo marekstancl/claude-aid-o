@@ -613,6 +613,10 @@ def clean_svg(svg):
     svg = re.sub(r"<\?xml[^>]*\?>", "", svg)
     svg = re.sub(r"<!DOCTYPE[^>]*>", "", svg, flags=re.I)
     svg = re.sub(r"<!--.*?-->", "", svg, flags=re.S)
+    # bpmn-js names its arrow markers with random ids: renumber them in order, so one map = one picture
+    ids = list(dict.fromkeys(re.findall(r'id="(marker-[A-Za-z0-9_-]+)"', svg)))
+    for n, old in enumerate(ids, 1):
+        svg = svg.replace(old, f"marker-{n}")
     return svg.strip()
 
 
@@ -898,9 +902,26 @@ def cmd_approved(brief):
     return 1 if bad else 0
 
 
+_MDX = {c: f"&#{ord(c)};" for c in "{}<>[]()|*_`#!\\&"}
+
+
+def _md(text):
+    """Map text as inert Markdown/MDX: no JSX, no HTML, no link, no table break (Docusaurus reads .md as MDX)."""
+    return "".join(_MDX.get(c, c) for c in " ".join(str(text).split()))
+
+
+def _safe_target(path, inside):
+    """A file the command may write: its directory resolves under <inside> and the file is not a symlink."""
+    real_dir = os.path.realpath(os.path.dirname(path))
+    if not (real_dir == inside or real_dir.startswith(inside + os.sep)) or os.path.islink(path):
+        raise Refused(f"docs_outside_site: {path}")
+    return path
+
+
 def cmd_docs(path, root, section, out=None):
-    """The map in a Docusaurus site: the SAME picture as the page (static/img/procesy/<name>.svg) and a page
-    docs/<section>/procesni-mapa-<name>.md. Both paths are checked to stay inside the site."""
+    """The map in a Docusaurus site: the SAME picture as the page (static/img/procesy/<project>/<name>.svg) and a
+    page docs/<section>/procesni-mapa-<name>.md (unlisted: linked from the pages that use it). Both resolve inside
+    the site and neither may be a symlink; every map text is escaped for MDX."""
     data = load_map(path)
     try:
         name = map_name(path)
@@ -914,6 +935,18 @@ def cmd_docs(path, root, section, out=None):
     page_dir = os.path.realpath(os.path.join(root, "docs", section))
     if not page_dir.startswith(os.path.join(root, "docs") + os.sep) or not os.path.isdir(page_dir):
         print(f"aid-process-map: docs/{section} is not an existing section of the site", file=sys.stderr); return 2
+    project = re.sub(r"[^a-z0-9-]+", "-", os.path.basename(_root_of(path)).lower()).strip("-") or "projekt"
+    static = os.path.realpath(os.path.join(root, "static"))
+    img_dir = os.path.join(static, "img", "procesy", project)   # per project: two projects' maps never collide
+    target = os.path.join(page_dir, f"procesni-mapa-{name}.md")
+    try:   # resolved BEFORE anything is created: a symlink on the way out of the site is refused, nothing written
+        if not os.path.realpath(img_dir).startswith(static + os.sep):
+            raise Refused(f"docs_outside_site: {img_dir}")
+        os.makedirs(img_dir, exist_ok=True)
+        img = _safe_target(os.path.join(img_dir, f"{name}.svg"), static)
+        _safe_target(target, os.path.realpath(os.path.join(root, "docs")))
+    except Refused as e:
+        print(e, file=sys.stderr); return 2
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         rc = cmd_build(path, out)
@@ -921,21 +954,25 @@ def cmd_docs(path, root, section, out=None):
         sys.stderr.write(buf.getvalue())
         return rc
     svg_src = os.path.join(work_dir(path, name, out), "picture.svg")
-    img_dir = os.path.join(root, "static", "img", "procesy")
-    os.makedirs(img_dir, exist_ok=True)
     with open(svg_src, encoding="utf-8") as f:
         svg = clean_svg(f.read())
-    with open(os.path.join(img_dir, f"{name}.svg"), "w", encoding="utf-8", newline="\n") as f:
+    with open(img, "w", encoding="utf-8", newline="\n") as f:
         f.write(svg + "\n")
+    from datetime import date
+    created = date.today().isoformat()
+    if os.path.isfile(target):   # a regenerated page keeps the day it was created
+        m = re.search(r"^created: (\S+)$", open(target, encoding="utf-8").read(), re.M)
+        created = m.group(1) if m else created
+    src_note = f"z kódu: `{data['zdroj']}`" if data.get("zdroj") else "z rozhovoru"
     lines = ["---", f"title: {json.dumps('Procesní mapa: ' + data['nazev'], ensure_ascii=False)}",
              f"description: {json.dumps('Procesní mapa ' + data['nazev'] + ' - vyrobená z docs/procesy/' + os.path.basename(path), ensure_ascii=False)}",
-             "---", "", f"# Procesní mapa: {data['nazev']}", "",
-             f"Vyrobeno z `docs/procesy/{os.path.basename(path)}` ({'z kódu: `' + data['zdroj'] + '`' if data.get('zdroj') else 'z rozhovoru'}). "
+             "status: published", f"owner: {json.dumps(project)}", f"created: {created}", f"updated: {date.today().isoformat()}",
+             "unlisted: true", "---", "", f"# Procesní mapa: {_md(data['nazev'])}", "",
+             f"Vyrobeno z `docs/procesy/{os.path.basename(path)}` ({src_note}). "
              f"Klikací verzi, kde jde označit, co je špatně, otevře `/aid-map {name}`. "
              "Vzhled: [standard procesních map](/ecosystem/specs/procesni-mapy).", "",
-             f"![{data['nazev']}](/img/procesy/{name}.svg)", "", "## Kroky", "", "| Krok | Co se děje |", "|---|---|"]
-    lines += [f"| {k['jmeno']} | {k['co']} |" for k in data["kroky"]]
-    target = os.path.join(page_dir, f"procesni-mapa-{name}.md")
+             f"![{_md(data['nazev'])}](/img/procesy/{project}/{name}.svg)", "", "## Kroky", "", "| Krok | Co se děje |", "|---|---|"]
+    lines += [f"| {_md(k['jmeno'])} | {_md(k['co'])} |" for k in data["kroky"]]
     with open(target, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
     print(target)

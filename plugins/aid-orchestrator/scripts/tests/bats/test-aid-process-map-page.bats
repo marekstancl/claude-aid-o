@@ -7,6 +7,8 @@
 # per-case limit. Defects it catches: a page that requests anything, a step that cannot be clicked, a mark the
 # reader cannot match back to its step.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; export AID_PLUGIN_PATH
   PM="$AID_PLUGIN_PATH/scripts/aid-process-map.sh"; TOOL="$AID_PLUGIN_PATH/scripts/aid-ui-tool.sh"
@@ -45,11 +47,41 @@ json.dump(r['records'], open('$BATS_TEST_TMPDIR/$1-records.json', 'w'))"
   cp "$FX/zivot-planu.mapa.yaml" "$D/zivot-planu.mapa.yaml"
   run bash "$PM" docs "$D/zivot-planu.mapa.yaml" --do "$SITE" --sekce aid/architecture --out "$BATS_TEST_TMPDIR/dz"; [ "$status" -eq 0 ]
   [ "$output" = "$SITE/docs/aid/architecture/procesni-mapa-zivot-planu.md" ]
-  grep -q '](/img/procesy/zivot-planu.svg)' "$SITE/docs/aid/architecture/procesni-mapa-zivot-planu.md"
+  pg="$SITE/docs/aid/architecture/procesni-mapa-zivot-planu.md"
+  grep -q '](/img/procesy/procesy/zivot-planu.svg)' "$pg"
+  for k in status owner created updated unlisted; do grep -q "^$k: " "$pg"; done
+  # the same picture as the page, byte for byte once cleaned, and stable from build to build
+  run python3 - "$AID_PLUGIN_PATH/scripts" "$BATS_TEST_TMPDIR/dz/picture.svg" "$SITE/static/img/procesy/procesy/zivot-planu.svg" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("apm", sys.argv[1] + "/aid-process-map.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+assert m.clean_svg(open(sys.argv[2]).read()) + "\n" == open(sys.argv[3]).read()
+PY
+  [ "$status" -eq 0 ]
+  cp "$SITE/static/img/procesy/procesy/zivot-planu.svg" "$BATS_TEST_TMPDIR/first.svg"
+  run bash "$PM" docs "$D/zivot-planu.mapa.yaml" --do "$SITE" --sekce aid/architecture --out "$BATS_TEST_TMPDIR/dz2"; [ "$status" -eq 0 ]
+  cmp "$BATS_TEST_TMPDIR/first.svg" "$SITE/static/img/procesy/procesy/zivot-planu.svg"
   run python3 -c "
-import re, yaml; svg = re.sub(r'\s+', '', re.sub(r'<[^>]+>', '', open('$SITE/static/img/procesy/zivot-planu.svg').read()))
+import re, yaml; svg = re.sub(r'\s+', '', re.sub(r'<[^>]+>', '', open('$SITE/static/img/procesy/procesy/zivot-planu.svg').read()))
 names = [re.sub(r'\s+', '', k['jmeno']) for k in yaml.safe_load(open('$D/zivot-planu.mapa.yaml'))['kroky']]
 missing = [n for n in names if n not in svg]; assert not missing, missing"
   [ "$status" -eq 0 ]
   run bash "$PM" docs "$D/zivot-planu.mapa.yaml" --do "$SITE" --sekce ../ven --out "$BATS_TEST_TMPDIR/dz"; [ "$status" -eq 2 ]
+}
+
+@test "docs: map text is inert in MDX, the command refuses a non-site, missing arguments and a symlinked target" {
+  SITE="$BATS_TEST_TMPDIR/site2"; mkdir -p "$SITE/docs/x" "$SITE/static"
+  python3 - "$FX/objednavka.mapa.yaml" "$D/objednavka.mapa.yaml" <<'PY'
+import sys, yaml
+m = yaml.safe_load(open(sys.argv[1])); m["nazev"] = "Obj {alert(1)}"; m["kroky"][0]["co"] = "<script>x</script> | [a](b) {props}"
+yaml.safe_dump(m, open(sys.argv[2], "w"), allow_unicode=True, sort_keys=False)
+PY
+  run bash "$PM" docs "$D/objednavka.mapa.yaml" --do "$SITE" --sekce x --out "$BATS_TEST_TMPDIR/m1"; [ "$status" -eq 0 ]
+  body="$(sed '1,/^---$/{/^---$/!d};1,/^---$/d' "$SITE/docs/x/procesni-mapa-objednavka.md" | sed '1,/^---$/d')"
+  run ! grep -q '[{}<>]' <<<"$body"
+  [ "$(grep -c '^|' "$SITE/docs/x/procesni-mapa-objednavka.md")" -eq 7 ]   # header, rule, five steps: no extra cell
+  run bash "$PM" docs "$D/objednavka.mapa.yaml" --do "$SITE"; [ "$status" -eq 2 ]
+  mkdir -p "$BATS_TEST_TMPDIR/nosite"; run bash "$PM" docs "$D/objednavka.mapa.yaml" --do "$BATS_TEST_TMPDIR/nosite" --sekce x; [ "$status" -eq 2 ]
+  mkdir -p "$BATS_TEST_TMPDIR/outside"; rm -rf "$SITE/static/img"; ln -s "$BATS_TEST_TMPDIR/outside" "$SITE/static/img"
+  run bash "$PM" docs "$D/objednavka.mapa.yaml" --do "$SITE" --sekce x --out "$BATS_TEST_TMPDIR/m2"; [ "$status" -eq 2 ]
+  [[ "$output" == *"docs_outside_site"* ]]; [ -z "$(ls -A "$BATS_TEST_TMPDIR/outside")" ]
 }

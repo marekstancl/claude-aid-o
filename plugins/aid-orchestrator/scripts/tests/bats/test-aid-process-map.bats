@@ -426,3 +426,31 @@ assert {s['id']: s['marker'] for s in m['steps']}['BALENA'] == 'added'"
   cp "$FX/objednavka.mapa.yaml" "$D/a.b.mapa.yaml"
   run bash "$PM" check "$D/a.b.mapa.yaml"; [ "$status" -eq 1 ]; [[ "$output" == *"name:"* ]]
 }
+
+@test "maps of AID: every transition of the code tables is in docs/procesy and every code place names its step" {
+  REPO="$(cd "$AID_PLUGIN_PATH/../.." && pwd)"
+  run python3 - "$REPO" <<'PY'
+import os, re, sys, yaml
+repo = sys.argv[1]; bad = []
+for name in ("zivot-planu", "beh-planu"):
+    m = yaml.safe_load(open(f"{repo}/docs/procesy/{name}.mapa.yaml"))
+    f, ln = m["zdroj"].rsplit(":", 1); lines = open(f"{repo}/{f}").read().split("\n")
+    head = re.match(r"([A-Za-z_]+)=\(", lines[int(ln) - 1]); assert head, ("zdroj is not a table start", name, lines[int(ln) - 1])
+    code = set()
+    for l in lines[int(ln):]:
+        if l.startswith(")"): break
+        t = re.match(r'\s*"([A-Z_]+):([A-Z_]+)"', l)
+        if t: code.add(t.groups())
+    drawn = {(t["z"], t["do"]) for t in m["prechody"]}
+    ids = [k["id"] for k in m["kroky"]]; ends = {k["id"] for k in m["kroky"] if k.get("konec") in ("ok", "bad")}
+    for o in m.get("odevsad", []):
+        drawn |= {(i, o["do"]) for i in ids if i != o["do"] and (o.get("vcetne_koncu") or i not in ends)}
+    bad += [(name, "missing", c) for c in sorted(code - drawn)] + [(name, "extra", d) for d in sorted(drawn - code)]
+    for k in m["kroky"]:
+        for c in k.get("kod", []):
+            cf, cl = c.rsplit(":", 1)
+            if k["id"] not in open(f"{repo}/{cf}").read().split("\n")[int(cl) - 1]: bad.append((name, "stale kod", k["id"], c))
+print(bad); sys.exit(1 if bad else 0)
+PY
+  [ "$status" -eq 0 ]
+}
