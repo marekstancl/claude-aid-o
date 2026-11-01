@@ -200,11 +200,13 @@ sys.exit(0 if not alive() else 1)
 _refresh_proto() {
   _down_proto || die "--refresh: the prototype could not be stopped (above) — nothing was set aside"
   [[ -e "$DIR/proto" || -e "$DIR/proto-manifest.json" || -e "$DIR/shots" ]] || return 0
-  [[ ! -L "$DIR/old" ]] || die "--refresh: ${DIR}/old is a link — the companion directory holds no links"
+  local f; for f in old proto proto-manifest.json shots; do [[ ! -L "$DIR/$f" ]] || die "--refresh: ${DIR}/${f} is a link — the companion directory holds no links"; done
   local old; old="$DIR/old/$(date -u +%Y%m%dT%H%M%SZ)-$$"
   [[ ! -e "$old" ]] || die "--refresh: ${old} already exists"
   mkdir -p "$DIR/old" && mkdir "$old" || die "--refresh: cannot create ${old}"
-  local f; for f in proto proto-manifest.json shots; do [[ -e "$DIR/$f" ]] && mv -- "$DIR/$f" "$old/"; done
+  for f in proto proto-manifest.json shots; do [[ -e "$DIR/$f" ]] && mv -- "$DIR/$f" "$old/"; done
+  # the copy_extra record goes with the old manifest: the new copy still knows which files beside it are the kit's
+  [[ -f "$old/proto-manifest.json" ]] && export AID_COMPANION_EXTRA_RECORDED="$old/proto-manifest.json"
   echo "aid-companion: the old copy, its manifest and shots are in ${old}" >&2
 }
 

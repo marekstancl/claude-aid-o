@@ -405,3 +405,42 @@ _gone() {  # <pgid> <port>: no member left and the port closed (a failing pgrep 
   run _k proto --refresh; [ "$status" -eq 0 ]; [ "$(ls "$D/old" | wc -l)" -eq 2 ]
   _proposal; run _k show; echo "$output"; [ "$status" -eq 0 ]                 # old/ does not block the kit
 }
+
+@test "the kit never writes or removes through a link or a crafted path: a linked .gitignore, a dangling extra target, a recorded ../ path, a reserved name" {
+  printf 'keep.txt\n' > "$P/ui/.gitignore"; local app_gi; app_gi="$(sha256sum < "$P/ui/.gitignore")"
+  run _k proto; [ "$status" -eq 0 ]; _k down >/dev/null
+  rm "$D/proto/.gitignore"; ln -s "$P/ui/.gitignore" "$D/proto/.gitignore"          # the copy's .gitignore points at the app's
+  sed -i '/aid-companion/d' "$P/ui/.gitignore"
+  run _k proto; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"is a link"* ]]; [ "$(sha256sum < "$P/ui/.gitignore")" = "$app_gi" ]
+  rm "$D/proto/.gitignore"; printf 'keep.txt\n' > "$D/proto/.gitignore"
+  mkdir -p "$P/shared" "$BATS_TEST_TMPDIR/out"; echo "a{}" > "$P/shared/a.css"
+  mkdir -p "$D/shared"; ln -s "$BATS_TEST_TMPDIR/out/a.css" "$D/shared/a.css"     # a dangling link where the extra lands
+  yq -i '.ui.copy_extra = ["shared/a.css"]' "$P/.aid-o/config/project.yaml"
+  run _k proto; [ "$status" -ne 0 ]; [[ "$output" == *"is a link"* ]]; [ ! -e "$BATS_TEST_TMPDIR/out/a.css" ]
+  rm "$D/shared/a.css"; run _k proto; [ "$status" -eq 0 ]; _k down >/dev/null
+  jq '.extra += [{rel: "shared/../proto/src/pages/Page.tsx", sha256: "x"}]' "$D/proto-manifest.json" > "$BATS_TEST_TMPDIR/m" && cp "$BATS_TEST_TMPDIR/m" "$D/proto-manifest.json"
+  run _k proto; [ "$status" -ne 0 ]; [[ "$output" == *"not a plain relative path"* ]]; [ -f "$D/proto/src/pages/Page.tsx" ]
+  jq '.extra |= map(select(.rel == "shared/a.css"))' "$D/proto-manifest.json" > "$BATS_TEST_TMPDIR/m" && cp "$BATS_TEST_TMPDIR/m" "$D/proto-manifest.json"
+  echo x > "$P/navrh-1.html"; yq -i '.ui.copy_extra = ["navrh-1.html"]' "$P/.aid-o/config/project.yaml"
+  run _k proto; [ "$status" -ne 0 ]; [[ "$output" == *"the kit's own navrh-1.html"* ]]
+}
+
+@test "the last extra removed takes its empty directory, --refresh keeps the record so a dropped extra still goes, a fresh copy is not stale, and an older copy's .gitignore is no change" {
+  mkdir -p "$P/shared" "$P/ui/storybook-static"; echo "a{}" > "$P/shared/a.css"; echo x > "$P/ui/storybook-static/s.js"
+  ln -s index.html "$P/ui/alias.html"                                              # a link inside ui.dir is copied as content
+  printf 'keep.txt\n' > "$P/ui/.gitignore"
+  yq -i '.ui.copy_extra = ["shared/a.css"]' "$P/.aid-o/config/project.yaml"
+  run _k proto; [ "$status" -eq 0 ]; run _k proto; [ "$(tail -1 <<< "$output" | jq -r .stale)" = 0 ]    # fresh: not stale
+  yq -i '.ui.copy_extra = []' "$P/.aid-o/config/project.yaml"
+  run _k proto; [ "$status" -eq 0 ]; [ ! -e "$D/shared" ]
+  yq -i '.ui.copy_extra = ["shared/a.css"]' "$P/.aid-o/config/project.yaml"; run _k proto; [ -f "$D/shared/a.css" ]
+  yq -i '.ui.copy_extra = []' "$P/.aid-o/config/project.yaml"
+  run _k proto --refresh; echo "$output"; [ "$status" -eq 0 ]; [ ! -e "$D/shared" ]       # dropped while refreshing: still removed
+  # a copy made before 3.14.0: a flat manifest that hashed .gitignore byte for byte
+  _k down >/dev/null
+  jq --arg h "$(sha256sum < "$D/proto/.gitignore" | cut -d' ' -f1)" '.files + {".gitignore": $h}' "$D/proto-manifest.json" > "$BATS_TEST_TMPDIR/m"
+  sed -i '/aid-companion: begin/,/aid-companion: end/d' "$D/proto/.gitignore"
+  jq --arg h "$(sha256sum < "$D/proto/.gitignore" | cut -d' ' -f1)" '. + {".gitignore": $h}' "$BATS_TEST_TMPDIR/m" > "$D/proto-manifest.json"
+  run _k proto; echo "$output"; [ "$status" -eq 0 ]; [ "$(tail -1 <<< "$output" | jq -r .stale)" = null ]
+  _proposal; run _k show; echo "$output"; [ "$status" -eq 0 ]
+}
