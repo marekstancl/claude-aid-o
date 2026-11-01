@@ -54,7 +54,7 @@ echo "TEST: aid-lint-skill.sh exists and is executable"
 [[ -x "$LINT" ]] && pass_msg "linter present + executable" || fail_msg "linter missing or not executable: $LINT"
 
 echo "TEST: every skill + command passes the guard (grandfather-aware)"
-for f in skills/*.md commands/*.md; do
+for f in skills/*.md skills/process-maps/SKILL.md commands/*.md; do
   out=$(bash "$LINT" "$f" 2>/dev/null || true)
   [[ -z "$out" ]] && continue
   univ=$(grep -c '^LINT|universal|' <<<"$out" || true)
