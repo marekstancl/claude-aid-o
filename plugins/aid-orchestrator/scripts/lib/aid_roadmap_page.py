@@ -100,7 +100,7 @@ def validate(raw, where):
             errs.append('stav_k must be a date RRRR-MM-DD')
     if 'jednou_vetou' in d and not txt(d['jednou_vetou']):
         errs.append('jednou_vetou must be a non-empty text')
-    if 'stav' in d and d['stav'] not in STAV:
+    if 'stav' in d and not (isinstance(d['stav'], str) and d['stav'] in STAV):
         errs.append(f'stav must be one of {", ".join(STAV)}')
     for k, fields in ITEM.items():
         if k not in d:
@@ -126,11 +126,14 @@ def validate(raw, where):
         if not d['etapy']:
             errs.append('etapy must name at least one stage')
         for i, it in enumerate(d['etapy']):
-            if isinstance(it, dict) and it.get('stav') not in ETAPA:
+            if isinstance(it, dict) and not (isinstance(it.get('stav'), str) and it['stav'] in ETAPA):
                 errs.append(f'etapy[{i}].stav must be one of {", ".join(ETAPA)}')
-        names = {it.get('nazev') for it in d['etapy'] if isinstance(it, dict)}
+        named = [it['nazev'] for it in d['etapy'] if isinstance(it, dict) and isinstance(it.get('nazev'), str)]
+        names = set(named)
+        if len(names) != len(named):
+            errs.append('etapy: every stage needs its own nazev (hotovo is grouped by it)')
         for i, it in enumerate(d.get('hotovo') if isinstance(d.get('hotovo'), list) else []):
-            if isinstance(it, dict) and it.get('etapa') not in names:
+            if isinstance(it, dict) and not (isinstance(it.get('etapa'), str) and it['etapa'] in names):
                 errs.append(f'hotovo[{i}].etapa {it.get("etapa")!r} is not the nazev of a stage in etapy')
     pz = d.get('posledni_zmena')
     if 'posledni_zmena' in d:
@@ -152,6 +155,8 @@ def render(d, doc_rel, hist):
             t = datetime.datetime.strptime(iso, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc).astimezone(ZoneInfo('Europe/Prague'))
         except (TypeError, ValueError):
             return ''
+        except Exception:                 # no time zone database on this host: UTC as it is
+            return f'{iso[8:10]}. {iso[5:7]}. {iso[11:16]} UTC'
         return f'{t.day}. {t.month}. {t:%H:%M}'
     date = f'{int(d["stav_k"][8:10])}. {int(d["stav_k"][5:7])}. {d["stav_k"][:4]}'
     ul = lambda items, f: '<ul>' + ''.join(f'<li>{f(x)}</li>' for x in items) + '</ul>'
@@ -184,7 +189,7 @@ def render(d, doc_rel, hist):
 <div class="two">{card("Co chybí a od koho", rows(['Co', 'Od koho', 'Od kdy'], d['chybi'], lambda x: f'<td>{e(x["co"])}</td><td>{e(x["od_koho"])}</td><td class="m">{e(x["od_kdy"])}</td>') if d['chybi'] else none('Nic, na nikoho se nečeká.'))}
 {card("Rizika", ul(d['rizika'], lambda x: e(x['co']) + (f' <span class="m">{e(x["overi"])}</span>' if x.get('overi') else '')) if d['rizika'] else none('Žádná známá.'))}</div>
 {card("Hotovo", by_stage or none('Zatím nic.'))}
-{card("Historie změn", rows(['Kdy', 'Co', 'Kdo'], hist, lambda h: f'<td class="m">{when(h.get("at"))}</td><td>{e(h.get("co") or "")}</td><td class="m">{e(h.get("kdo") or "")}</td>'))}
+{card("Historie změn", rows(['Kdy', 'Co', 'Kdo'], hist, lambda h: f'<td class="m">{when(h.get("at"))}</td><td>{e(h.get("co") or "—")}</td><td class="m">{e(h.get("kdo") or "")}</td>'))}
 <footer>Zdroj: {e(doc_rel)} · obnovuje každý plán roadmapy před uzávěrem a /aid-do nad její položkou</footer>
 </div></main></body></html>
 """

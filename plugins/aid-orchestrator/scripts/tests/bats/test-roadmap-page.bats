@@ -138,6 +138,11 @@ P
   _data 'del(.rizika) | .etapy = [] | .stav = "jede"'
   run _rp publish "$DOC" --plan P900; echo "$output"; [ "$status" -ne 0 ]
   [[ "$output" == *"missing field rizika"* && "$output" == *"etapy must name at least one stage"* && "$output" == *"stav must be one of"* ]]
+  _data '.rizika = [] | .stav = [] | .etapy = [{nazev: ["x"], kdy: "1", co_prinese: "a", stav: {}, polozky_hotovo: 0, polozky_celkem: 1}] | .hotovo = [{etapa: {}, lidsky: "x"}]'
+  run _rp publish "$DOC" --plan P900; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" != *Traceback* ]]
+  [[ "$output" == *"stav must be one of"* && "$output" == *"etapy[0].stav must be one of"* && "$output" == *"hotovo[0].etapa"* ]]
+  _data '.etapy = [{nazev: "1.0", kdy: "1", co_prinese: "a", stav: "ted", polozky_hotovo: 0, polozky_celkem: 1}, {nazev: "1.0", kdy: "2", co_prinese: "b", stav: "ceka", polozky_hotovo: 0, polozky_celkem: 1}] | .hotovo = [] | .stav = "na_ceste"'
+  run _rp publish "$DOC" --plan P900; [ "$status" -eq 1 ]; [[ "$output" == *"own nazev"* ]]
   _data '.rizika = [{co: "první plán", overi: "P900"}] | .stav = "na_ceste" | .posledni_zmena = {kdo: "P900", co: "etapy doplněny"}
     | .etapy = [{nazev: "1.0", kdy: "1. 11.", co_prinese: "základ", stav: "hotovo", polozky_hotovo: 3, polozky_celkem: 3},
                 {nazev: "1.1", kdy: "2. 11.", co_prinese: "zbytek", stav: "ted", polozky_hotovo: 1, polozky_celkem: 5}]
