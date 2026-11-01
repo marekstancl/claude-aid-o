@@ -79,3 +79,4 @@ zvlášť). Riziko: odkazy z Docusauru a z pluginu na přesunuté soubory — hl
 
 Rozhodnutí PM 20. 9. 2026 večer k úklidu: kokpit zůstává v repu pod `cockpit/` (1A);
 Telegram = údržba mapy + vyřazení `svc-mcp-tg-bot` jako samostatný krok mimo AID repo (2A).
+Změna 1. 11. 2026 (PM, předávka 17. 10.): kokpit z repa vyjmut, vzor je v soukromém `aidlab-apps/cockpit-v1/`, nový velín v `aidlab-apps/cockpit/`.
