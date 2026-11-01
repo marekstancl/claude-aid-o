@@ -135,6 +135,8 @@ _group_or_port_alive() {  # <pgid> <port>
 # alive (pid, start time). A pidfd is opened on each of them at that moment and every signal goes through it, so it
 # reaches exactly that process even if a number is reused later (a pidfd pins the process, not the number). A
 # member that appears afterwards is never signalled: down then reports the group as still alive and keeps the record.
+# ponytail: the record identifies the leader by pid + start time (clock ticks, 10 ms); a pid the kernel hands out
+# again within the same tick to a new group leader is not told apart — pids are allocated round-robin over 4M.
 _stop_group() {  # <pid> <starttime> <pgid> <port>
   local pid="$1" st="$2" pg="$3" port="$4" left rc=0
   python3 -I -c '
@@ -177,6 +179,9 @@ if not wait(5): send(signal.SIGKILL); wait(2)
 sys.exit(0 if not alive() else 1)
 ' "$pid" "$st" "$pg" || rc=$?
   (( rc == 3 )) && { echo "prototype: the leader ${pid} changed before it was signalled — nothing sent" >&2; return 1; }
+  # an exited process is still listed until it is reaped: wait for the group to empty and the port to close (no
+  # more signals), up to 3 s
+  local i; for i in $(seq 30); do _group_or_port_alive "$pg" "$port" >/dev/null && break; sleep 0.1; done
   left="$(_group_or_port_alive "$pg" "$port")" || {
     echo "prototype: ${left} after TERM and KILL — the record stays in ${DIR}/proto.json; stop it by hand" >&2; return 1; }
 }
