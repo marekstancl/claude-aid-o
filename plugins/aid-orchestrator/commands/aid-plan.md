@@ -303,6 +303,11 @@ is registered at that strength rather than described as more.
 
 ### Step 8: Document
 
+**A roadmap** (the result is several plans, `skills/plan-writing.md` §Plan Types) is written to `docs/plans/` and
+gets its progress page at once: `bash "$AID_PLUGIN_PATH/scripts/aid-roadmap-page.sh" init docs/plans/<roadmap>.md
+--title "<topic> – kde jsme"`; every brief of its plans then names it in `roadmapa_dokument:` (§The roadmap's
+progress page). The lint and plan-close hold the plans to it.
+
 **Write the brief first** — `.aid-o/plans/P{NNN}-zadani.md` from
 `defaults/templates/zadani.md` (`skills/plan-writing.md` §"The brief file"):
 section 1 from the interim's `## Zadání PM` verbatim plus the `**Co je v sázce:**`

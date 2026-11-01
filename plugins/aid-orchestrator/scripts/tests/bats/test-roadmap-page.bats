@@ -1,0 +1,114 @@
+#!/usr/bin/env bats
+# aid-tier: t1
+# aid-subject: scripts/aid-roadmap-page.sh
+# The progress page of a roadmap (AID 3.14.0, PM 30. 10. 2026: every roadmap has one, every plan and /aid-do on the
+# same thing refreshes it). Defects it catches: a page nobody refreshes, a page claiming somebody else's change, data
+# that leaks markup into the page, a path out of the project or through a link, a copied page line taking over another
+# roadmap's page, a failed publish counted as done, a later plan's refresh hiding an earlier plan's.
+
+setup() {
+  AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; export AID_PLUGIN_PATH
+  RP="$AID_PLUGIN_PATH/scripts/aid-roadmap-page.sh"; PY="$AID_PLUGIN_PATH/scripts/lib/aid_roadmap_page.py"
+  export AID_PM_PAGE_PUBLISHER="" AID_PM_PAGE_PUBLISHER_SUBCOMMAND="" AID_PM_PAGES=""
+  R="$BATS_TEST_TMPDIR/p"; mkdir -p "$R/docs/plans" "$R/.aid-o/work"; git -C "$R" init -q
+  git -C "$R" config user.email t@t; git -C "$R" config user.name t
+  DOC=docs/plans/2026-11-01-x-roadmapa.md; printf '# Roadmapa X\n\ntext\n' > "$R/$DOC"
+  DATA="$R/docs/plans/2026-11-01-x-roadmapa.prubeh.json"
+}
+_rp() { (cd "$R" && bash "$RP" "$@"); }
+_data() { jq "$1" "$DATA" > "$DATA.t" && mv "$DATA.t" "$DATA"; }
+_hist() { cat "$R"/.aid-o/work/roadmap-pages/*/history.jsonl; }
+# a publisher that answers with a link (or fails with FAIL=1), as the share does
+_publisher() {
+  cat > "$BATS_TEST_TMPDIR/pub" <<'P'
+#!/usr/bin/env bash
+[[ -n "${FAIL:-}" ]] && { echo "share is down" >&2; exit 3; }
+cat > "$BATS_TEST_TMPDIR/published.html"; echo "https://share.example/p/x#k=secret"
+P
+  chmod +x "$BATS_TEST_TMPDIR/pub"; export AID_PM_PAGE_PUBLISHER="$BATS_TEST_TMPDIR/pub" BATS_TEST_TMPDIR
+}
+
+@test "init writes the page line and the data once; publish records the plan's change; data text is escaped on the page" {
+  run _rp init "$DOC" --title "X kde jsme"; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == "local "* ]]
+  local id; id="$(grep -oE 'id=[a-z0-9-]+' "$R/$DOC" | cut -d= -f2)"; [[ "$id" =~ ^x-roadmapa-[0-9a-f]{8}$ ]]
+  [ "$(sed -n 2p "$R/$DOC")" = "<!-- aid-roadmap-page: id=${id} -->" ]
+  local before; before="$(sha256sum "$R/$DOC" "$DATA")"
+  run _rp init "$DOC" --title "jiný"; [ "$status" -eq 0 ]; [[ "$output" == "kept ${id}"* ]]; [ "$(sha256sum "$R/$DOC" "$DATA")" = "$before" ]
+  _data '.posledni_zmena = {kdo: "P900", co: "<script>alert(1)</script>"} | .chybi = [{co: "<img src=x onerror=1>", od_koho: "jednatel"}]'
+  run _rp publish "$DOC" --plan P900; echo "$output"; [ "$status" -eq 0 ]
+  local page="$R/.aid-o/work/roadmap-pages/${id}/page.html"
+  ! grep -q '<script>alert' "$page"; ! grep -q '<img src=x' "$page"; grep -q '&lt;script&gt;alert(1)&lt;/script&gt;' "$page"
+  [ "$(_hist | tail -1 | jq -r '"\(.kdo) \(.vysledek)"')" = "P900 local" ]
+  [ "$(_hist | tail -1 | jq -r .data_sha256)" = "$(sha256sum < "$DATA" | cut -d' ' -f1)" ]
+}
+
+@test "publish refuses a page that would claim somebody else's change, a data file outside the schema, and a copied page line" {
+  _rp init "$DOC" --title "X" >/dev/null
+  run _rp publish "$DOC" --plan P901; [ "$status" -ne 0 ]; [[ "$output" == *"posledni_zmena.kdo is init, not P901"* ]]
+  run _rp publish "$DOC" --aid-do; [ "$status" -ne 0 ]; [[ "$output" == *"not aid-do"* ]]
+  run _rp publish "$DOC"; [ "$status" -eq 2 ]
+  _data '.navic = 1 | .stav_k = "1. 11." | .hotovo = [{co: "x"}]'
+  run _rp publish "$DOC" --plan P900; echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown field navic"* && "$output" == *"stav_k must be a date"* && "$output" == *"hotovo[0].lidsky"* ]]
+  git -C "$R" checkout -q -- . 2>/dev/null || true
+  _data '.navic = null | del(.navic) | .stav_k = "2026-11-01" | .hotovo = [] | .posledni_zmena.kdo = "P900"'
+  local other=docs/plans/jina.md; { echo '# Jiná'; grep 'aid-roadmap-page' "$R/$DOC"; } > "$R/$other"
+  cp "$DATA" "$R/docs/plans/jina.prubeh.json"
+  run _rp publish "$DOC" --plan P900; [ "$status" -eq 0 ]
+  run _rp publish "$other" --plan P900; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"copied marker line"* ]]
+}
+
+@test "a path out of the project, through a link or a dangling link is refused and nothing outside changes; odd names work" {
+  local out="$BATS_TEST_TMPDIR/outside"; mkdir -p "$out"; printf '# venku\n' > "$out/r.md"
+  local snap; snap="$(ls -la "$out"; sha256sum "$out/r.md")"
+  run _rp init ../outside/r.md --title X; [ "$status" -eq 2 ]
+  run _rp init "$out/r.md" --title X; [ "$status" -eq 2 ]
+  ln -s "$out" "$R/docs/plans/odkaz"; run _rp init docs/plans/odkaz/r.md --title X; [ "$status" -eq 2 ]; [[ "$output" == *"is a link"* ]]
+  ln -s "$out/r.md" "$R/docs/plans/link.md"; run _rp init docs/plans/link.md --title X; [ "$status" -eq 2 ]
+  printf '# y\n' > "$R/docs/plans/d.md"; ln -s "$out/nic.json" "$R/docs/plans/d.prubeh.json"   # dangling data link
+  run _rp init docs/plans/d.md --title X; echo "$output"; [ "$status" -ne 0 ]; [ ! -e "$out/nic.json" ]
+  [ "$(ls -la "$out"; sha256sum "$out/r.md")" = "$snap" ]
+  local odd='docs/plans/a b $x;`y`.md'; printf '# odd\n' > "$R/$odd"
+  run _rp init "$odd" --title "Odd"; echo "$output"; [ "$status" -eq 0 ]; [ -f "$R/docs/plans/a b \$x;\`y\`.prubeh.json" ]
+}
+
+@test "the lint: roadmapa_dokument without a page or out of the project is an error; a free-text roadmapa: of an older brief passes" {
+  local B="$R/.aid-o/plans/P900-zadani.md"; mkdir -p "$R/.aid-o/plans"
+  printf -- '---\nroadmapa_dokument: %s\n---\n' "$DOC" > "$B"
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-roadmap.sh"
+  run aid_roadmap_brief_check "$B" "$R"; [ "$status" -eq 1 ]; [[ "$output" == "ERROR roadmap_page_missing:"*"next:"* ]]
+  printf -- '---\nroadmapa_dokument: ../venku.md\n---\n' > "$B"
+  run aid_roadmap_brief_check "$B" "$R"; [ "$status" -eq 1 ]; [[ "$output" == "ERROR roadmap_path_invalid:"* ]]
+  _rp init "$DOC" --title X >/dev/null
+  printf -- '---\nroadmapa_dokument: %s\n---\n' "$DOC" > "$B"; run aid_roadmap_brief_check "$B" "$R"; [ "$status" -eq 0 ]; [ -z "$output" ]
+  printf -- '---\nroadmapa: navazuje na %s (fáze 2)\n---\n' "$DOC" > "$B"
+  run aid_roadmap_brief_check "$B" "$R"; [ "$status" -eq 0 ]; [[ "$output" == "WARN roadmap_document_unnamed:"* ]]
+  printf -- '---\nroadmapa: P109 → P110 → P111 (docs/plans/2026-10-09-roadmapa-p109.md)\n---\n' > "$B"
+  run aid_roadmap_brief_check "$B" "$R"; [ "$status" -eq 0 ]; [ -z "$output" ]   # the document has no page: nothing to say
+}
+
+@test "published also with AID_PM_PAGES=off (the other pages are not); a failing publisher is failed, never local; the link is not stored" {
+  _publisher; export AID_PM_PAGES=off
+  run _rp init "$DOC" --title X; echo "$output"; [ "$status" -eq 0 ]; [ "$output" = "link https://share.example/p/x#k=secret" ]
+  [ "$(_hist | tail -1 | jq -r .vysledek)" = link ]; ! grep -rq 'k=secret' "$R/.aid-o/work/roadmap-pages"
+  echo '<p>x</p>' > "$BATS_TEST_TMPDIR/plan.html"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-pm-page-publish.sh" "$BATS_TEST_TMPDIR/plan.html" --plan P900 --kind plan --title T --project-root "$R"
+  [[ "$output" == "none "* ]]
+  _data '.posledni_zmena = {kdo: "P900", co: "x"}'
+  FAIL=1 run _rp publish "$DOC" --plan P900; echo "$output"; [ "$status" -ne 0 ]
+  [ "$(_hist | tail -1 | jq -r '"\(.vysledek) \(.duvod)"')" = "failed aid-pm-page-publish: the publisher refused the page (exit 3): share is down" ]
+}
+
+@test "a later plan's refresh does not hide an earlier plan's; a failed publish does not count; the data as merged or as on the target count" {
+  _rp init "$DOC" --title X >/dev/null
+  _data '.posledni_zmena = {kdo: "P900", co: "a"}'; git -C "$R" add -A; git -C "$R" commit -qm p900; local m900; m900="$(git -C "$R" rev-parse HEAD)"
+  _rp publish "$DOC" --plan P900 >/dev/null
+  _data '.posledni_zmena = {kdo: "P901", co: "b"}'; git -C "$R" add -A; git -C "$R" commit -qm p901
+  _rp publish "$DOC" --plan P901 >/dev/null
+  run python3 -I "$PY" refreshed "$R" "$R" "$DOC" P900 "$m900" HEAD; [ "$status" -eq 0 ]
+  run python3 -I "$PY" refreshed "$R" "$R" "$DOC" P901 "$m900" HEAD; [ "$status" -eq 0 ]       # on the target now
+  run python3 -I "$PY" refreshed "$R" "$R" "$DOC" P902 HEAD; [ "$status" -eq 1 ]
+  _publisher; _data '.posledni_zmena = {kdo: "P903", co: "c"}'; git -C "$R" add -A; git -C "$R" commit -qm p903
+  FAIL=1 run _rp publish "$DOC" --plan P903; [ "$status" -ne 0 ]
+  run python3 -I "$PY" refreshed "$R" "$R" "$DOC" P903 HEAD; [ "$status" -eq 1 ]
+}

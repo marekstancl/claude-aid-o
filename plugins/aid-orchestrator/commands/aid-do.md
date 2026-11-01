@@ -226,6 +226,14 @@ If the task hit an auto-escalation trigger (below) the last line stays a
 question the PM did not ask for. If the task could not be finished, render the
 **Blocked or failed** card instead — same file, same ordering rule.
 
+## A roadmap item
+
+When the task is an item of a roadmap with a progress page (`<!-- aid-roadmap-page: … -->` in a document under
+`docs/plans/`), write what it changed into the roadmap's `.prubeh.json` (`posledni_zmena: {kdo: "aid-do", co: "<what>"}`)
+and run `bash "$AID_PLUGIN_PATH/scripts/aid-roadmap-page.sh" publish docs/plans/<roadmap>.md --aid-do` in Step 7,
+before the commit. **Only an instruction:** /aid-do has no brief to bind it, so nothing checks it (plans are checked
+at plan-close, `roadmap_page_not_refreshed`). Give the printed link to the PM in the output.
+
 ## Auto-Escalation Triggers
 
 These conditions suggest the task should have been an EPIC:

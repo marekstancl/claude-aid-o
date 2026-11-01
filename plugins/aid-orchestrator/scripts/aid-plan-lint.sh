@@ -106,6 +106,16 @@ if [[ -n "$ZADANI" ]]; then
   if [[ ! "$z_verze" =~ ^[1-9][0-9]*$ ]]; then
     echo "zadani: $ZADANI: frontmatter verze '${z_verze}' is not a positive integer — the plan binds to a version" >>"$z_err"; z_bad=1
   fi
+  # AID 3.14.0: a brief of a roadmap's plan names a roadmap that has its progress page (lib/aid-roadmap.sh)
+  # shellcheck source=lib/aid-roadmap.sh
+  source "${SCRIPT_DIR}/lib/aid-roadmap.sh"
+  z_root="$(cd "$(dirname "$ZADANI")" && git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  while IFS= read -r rl; do
+    case "$rl" in
+      "ERROR "*) echo "zadani: $ZADANI: ${rl#ERROR }" >>"$z_err"; z_bad=1 ;;
+      "WARN "*) [[ "$QUIET" -eq 0 ]] && echo "zadani: $ZADANI: WARN ${rl#WARN }" >&2 ;;
+    esac
+  done < <(aid_roadmap_brief_check "$ZADANI" "$z_root" || true)
   if (( z_bad )); then
     [[ "$QUIET" -eq 0 ]] && { sed 's/^/ERROR /' "$z_err" >&2
       echo "aid-plan-lint: zadani FAIL — template: defaults/templates/zadani.md; grammar of a point: skills/plan-writing.md #20" >&2; }
@@ -326,6 +336,16 @@ _zadani_pass() {
     [[ -z "$ub" || "$ub" == "$up" ]] ||
       _zadani_err "" "ui_package_lost: the brief ${z} carries ${uk}: ${ub} and the plan ${up:-does not} - copy ${uk} from the brief into the plan's frontmatter (the run gate check_ui_handover reads it)"
   done
+  # AID 3.14.0: a plan of a roadmap keeps its progress page (lib/aid-roadmap.sh)
+  # shellcheck source=lib/aid-roadmap.sh
+  source "${SCRIPT_DIR}/lib/aid-roadmap.sh"
+  local rl
+  while IFS= read -r rl; do
+    case "$rl" in
+      "ERROR "*) _zadani_err "" "${rl#ERROR }" ;;
+      "WARN "*) [[ "$QUIET" -eq 0 ]] && echo "${PLAN}: WARN ${rl#WARN }" >&2 ;;
+    esac
+  done < <(aid_roadmap_brief_check "$zpath" "$root" || true)
   # the plan's criteria, by label (the SAME parser the brief is read with)
   while IFS= read -r rec; do
     [[ -n "$rec" ]] || continue

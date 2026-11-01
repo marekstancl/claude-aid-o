@@ -72,6 +72,23 @@ runs the `/aid-plan write` command from the generated session prompts.
 **Why:** Roadmaps never "complete" in FSM terms. They are living reference documents.
 Allocating plan IDs to them wastes counter space and creates phantom entries in plans/.
 
+### The roadmap's progress page (AID 3.14.0, PM 30. 10. 2026)
+
+Every roadmap has a progress page the PM reads instead of asking "where are we". When the roadmap document is
+written: `bash "$AID_PLUGIN_PATH/scripts/aid-roadmap-page.sh" init docs/plans/<roadmap>.md --title "<topic> – kde jsme"`
+(one page line in the document, the data file `<roadmap>.prubeh.json` beside it, the first publish; commit both).
+Every brief of a plan of that roadmap carries `roadmapa_dokument: docs/plans/<roadmap>.md` — the lint refuses it
+without a page (`roadmap_page_missing`), and `plan-close` refuses the plan until it refreshed the page
+(`roadmap_page_not_refreshed`). The free-text `roadmapa:` binds nothing.
+
+The data file is the only thing the agent writes (plain text, no HTML; unknown fields refused):
+`nazev` (the page title, ≤ 60 characters), `stav_k` (`RRRR-MM-DD`), `jednou_vetou` (where we are, one sentence),
+`hotovo[{co, lidsky, kde}]` (done: the plan or release, what a user notices, where it runs), `dal[{co, kdy?}]` (next),
+`cisla[{co, hodnota}]` (where we are in numbers), `chybi[{co, od_koho}]` (what is missing and from whom),
+`posledni_zmena{kdo: P<n>|aid-do, co}`. A plan writes its change there before its merge (or on the target branch
+after it), then `aid-roadmap-page.sh publish docs/plans/<roadmap>.md --plan P<n>`; the page goes out also with
+`AID_PM_PAGES=off` (the one page the PM wants without asking). The link printed goes to the chat only.
+
 ---
 
 ## Core Principle: Zero Information Loss

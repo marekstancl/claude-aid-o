@@ -2539,6 +2539,45 @@ _lc_status() {
   [ "$output" = "CLOSED" ]
 }
 
+# _main_put <file in the root>... — commit those files onto main by plumbing (the root's checkout is not main)
+_main_put() {
+  local idx; idx="$(mktemp)"; local r="$TEST_PROJECT_ROOT"
+  GIT_INDEX_FILE="$idx" git -C "$r" read-tree main
+  GIT_INDEX_FILE="$idx" git -C "$r" add -f -- "$@"
+  local t c; t="$(GIT_INDEX_FILE="$idx" git -C "$r" write-tree)"; rm -f "$idx"
+  c="$(git -C "$r" commit-tree "$t" -p main -m "roadmap data")"; git -C "$r" update-ref refs/heads/main "$c"
+}
+
+@test "close: a plan of a roadmap closes only after it published the roadmap's page from its data" {
+  _seed_closable
+  local r="$TEST_PROJECT_ROOT" doc=docs/plans/2026-11-01-x-roadmapa.md plan
+  export AID_PM_PAGE_PUBLISHER=""
+  mkdir -p "$r/docs/plans"; printf '# X\n' > "$r/$doc"
+  (cd "$r" && bash "$AID_PLUGIN_PATH/scripts/aid-roadmap-page.sh" init "$doc" --title "X kde jsme")
+  plan="$(source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" && aid_lifecycle_plan_file "$PLAN_ID" "$r")"
+  printf -- '---\nzadani: P900\nverze: 1\nroadmapa_dokument: %s\n---\n# zadani\n' "$doc" > "$r/.aid-o/plans/${PLAN_ID}-zadani.md"
+  printf -- '---\nzadani: .aid-o/plans/%s-zadani.md\n---\n' "$PLAN_ID" | cat - "$plan" > "$r/p.tmp" && mv "$r/p.tmp" "$plan"
+  jq --arg p "$PLAN_ID" '.posledni_zmena = {kdo: $p, co: "hotovo"}' "$r/${doc%.md}.prubeh.json" > "$r/x.json" && mv "$r/x.json" "$r/${doc%.md}.prubeh.json"
+  _main_put "$doc" "${doc%.md}.prubeh.json"
+  _close; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"REFUSED (roadmap_page_not_refreshed)"* ]]; [ ! -f "$(_marker)" ]
+  (cd "$r" && bash "$AID_PLUGIN_PATH/scripts/aid-roadmap-page.sh" publish "$doc" --plan "$PLAN_ID")
+  _close; echo "$output"; [ "$status" -eq 0 ]; [ -f "$(_marker)" ]
+}
+
+@test "close: --force waives an unrefreshed roadmap page and records why" {
+  _seed_closable
+  local r="$TEST_PROJECT_ROOT" doc=docs/plans/2026-11-01-x-roadmapa.md plan
+  export AID_PM_PAGE_PUBLISHER=""
+  mkdir -p "$r/docs/plans"; printf '# X\n' > "$r/$doc"
+  (cd "$r" && bash "$AID_PLUGIN_PATH/scripts/aid-roadmap-page.sh" init "$doc" --title "X kde jsme")
+  plan="$(source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" && aid_lifecycle_plan_file "$PLAN_ID" "$r")"
+  printf -- '---\nzadani: P900\nverze: 1\nroadmapa_dokument: %s\n---\n# zadani\n' "$doc" > "$r/.aid-o/plans/${PLAN_ID}-zadani.md"
+  printf -- '---\nzadani: .aid-o/plans/%s-zadani.md\n---\n' "$PLAN_ID" | cat - "$plan" > "$r/p.tmp" && mv "$r/p.tmp" "$plan"
+  _main_put "$doc" "${doc%.md}.prubeh.json"
+  _close --force --force-reason "the roadmap page is published by hand this time, the share is down"; echo "$output"
+  [ "$status" -eq 0 ]; [[ "$output" == *"bypassing precondition 'roadmap_page_refreshed'"* ]]
+}
+
 @test "AC7: a plan whose .lock sidecars EXIST but are not held closes normally (and the close takes its own lock)" {
   _seed_closable
   # The sidecars are on disk by design — flock releases on descriptor close,

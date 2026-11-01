@@ -166,6 +166,7 @@ Appended to project root `.gitignore` (or created if missing). Content:
 .aid-o/work/runs/
 .aid-o/work/test-audits/
 .aid-o/work/worktree-env/
+.aid-o/work/roadmap-pages/
 .aid-o/work/.cache/
 .aid-o/work/*.lock
 .aid-o/config/*.lock

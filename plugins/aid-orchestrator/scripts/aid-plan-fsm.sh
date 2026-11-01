@@ -432,6 +432,27 @@ _pfsm_force_evidence_dir() {
 # A `hard` failure under --force additionally says that force cannot bypass
 # it, so the operator is not left guessing.
 # ---------------------------------------------------------------------------
+# _pfsm_roadmap_refreshed <root> <plan_id> — 0 when the plan's brief names no roadmap (roadmapa_dokument) or the plan
+# published the roadmap's page from the data as its merge left them; else 1 with the refusal and its next: line.
+_pfsm_roadmap_refreshed() {
+  local root="$1" plan_id="$2" plan z zpath doc merge rc=0
+  plan="$(aid_lifecycle_plan_file "$plan_id" "$root" 2>/dev/null)" || return 0
+  z="$(_aid_fm_get "$plan" zadani)"; [[ -n "$z" ]] || return 0
+  [[ "$z" == /* ]] && zpath="$z" || zpath="${root}/${z}"
+  [[ -f "$zpath" ]] || return 0
+  doc="$(_aid_fm_get "$zpath" roadmapa_dokument)"; [[ -n "$doc" ]] || return 0
+  # shellcheck source=lib/aid-roadmap.sh
+  declare -F aid_roadmap_refreshed >/dev/null || source "${SCRIPT_DIR}/lib/aid-roadmap.sh"
+  local tb; tb="$(aid_target_branch)"
+  # the data as the plan's merge left them, or as they are on the target now (a change written there after the merge)
+  merge="$(git -C "$root" log "$tb" --merges --grep "^merge(plan): ${plan_id}\b" -1 --format=%H 2>/dev/null)"
+  aid_roadmap_refreshed "$root" "$(aid_state_root "$root" 2>/dev/null || printf '%s' "$root")" "$doc" "$plan_id" ${merge:+"$merge"} "$tb" || rc=$?
+  (( rc == 0 )) && return 0
+  echo "REFUSED (roadmap_page_not_refreshed): ${plan_id} belongs to the roadmap ${doc}, but its progress page was not published from the data the merge left ($(git -C "$root" rev-parse --short "$merge" 2>/dev/null))" >&2
+  echo "  next: write this plan's change into ${doc%.md}.prubeh.json (posledni_zmena.kdo: ${plan_id}) (in the plan's branch before the merge, or on ${tb} after it), run aid-roadmap-page.sh publish ${doc} --plan ${plan_id}, then plan-close again (pipeline.md §When AID refuses: roadmap_page_not_refreshed)" >&2
+  return 1
+}
+
 _pfsm_precondition() {
   [[ $# -ge 2 ]] || { echo "${0##*/}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }
   local name="$1" class="$2"; shift 2
@@ -6945,6 +6966,14 @@ cmd_plan_close() {
   # `_pfsm_commit_force` returns 0 immediately when --force is absent, and
   # `_pfsm_handle_force` itself reports "bypassed nothing" when the force was
   # a no-op — the two cases stay distinguishable in the operator's output.
+  # AID 3.14.0: a plan of a roadmap closes only after it refreshed the roadmap's progress page (PM 30. 10. 2026) —
+  # the ordinary close of a merged plan; an abort, an administrative close and a closed plan's rerun do not ask
+  if [[ "$close_mode" == merge && "${_PFSM_ADMIN_CLOSE:-0}" -ne 1 ]]; then
+    if ! _pfsm_precondition "roadmap_page_refreshed" forceable _pfsm_roadmap_refreshed "$root" "$plan_id"; then
+      _pfsm_close_release; exit 1
+    fi
+  fi
+
   _pfsm_commit_force "plan-close" "$plan_id" "$root" || { _pfsm_close_release; exit 1; }
 
   # ── 3. intent (op_id was derived above, for the check's exclusion) ────────
