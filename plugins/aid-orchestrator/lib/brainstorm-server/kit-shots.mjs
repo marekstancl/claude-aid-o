@@ -4,7 +4,7 @@
 // gets 404 and is listed; any such call fails the step, so a shot never shows an empty screen by accident.
 import fs from 'node:fs';
 import path from 'node:path';
-import { safeTarget, sha, shotSha } from './kit-extra.mjs';
+import { safeTarget, sha, shotSha, kitWrite } from './kit-extra.mjs';
 
 const STEPS = new Set(['goto', 'click', 'fill', 'select', 'hover', 'press', 'wait']);
 
@@ -142,9 +142,8 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
         // inside a scroller of its own (overflow-x auto|scroll) the content scrolls on purpose
         let own = false;
         for (let a = el.parentElement; a && a !== d; a = a.parentElement) { if (/(auto|scroll)/.test(getComputedStyle(a).overflowX)) { own = true; break; } }
-        if (own) continue;
         const r = el.getBoundingClientRect(), over = Math.max(r.right - dr.right, dr.left - r.left);
-        if (over > 1) out.push({ pravidlo: 'beyond_dialog_edge', prvek: name(el), presah_px: Math.round(over) });
+        if (!own && over > 1) out.push({ pravidlo: 'beyond_dialog_edge', prvek: name(el), presah_px: Math.round(over) });
         const cs = getComputedStyle(el);
         if (/(hidden|clip)/.test(cs.overflowX) && el.scrollWidth > el.clientWidth + 1
             && !(cs.textOverflow === 'ellipsis' && cs.whiteSpace === 'nowrap'))
@@ -158,6 +157,14 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
   // a shot's files go through the kit's path check; written to a temporary name and renamed into place
   const shotPath = (vp, s, ext) => safeTarget(DIR, `shots/${vp.name}/${s.name}${ext}`, die, { kit: true });
   const dropShot = (vp, s) => { for (const ext of ['.png', '.check.json']) { try { fs.rmSync(shotPath(vp, s, ext)); } catch {} } };
+  // the shots of a run with an unmocked API call may show an empty screen: their checks say so and show refuses them
+  // (K1) — also when the run then stops on another error
+  const markMocksMissing = () => {
+    for (const w of written) {
+      const rel = `shots/${w.vp.name}/${w.s.name}.check.json`;
+      try { kitWrite(DIR, rel, JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(DIR, rel), 'utf8')), mocks_missing: true }, null, 1), die); } catch {}
+    }
+  };
   const takeShot = async (page, s, vp) => {
     const where = `shot '${s.name}' (${vp.name})`;
     // the first shot waits ui.first_shot_timeout_s for what it waits on (a page load never less than the
@@ -196,14 +203,16 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
     } finally { await restore(page); }
     fs.renameSync(file, shotPath(vp, s, '.png'));
     const rec = { png_sha256: sha(shotPath(vp, s, '.png')), viewport: vp.name, shot_sha256: shotSha(s), mocks_missing: false, ...check };
-    fs.writeFileSync(shotPath(vp, s, '.check.json'), JSON.stringify(rec, null, 1));
+    kitWrite(DIR, `shots/${vp.name}/${s.name}.check.json`, JSON.stringify(rec, null, 1), die);
     return { vp, s, file: shotPath(vp, s, '.png') };
   };
   try {
     for (const vp of VIEWPORTS) {
       const ctx = await newContext(vp);
       const page = await ctx.newPage();
+      safeTarget(DIR, `shots/${vp.name}`, die, { kit: true });
       fs.mkdirSync(path.join(DIR, 'shots', vp.name), { recursive: true });
+      safeTarget(DIR, `shots/${vp.name}`, die, { kit: true });
       for (const s of shots) {
         if (s.only && !s.only.includes(vp.name)) continue;
         if (only.length && !only.includes(s.name)) continue;
@@ -227,15 +236,11 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
       await ctx.close();
     }
   } catch (e) {
-    await b.close(); die(`shots: ${e.message}`);
+    await b.close(); if (unknown.size) markMocksMissing(); die(`shots: ${e.message}`);
   }
   await b.close();
   if (unknown.size) {
-    // the shots of this run may show an empty screen: their checks say so, and show refuses them (K1)
-    for (const w of written) {
-      const f = shotPath(w.vp, w.s, '.check.json');
-      fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), mocks_missing: true }, null, 1));
-    }
+    markMocksMissing();
     die(`shots: API calls with no mock (answered 404, the screen may be empty): ${[...unknown].join(', ')} — add them to mocks.json and run shots again`);
   }
   console.log(JSON.stringify({ shots: written.length, dir: path.join(DIR, 'shots'), next: `write navrh.json (shot names: ${[...names].join(', ')}) and run: aid-companion.sh show --plan ${PLAN}` }));

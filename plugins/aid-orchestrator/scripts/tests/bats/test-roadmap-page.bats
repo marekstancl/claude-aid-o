@@ -108,6 +108,7 @@ P
   # a failed first publish: the next init publishes; an error text carrying the link never stores it
   rm -rf "$R/.aid-o/work/roadmap-pages"; FAIL=1 run _rp publish "$DOC" --plan P900
   run _rp init "$DOC" --title X; echo "$output"; [[ "$output" == "link "* ]]
+  [ "$(_hist | tail -1 | jq -r .kdo)" = init ]                                   # init's republish is never a plan's refresh
   printf '#!/usr/bin/env bash\necho "published https://share.example/p/x#k=secret but the record failed" >&2; exit 1\n' > "$BATS_TEST_TMPDIR/pub"
   run _rp publish "$DOC" --plan P900; [ "$status" -ne 0 ]; ! grep -rq 'k=secret' "$R/.aid-o/work/roadmap-pages"
   grep -q '<link>' "$R"/.aid-o/work/roadmap-pages/*/history.jsonl

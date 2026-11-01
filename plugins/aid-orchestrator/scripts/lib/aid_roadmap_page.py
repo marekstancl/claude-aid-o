@@ -212,7 +212,8 @@ def publish(project, state, doc, who, aid_do=False, any_author=False):
         result, link = 'local', None
     else:
         result, link = 'failed', None
-    entry = {'kdo': kdo, 'data_sha256': digest, 'dokument': rel, 'at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+    # a republish by init records init as its author: it never counts as a plan's refresh (plan-close reads kdo)
+    entry = {'kdo': 'init' if any_author else kdo, 'data_sha256': digest, 'dokument': rel, 'at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
              'vysledek': result}
     if result == 'failed':
         # the link carries the PM's key: never into a file, even inside an error text
