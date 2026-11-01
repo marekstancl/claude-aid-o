@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 6.1 s): returns to t1 once the core is faster (IMP-711).
 # aid-subject: scripts/lib/aid-plan-tests.sh
 # P117 (17): the close runs the nightly tests a plan names and binds the result to the candidate. Defect it
 # catches: a plan's t2/e2e tests never run at the close, or a hand-made or stale proof accepted in their place

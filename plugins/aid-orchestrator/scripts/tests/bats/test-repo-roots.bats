@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 3.4 s): returns to t1 once the core is faster (IMP-711).
 # test-repo-roots.bats — the one mapping of a plan's foreign repositories
 # (P112 Step 1): which worktree a declared path lives in, for a plan file and
 # a plan.json alike, and the rewrite of a command text.

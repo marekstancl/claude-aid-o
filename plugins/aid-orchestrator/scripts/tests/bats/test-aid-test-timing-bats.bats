@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 3.3 s): returns to t1 once the core is faster (IMP-711).
 # test-aid-test-timing-bats.bats — P072 Step 11.
 #
 # The parser is tested against RECORDED output, not by invoking bats: a parser

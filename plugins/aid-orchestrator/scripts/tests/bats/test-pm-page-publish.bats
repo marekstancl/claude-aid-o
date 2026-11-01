@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 3.5 s): returns to t1 once the core is faster (IMP-711).
 # aid-subject: scripts/aid-pm-page-publish.sh
 # Where a page AID renders for the PM goes. Defects it catches: a page sent to a publisher the PM did not configure,
 # a publisher command evaluated by a shell, a page counted as delivered that never reached the PM, the PM's link
@@ -164,4 +165,29 @@ _pub() { run bash "$PUB" "$PAGE" --plan P900 --kind plan --title "P900 · plán"
   unset AID_PM_PAGE_PUBLISHER                                      # off, asked for, no publisher: the artifact
   run bash "$PUB" "$PAGE" --plan P900 --kind plan --title t --project-root "$R" --on-request
   [ "$output" = "artifact $PAGE" ]
+}
+
+@test "pm page map: one stable key per map name, no --plan, published even with AID_PM_PAGES=off" {
+  export AID_PM_PAGE_PUBLISHER="$FAKE" AID_PM_PAGE_PUBLISHER_SUBCOMMAND=publish-for-pm AID_PM_PAGES=off
+  run bash "$PUB" "$PAGE" --kind map --name zivot-planu --title "Život plánu" --project-root "$R"
+  [ "$status" -eq 0 ]; [[ "${lines[${#lines[@]}-1]}" == "link https://"* ]]
+  grep -qx -- '--key' "$FAKE_LOG.argv"; key="$(sed -n '/^--key$/{n;p}' "$FAKE_LOG.argv")"; [[ "$key" == */zivot-planu/map ]]
+  run bash "$PUB" "$PAGE" --kind map --name objednavka --title "Objednávka" --project-root "$R"
+  key2="$(sed -n '/^--key$/{n;p}' "$FAKE_LOG.argv")"; [[ "$key2" == */objednavka/map ]]; [ "$key" != "$key2" ]
+}
+
+@test "pm page map: --name is required and valid, --plan is refused, --name belongs to map only" {
+  run bash "$PUB" "$PAGE" --kind map --title t --project-root "$R"; [ "$status" -eq 2 ]
+  run bash "$PUB" "$PAGE" --kind map --name "../x" --title t --project-root "$R"; [ "$status" -eq 2 ]
+  run bash "$PUB" "$PAGE" --kind map --name ok --plan P900 --title t --project-root "$R"; [ "$status" -eq 2 ]
+  run bash "$PUB" "$PAGE" --kind plan --plan P900 --name ok --title t --project-root "$R"; [ "$status" -eq 2 ]
+}
+
+@test "pm page map: --print-key prints the key and calls nothing; no publisher gives local <page>, not artifact" {
+  export AID_PM_PAGE_PUBLISHER="$FAKE"
+  run bash "$PUB" "$PAGE" --kind map --name zivot-planu --title t --project-root "$R" --print-key
+  [ "$status" -eq 0 ]; [[ "$output" == *-*/zivot-planu/map ]]; [ ! -e "$FAKE_LOG.argv" ]
+  unset AID_PM_PAGE_PUBLISHER
+  run bash "$PUB" "$PAGE" --kind map --name zivot-planu --title t --project-root "$R"
+  [ "$status" -eq 0 ]; [ "$output" = "local $PAGE" ]
 }

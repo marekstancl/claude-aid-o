@@ -1,0 +1,149 @@
+nazev: Život plánu v AID
+druh: bpmn
+stav: dnes
+puvod: kod
+zdroj: plugins/aid-orchestrator/scripts/lib/aid-plan-state.sh:229
+kroky:
+- id: OPEN
+  jmeno: Plán běží
+  co: Plán je založený a na jeho větvi se staví kroky.
+  kod:
+  - plugins/aid-orchestrator/scripts/lib/aid-plan-state.sh:537
+- id: EPIC_INTEGRATION
+  jmeno: Slučování práce
+  co: Hotové kroky se slučují do větve plánu.
+  kod:
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:2343
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:8642
+- id: PLAN_SYNC
+  jmeno: Srovnání s main
+  co: Větev plánu se dorovná s tím, co mezitím přibylo na main.
+  kod:
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:2582
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:2795
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3072
+- id: PLAN_GATES
+  jmeno: Brány
+  co: Běží testy merge cesty a kontroly, jednou za pokus.
+  kod:
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3316
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3580
+- id: PLAN_REVIEW
+  jmeno: Revize celku
+  co: Nezávislý revizor čte celý diff proti zadání.
+  kod:
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:4378
+- id: PLAN_FIX
+  jmeno: Oprava nálezů
+  co: Brány nebo revize našly vadu, agent ji opravuje.
+  kod:
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3343
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:6059
+- id: AWAITING_PM
+  jmeno: Čeká na merge
+  co: Rozhodnutí o vydání je ano, čeká se na merge.
+  ceka: true
+  kod:
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:5496
+- id: PLAN_MERGING
+  jmeno: Merge do main
+  co: Výsledek se slučuje do hlavní větve.
+  kod:
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:6526
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:8441
+- id: CONFLICT
+  jmeno: Konflikt
+  co: Slučování narazilo na konflikt, který se musí vyřešit.
+  kod:
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:3111
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:6315
+- id: CLOSED
+  jmeno: Hotovo
+  co: Plán je na main a uzavřený.
+  konec: ok
+  kod:
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:7179
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:7183
+- id: ROLLED_BACK
+  jmeno: Vráceno zpět
+  co: Plán se mergnul a pak se správně vrátil.
+  konec: bad
+  kod:
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:9542
+- id: ABORTED
+  jmeno: Zrušeno
+  co: Plán byl vědomě zrušen, main se nezměnil.
+  konec: bad
+  kod:
+  - plugins/aid-orchestrator/scripts/aid-plan-fsm.sh:6060
+prechody:
+- z: OPEN
+  do: EPIC_INTEGRATION
+- z: EPIC_INTEGRATION
+  do: PLAN_SYNC
+  popis: sloučeno
+- z: EPIC_INTEGRATION
+  do: CONFLICT
+  popis: konflikt
+- z: CONFLICT
+  do: EPIC_INTEGRATION
+  popis: vyřešeno (kroky)
+- z: CONFLICT
+  do: PLAN_SYNC
+  popis: vyřešeno (srovnání)
+- z: PLAN_SYNC
+  do: PLAN_GATES
+  popis: srovnáno
+- z: PLAN_SYNC
+  do: CONFLICT
+  popis: konflikt
+- z: PLAN_GATES
+  do: PLAN_REVIEW
+  popis: prošly
+- z: PLAN_GATES
+  do: PLAN_FIX
+  popis: neprošly
+- z: PLAN_REVIEW
+  do: AWAITING_PM
+  popis: bez vad
+- z: PLAN_REVIEW
+  do: PLAN_FIX
+  popis: nálezy
+- z: PLAN_FIX
+  do: PLAN_SYNC
+- z: AWAITING_PM
+  do: PLAN_MERGING
+  popis: merge
+- z: AWAITING_PM
+  do: PLAN_SYNC
+  popis: main se pohnul
+- z: AWAITING_PM
+  do: PLAN_FIX
+  popis: nová vada
+- z: AWAITING_PM
+  do: CONFLICT
+  popis: konflikt
+- z: PLAN_MERGING
+  do: CLOSED
+  popis: hotovo
+- z: PLAN_MERGING
+  do: ROLLED_BACK
+  popis: vráceno
+- z: PLAN_MERGING
+  do: CONFLICT
+  popis: konflikt
+- z: EPIC_INTEGRATION
+  do: EPIC_INTEGRATION
+- z: PLAN_SYNC
+  do: PLAN_SYNC
+odevsad:
+- do: ABORTED
+  popis: zrušení
+  vcetne_koncu: false
+otazky:
+- cil: PLAN_FIX
+  text: Má smyčka Oprava → Srovnání → Brány → Oprava strop počtu pokusů? Rychle jsem ho v kódu nenašel (možná ho drží pravidla obnovy).
+  stav: neovereno
+- cil: EPIC_INTEGRATION
+  text: AID 3.0.0 zrušil EPICy, stav se ale pořád jmenuje EPIC_INTEGRATION a každý plán jím prochází. Je jméno jen pozůstatek?
+  stav: neovereno

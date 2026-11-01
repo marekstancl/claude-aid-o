@@ -1,0 +1,72 @@
+nazev: Běh plánu v AID
+druh: bpmn
+stav: dnes
+puvod: kod
+zdroj: plugins/aid-orchestrator/scripts/aid-fsm.sh:109
+kroky:
+- id: READY
+  jmeno: Připraveno
+  co: Běh je založený a čeká na start prvního kroku.
+  kod:
+  - plugins/aid-orchestrator/scripts/aid-fsm.sh:3895
+- id: EXECUTE
+  jmeno: Stavba kroků
+  co: Kroky plánu se staví jeden po druhém, po každém revize kroku.
+  kod:
+  - plugins/aid-orchestrator/skills/pipeline.md:573
+  - plugins/aid-orchestrator/skills/pipeline.md:1004
+- id: GATES
+  jmeno: Brány
+  co: Po posledním kroku běží brány (testy a kontroly).
+  kod:
+  - plugins/aid-orchestrator/scripts/aid-fsm.sh:4388
+  - plugins/aid-orchestrator/skills/pipeline.md:1005
+- id: ESCALATION
+  jmeno: Eskalace
+  co: 'Selhání, které běh sám nevyřeší: rozhodne opravář, zástupce nebo PM.'
+  ceka: true
+  kod:
+  - plugins/aid-orchestrator/skills/pipeline.md:1006
+  - plugins/aid-orchestrator/skills/pipeline.md:1180
+- id: DONE
+  jmeno: Hotovo
+  co: Brány prošly, běh je hotový a plán jde k uzávěru.
+  konec: ok
+  kod:
+  - plugins/aid-orchestrator/skills/pipeline.md:1181
+- id: ERROR
+  jmeno: Chyba / opuštěno
+  co: Neopravitelná chyba nebo opuštěný běh (i z hotového běhu, P111).
+  konec: bad
+  kod:
+  - plugins/aid-orchestrator/scripts/aid-fsm.sh:4103
+prechody:
+- z: READY
+  do: EXECUTE
+- z: EXECUTE
+  do: EXECUTE
+- z: EXECUTE
+  do: GATES
+  popis: kroky hotové
+- z: EXECUTE
+  do: ESCALATION
+  popis: tvrdé selhání
+- z: GATES
+  do: DONE
+  popis: prošly
+- z: GATES
+  do: EXECUTE
+  popis: oprava
+- z: GATES
+  do: ESCALATION
+  popis: pokusy došly
+- z: ESCALATION
+  do: EXECUTE
+  popis: opraveno
+- z: ESCALATION
+  do: GATES
+  popis: oprava / přeskočení
+odevsad:
+- do: ERROR
+  popis: selhání
+  vcetne_koncu: true

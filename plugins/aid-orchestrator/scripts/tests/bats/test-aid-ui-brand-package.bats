@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 3.4 s): returns to t1 once the core is faster (IMP-711).
 # P103 extension K3 - aid-ui-brand-package.py: the brand package holds every part the project
 # uses, derived from variant.brand/type, options.identity and the contexts of use in the logo
 # brief; variants told by whole path tokens; a PM waiver covers exactly the waived missing list.

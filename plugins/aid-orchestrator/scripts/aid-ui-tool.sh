@@ -18,6 +18,9 @@
 #   video <out-dir> <url> [--until ms] [--width px]    (P113) a recording of an animation (video.webm)
 #   verify <args>                                      aid-ui-verify.mjs (arrives with the gate)
 #   png <src.svg> <out.png> <width>                    aid-ui-png.mjs: an SVG as a PNG (transparent)
+#   map-render <drawing.bpmn|.mmd> <out.svg> <ids>    aid-ui-map-render.mjs (P118): a process map drawn once by
+#                                                      bpmn-js / Mermaid into an SVG; every step id must be in it
+#   map-page <page.html> <out.json> <step id>          aid-ui-map-page.mjs (P118): drives a built map page (t2 test)
 #   measure [--storage-state <f>] [--build <id>] <base url> <out.json> <page>...   aid-ui-measure.mjs: what the built site uses
 #                                                      (control roles, fields, type, breakpoints) for
 #                                                      the project design standard (step 7 bod 4)
@@ -88,6 +91,8 @@ case "$tool" in
   webp)   js=aid-ui-webp.mjs ;;
   verify) js=aid-ui-verify.mjs ;;
   png)    js=aid-ui-png.mjs ;;
+  map-render) js=aid-ui-map-render.mjs ;;   # P118: a process map drawn once into an SVG
+  map-page)   js=aid-ui-map-page.mjs ;;     # P118: the t2 test driver of the clickable page
   logo-sheet) js=aid-ui-logo-sheet.mjs ;;
   measure) js=aid-ui-measure.mjs ;;
   motion) js=aid-ui-motion.mjs ;;

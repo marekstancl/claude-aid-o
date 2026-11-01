@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 3.2 s): returns to t1 once the core is faster (IMP-711).
 # test-review-summary.bats — the /aid-status lines for a checkpoint's review
 # rounds and for an EPIC's step reviews, and the USD figure behind them.
 # Known tokens are summed, unknown ones are counted and never summed as zero,

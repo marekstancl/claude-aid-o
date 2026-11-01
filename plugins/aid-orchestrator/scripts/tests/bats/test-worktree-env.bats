@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 3.2 s): returns to t1 once the core is faster (IMP-711).
 # aid-subject: scripts/lib/aid-worktree-env.sh
 # A new plan or step worktree gets the ignored files and the setup the project names (AID 3.13.0). Defects it
 # catches: a step tree without .env or its dependencies (WAN P114 26. 10., P116 28. 10. 2026), a copy that

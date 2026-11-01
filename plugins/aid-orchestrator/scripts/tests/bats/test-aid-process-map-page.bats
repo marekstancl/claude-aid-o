@@ -1,0 +1,112 @@
+#!/usr/bin/env bats
+# aid-tier: t2
+# aid-subject: scripts/aid-process-map.py
+# The process-map page as the PM meets it, end to end in a headless browser (P118): both kinds really rendered
+# once by bpmn-js / Mermaid, the page opened with the network cut off, a click, a mark stored through a stub of
+# share's runtime, and that very record read back by `flags`. t2 because a browser start exceeds the t1
+# per-case limit. Defects it catches: a page that requests anything, a step that cannot be clicked, a mark the
+# reader cannot match back to its step.
+
+bats_require_minimum_version 1.5.0
+
+setup() {
+  AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; export AID_PLUGIN_PATH
+  PM="$AID_PLUGIN_PATH/scripts/aid-process-map.sh"; TOOL="$AID_PLUGIN_PATH/scripts/aid-ui-tool.sh"
+  FX="$AID_PLUGIN_PATH/scripts/tests/fixtures/process-map"
+  D="$BATS_TEST_TMPDIR/procesy"; mkdir -p "$D"
+}
+
+_roundtrip() {   # <fixture> <step id> <expected detail title>
+  cp "$FX/$1.mapa.yaml" "$D/$1.mapa.yaml"
+  run bash "$PM" build "$D/$1.mapa.yaml" --out "$BATS_TEST_TMPDIR/$1"; [ "$status" -eq 0 ]
+  [ -s "$BATS_TEST_TMPDIR/$1/picture.svg" ] && [ -s "$BATS_TEST_TMPDIR/$1/page.html" ]
+  run bash "$TOOL" map-page "$BATS_TEST_TMPDIR/$1/page.html" "$BATS_TEST_TMPDIR/$1.json" "$2"; [ "$status" -eq 0 ]
+  run python3 -c "
+import json; r = json.load(open('$BATS_TEST_TMPDIR/$1.json'))
+assert r['requests'] == [], r['requests']
+assert r['detail'] == '$3', r['detail']
+assert len(r['records']) == 1 and r['records'][0]['path'].startswith('data/users/u_test/mapy/oznaceni/'), r['records']
+d = r['records'][0]['data']; assert d['map'] == '$1' and d['state'] == '$2' and d['text'] == 'Zkouška označení', d
+json.dump(r['records'], open('$BATS_TEST_TMPDIR/$1-records.json', 'w'))"
+  [ "$status" -eq 0 ]
+  printf '#!/usr/bin/env bash\ncat "%s"\n' "$BATS_TEST_TMPDIR/$1-records.json" > "$BATS_TEST_TMPDIR/reader"; chmod +x "$BATS_TEST_TMPDIR/reader"
+  AID_PM_PAGE_DATA_READER="$BATS_TEST_TMPDIR/reader" run bash "$PM" flags "$D/$1.mapa.yaml" --out "$BATS_TEST_TMPDIR/$1"
+  [ "$status" -eq 0 ]; [ "${#lines[@]}" -eq 1 ]; [[ "${lines[0]}" == *"\"state\": \"$2\""* ]]
+}
+
+@test "page: the BPMN map renders, makes no request, a click shows the step and its mark comes back through flags" {
+  _roundtrip zivot-planu PLAN_FIX "Oprava nálezů"
+}
+
+@test "page: the state map (Mermaid) renders, makes no request, a click shows the state and its mark comes back through flags" {
+  _roundtrip objednavka NEZAPLACENA "Nezaplacená"
+}
+
+@test "page: changed arrows are coloured and the removed one dashed, a share word shows as text, two builds give the same page" {
+  cp "$FX/zivot-planu.mapa.yaml" "$D/zivot-planu.mapa.yaml"
+  python3 - "$FX/zivot-planu.mapa.yaml" "$D/zmena.mapa.yaml" <<'PY'
+import sys, yaml
+m = yaml.safe_load(open(sys.argv[1])); m["proti"] = "zivot-planu.mapa.yaml"
+m["prechody"] = [t for t in m["prechody"] if (t["z"], t["do"]) != ("CONFLICT", "PLAN_SYNC")]
+[t.update(popis="opraveno") for t in m["prechody"] if (t["z"], t["do"]) == ("PLAN_FIX", "PLAN_SYNC")]
+m["prechody"].append({"z": "PLAN_FIX", "do": "AWAITING_PM", "popis": "fetch selhal"})
+[k.update(jmeno="Worker opraví nálezy") for k in m["kroky"] if k["id"] == "PLAN_FIX"]
+yaml.safe_dump(m, open(sys.argv[2], "w"), allow_unicode=True, sort_keys=False)
+PY
+  run bash "$PM" build "$D/zmena.mapa.yaml" --out "$BATS_TEST_TMPDIR/z1"; [ "$status" -eq 0 ]
+  run bash "$PM" build "$D/zmena.mapa.yaml" --out "$BATS_TEST_TMPDIR/z2"; [ "$status" -eq 0 ]
+  cmp "$BATS_TEST_TMPDIR/z1/page.html" "$BATS_TEST_TMPDIR/z2/page.html"   # the rendered picture too, not only the drawing
+  run bash "$TOOL" map-page "$BATS_TEST_TMPDIR/z1/page.html" "$BATS_TEST_TMPDIR/z.json" PLAN_FIX; [ "$status" -eq 0 ]
+  run python3 -c "
+import json; r = json.load(open('$BATS_TEST_TMPDIR/z.json'))
+assert r['requests'] == [] and r['detail'] == 'Worker opraví nálezy', r
+e = {x['cls'][0]: x for x in r['edges']}
+assert sorted(e) == ['pm-edge-added', 'pm-edge-removed'], r['edges']
+assert e['pm-edge-removed']['dash'] not in ('none', '') and e['pm-edge-added']['dash'] in ('none', ''), r['edges']
+assert 'fetch selhal) · nové' in r['detailText'], r['detailText']"
+  [ "$status" -eq 0 ]
+}
+
+@test "docs: the same picture lands in the site with every step name, a page beside it; a section outside docs/ is refused" {
+  SITE="$BATS_TEST_TMPDIR/site"; mkdir -p "$SITE/docs/aid/architecture" "$SITE/static"
+  cp "$FX/zivot-planu.mapa.yaml" "$D/zivot-planu.mapa.yaml"
+  run bash "$PM" docs "$D/zivot-planu.mapa.yaml" --do "$SITE" --sekce aid/architecture --out "$BATS_TEST_TMPDIR/dz"; [ "$status" -eq 0 ]
+  [ "$output" = "$SITE/docs/aid/architecture/procesni-mapa-zivot-planu.md" ]
+  pg="$SITE/docs/aid/architecture/procesni-mapa-zivot-planu.md"
+  grep -q '](/img/procesy/procesy/zivot-planu.svg)' "$pg"
+  for k in status owner created updated unlisted; do grep -q "^$k: " "$pg"; done
+  # the same picture as the page, byte for byte once cleaned, and stable from build to build
+  run python3 - "$AID_PLUGIN_PATH/scripts" "$BATS_TEST_TMPDIR/dz/picture.svg" "$SITE/static/img/procesy/procesy/zivot-planu.svg" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("apm", sys.argv[1] + "/aid-process-map.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+assert m.clean_svg(open(sys.argv[2]).read()) + "\n" == open(sys.argv[3]).read()
+PY
+  [ "$status" -eq 0 ]
+  cp "$SITE/static/img/procesy/procesy/zivot-planu.svg" "$BATS_TEST_TMPDIR/first.svg"
+  run bash "$PM" docs "$D/zivot-planu.mapa.yaml" --do "$SITE" --sekce aid/architecture --out "$BATS_TEST_TMPDIR/dz2"; [ "$status" -eq 0 ]
+  cmp "$BATS_TEST_TMPDIR/first.svg" "$SITE/static/img/procesy/procesy/zivot-planu.svg"
+  run python3 -c "
+import html, re, yaml; svg = re.sub(r'\s+', '', html.unescape(re.sub(r'<[^>]+>', '', open('$SITE/static/img/procesy/procesy/zivot-planu.svg').read())))
+names = [re.sub(r'\s+', '', k['jmeno']) for k in yaml.safe_load(open('$D/zivot-planu.mapa.yaml'))['kroky']]
+missing = [n for n in names if n not in svg]; assert not missing, missing"
+  [ "$status" -eq 0 ]
+  run bash "$PM" docs "$D/zivot-planu.mapa.yaml" --do "$SITE" --sekce ../ven --out "$BATS_TEST_TMPDIR/dz"; [ "$status" -eq 2 ]
+}
+
+@test "docs: map text is inert in MDX, the command refuses a non-site, missing arguments and a symlinked target" {
+  SITE="$BATS_TEST_TMPDIR/site2"; mkdir -p "$SITE/docs/x" "$SITE/static"
+  python3 - "$FX/objednavka.mapa.yaml" "$D/objednavka.mapa.yaml" <<'PY'
+import sys, yaml
+m = yaml.safe_load(open(sys.argv[1])); m["nazev"] = "Obj {alert(1)}"; m["kroky"][0]["co"] = "<script>x</script> | [a](b) {props}"
+yaml.safe_dump(m, open(sys.argv[2], "w"), allow_unicode=True, sort_keys=False)
+PY
+  run bash "$PM" docs "$D/objednavka.mapa.yaml" --do "$SITE" --sekce x --out "$BATS_TEST_TMPDIR/m1"; [ "$status" -eq 0 ]
+  body="$(sed '1,/^---$/{/^---$/!d};1,/^---$/d' "$SITE/docs/x/procesni-mapa-objednavka.md" | sed '1,/^---$/d')"
+  run ! grep -q '[{}<>]' <<<"$body"
+  [ "$(grep -c '^|' "$SITE/docs/x/procesni-mapa-objednavka.md")" -eq 7 ]   # header, rule, five steps: no extra cell
+  run bash "$PM" docs "$D/objednavka.mapa.yaml" --do "$SITE"; [ "$status" -eq 2 ]
+  mkdir -p "$BATS_TEST_TMPDIR/nosite"; run bash "$PM" docs "$D/objednavka.mapa.yaml" --do "$BATS_TEST_TMPDIR/nosite" --sekce x; [ "$status" -eq 2 ]
+  mkdir -p "$BATS_TEST_TMPDIR/outside"; rm -rf "$SITE/static/img"; ln -s "$BATS_TEST_TMPDIR/outside" "$SITE/static/img"
+  run bash "$PM" docs "$D/objednavka.mapa.yaml" --do "$SITE" --sekce x --out "$BATS_TEST_TMPDIR/m2"; [ "$status" -eq 2 ]
+  [[ "$output" == *"docs_outside_site"* ]]; [ -z "$(ls -A "$BATS_TEST_TMPDIR/outside")" ]
+}

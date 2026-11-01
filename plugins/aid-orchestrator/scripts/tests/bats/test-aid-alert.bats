@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 3.7 s): returns to t1 once the core is faster (IMP-711).
 # test-aid-alert.bats — AID sends three messages and only three: the agent is
 # waiting for the PM, the plan is delivered (P099 Step 3), and the merge-path
 # tests are over their budget (the nightly, 14. 10. 2026). All three carry the

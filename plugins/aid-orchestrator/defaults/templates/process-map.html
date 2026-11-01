@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<!-- AID process map page (P118, /ecosystem/specs/procesni-mapy). Built by aid-process-map.py write_page:
+     the five placeholders are replaced, nothing else. No library, no request: the picture is a finished SVG,
+     the script below is ours. Text from the map is put into the page with textContent, never as HTML. -->
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>@@TITLE@@</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;color:#1f2937;background:#fafaf9}
+header{padding:18px 22px 6px}h1{font-size:22px;margin:0}header p{margin:4px 0 0;color:#6b7280;max-width:85ch}
+.wrap{display:grid;grid-template-columns:1fr;gap:14px;padding:10px 22px 40px}
+.card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;min-width:0}
+#picture{overflow:auto;max-height:70vh;max-width:100%}#picture svg{display:block;height:auto}
+#picture [data-step]{cursor:pointer}
+#side{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:22px}
+@media(max-width:900px){#side{grid-template-columns:1fr}}
+h2{font-size:18px;margin:0 0 4px}h3{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#6b7280;margin:14px 0 6px}
+.muted{color:#6b7280}code{font:12px ui-monospace,monospace;background:#f3f4f6;padding:1px 5px;border-radius:4px}
+ul.arr{list-style:none;padding:0;margin:0}ul.arr li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:4px 0;border-top:1px solid #e5e7eb}
+button{font:inherit;border:1px solid #d1d5db;background:#fff;border-radius:8px;padding:4px 10px;cursor:pointer}
+button.pri{background:#1d4ed8;color:#fff;border-color:#1d4ed8}button.sm{font-size:12px;padding:2px 8px}
+textarea{width:100%;font:inherit;border:1px solid #d1d5db;border-radius:8px;padding:8px;min-height:64px}
+select{font:inherit;border:1px solid #d1d5db;border-radius:8px;padding:3px}
+.q,.f{padding:7px 10px;border-radius:6px;margin:6px 0;font-size:14px}
+.q{border-left:3px solid #b45309;background:#fffbeb}.f{border-left:3px solid #b91c1c;background:#fef2f2}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:13px;color:#6b7280;margin-top:8px}
+.legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:5px;vertical-align:-1px;border:2px solid}
+#form{display:none}#form.on{display:block}
+@@STYLE_CSS@@
+</style>
+</head>
+<body>
+<header><h1 id="title"></h1><p>Klikni na krok: uvidíš, co dělá, kam vede a odkud se do něj dostane. Co je špatně nebo chybí, označ - agent to prověří.</p></header>
+<div class="wrap">
+<div class="card"><div id="picture">@@SVG@@</div><div class="legend" id="legend"></div></div>
+<div class="card" id="side">
+ <div><div id="detail"><h2>Vyber krok v mapě</h2><button id="missing">Tady něco chybí</button></div>
+  <div id="form"><h3>Označit</h3><div id="ftarget" class="muted"></div>
+   <select id="fkind"><option>je to špatně</option><option>chybí krok</option><option>nerozumím</option><option>zbytečné</option></select>
+   <textarea id="ftext" placeholder="Co je špatně, jednou větou"></textarea>
+   <button class="pri" id="fsave">Uložit</button> <button id="fcancel">Zrušit</button> <span id="fmsg" class="muted"></span></div></div>
+ <div><h3>Otázky agenta</h3><div id="qs" class="muted">žádné</div><h3>Tvoje označení</h3><div id="flags" class="muted">zatím nic</div></div>
+</div>
+</div>
+<script type="text/plain" id="model">@@MODEL@@</script>
+<script>
+(function () {
+  "use strict";
+  var raw = atob(document.getElementById("model").textContent.trim());
+  var M = JSON.parse(new TextDecoder().decode(Uint8Array.from(raw, function (c) { return c.charCodeAt(0); })));
+  var steps = {}; M.steps.forEach(function (s) { steps[s.id] = s; });
+  var col = null, current = null, target = null;
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function clear(n) { while (n.firstChild) n.removeChild(n.firstChild); }
+  document.getElementById("title").textContent = M.nazev;
+  document.title = M.nazev;
+
+  // find each step's shape: bpmn-js keeps data-element-id, Mermaid keeps "state-s_<id>-<n>"
+  var shapes = {};
+  Array.prototype.forEach.call(document.querySelectorAll("#picture [data-element-id], #picture g[id]"), function (g) {
+    var id = g.getAttribute("data-element-id");
+    if (!id) { var m = /(?:^|-)s_([A-Za-z][A-Za-z0-9_]*)-\d+$/.exec(g.id || ""); id = m && m[1]; }
+    if (id && steps[id] && !shapes[id]) { shapes[id] = g; g.setAttribute("data-step", id); g.addEventListener("click", function () { show(id); }); }
+  });
+  function mark(id, cls, on) { var g = shapes[id]; if (g) g.classList[on ? "add" : "remove"](cls); }
+  M.steps.forEach(function (s) { if (s.marker) mark(s.id, "pm-" + s.marker, true); });
+  (M.otazky || []).forEach(function (q) { if (q.stav === "neovereno") mark(q.cil, "pm-question", true); });
+  M.transitions.forEach(function (t) {   // an arrow added or removed against the approved map
+    var g = t.marker && t.fid && document.querySelector('#picture [data-element-id="' + t.fid + '"]');
+    if (g) g.classList.add("pm-edge-" + t.marker);
+  });
+  var EDGE = { added: " · nové", removed: " · zrušené" };
+
+  var legend = document.getElementById("legend");
+  M.legend.forEach(function (l) { var span = el("span"); var i = el("i"); i.style.background = l.fill || "transparent"; i.style.borderColor = l.stroke; span.appendChild(i); span.appendChild(document.createTextNode(l.label)); legend.appendChild(span); });
+
+  var qs = document.getElementById("qs");
+  if ((M.otazky || []).length) { clear(qs); M.otazky.forEach(function (q) { qs.appendChild(el("div", "q", (steps[q.cil] ? steps[q.cil].jmeno + ": " : "") + q.text + " (" + q.stav + ")")); }); }
+
+  function show(id) {
+    var s = steps[id]; if (!s) return;
+    if (current) mark(current, "pm-sel", false);
+    current = id; mark(id, "pm-sel", true);
+    var d = document.getElementById("detail"); clear(d);
+    d.appendChild(el("h2", null, s.jmeno)); d.appendChild(el("p", null, s.co));
+    (M.otazky || []).filter(function (q) { return q.cil === id; }).forEach(function (q) { d.appendChild(el("div", "q", q.text)); });
+    if (s.kod && s.kod.length) { d.appendChild(el("h3", null, "Kde v kódu")); s.kod.forEach(function (k) { var p = el("div"); p.appendChild(el("code", null, k)); d.appendChild(p); }); }
+    var outs = M.transitions.filter(function (t) { return t.z === id && t.do !== id; });
+    d.appendChild(el("h3", null, "Kam odsud vede (" + outs.length + ")"));
+    var ul = el("ul", "arr");
+    outs.forEach(function (t) {
+      var li = el("li"); li.appendChild(el("span", null, "→ " + (steps[t.do] ? steps[t.do].jmeno : t.do) + (t.popis ? " (" + t.popis + ")" : "") + (EDGE[t.marker] || "")));
+      var b = el("button", "sm", "označit"); b.addEventListener("click", function () { openForm(id, t.do, "šipka " + s.jmeno + " → " + (steps[t.do] ? steps[t.do].jmeno : t.do)); });
+      li.appendChild(b); ul.appendChild(li);
+    });
+    if (!outs.length) ul.appendChild(el("li", "muted", "nikam, konec"));
+    d.appendChild(ul);
+    var ins = M.transitions.filter(function (t) { return t.do === id && t.z !== id; }).map(function (t) { return steps[t.z] ? steps[t.z].jmeno : t.z; });
+    d.appendChild(el("h3", null, "Odkud sem vede (" + ins.length + ")")); d.appendChild(el("div", "muted", ins.join(", ") || "začátek"));
+    var b2 = el("button", "pri", "Označit tento krok"); b2.style.marginTop = "12px";
+    b2.addEventListener("click", function () { openForm(id, null, "krok " + s.jmeno); }); d.appendChild(b2);
+  }
+  function openForm(state, to, label) {
+    target = { state: state, to: to, label: label };
+    document.getElementById("ftarget").textContent = label;
+    document.getElementById("form").classList.add("on"); document.getElementById("ftext").focus();
+  }
+  function closeForm() { document.getElementById("form").classList.remove("on"); document.getElementById("ftext").value = ""; document.getElementById("fmsg").textContent = ""; }
+  document.getElementById("missing").addEventListener("click", function () { openForm(null, null, "celý proces"); });
+  document.getElementById("fcancel").addEventListener("click", closeForm);
+  document.getElementById("fsave").addEventListener("click", function () {
+    var text = document.getElementById("ftext").value.trim(); if (!text || !target) return;
+    if (!col) { document.getElementById("fmsg").textContent = @@MARK_ONLY_SHARED@@; return; }
+    var rec = { map: M.name, state: target.state, to: target.to, label: target.label, kind: document.getElementById("fkind").value,
+                text: text, at: new Date().toISOString(), status: "nové" };
+    col.add(rec).then(function () { closeForm(); load(); }, function (e) { document.getElementById("fmsg").textContent = "Nepovedlo se uložit: " + ((e && (e.code || e.message)) || "neznámá chyba"); });
+  });
+  function load() {
+    if (!col) return;
+    col.get().then(function (snap) {
+      var list = snap.docs.map(function (d) { return d.data(); }).filter(function (r) { return r.map === M.name; });
+      list.sort(function (a, b) { return a.at < b.at ? 1 : -1; });
+      Object.keys(shapes).forEach(function (id) { mark(id, "pm-flag", false); });
+      var box = document.getElementById("flags"); clear(box);
+      if (!list.length) { box.textContent = "zatím nic"; return; }
+      list.forEach(function (r) { if (r.state) mark(r.state, "pm-flag", true); box.appendChild(el("div", "f", r.kind + " · " + r.label + ": " + r.text)); });
+    });
+  }
+  var claude = window.claude;
+  if (claude && claude.use) {
+    Promise.all([claude.use("db"), claude.use("user")]).then(function (caps) {
+      var db = caps[0], user = caps[1];
+      if (!db || !user) return null;
+      return user.me().then(function (me) { if (me && me.id) { col = db.collection("data/users/" + me.id + "/mapy/oznaceni"); load(); } });
+    }).catch(function () { col = null; });
+  }
+  window.__processMapReady = true;
+}());
+</script>
+</body>
+</html>

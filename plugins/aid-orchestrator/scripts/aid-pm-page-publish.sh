@@ -7,10 +7,21 @@
 #   aid-pm-page-publish.sh <page.html> --kind roadmap --roadmap <id> --title "<title>" [--project-root <r>]
 #                          a roadmap's progress page (AID 3.14.0, scripts/aid-roadmap-page.sh): the one page the PM
 #                          wants without asking (30. 10. 2026), so it goes out even when AID_PM_PAGES=off
+#   aid-pm-page-publish.sh <page.html> --kind map --name <map> --title "<title>" [--project-root <r>] [--print-key]
+#                          a process map (AID 3.15.0, scripts/aid-process-map.sh): one stable page per map, key
+#                          <project-id>/<map>/map, always on request (AID_PM_PAGES=off does not stop it); with no
+#                          publisher it prints `local <page>` (open the file locally, no marks) instead of `artifact`.
+#                          --print-key prints the key it would use and publishes nothing (aid-process-map.sh flags)
+#
+# THE READER PROTOCOL (process-map marks, AID 3.15.0):
+#   AID_PM_PAGE_DATA_READER (+ optional AID_PM_PAGE_DATA_READER_SUBCOMMAND), else AID_PM_PAGE_PUBLISHER with the
+#   subcommand `data`; argv [<subcommand>] --key <key>; stdout a JSON array of {path, data, …} — the page's stored
+#   documents. On eco-dev: share-admin.sh data --key (share's own brief, 2026-11-01).
 #
 # Prints ONE line for the controller:
 #   none <page>         AID_PM_PAGES=off and not --on-request: publish nothing, the card alone goes to the chat (exit 0)
 #   artifact <page>     no publisher configured: publish the page with the Artifact tool, as before (exit 0)
+#   local <page>        --kind map and no publisher configured: open the file locally, no marks (exit 0)
 #   link <https://…>    published; the controller adds "Stránka: <link>" under the chat card (exit 0)
 # and on failure exits 1 with one sentence on stderr — never "artifact": a page a configured publisher refused is
 # not quietly sent elsewhere (the controller adds "Stránka se nezveřejnila: <reason>" under the card).
@@ -43,7 +54,7 @@ LOGO_MAX=8192
 
 _die() { echo "aid-pm-page-publish: $1" >&2; exit "${2:-1}"; }
 
-page="" plan="" kind="" title="" root="" on_request=0 roadmap=""
+page="" plan="" kind="" title="" root="" on_request=0 roadmap="" map_name="" print_key=0
 [[ $# -ge 1 && "$1" != --* ]] && { page="$1"; shift; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -52,42 +63,29 @@ while [[ $# -gt 0 ]]; do
     --title) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; title="${2:-}"; shift 2 ;;
     --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; root="${2:-}"; shift 2 ;;
     --on-request) on_request=1; shift ;;
+    --name) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; map_name="${2:-}"; shift 2 ;;
+    --print-key) print_key=1; shift ;;
     --roadmap) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; roadmap="${2:-}"; shift 2 ;;
     *) _die "unknown argument: $1" 2 ;;
   esac
 done
 [[ -n "$page" && -f "$page" && -r "$page" ]] || _die "no readable page: ${page:-<none>}" 2
-if [[ "$kind" == roadmap ]]; then
+if [[ "$kind" == map ]]; then
+  [[ "$map_name" =~ ^[a-z0-9][a-z0-9-]{0,48}$ && -z "$plan" && -z "$roadmap" ]] || _die "--kind map takes --name <map> ([a-z0-9][a-z0-9-]*, at most 49 characters), no --plan or --roadmap; got '${map_name}'" 2
+  plan="$map_name"; on_request=1   # one stable page per map; a map is always asked for
+elif [[ "$kind" == roadmap ]]; then
   [[ "$roadmap" =~ ^[a-z0-9][a-z0-9-]{0,48}-[0-9a-f]{8}$ && -z "$plan" ]] || _die "--kind roadmap takes --roadmap <id> (as aid-roadmap-page.sh writes it), no --plan; got '${roadmap}'" 2
   plan="roadmap-${roadmap}"; on_request=1   # the key's middle part; published even with AID_PM_PAGES=off
 else
   [[ -z "$roadmap" ]] || _die "--roadmap belongs to --kind roadmap" 2
+  [[ -z "$map_name" ]] || _die "--name belongs to --kind map" 2
   [[ "$plan" =~ ^P[0-9]{3,}$ ]] || _die "--plan must be P<number>, got '${plan}'" 2
-  [[ "$kind" =~ ^(plan|close|brainstorm)$ ]] || _die "--kind must be plan, close, brainstorm or roadmap, got '${kind}'" 2
+  [[ "$kind" =~ ^(plan|close|brainstorm)$ ]] || _die "--kind must be plan, close, brainstorm, roadmap or map, got '${kind}'" 2
 fi
 title="${title//[$'\t\r\n']/ }"
 [[ -n "${title// /}" ]] || _die "--title is required" 2
 
-# the PM switched the automatic pages off: nothing goes out unless the PM asked for this page
-if aid_pm_pages_auto_off && (( ! on_request )); then
-  printf 'none %s\n' "$page"
-  exit 0
-fi
-
-# no publisher: the page stays a claude.ai artifact, exactly as before
-if ! aid_pm_page_publisher_set; then
-  printf 'artifact %s\n' "$page"
-  exit 0
-fi
-
-pub="$AID_PM_PAGE_PUBLISHER"
-[[ -x "$pub" && ! -d "$pub" ]] || _die "AID_PM_PAGE_PUBLISHER is not an executable file: ${pub}"
-sub="${AID_PM_PAGE_PUBLISHER_SUBCOMMAND:-}"
-[[ -z "$sub" || "$sub" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] || _die "AID_PM_PAGE_PUBLISHER_SUBCOMMAND must be one word, got '${sub}'"
-
-size="$(wc -c < "$page")"
-(( size <= MAX_BYTES )) || _die "the page is ${size} bytes, over the ${MAX_BYTES} a published page may have"
-
+_project_id() {   # root, pyaml and pid: early only for a map or --print-key, so other kinds behave as before
 [[ -n "$root" ]] || root="$(aid_state_root 2>/dev/null || pwd)"
 root="$(realpath "$root")"
 pyaml="${root}/.aid-o/config/project.yaml"
@@ -102,6 +100,33 @@ ident=""
 [[ -f "${root}/.aid-lifecycle/repo-identity.yaml" ]] && ident="$(yq -r '.repo_id // ""' "${root}/.aid-lifecycle/repo-identity.yaml" 2>/dev/null || true)"
 [[ -n "$ident" && "$ident" != null ]] || ident="$root"
 pid="${slug}-$(printf '%s' "$ident" | sha256sum | cut -c1-8)"
+}
+if (( print_key )) || [[ "$kind" == map ]]; then _project_id; fi
+(( print_key )) && { printf '%s\n' "${pid}/${plan}/${kind}"; exit 0; }
+
+# the PM switched the automatic pages off: nothing goes out unless the PM asked for this page
+if aid_pm_pages_auto_off && (( ! on_request )); then
+  printf 'none %s\n' "$page"
+  exit 0
+fi
+
+# no publisher: the page stays a claude.ai artifact, exactly as before — a map is opened locally instead
+if ! aid_pm_page_publisher_set; then
+  [[ "$kind" == map ]] && { printf 'local %s\n' "$page"; exit 0; }
+  printf 'artifact %s\n' "$page"
+  exit 0
+fi
+
+pub="$AID_PM_PAGE_PUBLISHER"
+[[ -x "$pub" && ! -d "$pub" ]] || _die "AID_PM_PAGE_PUBLISHER is not an executable file: ${pub}"
+sub="${AID_PM_PAGE_PUBLISHER_SUBCOMMAND:-}"
+[[ -z "$sub" || "$sub" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] || _die "AID_PM_PAGE_PUBLISHER_SUBCOMMAND must be one word, got '${sub}'"
+
+[[ -n "${pid:-}" ]] || _project_id
+
+size="$(wc -c < "$page")"
+(( size <= MAX_BYTES )) || _die "the page is ${size} bytes, over the ${MAX_BYTES} a published page may have"
+
 name=""
 [[ -f "$pyaml" ]] && name="$(yq -r '.project_name // .name // ""' "$pyaml" 2>/dev/null || true)"
 [[ -n "$name" && "$name" != null ]] || name="$(basename "$root")"

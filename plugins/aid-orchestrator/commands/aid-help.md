@@ -84,6 +84,7 @@ Before you trust either end:
 
 Design:
   /aid-ui                  → UI from product type to an approved brand page
+  /aid-map                 → a process as a clickable map; mark what is wrong, the agent answers
 ```
 
 ## Level 2: Configuration (5+ tasks completed)
@@ -223,6 +224,11 @@ about something visual, `/visual-companion` shows the PM proposals built from th
 own components on one fixed page — the agent builds the variants, `scripts/aid-companion.sh`
 does the server, the captures, the page and the PM's answers; you can also invoke
 `/visual-companion` on its own as a smoke test.
+
+When a brainstorm builds a new application, refactors, or changes how something proceeds, it offers
+`/aid-map`: the process as a clickable map in one fixed look (BPMN or a state diagram), where you mark
+what is wrong and the agent checks it in the code and answers; the procedure is the `/process-maps`
+skill. Approved maps bind the run through the brief; `/aid-map` also works on its own at any time.
 
 ```
 /aid-plan — Brainstorm, Write

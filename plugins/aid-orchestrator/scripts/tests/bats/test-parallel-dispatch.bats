@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 4.5 s): returns to t1 once the core is faster (IMP-711).
 # test-parallel-dispatch.bats — the brake comes off: a wave is run at once
 # only when code says so, and a merge conflict is a retry (P087 Step 4).
 #

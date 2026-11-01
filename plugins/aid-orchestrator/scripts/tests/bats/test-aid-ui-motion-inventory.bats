@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 4.2 s): returns to t1 once the core is faster (IMP-711).
 # aid-subject: scripts/aid-ui-motion.py
 # P108 motion inventory — scripts/aid-ui-motion.py: the inventory from the picked reference's
 # record, the check against an observed record (every adopt/replace seen in its scenario and

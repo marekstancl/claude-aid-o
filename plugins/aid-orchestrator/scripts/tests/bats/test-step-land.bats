@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026): one of the three most expensive suites outside tests/tier-core.txt (nightly: step-land 172 s, aid-ui-app 114 s, aid-ui-package 92 s).
 # aid-subject: scripts/aid-step-land.sh
 # Taking a step over in the background (AID 3.11.0). Defects it catches: the plan's branch moving before the
 # step's checks passed, a command criterion left out or run with another command, a failed takeover leaving the

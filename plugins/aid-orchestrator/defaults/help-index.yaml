@@ -227,6 +227,16 @@ surfaces:
       topic: ui, audience: regular, disposition: current,
       writes: [], final_turn: "card:decision-required" }
 
+  - { command: /aid-map, file: plugins/aid-orchestrator/commands/aid-map.md,
+      purpose: "Draw a process map, publish its clickable page, or read and answer the PM's marks on it",
+      topic: plan, audience: regular, disposition: current,
+      writes: [], final_turn: "card:decision-required" }
+
+  - { command: /process-maps, file: plugins/aid-orchestrator/skills/process-maps/SKILL.md,
+      purpose: "How a process map is written, built, published and answered; loaded by /aid-map, brainstorming and the reconcile step",
+      topic: plan, audience: power, disposition: current,
+      writes: [], final_turn: "card:decision-required" }
+
   - { command: /ui-design, file: plugins/aid-orchestrator/skills/ui-design/SKILL.md,
       purpose: "Seven steps of /aid-ui, loaded by that command; not invoked directly",
       topic: ui, audience: power, disposition: current,

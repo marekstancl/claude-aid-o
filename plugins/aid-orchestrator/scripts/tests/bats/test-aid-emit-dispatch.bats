@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 3.1 s): returns to t1 once the core is faster (IMP-711).
 # test-aid-emit-dispatch.bats — Component A of P040 coverage.
 #
 # Proves the pending-ledger semantics of aid-emit-dispatch.sh start/complete:
