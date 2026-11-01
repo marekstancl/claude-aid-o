@@ -1,0 +1,18 @@
+{"nazev": "AID opravy – kde jsme",
+ "stav_k": "2026-11-01",
+ "jednou_vetou": "Všechno, co jsi 31. 10. vybral, je vydané (3.12.1, 3.13.0, 3.14.0); zbývá pět drobností, které čekají na druhý případ.",
+ "hotovo": [
+  {"co": "3.12.1", "lidsky": "Odložené nálezy se značí i ve velkém repu, zástupce dostává svoje pokyny", "kde": "vydáno 31. 10."},
+  {"co": "3.13.0", "lidsky": "Běh plánu bez ručních obchvatů: převzetí kroku, prostředí stromů, obnova sloučení, verze souběžných plánů", "kde": "vydáno 31. 10."},
+  {"co": "3.14.0", "lidsky": "Povinná stránka průběhu roadmapy a companion, který nepředá uříznutý náhled", "kde": "vydáno 1. 11."}],
+ "dal": [
+  {"co": "12.5–12.9 (přejmenování kontraktu, souběžné slučování, pořadí slučování, předem existující chyba, přerušené sezení)", "kdy": "až se objeví druhý nezávislý případ"},
+  {"co": "Ověřit stránku roadmapy na prvním plánu WANu s roadmapa_dokument"}],
+ "cisla": [
+  {"co": "položek roadmapy hotovo", "hodnota": "23 / 28"},
+  {"co": "vydání", "hodnota": "3"},
+  {"co": "testovacích případů navíc (31. 10.–1. 11.)", "hodnota": "+91"}],
+ "chybi": [
+  {"co": "Brána inputs: u bran a brána jediné hlavy migrací alembic", "od_koho": "okno WANu (mimo plugin)"},
+  {"co": "Studio /aid-ui (10 hlášení + 4 tvé požadavky z 26. 10.)", "od_koho": "tvé rozhodnutí, kdy se k němu vrátit"}],
+ "posledni_zmena": {"kdo": "init", "co": "založení stránky po vydání 3.14.0"}}

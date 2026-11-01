@@ -1,4 +1,5 @@
 # Roadmapa oprav z plugin issues (od 31. 10. 2026)
+<!-- aid-roadmap-page: id=roadmapa-plugin-issues-b100a0aa -->
 
 Živý seznam: co PM z rozborů hlášení vybral, v jakém vydání to jde a jaký to má stav. Každé vydání, které
 položku dodá, ji tu ve stejném commitu označí `HOTOVO vX.Y.Z`. Do zdrojového hlášení projektu se dopíše
