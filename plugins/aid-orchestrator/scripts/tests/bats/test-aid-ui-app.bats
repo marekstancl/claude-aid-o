@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026): one of the three most expensive suites outside tests/tier-core.txt (nightly: step-land 172 s, aid-ui-app 114 s, aid-ui-package 92 s).
 # P116 - the /aid-ui studio for web applications: files and JSON only, no browser, no model.
 # screens:  aid-ui-screens.py check - the model of screens and tasks (UA-1) refuses what a skeleton, a gate or a
 #           package could not stand on.

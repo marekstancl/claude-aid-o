@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026): one of the three most expensive suites outside tests/tier-core.txt (nightly: step-land 172 s, aid-ui-app 114 s, aid-ui-package 92 s).
 # aid-ui-package.py — P115: the handover package between the studio and plan/run (docs/ui/predani.json).
 # package:  the handover writes it, an incomplete or stale one refuses the handover and leaves the answer unused.
 # Real studio and answers through the helpers of test-aid-ui-state.bats (aid-ui-state-helpers.bash); no model.
