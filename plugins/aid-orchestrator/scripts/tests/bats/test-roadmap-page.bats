@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 6.2 s): returns to t1 once the core is faster (IMP-711).
 # aid-subject: scripts/aid-roadmap-page.sh
 # The progress page of a roadmap (AID 3.14.0, PM 30. 10. 2026: every roadmap has one, every plan and /aid-do on the
 # same thing refreshes it). Defects it catches: a page nobody refreshes, a page claiming somebody else's change, data

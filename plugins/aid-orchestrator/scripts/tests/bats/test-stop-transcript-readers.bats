@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 22.4 s): returns to t1 once the core is faster (IMP-711).
 # aid-subject: scripts/lib/aid-hook-rules-turn.sh
 # The two transcript readers every AID Stop runs. Defects they catch: reading a long session's whole
 # transcript on every Stop (186 MB in WAN on 25. 10. 2026: 13 s per turn end), and a faster reader that

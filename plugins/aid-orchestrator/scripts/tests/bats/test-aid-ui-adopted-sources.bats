@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 12.0 s): returns to t1 once the core is faster (IMP-711).
 # P103 Step 1 — every adopted third-party file has a register row, every licence has its text.
 # P108 Step 1 — the marketingskills snapshot (adopted/marketingskills/MANIFEST: git blob id per
 # file) is byte-identical to upstream dda3841, nothing is added or missing, no symlink, and every

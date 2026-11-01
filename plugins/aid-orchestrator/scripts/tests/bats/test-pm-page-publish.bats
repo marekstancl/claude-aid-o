@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 3.5 s): returns to t1 once the core is faster (IMP-711).
 # aid-subject: scripts/aid-pm-page-publish.sh
 # Where a page AID renders for the PM goes. Defects it catches: a page sent to a publisher the PM did not configure,
 # a publisher command evaluated by a shell, a page counted as delivered that never reached the PM, the PM's link

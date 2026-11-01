@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 18.3 s): returns to t1 once the core is faster (IMP-711).
 # aid-subject: scripts/aid-stand-in.sh
 # P117 (11): in an --auto run the independent stand-in decides a technical decision that is not a review
 # finding (a scope widening, a step without a change, a technically failed measurement), and a PROTECTED impact

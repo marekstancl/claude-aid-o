@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 8.5 s): returns to t1 once the core is faster (IMP-711).
 # test-decision-card.bats — the card that asks the PM for a decision (P086 Step 3).
 #
 # THE GROUNDED FAILURE MODE: skills/communication.md has carried card 2 as a

@@ -13,6 +13,7 @@ Procesní mapy, mini verze (P118, stavěno mimo AID). Zadání: `.aid-o/plans/P1
 - **Zveřejnění mapy (`aid-pm-page-publish.sh --kind map --name`).** Jedna stálá stránka na mapu (klíč z hlavní kopie, stejný z pracovní kopie plánu), vždy na požádání i při `AID_PM_PAGES=off`; bez publisheru zůstane mapa jako lokální soubor (`local <page>`). `--print-key` vypíše klíč a nic nezveřejní. Výroba map a záznam zodpovězených označení (`.aid-o/work/process-maps/`) jsou běhové soubory: `.gitignore` z `/aid-init` je ignoruje.
 - **Dokumentace na přání (`aid-process-map.sh docs`).** Týž obrázek do Docusauru (`static/img/procesy/<projekt>/`) se stránkou (web a sekci určí CLAUDE.md projektu, jinak se agent zeptá); text mapy je pro MDX escapovaný a zápis mimo web (i přes symlink) se odmítne. Mapy života a běhu plánu AIDu (`docs/procesy/`, z tabulek v kódu, hlídané testem souladu). Text mapy jde do obrázku jako znakové entity, takže krok „Worker…“ nebo větev „fetch selhal“ stránku nezablokuje (share by ji jinak odmítl) nahradily ruční diagramy ve `fsm.md` a `diagrams.md`, které neměly stav ERROR.
 - **Registr:** součet řádků opraven na skutečných 709 (`test-enforcement-registry-cites.sh` padal v nočním běhu).
+- **Cesta k merge zase pod rozpočtem (T1 981 → 449 s, noční deník).** Kontrola pater blokovala každé vydání. Do nočního patra T2 šlo 32 sad mimo jádro (`tier-core.txt`) od nejdražší, každá s důvodem v hlavičce; jádro zůstává. Zrychlení jádra a návrat sad: IMP-711. Detail `/aid/testing`.
 
 ## [3.14.1] — 2026-11-01
 

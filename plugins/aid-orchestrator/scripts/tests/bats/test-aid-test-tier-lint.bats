@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 2.8 s): returns to t1 once the core is faster (IMP-711).
 # test-aid-test-tier-lint.bats — P081 Step 3: the tag keeps telling the truth.
 #
 # WHAT THIS SUITE PROVES: each of the lint's three checks fires on the thing it

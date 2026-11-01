@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 3.1 s): returns to t1 once the core is faster (IMP-711).
 # test-aid-gate-runtime-report.bats — P097 Step 5: aid-gate-runtime-report.sh
 # prints the proposed `timeout_seconds` (from gates_rows history, through the
 # library's `propose`) next to the configured one, per gate, and never writes.

@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 2.7 s): returns to t1 once the core is faster (IMP-711).
 # test-aid-obligations.bats — P079 Step 6 (IMP-476): a deferral that survives.
 #
 # THE LIVE FAILURE MODE UNDER TEST: the first P076 run deferred a

@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 16.6 s): returns to t1 once the core is faster (IMP-711).
 # aid-subject: scripts/aid-process-map.py
 # Process maps: the map file's check, the deterministic layout and the drawing (P118, standard
 # /ecosystem/specs/procesni-mapy). Defects it catches: a broken map accepted, two builds that differ,

@@ -1,5 +1,6 @@
 #!/usr/bin/env bats
-# aid-tier: t1
+# aid-tier: t2
+# Moved from t1 for the T1 budget (1. 11. 2026, 15.6 s): returns to t1 once the core is faster (IMP-711).
 # T1 because it runs aid-ui-critic.py freeze (behaviour); AID's T0 holds static checks only.
 # P113 step 1 - the rubrics and gates of the six decision places: every gate names a criterion of its rubric, the
 # motion metrics are the four the check measures, every frozen role prompt carries the evaluator's memory, nothing
