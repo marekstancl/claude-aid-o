@@ -4,6 +4,7 @@
 // gets 404 and is listed; any such call fails the step, so a shot never shows an empty screen by accident.
 import fs from 'node:fs';
 import path from 'node:path';
+import { safeTarget, sha, shotSha } from './kit-extra.mjs';
 
 const STEPS = new Set(['goto', 'click', 'fill', 'select', 'hover', 'press', 'wait']);
 
@@ -121,15 +122,53 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
     for (const [el, st] of (window.__aidSaved || []).reverse()) { if (st === null) el.removeAttribute('style'); else el.setAttribute('style', st); }
     window.__aidSaved = [];
   }).catch(() => {});
+  // K1 (PM 31. 10. 2026, WAN P119: a proposal went to the PM with a dialog cut off on the right): measured in the page
+  // as it will be captured, BEFORE the capture changes any style; visible elements only, 1 px tolerance, horizontal
+  const measure = page => page.evaluate(() => {
+    const vis = el => { const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+      return r.width > 0 && r.height > 0 && cs.display !== 'none' && cs.visibility !== 'hidden'; };
+    const name = el => (el.getAttribute('role') ? `[role=${el.getAttribute('role')}]` : el.tagName.toLowerCase())
+      + (el.getAttribute('aria-label') ? ` "${el.getAttribute('aria-label').slice(0, 40)}"` : '')
+      + (el.id ? `#${el.id}` : '') + (typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).slice(0, 3).join('.') : '');
+    const out = [], se = document.scrollingElement;
+    if (se.scrollWidth > innerWidth + 1) out.push({ pravidlo: 'page_wider_than_window', prvek: 'page', presah_px: se.scrollWidth - innerWidth });
+    const dialogs = [...document.querySelectorAll('[role=dialog],[role=alertdialog],dialog[open]')].filter(vis);
+    for (const d of dialogs) {
+      const dr = d.getBoundingClientRect();
+      const off = Math.max(0, dr.right - innerWidth, -dr.left);
+      if (off > 1) out.push({ pravidlo: 'dialog_off_screen', prvek: name(d), presah_px: Math.round(off) });
+      for (const el of d.querySelectorAll('*')) {
+        if (!vis(el)) continue;
+        // inside a scroller of its own (overflow-x auto|scroll) the content scrolls on purpose
+        let own = false;
+        for (let a = el.parentElement; a && a !== d; a = a.parentElement) { if (/(auto|scroll)/.test(getComputedStyle(a).overflowX)) { own = true; break; } }
+        if (own) continue;
+        const r = el.getBoundingClientRect(), over = Math.max(r.right - dr.right, dr.left - r.left);
+        if (over > 1) out.push({ pravidlo: 'beyond_dialog_edge', prvek: name(el), presah_px: Math.round(over) });
+        const cs = getComputedStyle(el);
+        if (/(hidden|clip)/.test(cs.overflowX) && el.scrollWidth > el.clientWidth + 1
+            && !(cs.textOverflow === 'ellipsis' && cs.whiteSpace === 'nowrap'))
+          out.push({ pravidlo: 'content_clipped', prvek: name(el), presah_px: el.scrollWidth - el.clientWidth });
+      }
+    }
+    // one entry per element and rule (a clipped parent also lists its children; the first 20 say enough)
+    const seen = new Set();
+    return { dialogs: dialogs.length, clipped: out.filter(c => { const k = c.pravidlo + c.prvek; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 20) };
+  });
+  // a shot's files go through the kit's path check; written to a temporary name and renamed into place
+  const shotPath = (vp, s, ext) => safeTarget(DIR, `shots/${vp.name}/${s.name}${ext}`, die, { kit: true });
+  const dropShot = (vp, s) => { for (const ext of ['.png', '.check.json']) { try { fs.rmSync(shotPath(vp, s, ext)); } catch {} } };
   const takeShot = async (page, s, vp) => {
     const where = `shot '${s.name}' (${vp.name})`;
     // the first shot waits ui.first_shot_timeout_s for what it waits on (a page load never less than the
     // browser's 30 s: the setting lengthens the first wait, it never shortens a load)
     const wait = isFirst ? first * 1000 : 15000, nav = isFirst ? Math.max(first * 1000, 30000) : 30000;
-    await page.goto(at(s.path || '/', where), { waitUntil: 'networkidle', timeout: nav });
+    // only a failed navigation may be taken again (K3): its error is marked here
+    const go = (u, w) => page.goto(at(u, w), { waitUntil: 'networkidle', timeout: nav }).catch(e => { e.aidNavigation = true; throw e; });
+    await go(s.path || '/', where);
     for (const [k, stp] of (s.steps || []).entries()) {
       const w = `${where} step ${k + 1}`;
-      if ('goto' in stp) await page.goto(at(stp.goto, w), { waitUntil: 'networkidle', timeout: nav });
+      if ('goto' in stp) await go(stp.goto, w);
       else if ('click' in stp) await (await one(page, stp.click, w)).click();
       else if ('fill' in stp) await (await one(page, stp.fill, w)).fill(String(stp.value ?? ''));
       else if ('select' in stp) await (await one(page, stp.select, w)).selectOption(String(stp.value ?? ''));
@@ -142,7 +181,8 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
       }
     }
     await page.waitForTimeout(300);
-    const file = path.join(DIR, 'shots', vp.name, `${s.name}.png`);
+    const check = await measure(page);
+    const file = shotPath(vp, s, `.tmp-${process.pid}.png`);   // the capture names its format by the extension
     const cap = s.capture || 'viewport';
     try {
       if (cap && typeof cap === 'object' && cap.element) await (await one(page, cap.element, `${where} capture`)).screenshot({ path: file });
@@ -154,7 +194,10 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
         await page.screenshot({ path: file, fullPage: cap === 'full' });
       }
     } finally { await restore(page); }
-    return file;
+    fs.renameSync(file, shotPath(vp, s, '.png'));
+    const rec = { png_sha256: sha(shotPath(vp, s, '.png')), viewport: vp.name, shot_sha256: shotSha(s), mocks_missing: false, ...check };
+    fs.writeFileSync(shotPath(vp, s, '.check.json'), JSON.stringify(rec, null, 1));
+    return { vp, s, file: shotPath(vp, s, '.png') };
   };
   try {
     for (const vp of VIEWPORTS) {
@@ -166,12 +209,13 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
         if (only.length && !only.includes(s.name)) continue;
         const before = new Set(unknown);
         let file;
+        dropShot(vp, s);                         // an old shot never outlives a failed new one (K1)
         try { file = await takeShot(page, s, vp); }
         catch (e) {
           // one retry of this shot on this viewport, for a network error of the browser only (C7, WAN P113: a
           // changing network failed the whole set) — in a new context with the storage of shots.json, so nothing
           // the first try changed (a cookie, local storage) carries over; the unmocked calls it listed are dropped
-          if (!/net::ERR_/.test(e.message)) throw e;
+          if (!e.aidNavigation || !/net::ERR_/.test(e.message)) throw e;
           console.error(`aid-companion: shot '${s.name}' (${vp.name}) taken again after ${e.message.split('\n')[0]}`);
           unknown.clear(); for (const x of before) unknown.add(x);
           const ctx2 = await newContext(vp);
@@ -186,6 +230,13 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
     await b.close(); die(`shots: ${e.message}`);
   }
   await b.close();
-  if (unknown.size) die(`shots: API calls with no mock (answered 404, the screen may be empty): ${[...unknown].join(', ')} — add them to mocks.json and run shots again`);
+  if (unknown.size) {
+    // the shots of this run may show an empty screen: their checks say so, and show refuses them (K1)
+    for (const w of written) {
+      const f = shotPath(w.vp, w.s, '.check.json');
+      fs.writeFileSync(f, JSON.stringify({ ...JSON.parse(fs.readFileSync(f, 'utf8')), mocks_missing: true }, null, 1));
+    }
+    die(`shots: API calls with no mock (answered 404, the screen may be empty): ${[...unknown].join(', ')} — add them to mocks.json and run shots again`);
+  }
   console.log(JSON.stringify({ shots: written.length, dir: path.join(DIR, 'shots'), next: `write navrh.json (shot names: ${[...names].join(', ')}) and run: aid-companion.sh show --plan ${PLAN}` }));
 }

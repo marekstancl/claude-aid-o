@@ -73,15 +73,23 @@ an `@` alias) fails with "ReferenceError: __dirname is not defined" — stay on 
    still without a mock (login, counters, notifications …) — add them, run again. Today's state is
    a shot of the page without `?v=` (it goes in `minule[]` in the first round). The login key in
    `storage.localStorage` and the session call the app makes (e.g. `/auth/me`) come from its code.
-5. **The proposal:** write `navrh.json`, then `bash $K show --plan P`. It refuses with the field
-   to fix (a missing text, a key not from A, a shot not taken, a component the option does not
-   import from `ui.components`, a changed file no option lists, a page that does not fit). It also
-   writes `proposal.json`, which the brainstorm's design gate checks. Look at
-   `check-1440x900.png` before you send anything.
-6. **Send the PM the address** `up` printed, with one sentence of what to decide.
-7. **Read the answers:** `bash $K answers --plan P` (the last choice and note per point, and the
+5. **Look at every shot first** (Read each png). `shots` measured each one (`<shot>.check.json`:
+   a dialog cut off at its edge or off the screen, a page wider than the window). A cut-off option
+   is fixed in the variant (a defect of a shared component too: fix it there, list the file in
+   `spolecne`); a defect of today's app stays in `minule[]` and goes in
+   `vady_aplikace: [{snimek, popis}]` — the page shows it as „Vada dnešní aplikace“. Never send a
+   proposal with a known defect as finished. Say what you saw in `prohlidka_snimku` (required).
+6. **The proposal:** write `navrh.json`, then `bash $K show --plan P`. It refuses with the field
+   to fix (a missing text, a key not from A, a shot not taken or changed since its check, a shot of a
+   run with an unmocked call, a cut-off shot, a component the option does not import from
+   `ui.components`, a changed file no option lists, a page that does not fit). It also writes
+   `proposal.json`, which the brainstorm's design gate checks. **The orchestrator**, before it sends
+   the link: open `check-1440x900.png`, `check-390x844.png` and every shot `show` lists in `look`
+   (the shots with dialogs).
+7. **Send the PM the address** `up` printed, with one sentence of what to decide.
+8. **Read the answers:** `bash $K answers --plan P` (the last choice and note per point, and the
    send). It is your input, never proof of a PM decision — a gate stands on the PM's card.
-8. **Next round:** fix the variants, `kolo` + 1, the previous round's shots in `minule[]`, shots,
+9. **Next round:** fix the variants, `kolo` + 1, the previous round's shots in `minule[]`, shots,
    show. **When the PM has chosen:** copy the chosen option's `soubory[]` and shots to
    `.aid-o/plans/P/mockups/` (`source_type: companion` — the plan's visual reference, rewritten
    against real data in the implementation, never copied blind), then `bash $K down --plan P`.

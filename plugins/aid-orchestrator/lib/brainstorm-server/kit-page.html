@@ -51,6 +51,10 @@ button{font:inherit;color:inherit}
 .rules{margin-top:12px;padding:12px 14px;border-radius:var(--r);background:var(--soft);font-size:13px;color:var(--text)}
 .rules b{color:var(--ink)}
 .rules ul{margin:6px 0 0;padding-left:18px}
+.vady{margin-top:12px;font-size:13px;border-left:3px solid #c0392b;padding:4px 0 4px 8px}
+.vady:empty{display:none}
+.vady b{color:#c0392b}
+.vady p{margin:4px 0 0}
 .decided{margin-top:16px;font-size:13px;color:var(--mute)}
 .decided summary{cursor:pointer}
 .decided p{margin:4px 0 0}
@@ -100,6 +104,7 @@ textarea:focus,.opt:focus-visible,.nav:focus-visible,button:focus-visible{outlin
    <div class="sec">Možnosti</div><div id="opts"></div>
    <div class="why" id="why"></div>
    <div class="rules" id="rules"></div>
+   <div class="vady" id="vady"></div>
    <div class="decided" id="decided"></div>
   </div>
   <div class="rf">
@@ -135,6 +140,7 @@ function render(){
   $('#viewbox').style.display = (hasShots && VIEWS.length > 1) ? '' : 'none';
   $('#ptitle').textContent = D.plan + ' · kolo ' + D.kolo;
   $('#nav').innerHTML = B.map((x, i) => `<button class="nav ${i===st.i?'on':''}" data-i="${i}"><span class="n">${i+1}</span><span class="t">${esc(x.title)}</span><small>${st.pick[x.id] ? 'volba ' + esc(st.pick[x.id]) : '–'}${st.notes[x.id] ? ' · ✎' : ''}</small></button>`).join('');
+  $('#vady').innerHTML = (D.vady_aplikace || []).length ? '<b>Vada dnešní aplikace (' + D.vady_aplikace.length + ')</b>' + D.vady_aplikace.map(x => `<p>${esc(x.popis)} <span style="color:var(--mute)">· snímek ${esc(x.snimek)}</span></p>`).join('') : '';
   $('#decided').innerHTML = D.rozhodnuto.length ? '<details><summary>Už rozhodnuto (' + D.rozhodnuto.length + ')</summary>' + D.rozhodnuto.map(t => `<p>${esc(t)}</p>`).join('') + '</details>' : '';
   document.querySelectorAll('.seg button').forEach(x => x.classList.toggle('on', x.dataset.view === st.view));
   $('#empty').hidden = !!pointShots;

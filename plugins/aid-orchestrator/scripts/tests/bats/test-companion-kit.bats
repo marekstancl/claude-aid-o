@@ -124,7 +124,7 @@ _ws() {
   # the first shot's wait follows the setting: 2 s for a text that never comes fails in seconds, not 15
   yq -i '.ui.first_shot_timeout_s = 2' "$P/.aid-o/config/project.yaml"
   echo '{"base": "proto", "shots": [{"name": "nic", "path": "/index.html", "steps": [{"wait": {"for": {"text": "nikdy"}}}]}]}' > "$D/shots.json"
-  local t0=$SECONDS; run _k shots; [ "$status" -ne 0 ]; (( SECONDS - t0 < 12 ))
+  local t0=$SECONDS; run _k shots; [ "$status" -ne 0 ]; (( SECONDS - t0 < 12 )); [[ "$output" != *"taken again"* ]]   # not a network error: no retry
   yq -i '.ui.first_shot_timeout_s = 500' "$P/.aid-o/config/project.yaml"
   run _k shots; [ "$status" -ne 0 ]; [[ "$output" == *"first_shot_timeout_s must be whole seconds from 1 to 120"* ]]
 }
@@ -174,16 +174,32 @@ EOF
 }
 
 # a proposal over the sample app: option A edits Page.tsx through the alias, B adds a component through the barrel
+# _checks [<clipped json>] — a check record for every png in shots/, as the shots step writes it (K1): bound to the png,
+# the viewport and the entry of shots.json; <clipped> (default []) for every shot
+_checks() {
+  (cd "$AID_PLUGIN_PATH/lib/brainstorm-server" && node --input-type=module -e '
+    import fs from "node:fs"; import path from "node:path"; import { sha, shotSha } from "./kit-extra.mjs";
+    const [D, clipped] = process.argv.slice(1); const spec = JSON.parse(fs.readFileSync(path.join(D, "shots.json"), "utf8"));
+    const by = Object.fromEntries(spec.shots.map(x => [x.name, x]));
+    for (const vp of fs.readdirSync(path.join(D, "shots"))) for (const f of fs.readdirSync(path.join(D, "shots", vp))) {
+      if (!f.endsWith(".png")) continue; const n = f.slice(0, -4), png = path.join(D, "shots", vp, f);
+      fs.writeFileSync(png.replace(/\.png$/, ".check.json"), JSON.stringify({ png_sha256: sha(png), viewport: vp,
+        shot_sha256: by[n] ? shotSha(by[n]) : "none", mocks_missing: false, dialogs: 0, clipped: JSON.parse(clipped) }));
+    }' "$D" "${1:-[]}")
+}
+
 _proposal() {
   _k proto >/dev/null
   mkdir -p "$D/shots/desktop" "$D/shots/mobile"
   local v s
   node -e 'const z=require("zlib"),fs=require("fs");const w=+process.argv[2],h=+process.argv[3];const raw=Buffer.alloc((w*3+1)*h,255);for(let y=0;y<h;y++)raw[y*(w*3+1)]=0;const c=t=>{let r=0xffffffff;for(const x of t){r^=x;for(let k=0;k<8;k++)r=r&1?(r>>>1)^0xedb88320:r>>>1}return (r^0xffffffff)>>>0};const ch=(t,d)=>{const l=Buffer.alloc(4);l.writeUInt32BE(d.length);const td=Buffer.concat([Buffer.from(t),d]);const cr=Buffer.alloc(4);cr.writeUInt32BE(c(td));return Buffer.concat([l,td,cr])};const ih=Buffer.alloc(13);ih.writeUInt32BE(w,0);ih.writeUInt32BE(h,4);ih[8]=8;ih[9]=2;fs.writeFileSync(process.argv[1],Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),ch("IHDR",ih),ch("IDAT",z.deflateSync(raw)),ch("IEND",Buffer.alloc(0))]))' "$D/shots/desktop/a.png" 1280 720
   for v in desktop mobile; do for s in dnes a b; do [[ "$v/$s" == desktop/a ]] || cp "$D/shots/desktop/a.png" "$D/shots/$v/$s.png"; done; done
+  echo '{"base": "proto", "shots": [{"name": "dnes", "path": "/"}, {"name": "a", "path": "/?v=A"}, {"name": "b", "path": "/?v=B"}]}' > "$D/shots.json"
+  _checks
   printf "import { Button } from '@/components/shared/Button';\nimport { Card } from '../components/shared';\nexport function Page() { return Button({ label: 'new' }) + Card({ title: 'x' }); }\n" > "$D/proto/src/pages/Page.tsx"
   printf "import { Card } from './shared';\nexport function Novy() { return Card({ title: 'n' }); }\n" > "$D/proto/src/components/Novy.tsx"
   cat > "$D/navrh.json" <<'EOF'
-{"plan": "P900", "kolo": 1, "rozhodnuto": [],
+{"plan": "P900", "kolo": 1, "rozhodnuto": [], "prohlidka_snimku": "Každý snímek prohlédnut: řádek, blok i dnešní stav celé, nic neuříznuté.",
  "body": [{"id": "1", "title": "Řádek", "otazka": "Jak má řádek vypadat?", "doporuceni": "A", "proc": "Je kratší.",
    "soulad_s_pravidly": [{"pravidlo": "ui/CLAUDE.md#Komponenty", "jak": "jen sdílené komponenty"}],
    "minule": [{"popisek": "Dnes", "shot": "dnes"}],
@@ -456,7 +472,7 @@ class H(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         p = self.path.split('?')[0]
         seen[p] = seen.get(p, 0) + 1
-        if p == '/broken.html' or (p == '/flaky.html' and seen[p] == 1):
+        if p == '/broken.html' or (p in ('/flaky.html', '/flaky2.html') and seen[p] == 1):
             self.wfile.write(b'garbage that is no HTTP\r\n\r\n'); self.close_connection = True; return
         return super().do_GET()
     def log_message(self, *a): pass
@@ -465,6 +481,8 @@ PY
   echo '<html><body><script>localStorage.setItem("x","1"); document.cookie="c=1"</script>set</body></html>' > "$P/ui/set.html"
   echo '<html><body><p id="v"></p><script>document.getElementById("v").textContent = "x=" + (localStorage.getItem("x") || "none") + " c=" + (document.cookie.includes("c=1") ? "1" : "none")</script></body></html>' > "$P/ui/flaky.html"
   cp "$P/ui/flaky.html" "$P/ui/broken.html"
+  echo '<html><body><script>localStorage.setItem("n", String(+(localStorage.getItem("n") || 0) + 1))</script>bump</body></html>' > "$P/ui/bump.html"
+  echo '<html><body><p id="v"></p><script>document.getElementById("v").textContent = "n=" + localStorage.getItem("n") + " s=" + localStorage.getItem("s")</script></body></html>' > "$P/ui/flaky2.html"
   yq -i '.ui.dev_cmd = ["python3", "server.py", "{port}"] | .ui.ready_path = "/index.html"' "$P/.aid-o/config/project.yaml"
   mkdir -p "$D"; echo '[]' > "$D/mocks.json"
 }
@@ -479,12 +497,20 @@ J
   [ -s "$D/shots/desktop/flaky.png" ]
   echo '{"base": "proto", "shots": [{"name": "broken", "path": "/broken.html"}]}' > "$D/shots.json"
   run _k shots; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"net::ERR_"* ]]
+  [ "$(grep -c 'taken again' <<< "$output")" -eq 1 ]                           # once, not twice
+  # a step of the same shot changed storage before the failing navigation: the retry starts from shots.json's storage
+  cat > "$D/shots.json" <<'J'
+{"base": "proto", "storage": {"localStorage": {"s": "spec"}}, "shots": [{"name": "kroky", "path": "/bump.html", "only": ["desktop"],
+  "steps": [{"goto": "/flaky2.html"}, {"wait": {"for": {"text": "n=1 s=spec"}}}]}]}
+J
+  run _k shots; echo "$output"; [ "$status" -eq 0 ]; [ "$(grep -c 'taken again' <<< "$output")" -eq 1 ]
   cat > "$D/shots.json" <<'J'
 {"base": "proto", "shots": [{"name": "nastav", "path": "/set.html"}, {"name": "flaky", "path": "/flaky.html"}]}
 J
-  local before; before="$(stat -c %Y.%N "$D/shots/desktop/flaky.png")"; sleep 1
+  local before nastav; before="$(stat -c %Y "$D/shots/desktop/flaky.png")"; nastav="$(stat -c %Y "$D/shots/desktop/nastav.png")"; sleep 1
   run _k shots --only nastav; echo "$output"; [ "$status" -eq 0 ]
-  [ "$(stat -c %Y.%N "$D/shots/desktop/flaky.png")" = "$before" ]             # the other shot is untouched
+  [ "$(stat -c %Y "$D/shots/desktop/flaky.png")" = "$before" ]                # the other shot is untouched
+  [ "$(stat -c %Y "$D/shots/desktop/nastav.png")" -gt "$nastav" ]              # the named one is taken again
   run _k shots --only nikdo; [ "$status" -ne 0 ]; [[ "$output" == *"no such shot"* ]]
 }
 
@@ -500,4 +526,78 @@ J
     console.log(red.length, red[0], p.height);' "$D/shots/desktop/dlouha.png" "$AID_PLUGIN_PATH/lib/ui-fidelity/package.json"
   echo "$output"; read -r n first h <<< "$output"
   [ "$n" -ge 35 ] && [ "$n" -le 45 ]; [ "$first" -le 5 ]                       # once, at the top of the page's flow
+  # the page's styles are put back: a next shot in the same page (only the #hash changes, no reload) sees the bar pinned
+  echo '{"base": "proto", "shots": [{"name": "dlouha", "path": "/long.html", "capture": "full"}, {"name": "okno", "path": "/long.html#dole", "only": ["desktop"]}]}' > "$D/shots.json"
+  run _k shots; [ "$status" -eq 0 ]
+  run node -e '
+    const { createRequire } = require("module"); const r = createRequire(process.argv[2]);
+    const { PNG } = r("pngjs"); const p = PNG.sync.read(require("fs").readFileSync(process.argv[1]));
+    const i = ((p.height - 10) * p.width + 5) * 4; console.log(p.data[i] > 200 && p.data[i + 1] < 60 ? "pinned" : "gone");' "$D/shots/desktop/okno.png" "$AID_PLUGIN_PATH/lib/ui-fidelity/package.json"
+  [ "$output" = pinned ]
+}
+
+@test "a scrolling container is captured whole also when an ancestor clips it (overflow hidden, a fixed height)" {
+  echo '<html><body style="margin:0"><div id="shell" style="height:200px;overflow:hidden"><div id="list" style="height:100px;overflow:auto"><div style="height:600px;background:#00ff00">obsah</div></div></div></body></html>' > "$P/ui/shell.html"
+  run _k proto; [ "$status" -eq 0 ]; echo '[]' > "$D/mocks.json"
+  echo '{"base": "proto", "shots": [{"name": "seznam", "path": "/shell.html", "only": ["desktop"], "capture": {"scroll": {"css": "#list"}}}]}' > "$D/shots.json"
+  run _k shots; echo "$output"; [ "$status" -eq 0 ]
+  run node -e '
+    const { createRequire } = require("module"); const r = createRequire(process.argv[2]);
+    const { PNG } = r("pngjs"); const p = PNG.sync.read(require("fs").readFileSync(process.argv[1])); let g = 0;
+    for (let y = 0; y < p.height; y++) { const i = (y * p.width + 5) * 4; if (p.data[i + 1] > 200 && p.data[i] < 60) g++; } console.log(g);' "$D/shots/desktop/seznam.png" "$AID_PLUGIN_PATH/lib/ui-fidelity/package.json"
+  [ "$output" -ge 590 ]                                                        # the whole 600 px of content, not the 200 the shell shows
+}
+
+# pages with dialogs: one that fits, a hidden one with overflowing content, a table that scrolls inside its dialog on
+# purpose, a dialog whose content is cut off at its edge, and a page wider than the phone
+_dialog_pages() {
+  local dlg='position:fixed;top:40px;left:40px;width:300px;height:200px;overflow:hidden;background:#fff;border:1px solid #000'
+  echo "<html><body><div role=dialog aria-label=Ok style='$dlg'><p>vejde se</p></div></body></html>" > "$P/ui/ok.html"
+  echo "<html><body><div role=dialog style='$dlg;display:none'><div style='width:900px'>skryte</div></div></body></html>" > "$P/ui/hidden.html"
+  echo "<html><body><div role=dialog style='$dlg'><div style='overflow-x:auto'><table style='width:900px'><tr><td>siroka tabulka</td></tr></table></div></div></body></html>" > "$P/ui/scroll.html"
+  echo "<html><body><div role=dialog aria-label=Prevod style='$dlg'><div class=paticka style='width:520px'>tlacitko uriznute</div></div></body></html>" > "$P/ui/clip.html"
+  echo "<html><body style='margin:0'><div style='width:600px'>siroka stranka</div></body></html>" > "$P/ui/wide.html"
+}
+_navrh() {  # <minule shot> <option A shot> [vady json]
+  cat > "$D/navrh.json" <<J
+{"plan": "P900", "kolo": 1, "prohlidka_snimku": "Prohlédl jsem všechny snímky.", "vady_aplikace": ${3:-[]},
+ "body": [{"id": "1", "title": "Okno", "otazka": "Jak?", "doporuceni": "A", "proc": "Proto.",
+   "minule": [{"popisek": "Dnes", "shot": "$1"}],
+   "moznosti": [{"klic": "A", "nazev": "A", "popis": "a", "snimky": [{"popisek": "A", "shot": "$2"}]}]}]}
+J
+}
+
+@test "every shot is checked for a cut-off dialog and a page wider than the window; show refuses one in an option, shows one of today's app as its defect" {
+  _dialog_pages; run _k proto; [ "$status" -eq 0 ]; run _k up; [ "$status" -eq 0 ]; echo '[]' > "$D/mocks.json"
+  echo '{"base": "proto", "shots": [{"name": "ok", "path": "/ok.html"}, {"name": "hidden", "path": "/hidden.html"}, {"name": "scroll", "path": "/scroll.html"}, {"name": "clip", "path": "/clip.html"}, {"name": "wide", "path": "/wide.html"}]}' > "$D/shots.json"
+  run _k shots; echo "$output"; [ "$status" -eq 0 ]
+  local c=$D/shots
+  [ "$(jq -c '[(.clipped|length), .dialogs]' "$c/desktop/ok.check.json")" = "[0,1]" ]
+  [ "$(jq '.clipped|length' "$c/desktop/hidden.check.json")" = 0 ]
+  [ "$(jq '.clipped|length' "$c/desktop/scroll.check.json")" = 0 ]
+  jq -e '.clipped[] | select(.pravidlo == "beyond_dialog_edge" and (.prvek | test("paticka")))' "$c/desktop/clip.check.json"
+  [ "$(jq '.clipped|length' "$c/desktop/wide.check.json")" = 0 ]
+  jq -e '.clipped[] | select(.pravidlo == "page_wider_than_window")' "$c/mobile/wide.check.json"
+  _navrh ok clip; run _k show; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"option A snimky[0]: shot 'clip' (desktop) is cut off — beyond_dialog_edge"* ]]
+  _navrh clip ok; run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"list it in vady_aplikace"* ]]
+  _navrh clip ok '[{"snimek": "clip", "popis": "Okno převodu klienta je širší než panel, patička je uříznutá."}]'
+  run _k show; echo "$output"; [ "$status" -eq 0 ]; [[ "$(jq -r '.look[0]' <<< "$output")" == *"shots/desktop/clip.png" ]]
+  grep -q 'Vada dnešní aplikace' "$D/navrh-1.html"; grep -q 'patička je uříznutá' "$D/navrh-1.html"
+  jq 'del(.prohlidka_snimku)' "$D/navrh.json" > "$D/n.t" && mv "$D/n.t" "$D/navrh.json"
+  run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"prohlidka_snimku"* ]]
+}
+
+@test "show refuses a shot without its check, one whose png or shots.json entry changed since, and the shots of a run with an unmocked call" {
+  _dialog_pages; run _k proto; [ "$status" -eq 0 ]; echo '[]' > "$D/mocks.json"
+  echo '{"base": "proto", "shots": [{"name": "ok", "path": "/ok.html"}, {"name": "scroll", "path": "/scroll.html"}]}' > "$D/shots.json"
+  run _k shots; [ "$status" -eq 0 ]; _navrh ok scroll; run _k show; echo "$output"; [ "$status" -eq 0 ]
+  rm "$D/shots/mobile/scroll.check.json"
+  run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"shot 'scroll' (mobile) has no check record"* ]]
+  run _k shots; [ "$status" -eq 0 ]; cp "$D/shots/desktop/ok.png" "$D/shots/desktop/scroll.png"
+  run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"shot 'scroll' (desktop) changed since it was checked"* ]]
+  run _k shots; [ "$status" -eq 0 ]; jq '.shots[1].path = "/scroll.html?x=1"' "$D/shots.json" > "$D/s.t" && mv "$D/s.t" "$D/shots.json"
+  run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"changed since it was checked"* ]]
+  echo "<html><body><script>fetch('/api/nic')</script><div role=dialog style='width:100px'>x</div></body></html>" > "$D/proto/scroll.html"
+  run _k shots; [ "$status" -ne 0 ]; [[ "$output" == *"no mock"* ]]
+  run _k show; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"API calls without a mock"* ]]
 }

@@ -58,6 +58,9 @@ export const withKitBlock = (t, runtime) => t.includes(GI_BEGIN) ? t
 export const manFiles = m => (m && m.version === 2 ? m.files : m) || {};
 // the hash a .gitignore is compared by (its text without the kit's block)
 export const giSha = text => crypto.createHash('sha256').update(stripKitBlock(text)).digest('hex');
+export const textSha = t => crypto.createHash('sha256').update(t).digest('hex');
+// the hash a shot's check record binds to its entry in shots.json (K1): any change of the entry voids the check
+export const shotSha = entry => textSha(JSON.stringify(entry));
 export const sha = f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
 
 // any component of the path (a file inside .env.d/ or credentials/ is as secret as the directory)
