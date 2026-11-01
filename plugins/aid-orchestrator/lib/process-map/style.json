@@ -2,19 +2,68 @@
   "version": 1,
   "font": "system-ui, -apple-system, 'Segoe UI', sans-serif",
   "roles": {
-    "ok":       {"fill": "#dcfce7", "stroke": "#15803d", "label": "dobrý konec"},
-    "bad":      {"fill": "#fee2e2", "stroke": "#b91c1c", "label": "špatný konec"},
-    "warn":     {"fill": "#fef3c7", "stroke": "#b45309", "label": "zádrhel, vrací se zpět"},
-    "pm":       {"fill": "#dbeafe", "stroke": "#1d4ed8", "label": "čeká na člověka"},
-    "flag":     {"fill": null,      "stroke": "#b91c1c", "label": "tvoje označení"},
-    "question": {"fill": null,      "stroke": "#b45309", "dash": "6 3", "label": "otázka agenta"},
-    "added":    {"fill": null,      "stroke": "#15803d", "label": "nové proti schválené mapě"},
-    "removed":  {"fill": null,      "stroke": "#b91c1c", "dash": "4 4", "label": "zrušené proti schválené mapě"}
+    "default": {
+      "fill": "#ffffff",
+      "stroke": "#1f2937",
+      "text": "#1f2937",
+      "label": "krok"
+    },
+    "ok": {
+      "fill": "#dcfce7",
+      "stroke": "#15803d",
+      "label": "dobrý konec"
+    },
+    "bad": {
+      "fill": "#fee2e2",
+      "stroke": "#b91c1c",
+      "label": "špatný konec"
+    },
+    "warn": {
+      "fill": "#fef3c7",
+      "stroke": "#b45309",
+      "label": "zádrhel, vrací se zpět"
+    },
+    "pm": {
+      "fill": "#dbeafe",
+      "stroke": "#1d4ed8",
+      "label": "čeká na člověka"
+    },
+    "flag": {
+      "fill": null,
+      "stroke": "#b91c1c",
+      "label": "tvoje označení"
+    },
+    "question": {
+      "fill": null,
+      "stroke": "#b45309",
+      "dash": "6 3",
+      "label": "otázka agenta"
+    },
+    "added": {
+      "fill": null,
+      "stroke": "#15803d",
+      "label": "nové proti schválené mapě"
+    },
+    "removed": {
+      "fill": null,
+      "stroke": "#b91c1c",
+      "dash": "4 4",
+      "label": "zrušené proti schválené mapě"
+    }
   },
   "sizes": {
-    "task": [120, 60],
-    "gateway": [50, 50],
-    "event": [36, 36],
+    "task": [
+      120,
+      60
+    ],
+    "gateway": [
+      50,
+      50
+    ],
+    "event": [
+      36,
+      36
+    ],
     "left": 40,
     "top": 60,
     "column_gap": 90,
@@ -24,12 +73,35 @@
     "track_step": 16,
     "track_margin": 30,
     "label_height": 14,
-    "char_width": 6
+    "char_width": 6,
+    "font_size": 12,
+    "label_font_size": 11,
+    "stroke_width": 1.5,
+    "end_stroke_width": 4,
+    "emphasis_stroke_width": 3,
+    "annotation": [
+      150,
+      36
+    ],
+    "label_max_chars": 24,
+    "label_padding": 20,
+    "task_text_chars": 18
   },
   "texts": {
     "odevsad": "z každého kroku",
     "odevsad_ends": "z každého kroku i z konců",
     "mark_only_shared": "Značit jde jen na sdílené stránce.",
     "legend_title": "Legenda"
+  },
+  "edge": {
+    "stroke": "#4b5563",
+    "text": "#374151"
+  },
+  "background": "#ffffff",
+  "rules": {
+    "warn": "computed: a step that is the source of a back edge (the process goes back from it)",
+    "pm": "from the map: ceka: true on the step",
+    "column_gap": "max(column_gap, longest label in the gap * char_width + label_padding)",
+    "gateway": "its own column right after the branching step, never inside a gap"
   }
 }
