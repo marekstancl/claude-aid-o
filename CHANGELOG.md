@@ -3,6 +3,12 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.14.0] — Unreleased
+
+Stránka průběhu roadmapy a spolehlivý companion (rozbor plugin issues 31. 10. 2026, volby PM 10A a C1-C8). Zadání: `docs/plans/2026-11-01-zadani-3140-roadmapa-companion.md`.
+
+- **Jména testů říkají, co hlídají, ne odkud jsou (J).** Kontrola jmen nových testů (`test_named_after_plan`, kontrola kroku i brány uzávěru) odmítne kromě čísla plánu i úvodní číslo verze („3.14.0: …“, „v2.95 …“), verzi v závorce („(3.14.0)“) a odkaz na hlášení projektu („(WAN #1)“). Verze jako předmět věty („a 3.13 record“) projde. 113 dosavadních případů v AID je přejmenovaných.
+
 ## [3.13.0] — 2026-10-31
 
 Běh plánu bez ručních obchvatů (rozbor plugin issues 31. 10. 2026, volby PM 3A-9A, 11A, 12B). Zadání: `docs/archive/2026-10-31-zadani-3130-beh-planu.md`.
