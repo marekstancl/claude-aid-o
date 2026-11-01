@@ -59,6 +59,12 @@ nález z 1. 11. (jména testů s číslem verze). Studio `/aid-ui` je mimo rozsa
 - `/aid-do` nad položkou roadmapy: pokyn `publish --aid-do` (**jen pokyn**, `/aid-do` nemá zadání; tak to
   řekne i dokumentace).
 
+**Při stavbě 1. 11. (R):** uzávěr uzná data z commitu sloučení **nebo** z dnešního konce cílové větve (plán, který
+zapíše změnu dat až po sloučení, ji jinak nemá kam dát); pořadí P900 → P901 → uzávěr P900 proto drží jen pro data
+zapsaná před sloučením. Doklad o doručení, který zapisuje vydavatel vedle stránky (`page.html.published.json`), jde
+dál přes `>` bez ochrany proti odkazu (složku záznamů hlídá skript stránky). Administrativní uzávěr kontrolu nepouští
+(kód), test na něj chybí — sada administrativního uzávěru staví plán bez plan-final, se zadáním roadmapy nepočítá.
+
 **K1 – náhled bez ořezu** (C1, přání PM 31. 10.) [R9, R10, R17]
 
 1. **Měření** v `shots` po krocích snímku, **před** úpravami pro snímek z K3, jen na viditelných prvcích
