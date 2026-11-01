@@ -226,7 +226,9 @@ No PM here. Approaches, design, section validation and the opponent run without
 stopping; agreements go straight into the interim, disagreements are collected
 for the result. When the PM said yes to process maps, draw them here following
 `skills/process-maps/SKILL.md` (`stav: dnes` from the code you read, `stav: po`
-for the design), `check` each, and `publish` it — the links go to Step 7a.
+for the design), `check` each - a map that fails `check` is fixed, never shown -
+and `publish` it; the links go to Step 7a. A resumed brainstorm reuses the maps
+already drawn; `stav` stays `po` until Step 8.
 
 ```bash
 rc=0
@@ -297,8 +299,9 @@ is one line.
 
 With process maps: one line per map under the list, `Procesní mapy: <link>`
 (or the local path), shown with the list — not as a stop of its own. Before
-Step 8 every mark is answered: `aid-process-map.sh flags <map> --nove` prints
-nothing, or the PM says to go on.
+Step 8 every mark is answered and recorded (`flags --zodpovezeno <id>`, the
+process-maps skill's "Reading the PM's marks"): `aid-process-map.sh flags <map>
+--nove` prints nothing, or the PM says to go on.
 
 The PM accepts it, corrects it, or refuses it. **Refused → back to the stop in
 Step 3; the plan is not written.** Something added → it goes back through the
@@ -328,8 +331,9 @@ set each map's `stav: schvaleno`, `check` it, list it in section 4 under
 `### Procesní mapy` (`| Mapa | Soubor | sha256 |`, the sha256 of the file as
 committed), add the point "Postavené odpovídá schváleným procesním mapám v §4"
 with the pattern `aid-process-map.sh approved` (the template's example), and
-commit the map files on the target branch with the brief before `plan-start`
-(`git add -f` where `docs/` is ignored) so the plan's worktree has them. Then:
+commit the brief and the map files on the target branch before `plan-start`
+(`git add -f` for whichever is ignored - `.aid-o/` or `docs/`) so the plan's
+worktree has both. Then:
 
 ```bash
 bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" --zadani .aid-o/plans/P{NNN}-zadani.md

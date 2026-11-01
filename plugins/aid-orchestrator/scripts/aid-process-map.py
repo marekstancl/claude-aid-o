@@ -863,6 +863,7 @@ def cmd_approved(brief):
             text = f.read()
     except OSError as e:
         print(f"{brief}: unreadable: {e}", file=sys.stderr); return 2
+    text = re.sub(r"<!--.*?-->", "", text, flags=re.S)   # the template's commented example is not a block (as the lint)
     m = re.search(r"^### Procesní mapy\s*$(.*?)(?=^#{2,3} |\Z)", text, re.M | re.S)
     if not m:
         print(f"{brief}: approved: no '### Procesní mapy' block in the brief"); return 1

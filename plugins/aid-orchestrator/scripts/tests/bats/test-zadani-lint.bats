@@ -220,3 +220,22 @@ PY
   run "$LINT" --zadani "$B"
   [ "$status" -eq 0 ]; [[ "$output" == *"zadani OK (12 points)"* ]]
 }
+
+@test "zadani maps: the template's own commented block, filled in and uncommented, lints and is read by approved" {
+  R="$T/proj"; mkdir -p "$R/docs/procesy" "$R/.aid-o/plans"; git -C "$R" init -q
+  sed 's/^stav: dnes/stav: schvaleno/' "$AID_PLUGIN_PATH/scripts/tests/fixtures/process-map/objednavka.mapa.yaml" > "$R/docs/procesy/objednavka.mapa.yaml"
+  sha="$(sha256sum "$R/docs/procesy/objednavka.mapa.yaml" | cut -d' ' -f1)"
+  python3 - "$AID_PLUGIN_PATH/defaults/templates/zadani.md" "$B" "$R/.aid-o/plans/P1-zadani.md" "$sha" <<'PY'
+import re, sys
+tpl, brief, out, sha = sys.argv[1:]
+blk = re.search(r"<!-- Optional, only when the brainstorm drew process maps.*?-->", open(tpl).read(), re.S).group(0)
+table = re.search(r"### Procesní mapy.*?\n\n(\|.*?\n)(?=\n)", blk, re.S).group(0)
+table = table.replace("<název>", "Objednávka").replace("<name>", "objednavka").replace("<sha256 of the committed file>", sha)
+point = re.search(r"- \[ \] AC<n>:.*?```\n", blk, re.S).group(0).replace("AC<n>", "AC12").replace("P<NNN>", "P1")
+s = open(brief).read(); i = s.index("## 5. Pravidla práce")
+s = s[:i] + blk + "\n\n" + table + "\n" + s[i:]          # the commented example stays, the real block follows it
+open(out, "w").write(s.rstrip("\n") + "\n" + point)
+PY
+  run "$LINT" --zadani "$R/.aid-o/plans/P1-zadani.md"; [ "$status" -eq 0 ]; [[ "$output" == *"zadani OK (12 points)"* ]]
+  cd "$R"; run bash "$AID_PLUGIN_PATH/scripts/aid-process-map.sh" approved .aid-o/plans/P1-zadani.md; [ "$status" -eq 0 ]
+}
