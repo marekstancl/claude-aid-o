@@ -1,6 +1,7 @@
 // kit-extra.mjs — what the kit writes in the plan's companion directory, checked in ONE place:
 //   - the names the kit keeps for itself (RESERVED: the same list `show` allows, `copy_extra` may never take);
-//   - safeTarget: every write and every removal the kit makes goes through it — a normalized relative path,
+//   - safeTarget: the kit's writes and removals in the copy_extra files, the copy's .gitignore, the manifest, the
+//     prototype's record and log go through it — a normalized relative path,
 //     inside the directory, no component (the target included, even a dangling one) a link;
 //   - ui.copy_extra[] (P117 (20), WAN P112): repository files outside ui.dir the app reads by a relative path
 //     (../tsconfig.base.json), copied beside the copy; `proto` copies by extraTargets, `show` allows exactly these

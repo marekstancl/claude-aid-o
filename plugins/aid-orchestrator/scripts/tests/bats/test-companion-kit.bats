@@ -444,3 +444,60 @@ _gone() {  # <pgid> <port>: no member left and the port closed (a failing pgrep 
   run _k proto; echo "$output"; [ "$status" -eq 0 ]; [ "$(tail -1 <<< "$output" | jq -r .stale)" = null ]
   _proposal; run _k show; echo "$output"; [ "$status" -eq 0 ]
 }
+
+# a dev server that answers the first request for /flaky.html with bytes that are no HTTP (the browser fails it with a
+# net::ERR_ error and does not repeat it, as a dropped connection would be repeated) and every
+# request for /broken.html; set.html stores a value, flaky.html shows what storage holds
+_flaky_dev() {
+  cat > "$P/ui/server.py" <<'PY'
+import http.server, sys
+seen = {}
+class H(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        p = self.path.split('?')[0]
+        seen[p] = seen.get(p, 0) + 1
+        if p == '/broken.html' or (p == '/flaky.html' and seen[p] == 1):
+            self.wfile.write(b'garbage that is no HTTP\r\n\r\n'); self.close_connection = True; return
+        return super().do_GET()
+    def log_message(self, *a): pass
+http.server.ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+PY
+  echo '<html><body><script>localStorage.setItem("x","1"); document.cookie="c=1"</script>set</body></html>' > "$P/ui/set.html"
+  echo '<html><body><p id="v"></p><script>document.getElementById("v").textContent = "x=" + (localStorage.getItem("x") || "none") + " c=" + (document.cookie.includes("c=1") ? "1" : "none")</script></body></html>' > "$P/ui/flaky.html"
+  cp "$P/ui/flaky.html" "$P/ui/broken.html"
+  yq -i '.ui.dev_cmd = ["python3", "server.py", "{port}"] | .ui.ready_path = "/index.html"' "$P/.aid-o/config/project.yaml"
+  mkdir -p "$D"; echo '[]' > "$D/mocks.json"
+}
+
+@test "a shot that fails on a network error is taken again once in a fresh context; a second failure stops the set; --only takes just the named shots" {
+  _flaky_dev; run _k proto; [ "$status" -eq 0 ]
+  cat > "$D/shots.json" <<'J'
+{"base": "proto", "shots": [{"name": "nastav", "path": "/set.html"},
+  {"name": "flaky", "path": "/flaky.html", "only": ["desktop"], "steps": [{"wait": {"for": {"text": "x=none c=none"}}}]}]}
+J
+  run _k shots; echo "$output"; [ "$status" -eq 0 ]                          # retried, and nothing of shot 1 carried over
+  [ -s "$D/shots/desktop/flaky.png" ]
+  echo '{"base": "proto", "shots": [{"name": "broken", "path": "/broken.html"}]}' > "$D/shots.json"
+  run _k shots; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"net::ERR_"* ]]
+  cat > "$D/shots.json" <<'J'
+{"base": "proto", "shots": [{"name": "nastav", "path": "/set.html"}, {"name": "flaky", "path": "/flaky.html"}]}
+J
+  local before; before="$(stat -c %Y.%N "$D/shots/desktop/flaky.png")"; sleep 1
+  run _k shots --only nastav; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(stat -c %Y.%N "$D/shots/desktop/flaky.png")" = "$before" ]             # the other shot is untouched
+  run _k shots --only nikdo; [ "$status" -ne 0 ]; [[ "$output" == *"no such shot"* ]]
+}
+
+@test "a full-page shot prints a pinned bar once, where it sits in the page, not over the content" {
+  echo '<html><body style="margin:0"><div style="position:fixed;bottom:0;left:0;right:0;height:40px;background:#ff0000"></div><div style="height:3000px;background:#ffffff">dlouhy obsah</div></body></html>' > "$P/ui/long.html"
+  run _k proto; [ "$status" -eq 0 ]; mkdir -p "$D"; echo '[]' > "$D/mocks.json"
+  echo '{"base": "proto", "shots": [{"name": "dlouha", "path": "/long.html", "capture": "full"}]}' > "$D/shots.json"
+  run _k shots; echo "$output"; [ "$status" -eq 0 ]
+  run node -e '
+    const { createRequire } = require("module"); const r = createRequire(process.argv[2]);
+    const { PNG } = r("pngjs"); const p = PNG.sync.read(require("fs").readFileSync(process.argv[1]));
+    const red = []; for (let y = 0; y < p.height; y++) { const i = (y * p.width + 5) * 4; if (p.data[i] > 200 && p.data[i + 1] < 60) red.push(y); }
+    console.log(red.length, red[0], p.height);' "$D/shots/desktop/dlouha.png" "$AID_PLUGIN_PATH/lib/ui-fidelity/package.json"
+  echo "$output"; read -r n first h <<< "$output"
+  [ "$n" -ge 35 ] && [ "$n" -le 45 ]; [ "$first" -le 5 ]                       # once, at the top of the page's flow
+}

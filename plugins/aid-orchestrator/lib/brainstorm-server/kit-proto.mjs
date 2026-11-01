@@ -91,7 +91,7 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
       if (e === '.vite' || e === '.vite-temp' || e === '.cache') continue;
       fs.symlinkSync(path.join(src, 'node_modules', e), path.join(nm, e));
     }
-    writeMan({ version: 2, files: manifest(dest), src_files: manifest(src), extra: [] });
+    writeMan({ version: 2, files: manifest(dest), src_files: manifest(src), extra: recordedBefore() });
   } else if (!fs.existsSync(manFile)) {
     die(`proto: ${dest} exists without its manifest (${manFile}) — the copy's changes cannot be told from the app; run: aid-companion.sh proto --plan ${PLAN} --refresh`);
   }
@@ -99,7 +99,7 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
 
   const port = await freePort();
   const args = UI.dev_cmd.map(a => String(a).replaceAll('{port}', String(port)));
-  const log = fs.openSync(path.join(DIR, 'proto.log'), 'a');
+  const log = fs.openSync(safeTarget(DIR, 'proto.log', die, { kit: true }), fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW, 0o644);
   const child = spawn(args[0], args.slice(1), { cwd: dest, detached: true, stdio: ['ignore', log, log], env: { ...process.env, BROWSER: 'none' } });
   child.unref();
   const pgid = child.pid, url = `http://127.0.0.1:${port}`, ready = UI.ready_path || '/';
@@ -118,6 +118,6 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
   const owners = portOwners(port);
   if (!owners.length || !owners.every(p => pgrpOf(p) === pgid)) stop(`port ${port} answers, but not from the process group we started (owners: ${owners.join(', ') || 'unknown'}) — another process took it`);
   const out = { pid: pgid, pgid, starttime: startOf(pgid), cmd: args[0], port, url, dir: dest, reused: false };
-  fs.writeFileSync(rec, JSON.stringify(out, null, 1));
+  kitWrite(DIR, 'proto.json', JSON.stringify(out, null, 1), die);
   console.log(JSON.stringify({ ...out, ...state, next: `build the variants in ${dest} behind ?v=<klic> from ui.components only; then write mocks.json and shots.json and run: aid-companion.sh shots --plan ${PLAN}` }));
 }

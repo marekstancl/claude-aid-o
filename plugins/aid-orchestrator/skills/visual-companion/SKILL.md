@@ -68,7 +68,8 @@ an `@` alias) fails with "ReferenceError: __dirname is not defined" — stay on 
    component of the page outside `ui.components` (a page-local badge) may be reused as it is; name
    it in `popis`, not in `postaveno_z` (which is only for shared ones) and not in `nove[]`.
 4. **Data and shots:** write `mocks.json` and `shots.json` in `.aid-o/work/companion/P/`, then
-   `bash $K shots --plan P`. Start with the calls you saw in the code; the step lists every API call
+   `bash $K shots --plan P` (`--only a,b` takes just those shots; a shot that fails on a network error
+   of the browser is taken once more by itself). Start with the calls you saw in the code; the step lists every API call
    still without a mock (login, counters, notifications …) — add them, run again. Today's state is
    a shot of the page without `?v=` (it goes in `minule[]` in the first round). The login key in
    `storage.localStorage` and the session call the app makes (e.g. `/auth/me`) come from its code.
@@ -106,7 +107,8 @@ an `@` alias) fails with "ReferenceError: __dirname is not defined" — stay on 
 Steps: `goto`, `click`, `fill` (+`value`), `select` (+`value`), `hover`, `press`, `wait` (ms,
 `"network"` or `{"for": <selector>}`). Selectors: `{role, name}`, `{testid}`, `{text}`, `{css}` —
 each must find exactly one element. `capture`: `"viewport"`, `"full"`, `{"element": <selector>}` or
-`{"scroll": <selector>}` (a container that scrolls on its own, captured at its full content height);
+`{"scroll": <selector>}` (a container that scrolls on its own, captured at its full content height, the
+ancestors that clip it opened too); with `"full"` the pinned bars (`fixed`, `sticky`) are printed once where they sit;
 `"only": ["desktop"]` limits a shot.
 
 `navrh.json` — the content of the page:

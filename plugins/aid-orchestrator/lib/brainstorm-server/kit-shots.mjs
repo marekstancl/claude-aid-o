@@ -68,62 +68,115 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
   const first = UI.first_shot_timeout_s === undefined ? 15 : Number(UI.first_shot_timeout_s);
   if (!Number.isInteger(first) || first < 1 || first > 120) die(`shots: ui.first_shot_timeout_s must be whole seconds from 1 to 120 (got ${UI.first_shot_timeout_s})`);
   let isFirst = true;
+  // --only <a,b> (C7): just the named shots; the others and their files stay as they are
+  const only = (process.env.AID_COMPANION_ONLY || '').split(',').filter(Boolean);
+  for (const n of only) if (!names.has(n)) die(`shots: --only ${n}: no such shot in shots.json (${[...names].join(', ')})`);
+  const newContext = async vp => {
+    const ctx = await b.newContext({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1 });
+    const st = spec.storage || {};
+    if (st.localStorage) await ctx.addInitScript(o => { for (const [k, v] of Object.entries(o)) localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); }, st.localStorage);
+    if (Array.isArray(st.cookies) && st.cookies.length) await ctx.addCookies(st.cookies.map(c => ({ url: base, ...c })));
+    await ctx.route('**/*', route => {
+      const req = route.request(), u = new URL(req.url());
+      if (req.isNavigationRequest() && u.origin !== origin) { unknown.add(`navigation to ${u.origin} (another origin)`); return route.abort(); }
+      if (!isApi(u)) {
+        // a data request to another origin would reach a live service: refused and listed like an unmocked call
+        if (u.origin !== new URL(base).origin && ['xhr', 'fetch'].includes(req.resourceType())) { unknown.add(`${req.method()} ${u.origin}${u.pathname} (another origin)`); return route.abort(); }
+        return route.continue();
+      }
+      const q = Object.fromEntries(u.searchParams);
+      const m = compiled.find(x => (!x.method || x.method === req.method()) && x.re.test(u.pathname)
+        && (!x.query || Object.entries(x.query).every(([k, v]) => q[k] === String(v))));
+      if (!m) { unknown.add(`${req.method()} ${u.pathname}${u.search}`); return route.fulfill({ status: 404, contentType: 'application/json', body: '{"detail":"no mock"}' }); }
+      return route.fulfill({ status: m.status || 200, headers: m.headers || {}, contentType: 'application/json', body: typeof m.body === 'string' ? m.body : JSON.stringify(m.body ?? null) });
+    });
+    return ctx;
+  };
+  // the page's own layout changed for the capture and put back in `finally`, also when the capture fails (C4):
+  // a full page sets fixed/sticky elements static (a pinned bar is otherwise printed in the middle of the long
+  // shot, WAN P117, P119); a scrolling container is opened to its full height together with every ancestor that
+  // clips it (overflow hidden or a fixed height: WAN AdminLayout h-[100dvh] overflow-hidden)
+  const unpin = page => page.evaluate(() => {
+    const saved = [];
+    for (const el of document.querySelectorAll('*')) {
+      const p = getComputedStyle(el).position;
+      if (p === 'fixed' || p === 'sticky') { saved.push([el, el.getAttribute('style')]); el.style.setProperty('position', 'static', 'important'); }
+    }
+    window.__aidSaved = saved;
+  });
+  const openUp = el => el.evaluate(n => {
+    const saved = [];
+    const open = (x, own) => { saved.push([x, x.getAttribute('style')]);
+      x.style.setProperty('max-height', 'none', 'important'); x.style.setProperty('overflow', 'visible', 'important');
+      x.style.setProperty('height', own ? x.scrollHeight + 'px' : 'auto', 'important'); };
+    const need = n.scrollHeight;
+    open(n, true);
+    for (let a = n.parentElement; a && a !== document.documentElement; a = a.parentElement) {
+      const cs = getComputedStyle(a);
+      if (cs.overflowY !== 'visible' || cs.maxHeight !== 'none' || a.clientHeight < need) open(a, false);
+    }
+    window.__aidSaved = saved;
+  });
+  const restore = page => page.evaluate(() => {
+    for (const [el, st] of (window.__aidSaved || []).reverse()) { if (st === null) el.removeAttribute('style'); else el.setAttribute('style', st); }
+    window.__aidSaved = [];
+  }).catch(() => {});
+  const takeShot = async (page, s, vp) => {
+    const where = `shot '${s.name}' (${vp.name})`;
+    // the first shot waits ui.first_shot_timeout_s for what it waits on (a page load never less than the
+    // browser's 30 s: the setting lengthens the first wait, it never shortens a load)
+    const wait = isFirst ? first * 1000 : 15000, nav = isFirst ? Math.max(first * 1000, 30000) : 30000;
+    await page.goto(at(s.path || '/', where), { waitUntil: 'networkidle', timeout: nav });
+    for (const [k, stp] of (s.steps || []).entries()) {
+      const w = `${where} step ${k + 1}`;
+      if ('goto' in stp) await page.goto(at(stp.goto, w), { waitUntil: 'networkidle', timeout: nav });
+      else if ('click' in stp) await (await one(page, stp.click, w)).click();
+      else if ('fill' in stp) await (await one(page, stp.fill, w)).fill(String(stp.value ?? ''));
+      else if ('select' in stp) await (await one(page, stp.select, w)).selectOption(String(stp.value ?? ''));
+      else if ('hover' in stp) await (await one(page, stp.hover, w)).hover();
+      else if ('press' in stp) await page.keyboard.press(String(stp.press));
+      else if ('wait' in stp) {
+        if (typeof stp.wait === 'number') await page.waitForTimeout(stp.wait);
+        else if (stp.wait === 'network') await page.waitForLoadState('networkidle');
+        else if (stp.wait && stp.wait.for) { await loc(page, stp.wait.for, w).first().waitFor({ timeout: wait }); await one(page, stp.wait.for, w); }
+      }
+    }
+    await page.waitForTimeout(300);
+    const file = path.join(DIR, 'shots', vp.name, `${s.name}.png`);
+    const cap = s.capture || 'viewport';
+    try {
+      if (cap && typeof cap === 'object' && cap.element) await (await one(page, cap.element, `${where} capture`)).screenshot({ path: file });
+      else if (cap && typeof cap === 'object' && cap.scroll) {
+        const el = await one(page, cap.scroll, `${where} capture`);
+        await openUp(el); await el.screenshot({ path: file });
+      } else {
+        if (cap === 'full') await unpin(page);
+        await page.screenshot({ path: file, fullPage: cap === 'full' });
+      }
+    } finally { await restore(page); }
+    return file;
+  };
   try {
     for (const vp of VIEWPORTS) {
-      const ctx = await b.newContext({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1 });
-      const st = spec.storage || {};
-      if (st.localStorage) await ctx.addInitScript(o => { for (const [k, v] of Object.entries(o)) localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); }, st.localStorage);
-      if (Array.isArray(st.cookies) && st.cookies.length) await ctx.addCookies(st.cookies.map(c => ({ url: base, ...c })));
-      await ctx.route('**/*', route => {
-        const req = route.request(), u = new URL(req.url());
-        if (req.isNavigationRequest() && u.origin !== origin) { unknown.add(`navigation to ${u.origin} (another origin)`); return route.abort(); }
-        if (!isApi(u)) {
-          // a data request to another origin would reach a live service: refused and listed like an unmocked call
-          if (u.origin !== new URL(base).origin && ['xhr', 'fetch'].includes(req.resourceType())) { unknown.add(`${req.method()} ${u.origin}${u.pathname} (another origin)`); return route.abort(); }
-          return route.continue();
-        }
-        const q = Object.fromEntries(u.searchParams);
-        const m = compiled.find(x => (!x.method || x.method === req.method()) && x.re.test(u.pathname)
-          && (!x.query || Object.entries(x.query).every(([k, v]) => q[k] === String(v))));
-        if (!m) { unknown.add(`${req.method()} ${u.pathname}${u.search}`); return route.fulfill({ status: 404, contentType: 'application/json', body: '{"detail":"no mock"}' }); }
-        return route.fulfill({ status: m.status || 200, headers: m.headers || {}, contentType: 'application/json', body: typeof m.body === 'string' ? m.body : JSON.stringify(m.body ?? null) });
-      });
+      const ctx = await newContext(vp);
       const page = await ctx.newPage();
       fs.mkdirSync(path.join(DIR, 'shots', vp.name), { recursive: true });
       for (const s of shots) {
         if (s.only && !s.only.includes(vp.name)) continue;
-        const where = `shot '${s.name}' (${vp.name})`;
-        // the first shot waits ui.first_shot_timeout_s for what it waits on (a page load never less than the
-        // browser's 30 s: the setting lengthens the first wait, it never shortens a load)
-        const wait = isFirst ? first * 1000 : 15000, nav = isFirst ? Math.max(first * 1000, 30000) : 30000;
-        await page.goto(at(s.path || '/', where), { waitUntil: 'networkidle', timeout: nav });
-        for (const [k, stp] of (s.steps || []).entries()) {
-          const w = `${where} step ${k + 1}`;
-          if ('goto' in stp) await page.goto(at(stp.goto, w), { waitUntil: 'networkidle', timeout: nav });
-          else if ('click' in stp) await (await one(page, stp.click, w)).click();
-          else if ('fill' in stp) await (await one(page, stp.fill, w)).fill(String(stp.value ?? ''));
-          else if ('select' in stp) await (await one(page, stp.select, w)).selectOption(String(stp.value ?? ''));
-          else if ('hover' in stp) await (await one(page, stp.hover, w)).hover();
-          else if ('press' in stp) await page.keyboard.press(String(stp.press));
-          else if ('wait' in stp) {
-            if (typeof stp.wait === 'number') await page.waitForTimeout(stp.wait);
-            else if (stp.wait === 'network') await page.waitForLoadState('networkidle');
-            else if (stp.wait && stp.wait.for) { await loc(page, stp.wait.for, w).first().waitFor({ timeout: wait }); await one(page, stp.wait.for, w); }
-          }
+        if (only.length && !only.includes(s.name)) continue;
+        const before = new Set(unknown);
+        let file;
+        try { file = await takeShot(page, s, vp); }
+        catch (e) {
+          // one retry of this shot on this viewport, for a network error of the browser only (C7, WAN P113: a
+          // changing network failed the whole set) — in a new context with the storage of shots.json, so nothing
+          // the first try changed (a cookie, local storage) carries over; the unmocked calls it listed are dropped
+          if (!/net::ERR_/.test(e.message)) throw e;
+          console.error(`aid-companion: shot '${s.name}' (${vp.name}) taken again after ${e.message.split('\n')[0]}`);
+          unknown.clear(); for (const x of before) unknown.add(x);
+          const ctx2 = await newContext(vp);
+          try { file = await takeShot(await ctx2.newPage(), s, vp); } finally { await ctx2.close(); }
         }
-        await page.waitForTimeout(300);
-        const file = path.join(DIR, 'shots', vp.name, `${s.name}.png`);
-        const cap = s.capture || 'viewport';
-        if (cap && typeof cap === 'object' && cap.element) await (await one(page, cap.element, `${where} capture`)).screenshot({ path: file });
-        else if (cap && typeof cap === 'object' && cap.scroll) {
-          // a scrolling container captured whole (P117 (20)): opened to its full height for the shot, then put back
-          const el = await one(page, cap.scroll, `${where} capture`);
-          const before = await el.evaluate(n => { const s = n.getAttribute('style'); n.style.setProperty('max-height', 'none', 'important');
-            n.style.setProperty('height', n.scrollHeight + 'px', 'important'); n.style.setProperty('overflow', 'visible', 'important'); return s; });
-          await el.screenshot({ path: file });
-          await el.evaluate((n, s) => { if (s === null) n.removeAttribute('style'); else n.setAttribute('style', s); }, before);
-        }
-        else await page.screenshot({ path: file, fullPage: cap === 'full' });
         isFirst = false;
         written.push(file);
       }
