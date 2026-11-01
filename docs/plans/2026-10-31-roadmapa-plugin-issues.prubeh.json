@@ -1,18 +1,29 @@
 {"nazev": "AID opravy – kde jsme",
  "stav_k": "2026-11-01",
- "jednou_vetou": "Všechno, co jsi 31. 10. vybral, je vydané (3.12.1, 3.13.0, 3.14.0); zbývá pět drobností, které čekají na druhý případ.",
- "hotovo": [
-  {"co": "3.12.1", "lidsky": "Odložené nálezy se značí i ve velkém repu, zástupce dostává svoje pokyny", "kde": "vydáno 31. 10."},
-  {"co": "3.13.0", "lidsky": "Běh plánu bez ručních obchvatů: převzetí kroku, prostředí stromů, obnova sloučení, verze souběžných plánů", "kde": "vydáno 31. 10."},
-  {"co": "3.14.0", "lidsky": "Povinná stránka průběhu roadmapy a companion, který nepředá uříznutý náhled", "kde": "vydáno 1. 11."}],
- "dal": [
-  {"co": "12.5–12.9 (přejmenování kontraktu, souběžné slučování, pořadí slučování, předem existující chyba, přerušené sezení)", "kdy": "až se objeví druhý nezávislý případ"},
-  {"co": "Ověřit stránku roadmapy na prvním plánu WANu s roadmapa_dokument"}],
+ "jednou_vetou": "Všechno, co jsi 31. 10. vybral, je vydané; stránka roadmapy dostává pevnou strukturu (3.14.1) a pak zbývá pět drobností, které čekají na druhý případ.",
+ "stav": "na_ceste",
+ "ceka_na_tebe": [],
+ "etapy": [
+  {"nazev": "3.12.1", "kdy": "31. 10.", "co_prinese": "Odložené nálezy se značí i ve velkém repu; zástupce má svoje pokyny.", "stav": "hotovo", "polozky_hotovo": 2, "polozky_celkem": 2},
+  {"nazev": "3.13.0 · běh plánu", "kdy": "31. 10.", "co_prinese": "Plán ve WANu projde bez ručních obchvatů.", "stav": "hotovo", "polozky_hotovo": 12, "polozky_celkem": 12},
+  {"nazev": "3.14.0 · roadmapa a companion", "kdy": "1. 11.", "co_prinese": "Stránka průběhu roadmapy; náhled bez uříznutých oken.", "stav": "hotovo", "polozky_hotovo": 9, "polozky_celkem": 9},
+  {"nazev": "3.14.1 · stránka roadmapy", "kdy": "1. 11.", "co_prinese": "Pevná struktura stránky, která má o čem mluvit.", "stav": "ted", "polozky_hotovo": 0, "polozky_celkem": 1},
+  {"nazev": "12.5–12.9", "kdy": "až přijde druhý případ", "co_prinese": "Pět drobností z WANu, zatím viděných jednou.", "stav": "ceka", "polozky_hotovo": 0, "polozky_celkem": 5}],
+ "ted": [{"co": "Stránka roadmapy s pevnou strukturou", "kdo": "Claude", "kdy": "dnes"}],
  "cisla": [
-  {"co": "položek roadmapy hotovo", "hodnota": "23 / 28"},
-  {"co": "vydání", "hodnota": "3"},
-  {"co": "testovacích případů navíc (31. 10.–1. 11.)", "hodnota": "+91"}],
+  {"co": "vydání (31. 10.–1. 11.)", "hodnota": "3"},
+  {"co": "testovacích případů navíc", "hodnota": "+91"},
+  {"co": "řádků kódu čistě", "hodnota": "+1 587"}],
  "chybi": [
-  {"co": "Brána inputs: u bran a brána jediné hlavy migrací alembic", "od_koho": "okno WANu (mimo plugin)"},
-  {"co": "Studio /aid-ui (10 hlášení + 4 tvé požadavky z 26. 10.)", "od_koho": "tvé rozhodnutí, kdy se k němu vrátit"}],
- "posledni_zmena": {"kdo": "init", "co": "založení stránky po vydání 3.14.0"}}
+  {"co": "Brána inputs: u bran a jediná hlava migrací alembic", "od_koho": "okno WANu", "od_kdy": "31. 10."},
+  {"co": "Kdy se vrátit ke studiu /aid-ui (10 hlášení + 4 tvé požadavky)", "od_koho": "ty", "od_kdy": "31. 10."}],
+ "rizika": [
+  {"co": "Stránka roadmapy zatím neprošla prvním skutečným plánem WANu.", "overi": "Ověří první plán s roadmapa_dokument."},
+  {"co": "Kontrola ořezu snímků je ověřená na starší komponentě; na nové vadě se teprve ukáže."}],
+ "hotovo": [
+  {"etapa": "3.12.1", "lidsky": "Odložené nálezy se značí i ve velkém repu, zástupce dostává svoje pokyny."},
+  {"etapa": "3.13.0 · běh plánu", "lidsky": "Převzetí kroku s náhradním příkazem, prostředí stromů, obnova sloučení, verze souběžných plánů."},
+  {"etapa": "3.14.0 · roadmapa a companion", "lidsky": "Každá roadmapa má stránku průběhu a plán ji musí obnovit před uzávěrem."},
+  {"etapa": "3.14.0 · roadmapa a companion", "lidsky": "Companion změří ořez oken u každého snímku a uříznutý návrh nepředá."},
+  {"etapa": "3.14.0 · roadmapa a companion", "lidsky": "Kopie aplikace má styly oken, snímky celé stránky bez zdvojených lišt, down zastaví, co spustil."}],
+ "posledni_zmena": {"kdo": "aid-do", "co": "stránka v pevné struktuře (3.14.1)"}}

@@ -81,11 +81,15 @@ Every brief of a plan of that roadmap carries `roadmapa_dokument: docs/plans/<ro
 without a page (`roadmap_page_missing`), and `plan-close` refuses the plan until it refreshed the page
 (`roadmap_page_not_refreshed`). The free-text `roadmapa:` binds nothing.
 
-The data file is the only thing the agent writes (plain text, no HTML; unknown fields refused):
-`nazev` (the page title, ≤ 60 characters), `stav_k` (`RRRR-MM-DD`), `jednou_vetou` (where we are, one sentence),
-`hotovo[{co, lidsky, kde}]` (done: the plan or release, what a user notices, where it runs), `dal[{co, kdy?}]` (next),
-`cisla[{co, hodnota}]` (where we are in numbers), `chybi[{co, od_koho}]` (what is missing and from whom),
-`posledni_zmena{kdo: P<n>|aid-do, co}`. A plan writes its change there before its merge (or on the target branch
+The data file is the only thing the agent writes (plain text, no HTML; every field required, unknown fields refused).
+The page has the same parts in the same order for every roadmap (PM 1. 11. 2026) — fill each so it says something:
+`nazev` (≤ 60 characters), `stav_k` (`RRRR-MM-DD`), `jednou_vetou` (where we are, one sentence), `stav`
+(`na_ceste|stoji|hotovo`), `ceka_na_tebe[{co, doporuceni?}]` (decisions blocking on the PM, first on the page),
+`etapy[{nazev, kdy, co_prinese, stav: hotovo|ted|ceka, polozky_hotovo, polozky_celkem}]` (the releases or plans in
+order, at least one; the overall progress is their sum), `ted[{co, kdo, kdy}]`, `cisla[{co, hodnota}]`,
+`chybi[{co, od_koho, od_kdy}]`, `rizika[{co, overi?}]`, `hotovo[{etapa, lidsky}]` (what a user notices, by the
+stage's `nazev`), `posledni_zmena{kdo: P<n>|aid-do, co}`. Empty lists are allowed and the page says so; the history
+of changes is taken from the record, not from the data. A plan writes its change there before its merge (or on the target branch
 after it), then `aid-roadmap-page.sh publish docs/plans/<roadmap>.md --plan P<n>`; the page goes out also with
 `AID_PM_PAGES=off` (the one page the PM wants without asking). The link printed goes to the chat only.
 

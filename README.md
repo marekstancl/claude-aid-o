@@ -122,7 +122,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v3.14.0** (current) — stránka průběhu roadmapy (povinná, plán ji obnoví před uzávěrem), companion nepředá uříznutý náhled (kontrola každého snímku), kopie aplikace drží krok s nastavením, snímky celé stránky a opakování po síťové chybě, `down` zastaví, co spustil; jména testů bez původu
+- **v3.14.1** (current) — stránka průběhu roadmapy má pevnou strukturu: čeká na tebe, etapy, teď, čísla, co chybí od koho, rizika, hotovo, historie
+- **v3.14.0** — stránka průběhu roadmapy (povinná, plán ji obnoví před uzávěrem), companion nepředá uříznutý náhled (kontrola každého snímku), kopie aplikace drží krok s nastavením, snímky celé stránky a opakování po síťové chybě, `down` zastaví, co spustil; jména testů bez původu
 - **v3.13.0** — běh plánu bez ručních obchvatů: převzetí kroku s náhradním příkazem, prostředí pracovních stromů, spor po opravě jde do dalšího kola, obnova sloučení se nezacyklí, kontroly vydání před sloučením
 - **v3.12.1** — odložené nálezy se značí i ve velkém repozitáři (WAN); zástupce dostává svoje pokyny (chyběla šablona)
 - **v3.12.0** — uzávěr plánu konverguje: po opravě potvrzovací kolo místo nové plné revize, nový drobný nález mimo opravu jde do backlogu (`follow_up`), rozhodnutí PM platí pro věc napříč koly a pokusy a karta nese otisky nálezů, takže projde napoprvé; uzávěr jmenuje brány, které běží znovu jen kvůli chybějícímu `inputs:`

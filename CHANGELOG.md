@@ -3,6 +3,10 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.14.1] — 2026-11-01
+
+- **Stránka průběhu roadmapy má pevnou strukturu (PM 1. 11.: „nyní je to o ničem“).** Každá roadmapa má stejné části ve stejném pořadí: hlavička se stavem (Na cestě, Stojí, Hotovo), kde jsme jednou větou a ukazatel hotovo/celkem; „Čeká na tebe“ úplně nahoře; etapy jako karty se stavem (Hotovo, Teď, Čeká), datem, co přinesou a kolik položek je hotových; teď se dělá; čísla; co chybí od koho a od kdy; rizika; hotovo podle etap; historie změn. Ukazatel se sčítá z etap a historie bere ze záznamů, agent je nepíše. Data `.prubeh.json` mají nová povinná pole (`stav`, `ceka_na_tebe`, `etapy`, `ted`, `rizika`, `chybi[].od_kdy`, `hotovo[{etapa, lidsky}]`); data ve starém tvaru stránka odmítne se jménem chybějícího pole. Podklad už není bílý, stránka má i tmavý režim a čas v historii je pražský.
+
 ## [3.14.0] — 2026-11-01
 
 Stránka průběhu roadmapy a spolehlivý companion (rozbor plugin issues 31. 10. 2026, volby PM 10A a C1-C8). Zadání: `docs/archive/2026-11-01-zadani-3140-roadmapa-companion.md`.

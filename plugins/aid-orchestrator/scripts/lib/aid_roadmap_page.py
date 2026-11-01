@@ -13,11 +13,19 @@ The document lives in the project (docs/plans/<x>.md); its data <x>.prubeh.json 
 writes only this); the rendered page and the record in the state root (.aid-o/work/roadmap-pages/<id>/, runtime).
 """
 import datetime, hashlib, html, json, os, re, secrets, subprocess, sys
+from zoneinfo import ZoneInfo
 
 MARK = re.compile(r'^<!-- aid-roadmap-page: id=([a-z0-9][a-z0-9-]{0,48}-[0-9a-f]{8}) -->$', re.M)
-ITEM = {'hotovo': ('co', 'lidsky', 'kde'), 'dal': ('co',), 'cisla': ('co', 'hodnota'), 'chybi': ('co', 'od_koho')}
-OPTIONAL = {'dal': ('kdy',)}
-TOP = {'nazev', 'stav_k', 'jednou_vetou', 'hotovo', 'dal', 'cisla', 'chybi', 'posledni_zmena'}
+# the page's fixed structure (AID 3.14.1, PM 1. 11. 2026: every roadmap page has the same parts, in the same order):
+# where we are in one sentence + overall progress, what waits for the PM, the stages, what is being done, the numbers,
+# what is missing from whom, the risks, what is done per stage, the history of changes (from the record, not the data)
+ITEM = {'ceka_na_tebe': ('co',), 'etapy': ('nazev', 'kdy', 'co_prinese', 'stav'), 'ted': ('co', 'kdo', 'kdy'),
+        'cisla': ('co', 'hodnota'), 'chybi': ('co', 'od_koho', 'od_kdy'), 'rizika': ('co',), 'hotovo': ('etapa', 'lidsky')}
+OPTIONAL = {'ceka_na_tebe': ('doporuceni',), 'rizika': ('overi',)}
+COUNTS = {'etapy': ('polozky_hotovo', 'polozky_celkem')}
+TOP = {'nazev', 'stav_k', 'jednou_vetou', 'stav', *ITEM, 'posledni_zmena'}
+STAV = {'na_ceste': 'Na cestě', 'stoji': 'Stojí', 'hotovo': 'Hotovo'}
+ETAPA = {'hotovo': ('Hotovo', 'done'), 'ted': ('Teď', 'run'), 'ceka': ('Čeká', 'wait')}
 
 
 class Refused(Exception):
@@ -92,13 +100,15 @@ def validate(raw, where):
             errs.append('stav_k must be a date RRRR-MM-DD')
     if 'jednou_vetou' in d and not txt(d['jednou_vetou']):
         errs.append('jednou_vetou must be a non-empty text')
+    if 'stav' in d and d['stav'] not in STAV:
+        errs.append(f'stav must be one of {", ".join(STAV)}')
     for k, fields in ITEM.items():
         if k not in d:
             continue
         if not isinstance(d[k], list):
             errs.append(f'{k} must be a list (it may be empty)'); continue
         for i, it in enumerate(d[k]):
-            allowed = set(fields) | set(OPTIONAL.get(k, ()))
+            allowed = set(fields) | set(OPTIONAL.get(k, ())) | set(COUNTS.get(k, ()))
             if not isinstance(it, dict):
                 errs.append(f'{k}[{i}] must be an object'); continue
             for f in fields:
@@ -109,6 +119,19 @@ def validate(raw, where):
             for f in OPTIONAL.get(k, ()):
                 if f in it and not txt(it[f]):
                     errs.append(f'{k}[{i}].{f} must be a non-empty text when present')
+            nums = [it.get(f) for f in COUNTS.get(k, ())]
+            if nums and not (all(isinstance(n, int) and not isinstance(n, bool) and n >= 0 for n in nums) and nums[0] <= nums[1]):
+                errs.append(f'{k}[{i}]: polozky_hotovo and polozky_celkem must be whole numbers, hotovo <= celkem')
+    if isinstance(d.get('etapy'), list):
+        if not d['etapy']:
+            errs.append('etapy must name at least one stage')
+        for i, it in enumerate(d['etapy']):
+            if isinstance(it, dict) and it.get('stav') not in ETAPA:
+                errs.append(f'etapy[{i}].stav must be one of {", ".join(ETAPA)}')
+        names = {it.get('nazev') for it in d['etapy'] if isinstance(it, dict)}
+        for i, it in enumerate(d.get('hotovo') if isinstance(d.get('hotovo'), list) else []):
+            if isinstance(it, dict) and it.get('etapa') not in names:
+                errs.append(f'hotovo[{i}].etapa {it.get("etapa")!r} is not the nazev of a stage in etapy')
     pz = d.get('posledni_zmena')
     if 'posledni_zmena' in d:
         if not (isinstance(pz, dict) and set(pz) == {'kdo', 'co'} and isinstance(pz.get('kdo'), str)
@@ -119,34 +142,77 @@ def validate(raw, where):
     return d
 
 
-def render(d, doc_rel):
+def render(d, doc_rel, hist):
+    """the fixed page (3.14.1). <hist>: the record's latest entries, newest first, each {at, kdo, co}"""
     e = html.escape
-    def section(title, items, fmt):
-        body = ''.join(f'<li>{fmt(i)}</li>' for i in items) or '<li class="empty">nic</li>'
-        return f'<section><h2>{e(title)}</h2><ul>{body}</ul></section>'
-    cisla = ''.join(f'<div class="n"><b>{e(c["hodnota"])}</b><span>{e(c["co"])}</span></div>' for c in d['cisla'])
-    return f'''<!doctype html><html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{e(d["nazev"])}</title><style>
-:root{{--bg:#fbfaf7;--fg:#1d1d1b;--mut:#6b6a66;--line:#e4e1da;--acc:#2f5d50}}
-@media (prefers-color-scheme:dark){{:root{{--bg:#191917;--fg:#ecebe6;--mut:#a3a19b;--line:#33322e;--acc:#7fb7a4}}}}
-body{{margin:0;background:var(--bg);color:var(--fg);font:16px/1.5 system-ui,sans-serif}}
-main{{max-width:760px;margin:0 auto;padding:24px 16px 48px}}
-h1{{font-size:24px;margin:0 0 4px}} .k{{color:var(--mut);font-size:14px}} .v{{font-size:18px;margin:16px 0 24px}}
-h2{{font-size:15px;text-transform:uppercase;letter-spacing:.04em;color:var(--acc);margin:28px 0 8px}}
-ul{{margin:0;padding-left:20px}} li{{margin:6px 0}} li.empty{{color:var(--mut);list-style:none;margin-left:-20px}}
-.m{{color:var(--mut);font-size:14px}} .nums{{display:flex;flex-wrap:wrap;gap:12px}}
-.n{{border:1px solid var(--line);border-radius:8px;padding:10px 14px;min-width:120px}} .n b{{display:block;font-size:20px}}
-.n span{{color:var(--mut);font-size:14px}} footer{{margin-top:32px;color:var(--mut);font-size:13px}}
-</style></head><body><main>
-<h1>{e(d["nazev"])}</h1><div class="k">Stav k {e(d["stav_k"])}</div>
-<p class="v">{e(d["jednou_vetou"])}</p>
-{('<section><h2>Kde jsme v číslech</h2><div class="nums">' + cisla + '</div></section>') if d['cisla'] else ''}
-{section("Hotovo", d["hotovo"], lambda i: f'{e(i["lidsky"])} <span class="m">· {e(i["co"])} · {e(i["kde"])}</span>')}
-{section("Co je dál", d["dal"], lambda i: e(i["co"]) + (f' <span class="m">· {e(i["kdy"])}</span>' if i.get("kdy") else ''))}
-{section("Co chybí a od koho", d["chybi"], lambda i: f'{e(i["co"])} <span class="m">· {e(i["od_koho"])}</span>')}
-<footer>Poslední změna: {e(d["posledni_zmena"]["kdo"])} — {e(d["posledni_zmena"]["co"])}. Zdroj: {e(doc_rel)}</footer>
-</main></body></html>
-'''
+    done = sum(x['polozky_hotovo'] for x in d['etapy']); total = sum(x['polozky_celkem'] for x in d['etapy'])
+    pct = round(100 * done / total) if total else 0
+    def when(iso):   # the record is UTC; the PM reads Prague time
+        try:
+            t = datetime.datetime.strptime(iso, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=datetime.timezone.utc).astimezone(ZoneInfo('Europe/Prague'))
+        except (TypeError, ValueError):
+            return ''
+        return f'{t.day}. {t.month}. {t:%H:%M}'
+    date = f'{int(d["stav_k"][8:10])}. {int(d["stav_k"][5:7])}. {d["stav_k"][:4]}'
+    ul = lambda items, f: '<ul>' + ''.join(f'<li>{f(x)}</li>' for x in items) + '</ul>'
+    card = lambda title, body, cls='': f'<section class="card{cls}"><h2>{e(title)}</h2>{body}</section>'
+    none = lambda t: f'<p class="m">{e(t)}</p>'
+    if d['ceka_na_tebe']:
+        you = ul(d['ceka_na_tebe'], lambda x: f'<b>{e(x["co"])}</b>' + (f' <span class="m">· doporučuji: {e(x["doporuceni"])}</span>' if x.get('doporuceni') else ''))
+    else:
+        you = '<p class="ok">Nic. Jede se bez tebe.</p>'
+    def stage(x):
+        label, cls = ETAPA[x['stav']]; t = x['polozky_celkem']; w = round(100 * x['polozky_hotovo'] / t) if t else 0
+        return (f'<div class="ph{" now" if x["stav"] == "ted" else ""}"><span class="chip {cls}">{label}</span><div class="n">{e(x["nazev"])}</div>'
+                f'<div class="d">{e(x["kdy"])}</div><p>{e(x["co_prinese"])}</p><div class="mini"><i style="width:{w}%"></i></div>'
+                f'<div class="m">{x["polozky_hotovo"]} / {t}</div></div>')
+    by_stage = ''
+    for k, x in enumerate([x for x in reversed(d['etapy']) if any(h['etapa'] == x['nazev'] for h in d['hotovo'])]):
+        items = [h for h in d['hotovo'] if h['etapa'] == x['nazev']]
+        by_stage += f'<details{" open" if k == 0 else ""}><summary>{e(x["nazev"])} <span class="m">({e(x["kdy"])})</span></summary>' + ul(items, lambda h: e(h['lidsky'])) + '</details>'
+    rows = lambda head, items, f: '<table><tr>' + ''.join(f'<th>{h}</th>' for h in head) + '</tr>' + ''.join('<tr>' + f(x) + '</tr>' for x in items) + '</table>'
+    return f"""<!doctype html><html lang="cs"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{e(d["nazev"])}</title><style>{CSS}</style></head><body>
+<header><div class="w"><div class="kicker">Roadmapa · stav k {date}</div>
+<h1>{e(d["nazev"])} <span class="pill">{STAV[d["stav"]]}</span></h1><p class="lead">{e(d["jednou_vetou"])}</p>
+<div class="prog"><b>{done} / {total}</b><div class="bar"><i style="width:{pct}%"></i></div><span>položek hotovo</span></div></div></header>
+<main><div class="w grid">
+{card("Čeká na tebe", you, " you")}
+{card("Etapy", '<div class="tl">' + ''.join(stage(x) for x in d['etapy']) + '</div>')}
+<div class="two">{card("Teď se dělá", ul(d['ted'], lambda x: f'<b>{e(x["co"])}</b> <span class="m">· {e(x["kdo"])} · {e(x["kdy"])}</span>') if d['ted'] else none('Nic nerozpracovaného.'))}
+{card("Kde jsme v číslech", '<div class="nums">' + ''.join(f'<div class="num"><b>{e(c["hodnota"])}</b><span>{e(c["co"])}</span></div>' for c in d['cisla']) + '</div>' if d['cisla'] else none('Bez čísel.'))}</div>
+<div class="two">{card("Co chybí a od koho", rows(['Co', 'Od koho', 'Od kdy'], d['chybi'], lambda x: f'<td>{e(x["co"])}</td><td>{e(x["od_koho"])}</td><td class="m">{e(x["od_kdy"])}</td>') if d['chybi'] else none('Nic, na nikoho se nečeká.'))}
+{card("Rizika", ul(d['rizika'], lambda x: e(x['co']) + (f' <span class="m">{e(x["overi"])}</span>' if x.get('overi') else '')) if d['rizika'] else none('Žádná známá.'))}</div>
+{card("Hotovo", by_stage or none('Zatím nic.'))}
+{card("Historie změn", rows(['Kdy', 'Co', 'Kdo'], hist, lambda h: f'<td class="m">{when(h.get("at"))}</td><td>{e(h.get("co") or "")}</td><td class="m">{e(h.get("kdo") or "")}</td>'))}
+<footer>Zdroj: {e(doc_rel)} · obnovuje každý plán roadmapy před uzávěrem a /aid-do nad její položkou</footer>
+</div></main></body></html>
+"""
+
+
+CSS = """:root{--bg:#eeeae1;--card:#fffdf8;--ink:#1c2321;--mut:#68716d;--line:#ddd6c8;--band:#17322b;--band2:#21463c;--acc:#2f8f6f;--warn:#c27a12;--warnbg:#fbf0dc;--prog:#e8e2d4}
+@media (prefers-color-scheme:dark){:root{--bg:#141816;--card:#1d2321;--ink:#e9ece8;--mut:#9aa39e;--line:#2d3532;--band:#0f2a23;--band2:#173a31;--acc:#5cc39c;--warn:#e3a33d;--warnbg:#2c2416;--prog:#2a312e}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{background:linear-gradient(135deg,var(--band),var(--band2));color:#f3f6f2;padding:28px 16px 32px}.w{max-width:960px;margin:0 auto}
+.kicker{font-size:12px;letter-spacing:.08em;text-transform:uppercase;opacity:.75}h1{font-size:28px;margin:6px 0 10px;line-height:1.2}
+.lead{font-size:17px;max-width:680px;opacity:.95;margin:0 0 20px}.prog{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.bar{flex:1;min-width:220px;height:12px;background:rgba(255,255,255,.18);border-radius:99px;overflow:hidden}.bar i{display:block;height:100%;background:#7fe0b6;border-radius:99px}
+.prog b{font-size:22px}.prog span{opacity:.8;font-size:14px}
+.pill{display:inline-block;font-size:12px;font-weight:600;padding:3px 10px;border-radius:99px;background:rgba(127,224,182,.2);color:#9ff0cb;margin-left:8px;vertical-align:middle}
+main{padding:0 16px 48px}.grid{display:grid;gap:16px;margin-top:-16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px 20px}
+h2{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--mut);margin:0 0 12px}
+.you{border-color:var(--warn);background:var(--warnbg)}.you h2{color:var(--warn)}.ok{color:var(--acc);font-weight:600;margin:0}
+.tl{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:10px}
+.ph{border:1px solid var(--line);border-radius:10px;padding:12px;background:var(--card)}.ph.now{border-color:var(--acc);box-shadow:0 0 0 2px color-mix(in srgb,var(--acc) 25%,transparent)}
+.ph .n{font-weight:700}.ph .d{color:var(--mut);font-size:13px}.ph p{margin:6px 0 8px;font-size:14px}
+.chip{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;padding:2px 8px;border-radius:99px;display:inline-block}
+.done{background:color-mix(in srgb,var(--acc) 18%,transparent);color:var(--acc)}.run{background:color-mix(in srgb,var(--warn) 20%,transparent);color:var(--warn)}.wait{background:var(--prog);color:var(--mut)}
+.mini{height:6px;background:var(--prog);border-radius:99px;overflow:hidden}.mini i{display:block;height:100%;background:var(--acc)}
+.nums{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}.num{border:1px solid var(--line);border-radius:10px;padding:12px}.num b{font-size:24px;display:block}.num span{color:var(--mut);font-size:13px}
+table{width:100%;border-collapse:collapse;font-size:14px}td,th{text-align:left;padding:8px 6px;border-top:1px solid var(--line);vertical-align:top}th{color:var(--mut);font-weight:600;font-size:12px;border-top:0;white-space:nowrap}
+ul{margin:0;padding-left:18px}li{margin:4px 0}.m{color:var(--mut);font-size:13px}.two{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:720px){.two{grid-template-columns:1fr}h1{font-size:23px}}details summary{cursor:pointer;font-weight:600}footer{color:var(--mut);font-size:12px;margin-top:20px}"""
 
 
 def record_dir(state, rid):
@@ -201,7 +267,19 @@ def publish(project, state, doc, who, aid_do=False, any_author=False):
     claim(project, rel, rid, rdir)
     cur = os.path.join(rdir, 'current.json')
     page = os.path.join(rdir, 'page.html')
-    write_no_follow(page, render(d, rel))
+    hist_file = os.path.join(rdir, 'history.jsonl')
+    past = []
+    if os.path.isfile(hist_file) and not os.path.islink(hist_file):
+        for ln in open(hist_file, encoding='utf-8'):
+            try:
+                x = json.loads(ln)
+            except ValueError:
+                continue
+            if x.get('vysledek') in ('link', 'local'):
+                past.append(x)
+    now_at = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+    shown = [{'at': now_at, 'kdo': 'init' if any_author else kdo, 'co': d['posledni_zmena']['co']}] + past[::-1][:4]
+    write_no_follow(page, render(d, rel, shown))
     pub = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'aid-pm-page-publish.sh')
     p = subprocess.run(['bash', pub, page, '--kind', 'roadmap', '--roadmap', rid, '--title', d['nazev'], '--project-root', state],
                        capture_output=True, text=True)
@@ -213,7 +291,7 @@ def publish(project, state, doc, who, aid_do=False, any_author=False):
     else:
         result, link = 'failed', None
     # a republish by init records init as its author: it never counts as a plan's refresh (plan-close reads kdo)
-    entry = {'kdo': 'init' if any_author else kdo, 'data_sha256': digest, 'dokument': rel, 'at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+    entry = {'kdo': 'init' if any_author else kdo, 'co': d['posledni_zmena']['co'], 'data_sha256': digest, 'dokument': rel, 'at': now_at,
              'vysledek': result}
     if result == 'failed':
         # the link carries the PM's key: never into a file, even inside an error text
@@ -249,7 +327,9 @@ def init(project, state, doc, title):
             raise Refused(1, '--title must be a text of 1-60 characters')
         inside(project, data_rel, 'the data file', must_exist=False)
         data = {'nazev': title, 'stav_k': datetime.date.today().isoformat(), 'jednou_vetou': 'Roadmapa má stránku průběhu; první plán ji naplní.',
-                'hotovo': [], 'dal': [], 'cisla': [], 'chybi': [], 'posledni_zmena': {'kdo': 'init', 'co': 'založení stránky'}}
+                'stav': 'na_ceste', 'ceka_na_tebe': [],
+                'etapy': [{'nazev': 'Etapa 1', 'kdy': 'doplní první plán', 'co_prinese': 'doplní první plán', 'stav': 'ted', 'polozky_hotovo': 0, 'polozky_celkem': 1}],
+                'ted': [], 'cisla': [], 'chybi': [], 'rizika': [], 'hotovo': [], 'posledni_zmena': {'kdo': 'init', 'co': 'založení stránky'}}
         write_no_follow(os.path.join(project, data_rel), json.dumps(data, ensure_ascii=False, indent=1) + '\n')
         publish(project, state, rel, 'init')
     else:

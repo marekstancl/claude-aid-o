@@ -34,7 +34,7 @@ P
   [ "$(sed -n 2p "$R/$DOC")" = "<!-- aid-roadmap-page: id=${id} -->" ]
   local before; before="$(sha256sum "$R/$DOC" "$DATA")"
   run _rp init "$DOC" --title "jiný"; [ "$status" -eq 0 ]; [[ "$output" == "kept ${id}"* ]]; [ "$(sha256sum "$R/$DOC" "$DATA")" = "$before" ]
-  _data '.posledni_zmena = {kdo: "P900", co: "<script>alert(1)</script>"} | .chybi = [{co: "<img src=x onerror=1>", od_koho: "jednatel"}]'
+  _data '.posledni_zmena = {kdo: "P900", co: "<script>alert(1)</script>"} | .chybi = [{co: "<img src=x onerror=1>", od_koho: "jednatel", od_kdy: "1. 11."}]'
   run _rp publish "$DOC" --plan P900; echo "$output"; [ "$status" -eq 0 ]
   local page="$R/.aid-o/work/roadmap-pages/${id}/page.html"
   ! grep -q '<script>alert' "$page"; ! grep -q '<img src=x' "$page"; grep -q '&lt;script&gt;alert(1)&lt;/script&gt;' "$page"
@@ -131,4 +131,25 @@ P
   _publisher; _data '.posledni_zmena = {kdo: "P903", co: "c"}'; git -C "$R" add -A; git -C "$R" commit -qm p903
   FAIL=1 run _rp publish "$DOC" --plan P903; [ "$status" -ne 0 ]
   run python3 -I "$PY" refreshed "$R" "$R" "$DOC" P903 HEAD; [ "$status" -eq 1 ]
+}
+
+@test "the page has its fixed parts: every part required, stages counted into the progress, done grouped by stage, history from the record" {
+  _rp init "$DOC" --title "X kde jsme" >/dev/null
+  _data 'del(.rizika) | .etapy = [] | .stav = "jede"'
+  run _rp publish "$DOC" --plan P900; echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"missing field rizika"* && "$output" == *"etapy must name at least one stage"* && "$output" == *"stav must be one of"* ]]
+  _data '.rizika = [{co: "první plán", overi: "P900"}] | .stav = "na_ceste" | .posledni_zmena = {kdo: "P900", co: "etapy doplněny"}
+    | .etapy = [{nazev: "1.0", kdy: "1. 11.", co_prinese: "základ", stav: "hotovo", polozky_hotovo: 3, polozky_celkem: 3},
+                {nazev: "1.1", kdy: "2. 11.", co_prinese: "zbytek", stav: "ted", polozky_hotovo: 1, polozky_celkem: 5}]
+    | .hotovo = [{etapa: "1.9", lidsky: "nic"}]'
+  run _rp publish "$DOC" --plan P900; [ "$status" -ne 0 ]; [[ "$output" == *"hotovo[0].etapa '1.9' is not the nazev of a stage"* ]]
+  _data '.hotovo = [{etapa: "1.0", lidsky: "Základ stojí"}] | .etapy[1].polozky_hotovo = 6'
+  run _rp publish "$DOC" --plan P900; [ "$status" -ne 0 ]; [[ "$output" == *"hotovo <= celkem"* ]]
+  _data '.etapy[1].polozky_hotovo = 1'
+  run _rp publish "$DOC" --plan P900; echo "$output"; [ "$status" -eq 0 ]
+  local page; page="$(ls "$R"/.aid-o/work/roadmap-pages/*/page.html)"
+  grep -q '<b>4 / 8</b>' "$page"; grep -q 'width:50%' "$page"                       # 3+1 of 3+5, computed
+  grep -q 'Nic. Jede se bez tebe.' "$page"; grep -q 'Základ stojí' "$page"; grep -q '<span class="pill">Na cestě</span>' "$page"
+  grep -q 'etapy doplněny' "$page"; grep -q 'založení stránky' "$page"                # this change and the earlier one
+  local p; for p in "Čeká na tebe" "Etapy" "Teď se dělá" "Kde jsme v číslech" "Co chybí a od koho" "Rizika" "Hotovo" "Historie změn"; do grep -q "<h2>$p</h2>" "$page"; done
 }
