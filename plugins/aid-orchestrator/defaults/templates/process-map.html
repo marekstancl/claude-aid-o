@@ -45,11 +45,12 @@ select{font:inherit;border:1px solid #d1d5db;border-radius:8px;padding:3px}
  <div><h3>Otázky agenta</h3><div id="qs" class="muted">žádné</div><h3>Tvoje označení</h3><div id="flags" class="muted">zatím nic</div></div>
 </div>
 </div>
-<script type="application/json" id="model">@@MODEL@@</script>
+<script type="text/plain" id="model">@@MODEL@@</script>
 <script>
 (function () {
   "use strict";
-  var M = JSON.parse(document.getElementById("model").textContent);
+  var raw = atob(document.getElementById("model").textContent.trim());
+  var M = JSON.parse(new TextDecoder().decode(Uint8Array.from(raw, function (c) { return c.charCodeAt(0); })));
   var steps = {}; M.steps.forEach(function (s) { steps[s.id] = s; });
   var col = null, current = null, target = null;
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }

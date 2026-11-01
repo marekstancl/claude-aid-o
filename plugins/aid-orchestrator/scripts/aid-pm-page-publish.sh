@@ -84,6 +84,7 @@ fi
 title="${title//[$'\t\r\n']/ }"
 [[ -n "${title// /}" ]] || _die "--title is required" 2
 
+_project_id() {   # root, pyaml and pid: early only for a map or --print-key, so other kinds behave as before
 [[ -n "$root" ]] || root="$(aid_state_root 2>/dev/null || pwd)"
 root="$(realpath "$root")"
 pyaml="${root}/.aid-o/config/project.yaml"
@@ -98,6 +99,8 @@ ident=""
 [[ -f "${root}/.aid-lifecycle/repo-identity.yaml" ]] && ident="$(yq -r '.repo_id // ""' "${root}/.aid-lifecycle/repo-identity.yaml" 2>/dev/null || true)"
 [[ -n "$ident" && "$ident" != null ]] || ident="$root"
 pid="${slug}-$(printf '%s' "$ident" | sha256sum | cut -c1-8)"
+}
+if (( print_key )) || [[ "$kind" == map ]]; then _project_id; fi
 (( print_key )) && { printf '%s\n' "${pid}/${plan}/${kind}"; exit 0; }
 
 # the PM switched the automatic pages off: nothing goes out unless the PM asked for this page
@@ -117,6 +120,8 @@ pub="$AID_PM_PAGE_PUBLISHER"
 [[ -x "$pub" && ! -d "$pub" ]] || _die "AID_PM_PAGE_PUBLISHER is not an executable file: ${pub}"
 sub="${AID_PM_PAGE_PUBLISHER_SUBCOMMAND:-}"
 [[ -z "$sub" || "$sub" =~ ^[A-Za-z0-9][A-Za-z0-9_-]*$ ]] || _die "AID_PM_PAGE_PUBLISHER_SUBCOMMAND must be one word, got '${sub}'"
+
+[[ -n "${pid:-}" ]] || _project_id
 
 size="$(wc -c < "$page")"
 (( size <= MAX_BYTES )) || _die "the page is ${size} bytes, over the ${MAX_BYTES} a published page may have"

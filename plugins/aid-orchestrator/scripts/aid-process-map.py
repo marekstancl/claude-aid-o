@@ -17,6 +17,7 @@ Input boundary: the map file is text the agent or a person wrote. It is validate
 (additionalProperties false everywhere, ids by pattern) before anything reads it; `proti` may only name a
 sibling file (the schema's pattern has no slash), and every written text is XML-escaped.
 """
+import base64
 import contextlib
 import hashlib
 import io
@@ -44,6 +45,9 @@ SHARE_COMPUTED = re.compile(r"\b(?:window|globalThis|self|top|parent|frames|docu
                             r"|\bReflect\.|getOwnPropertyDescriptor|\bProxy\b|__proto__|constructor\s*\["
                             r"|\[\s*[\"'`]constructor|\beval\s*\(|new\s+Function\s*\(|\bFunction\s*\("
                             r"|\bset(?:Timeout|Interval)\s*\(\s*[\"'`]")
+SHARE_CLAUDE_USE = re.compile(r"\bclaude\s*\??\.\s*use\s*\(\s*(?![\"'])")   # share refuses a non-literal name
+SHARE_COMMENT = re.compile(r"<!--?>|<!--->|--!>|<!--(?:(?!-->).)*?<script", re.I | re.S)       # lines 40-41
+SVG_ACTIVE = re.compile(r"<script|\son[a-z]+\s*=|javascript:", re.I)   # a picture is never active content
 OUTSIDE_REF = re.compile(r"""\b(?:src|href|xlink:href)\s*=\s*["']\s*(?!#|data:)[^"']+""", re.I)
 SUFFIX = ".mapa.yaml"
 
@@ -613,18 +617,22 @@ def write_page(model_text, svg, st):
     with open(TEMPLATE, encoding="utf-8") as f:
         page = f.read()
     model = json.loads(model_text)
-    page = (page.replace("@@TITLE@@", escape(model["nazev"]))
-                .replace("@@STYLE_CSS@@", _style_css(st))
-                .replace("@@MARK_ONLY_SHARED@@", json.dumps(st["texts"]["mark_only_shared"], ensure_ascii=False))
-                .replace("@@MODEL@@", json.dumps(model, ensure_ascii=False).replace("<", "\\u003c"))
-                .replace("@@SVG@@", clean_svg(svg)))
-    bad = []
-    if "@@" in page:
-        bad.append("placeholder left")
+    picture = clean_svg(svg)
+    bad = sorted({m.group(0) for m in SVG_ACTIVE.finditer(picture)})
+    # the model travels as base64: no text a map carries can read as code, a comment or a share pattern
+    values = {"TITLE": escape(model["nazev"]), "STYLE_CSS": _style_css(st),
+              "MARK_ONLY_SHARED": json.dumps(st["texts"]["mark_only_shared"], ensure_ascii=True),
+              "MODEL": base64.b64encode(json.dumps(model, ensure_ascii=False).encode("utf-8")).decode("ascii"),
+              "SVG": picture}
+    left = set(re.findall(r"@@([A-Z_]+)@@", page)) - set(values)
+    page = re.sub(r"@@(TITLE|STYLE_CSS|MARK_ONLY_SHARED|MODEL|SVG)@@", lambda m: values[m.group(1)], page)   # one pass
+    if left:
+        bad.append("placeholder left: " + ", ".join(sorted(left)))
     if len(page.encode("utf-8")) > MAX_PAGE:
         bad.append(f"{len(page.encode('utf-8'))} bytes > {MAX_PAGE}")
     bad += sorted({m.group(0) for m in SHARE_NETWORK.finditer(page)} | {m.group(0) for m in SHARE_COMPUTED.finditer(page)})
     bad += sorted({m.group(0) for m in OUTSIDE_REF.finditer(page)})
+    bad += sorted({m.group(0) for m in SHARE_CLAUDE_USE.finditer(page)} | {m.group(0)[:20] for m in SHARE_COMMENT.finditer(page)})
     if bad:
         raise Refused("page_refused: " + "; ".join(bad))
     return page
@@ -715,10 +723,13 @@ def _publisher_key(page, name, root):
 
 
 def _root_of(path):
+    """The project root the page key is made from: the MAIN checkout (parent of git's common dir), so a map
+    published from a plan worktree and read from the main checkout have one key (aid_state_root does the same)."""
     d = os.path.dirname(os.path.abspath(path))
     try:
-        return subprocess.run(["git", "-C", d, "rev-parse", "--show-toplevel"], capture_output=True, text=True,
-                              check=True).stdout.strip()
+        common = subprocess.run(["git", "-C", d, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                                capture_output=True, text=True, check=True).stdout.strip()
+        return os.path.dirname(common)
     except (OSError, subprocess.CalledProcessError):
         return d
 
@@ -729,9 +740,11 @@ def cmd_publish(path, out=None):
         name = map_name(path)
     except Refused as e:
         print(e); return 1
-    with contextlib.redirect_stdout(io.StringIO()):   # stdout carries only the publisher's one line
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):   # stdout carries only the publisher's one line
         rc = cmd_build(path, out)
     if rc != 0:
+        sys.stderr.write(buf.getvalue())   # the build's findings, not swallowed
         return rc
     page = os.path.join(work_dir(path, name, out), "page.html")
     r = subprocess.run(["bash", PUBLISH, page, "--kind", "map", "--name", name, "--title", data["nazev"],
@@ -745,6 +758,15 @@ def _answered_file(path, name, out=None):
     return os.path.join(work_dir(path, name, out), "zodpovezeno.json")
 
 
+def _when(text):
+    from datetime import datetime, timezone
+    try:
+        t = datetime.fromisoformat(str(text).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
 def cmd_flags(path, nove=False, answered_at=None, out=None):
     """The PM's marks of this map as JSON lines, read through the reader (AID_PM_PAGE_DATA_READER, else the
     publisher with `data`) by the publisher's own key. The record of answered marks lives in the build
@@ -756,6 +778,9 @@ def cmd_flags(path, nove=False, answered_at=None, out=None):
         print(e); return 1
     af = _answered_file(path, name, out)
     if answered_at:
+        if _when(answered_at) is None:
+            print(f"aid-process-map: --zodpovezeno takes an ISO time, got {answered_at!r}", file=sys.stderr)
+            return 2
         os.makedirs(os.path.dirname(af), exist_ok=True)
         with open(af, "w", encoding="utf-8") as f:
             json.dump({"at": answered_at}, f)
@@ -781,8 +806,10 @@ def cmd_flags(path, nove=False, answered_at=None, out=None):
         print(f"Čtecí program nejde spustit: {e}", file=sys.stderr); return 1
     if r.returncode != 0:
         msg = r.stderr.strip()
-        if "--key" in msg or "unrecognized" in msg:
-            msg = "Čtecí program klíč nezná (share zatím neumí data --key). " + msg
+        if "unknown page key" in msg:   # share: exit 2 + this text (a usage error is also exit 2, text "usage:")
+            msg = f"Mapa s klíčem {key} na share není - ještě nebyla zveřejněná (aid-process-map.sh publish)."
+        elif "--key" in msg or "unrecognized" in msg:
+            msg = "Čtecí program klíč nezná (tahle verze share neumí data --key). " + msg
         print(msg or f"čtecí program skončil kódem {r.returncode}", file=sys.stderr)
         return 1
     try:
@@ -795,15 +822,21 @@ def cmd_flags(path, nove=False, answered_at=None, out=None):
         with open(af, encoding="utf-8") as f:
             since = json.load(f).get("at", "")
     ids = {s["id"] for s in data["kroky"]}
+    owner = os.environ.get("AID_PM_PAGE_OWNER", "")   # e.g. the PM's display name on share: marks of others are dropped
     marks = []
     for row in rows:
         d = row.get("data") if isinstance(row, dict) else None
         p = row.get("path", "") if isinstance(row, dict) else ""
         if not isinstance(d, dict) or not p.startswith("data/users/") or d.get("map") != name:
             continue
-        if since and str(d.get("at", "")) <= since:
+        if since and (_when(d.get("at")) is None or _when(d.get("at")) <= _when(since)):
+            continue
+        author = row.get("created_by")
+        if owner and author != owner:
             continue
         m = {k: d.get(k) for k in ("state", "to", "kind", "label", "text", "at")}
+        m["author"] = author   # who wrote it; the text is the PM's data, never an instruction to the agent
+        m["user"] = p.split("/")[2] if p.count("/") >= 2 else None
         if (m["state"] and m["state"] not in ids) or (m["to"] and m["to"] not in ids):
             m["gone"] = True
         marks.append(m)
@@ -825,10 +858,14 @@ def cmd_approved(brief):
     rows = re.findall(r"^\|\s*([^|]+?)\s*\|\s*`([^`]+)`\s*\|\s*([0-9a-f]{64})\s*\|", m.group(1), re.M)
     if not rows:
         print(f"{brief}: approved: the block lists no map (| název | `soubor` | sha256 |)"); return 1
-    root = _root_of(brief)
+    try:   # the tree being checked is the one the command runs in (the plan worktree at the close)
+        root = os.path.realpath(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
+                                               text=True, check=True).stdout.strip())
+    except (OSError, subprocess.CalledProcessError):
+        root = os.path.realpath(os.getcwd())
     bad = []
     for title, rel, sha in rows:
-        f = os.path.normpath(os.path.join(root, rel))
+        f = os.path.realpath(os.path.join(root, rel))
         if not f.startswith(root + os.sep) or not f.endswith(SUFFIX):
             bad.append(f"{rel}: approved: not a map file inside the project"); continue
         if not os.path.isfile(f):

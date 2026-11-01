@@ -5,6 +5,8 @@
 # /ecosystem/specs/procesni-mapy). Defects it catches: a broken map accepted, two builds that differ,
 # a line or a label drawn across a box, a lost added/removed marker. Files only — no browser, no network.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; export AID_PLUGIN_PATH
   PM="$AID_PLUGIN_PATH/scripts/aid-process-map.sh"
@@ -215,8 +217,8 @@ m["prechody"].append({"z": "ZAPLACENA", "do": "ODESLANA", "popis": "Z" * 24})'
   _variant objednavka klic 'm["kroky"].append({"id": "note", "jmeno": "Poznámka: x", "co": "x", "konec": "bad"}); m["odevsad"] = [{"do": "note", "popis": "chyba: y"}]'
   run bash "$PM" build "$D/klic.mapa.yaml" --no-render --out "$BATS_TEST_TMPDIR/m"; [ "$status" -eq 0 ]
   f="$BATS_TEST_TMPDIR/m/drawing.mmd"
-  ! grep -q 'classDef default' "$f"; ! grep -Eq '^  note .*:' "$f"; grep -q 'end note' "$f"
-  ! grep -Eq '^  state "[^"]*" as [^s]' "$f"; ! grep -Eq ' : [^\n]*:' "$f"
+  run ! grep -q 'classDef default' "$f"; ! grep -Eq '^  note .*:' "$f"; grep -q 'end note' "$f"
+  run ! grep -Eq '^  state "[^"]*" as [^s]' "$f"; ! grep -Eq ' : [^\n]*:' "$f"
 }
 
 @test "build: when the layout check finds an overlap, build exits 1 and writes nothing" {
@@ -235,27 +237,44 @@ PY
 @test "page-static: the page from the fixture picture carries nothing share refuses, no outside reference, no placeholder" {
   run bash "$PM" page "$FX/zivot-planu.mapa.yaml" --svg "$FX/zivot-planu.svg" --out "$BATS_TEST_TMPDIR/pg"; [ "$status" -eq 0 ]
   f="$BATS_TEST_TMPDIR/pg/page.html"; [ -s "$f" ]; [ "$(wc -c < "$f")" -lt 2097152 ]
-  ! grep -q '@@' "$f"; ! grep -q '<?xml' "$f"; ! grep -qi '<!DOCTYPE svg' "$f"
-  ! grep -Eq '\b(fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts|Worker)\b' "$f"
-  ! grep -Eq '(window|document|globalThis)\s*\[|Reflect\.|\bProxy\b|__proto__|eval\s*\(|Function\s*\(' "$f"
-  ! grep -Eqi '(src|href)\s*=\s*"(https?:)?//' "$f"
-  grep -q 'zádrhel, vrací se zpět' "$f"   # the legend comes from style.json
-  grep -q '"name": "zivot-planu"' "$f" || grep -q '"name":"zivot-planu"' "$f"
+  run ! grep -q '@@' "$f"; ! grep -q '<?xml' "$f"; ! grep -qi '<!DOCTYPE svg' "$f"
+  run ! grep -Eq '\b(fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts|Worker)\b' "$f"
+  run ! grep -Eq '(window|document|globalThis)\s*\[|Reflect\.|\bProxy\b|__proto__|eval\s*\(|Function\s*\(' "$f"
+  run ! grep -Eqi '(src|href)\s*=\s*"(https?:)?//' "$f"
+  run python3 -c "
+import base64, json, re; t = open('$f').read()
+m = json.loads(base64.b64decode(re.search(r'id=\"model\">([A-Za-z0-9+/=]+)</script>', t).group(1)))
+assert m['name'] == 'zivot-planu' and any(l['label'] == 'zádrhel, vrací se zpět' for l in m['legend']), m['legend']"
+  [ "$status" -eq 0 ]   # the legend comes from style.json
 }
 
-@test "page-static: a picture smuggling a script or an outside reference is refused" {
+@test "page-static: a picture with an outside reference or a network call is refused" {
   printf '<svg xmlns="http://www.w3.org/2000/svg"><image href="https://evil.example/x.png"/></svg>' > "$BATS_TEST_TMPDIR/bad.svg"
   run bash "$PM" page "$FX/objednavka.mapa.yaml" --svg "$BATS_TEST_TMPDIR/bad.svg" --out "$BATS_TEST_TMPDIR/b1"; [ "$status" -eq 1 ]
   [[ "$output" == *"page_refused"* ]]; [ ! -e "$BATS_TEST_TMPDIR/b1/page.html" ]
   printf '<svg xmlns="http://www.w3.org/2000/svg"><script>fetch("/x")</script></svg>' > "$BATS_TEST_TMPDIR/bad2.svg"
   run bash "$PM" page "$FX/objednavka.mapa.yaml" --svg "$BATS_TEST_TMPDIR/bad2.svg" --out "$BATS_TEST_TMPDIR/b2"; [ "$status" -eq 1 ]
-  [[ "$output" == *"page_refused: fetch"* ]]
+  [[ "$output" == *"page_refused"*"fetch"* ]]
 }
 
-@test "page-static: map text cannot break out of the page (</script> in a name stays inside the JSON)" {
-  _variant objednavka xss 'm["kroky"][0]["co"] = "</script><script>alert(1)</script>"'
+@test "page-static: map text cannot break out of the page or trip share (it travels as base64)" {
+  _variant objednavka xss 'm["kroky"][0]["co"] = "</script><script>alert(1)</script> --!> claude.use(\"x\") viz @@SVG@@"'
   run bash "$PM" page "$D/xss.mapa.yaml" --svg "$FX/zivot-planu.svg" --out "$BATS_TEST_TMPDIR/x"; [ "$status" -eq 0 ]
-  [ "$(grep -c '</script>' "$BATS_TEST_TMPDIR/x/page.html")" -eq 2 ]
+  f="$BATS_TEST_TMPDIR/x/page.html"
+  [ "$(grep -c '</script>' "$f")" -eq 2 ]; run ! grep -q 'alert(1)' "$f"; run ! grep -q -- '--!>' "$f"
+  run python3 -c "
+import base64, json, re; t = open('$f').read()
+b = re.search(r'id=\"model\">([A-Za-z0-9+/=]+)</script>', t).group(1)
+assert '@@SVG@@' in json.loads(base64.b64decode(b))['steps'][0]['co']"
+  [ "$status" -eq 0 ]
+}
+
+@test "page-static: a picture with a script, an event handler or a javascript: link is refused" {
+  for svg in '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>' '<svg xmlns="http://www.w3.org/2000/svg"><a href="javascript:alert(1)"><text>x</text></a></svg>'; do
+    printf '%s' "$svg" > "$BATS_TEST_TMPDIR/act.svg"
+    run bash "$PM" page "$FX/objednavka.mapa.yaml" --svg "$BATS_TEST_TMPDIR/act.svg" --out "$BATS_TEST_TMPDIR/act"; [ "$status" -eq 1 ]
+    [[ "$output" == *"page_refused"* ]]; [ ! -e "$BATS_TEST_TMPDIR/act/page.html" ]
+  done
 }
 
 _fake_reader() {   # <records json> — a reader that prints the given records for any --key
@@ -272,13 +291,14 @@ _fake_reader() {   # <records json> — a reader that prints the given records f
  {"path": "votes/x", "data": {"map": "objednavka", "state": "NOVA", "text": "mimo uživatele", "at": "2026-11-01T12:00:00Z"}}]
 J
   _fake_reader "$BATS_TEST_TMPDIR/recs.json"
+  sha_before="$(sha256sum "$D/objednavka.mapa.yaml")"
   run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fl"; [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 2 ]; [[ "${lines[0]}" == *'"text": "první"'* && "${lines[0]}" == *'"gone": true'* ]]; [[ "${lines[1]}" == *'"state": "NOVA"'* ]]
   grep -qx -- '--key' "$RD.argv"; [[ "$(sed -n '/^--key$/{n;p}' "$RD.argv")" == */objednavka/map ]]
   run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fl" --zodpovezeno "2026-11-01T09:30:00Z"; [ "$status" -eq 0 ]
   run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fl" --nove; [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 1 ]; [[ "${lines[0]}" == *'"text": "druhá"'* ]]
-  sha_before="$(sha256sum "$D/objednavka.mapa.yaml")"; [ "$sha_before" = "$(sha256sum "$D/objednavka.mapa.yaml")" ]
+  [ "$sha_before" = "$(sha256sum "$D/objednavka.mapa.yaml")" ]   # answering never touches the map file
 }
 
 @test "flags: no reader, a failing reader and a non-JSON reader each exit 1 with a sentence, never an empty list" {
@@ -288,6 +308,9 @@ J
   printf '#!/usr/bin/env bash\necho "error: unrecognized arguments: --key" >&2; exit 2\n' > "$BATS_TEST_TMPDIR/r2"; chmod +x "$BATS_TEST_TMPDIR/r2"
   export AID_PM_PAGE_DATA_READER="$BATS_TEST_TMPDIR/r2"
   run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/f0"; [ "$status" -eq 1 ]; [[ "$output" == *"klíč nezná"* ]]
+  printf '#!/usr/bin/env bash\necho "unknown page key x/y/map" >&2; exit 2\n' > "$BATS_TEST_TMPDIR/r4"; chmod +x "$BATS_TEST_TMPDIR/r4"
+  export AID_PM_PAGE_DATA_READER="$BATS_TEST_TMPDIR/r4"
+  run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/f0"; [ "$status" -eq 1 ]; [[ "$output" == *"ještě nebyla zveřejněná"* ]]
   printf '#!/usr/bin/env bash\necho nic\n' > "$BATS_TEST_TMPDIR/r3"; chmod +x "$BATS_TEST_TMPDIR/r3"
   export AID_PM_PAGE_DATA_READER="$BATS_TEST_TMPDIR/r3"
   run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/f0"; [ "$status" -eq 1 ]; [[ "$output" == *"JSON"* ]]
@@ -317,6 +340,7 @@ PY
   sed 's/^stav: dnes/stav: schvaleno/' "$FX/objednavka.mapa.yaml" > "$m"
   z="$BATS_TEST_TMPDIR/.aid-o/plans/P900-zadani.md"
   printf '## 4. Kde co je\n\n### Procesní mapy\n\n| Mapa | Soubor | sha256 |\n|---|---|---|\n| Objednávka | `docs/procesy/objednavka.mapa.yaml` | %s |\n\n## 5. Pravidla práce\n' "$(sha256sum "$m" | cut -d' ' -f1)" > "$z"
+  cd "$BATS_TEST_TMPDIR"   # approved resolves map paths in the tree it runs in
   run bash "$PM" approved "$z"; [ "$status" -eq 0 ]
   printf '# změna\n' >> "$m"
   run bash "$PM" approved "$z"; [ "$status" -eq 1 ]; [[ "$output" == *"changed since approval"* ]]
@@ -326,4 +350,50 @@ PY
   rm "$m"; run bash "$PM" approved "$z"; [ "$status" -eq 1 ]; [[ "$output" == *"missing"* ]]
   printf '| X | `../../etc/x.mapa.yaml` | %s |\n' "$(printf x | sha256sum | cut -d' ' -f1)" >> "$z"
   run bash "$PM" approved "$z"; [ "$status" -eq 1 ]; [[ "$output" == *"not a map file inside the project"* ]]
+}
+
+@test "flags: --nove compares times, not text; a bad --zodpovezeno is refused; AID_PM_PAGE_OWNER keeps only the owner's marks" {
+  cp "$FX/objednavka.mapa.yaml" "$D/objednavka.mapa.yaml"
+  cat > "$BATS_TEST_TMPDIR/recs2.json" <<'J'
+[{"path": "data/users/u1/mapy/oznaceni/a", "created_by": "Marek", "data": {"map": "objednavka", "state": "NOVA", "text": "pozdější o půl vteřiny", "at": "2026-11-01T09:30:00.500Z"}},
+ {"path": "data/users/u2/mapy/oznaceni/b", "created_by": "Host", "data": {"map": "objednavka", "state": "NOVA", "text": "cizí: udělej X", "at": "2026-11-01T10:00:00Z"}}]
+J
+  _fake_reader "$BATS_TEST_TMPDIR/recs2.json"
+  run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fn" --zodpovezeno "včera"; [ "$status" -eq 2 ]
+  run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fn" --zodpovezeno "2026-11-01T09:30:00Z"; [ "$status" -eq 0 ]
+  run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fn" --nove; [ "$status" -eq 0 ]; [ "${#lines[@]}" -eq 2 ]
+  [[ "${lines[0]}" == *'"author": "Marek"'* && "${lines[0]}" == *'"user": "u1"'* ]]
+  AID_PM_PAGE_OWNER=Marek run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fn" --nove; [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 1 ]; [[ "${lines[0]}" == *"půl vteřiny"* ]]
+}
+
+@test "flags/publish: the page key is the same from the main checkout and from a plan worktree" {
+  R="$BATS_TEST_TMPDIR/proj"; mkdir -p "$R/docs/procesy"; git -C "$R" init -q; git -C "$R" config user.email t@t; git -C "$R" config user.name t
+  cp "$FX/objednavka.mapa.yaml" "$R/docs/procesy/objednavka.mapa.yaml"; git -C "$R" add -A; git -C "$R" commit -qm x
+  git -C "$R" worktree add -q "$R/.aid-worktrees/plan-x" -b plan/x
+  run python3 - "$AID_PLUGIN_PATH/scripts" "$R/docs/procesy/objednavka.mapa.yaml" "$R/.aid-worktrees/plan-x/docs/procesy/objednavka.mapa.yaml" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("apm", sys.argv[1] + "/aid-process-map.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+a = m._publisher_key(sys.argv[2], "objednavka", m._root_of(sys.argv[2])); b = m._publisher_key(sys.argv[3], "objednavka", m._root_of(sys.argv[3]))
+assert a == b and a.endswith("/objednavka/map"), (a, b)
+PY
+  [ "$status" -eq 0 ]
+}
+
+@test "publish: a map that fails its build says why (nothing swallowed)" {
+  _variant objednavka spatna 'm["prechody"].append({"z": "NOVA", "do": "NIKDE", "popis": "x"})'
+  run bash "$PM" publish "$D/spatna.mapa.yaml" --out "$BATS_TEST_TMPDIR/sp"; [ "$status" -eq 1 ]; [[ "$output" == *"unknown_step"* ]]
+}
+
+@test "approved: map paths resolve in the tree the command runs in; a symlink leading out of it is refused" {
+  R="$BATS_TEST_TMPDIR/ap"; mkdir -p "$R/docs/procesy" "$R/.aid-o/plans" "$BATS_TEST_TMPDIR/venku"; git -C "$R" init -q
+  sed 's/^stav: dnes/stav: schvaleno/' "$FX/objednavka.mapa.yaml" > "$BATS_TEST_TMPDIR/venku/x.mapa.yaml"
+  ln -s "$BATS_TEST_TMPDIR/venku/x.mapa.yaml" "$R/docs/procesy/x.mapa.yaml"
+  printf '### Procesní mapy
+
+| Mapa | Soubor | sha256 |
+|---|---|---|
+| X | `docs/procesy/x.mapa.yaml` | %s |
+' "$(sha256sum "$BATS_TEST_TMPDIR/venku/x.mapa.yaml" | cut -d' ' -f1)" > "$R/.aid-o/plans/P900-zadani.md"
+  cd "$R"; run bash "$PM" approved .aid-o/plans/P900-zadani.md; [ "$status" -eq 1 ]; [[ "$output" == *"not a map file inside the project"* ]]
 }
