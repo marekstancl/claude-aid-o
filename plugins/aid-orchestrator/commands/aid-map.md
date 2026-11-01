@@ -30,7 +30,7 @@ bash "$AID_PLUGIN_PATH/scripts/aid-process-map.sh" check   docs/procesy/<name>.m
 bash "$AID_PLUGIN_PATH/scripts/aid-process-map.sh" publish docs/procesy/<name>.mapa.yaml
 bash "$AID_PLUGIN_PATH/scripts/aid-process-map.sh" flags   docs/procesy/<name>.mapa.yaml --nove
 bash "$AID_PLUGIN_PATH/scripts/aid-process-map.sh" flags   docs/procesy/<name>.mapa.yaml --zodpovezeno <mark id>
-bash "$AID_PLUGIN_PATH/scripts/aid-process-map.sh" docs    docs/procesy/<name>.mapa.yaml --do <docusaurus path>
+bash "$AID_PLUGIN_PATH/scripts/aid-process-map.sh" docs    docs/procesy/<name>.mapa.yaml --do <docusaurus root> --sekce <path under docs/>
 ```
 
 Output to the PM: one line with the link (`link <url>`), or the local path (`local <page>`) when no

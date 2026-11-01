@@ -11,6 +11,7 @@ lib/process-map/style.json is the only source of HOW it looks. Standard: /ecosys
   publish <mapa.yaml>                     build, then aid-pm-page-publish.sh --kind map --name <name>
   flags <mapa.yaml> [--nove] [--zodpovezeno <mark id>]   the PM's marks; --zodpovezeno records one answered
   approved <Pnnn-zadani.md>               the brief's approved maps exist, are approved and unchanged
+  docs <mapa.yaml> --do <site> --sekce <path>   the same picture into a Docusaurus site, with a page
 
 Exit: 0 ok, 1 findings / refused, 2 usage or unreadable input.
 Input boundary: the map file is text the agent or a person wrote. It is validated against the schema
@@ -897,15 +898,59 @@ def cmd_approved(brief):
     return 1 if bad else 0
 
 
+def cmd_docs(path, root, section, out=None):
+    """The map in a Docusaurus site: the SAME picture as the page (static/img/procesy/<name>.svg) and a page
+    docs/<section>/procesni-mapa-<name>.md. Both paths are checked to stay inside the site."""
+    data = load_map(path)
+    try:
+        name = map_name(path)
+    except Refused as e:
+        print(e); return 1
+    root = os.path.realpath(root)
+    if not os.path.isdir(os.path.join(root, "docs")) or not os.path.isdir(os.path.join(root, "static")):
+        print(f"{root}: not a Docusaurus site (no docs/ and static/)", file=sys.stderr); return 2
+    if not re.fullmatch(r"[a-z0-9][a-z0-9/_-]*", section) or ".." in section.split("/"):
+        print(f"aid-process-map: --sekce must be a path under docs/ ([a-z0-9/_-]), got {section!r}", file=sys.stderr); return 2
+    page_dir = os.path.realpath(os.path.join(root, "docs", section))
+    if not page_dir.startswith(os.path.join(root, "docs") + os.sep) or not os.path.isdir(page_dir):
+        print(f"aid-process-map: docs/{section} is not an existing section of the site", file=sys.stderr); return 2
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        rc = cmd_build(path, out)
+    if rc != 0:
+        sys.stderr.write(buf.getvalue())
+        return rc
+    svg_src = os.path.join(work_dir(path, name, out), "picture.svg")
+    img_dir = os.path.join(root, "static", "img", "procesy")
+    os.makedirs(img_dir, exist_ok=True)
+    with open(svg_src, encoding="utf-8") as f:
+        svg = clean_svg(f.read())
+    with open(os.path.join(img_dir, f"{name}.svg"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(svg + "\n")
+    lines = ["---", f"title: {json.dumps('Procesní mapa: ' + data['nazev'], ensure_ascii=False)}",
+             f"description: {json.dumps('Procesní mapa ' + data['nazev'] + ' - vyrobená z docs/procesy/' + os.path.basename(path), ensure_ascii=False)}",
+             "---", "", f"# Procesní mapa: {data['nazev']}", "",
+             f"Vyrobeno z `docs/procesy/{os.path.basename(path)}` ({'z kódu: `' + data['zdroj'] + '`' if data.get('zdroj') else 'z rozhovoru'}). "
+             f"Klikací verzi, kde jde označit, co je špatně, otevře `/aid-map {name}`. "
+             "Vzhled: [standard procesních map](/ecosystem/specs/procesni-mapy).", "",
+             f"![{data['nazev']}](/img/procesy/{name}.svg)", "", "## Kroky", "", "| Krok | Co se děje |", "|---|---|"]
+    lines += [f"| {k['jmeno']} | {k['co']} |" for k in data["kroky"]]
+    target = os.path.join(page_dir, f"procesni-mapa-{name}.md")
+    with open(target, "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(lines) + "\n")
+    print(target)
+    return 0
+
+
 def main(argv):
-    if len(argv) < 2 or argv[0] not in ("check", "build", "page", "publish", "flags", "approved"):
+    if len(argv) < 2 or argv[0] not in ("check", "build", "page", "publish", "flags", "approved", "docs"):
         print(__doc__.strip().split("\n\n")[1], file=sys.stderr)
         return 2
     cmd, path, rest = argv[0], argv[1], argv[2:]
     if cmd == "approved":
         return 2 if rest else cmd_approved(path)
-    if cmd in ("page", "publish", "flags"):
-        opts = {"--svg": None, "--out": None, "--zodpovezeno": None}
+    if cmd in ("page", "publish", "flags", "docs"):
+        opts = {"--svg": None, "--out": None, "--zodpovezeno": None, "--do": None, "--sekce": None}
         nove = False
         while rest:
             a = rest.pop(0)
@@ -921,6 +966,10 @@ def main(argv):
             return cmd_page(path, opts["--svg"], opts["--out"])
         if cmd == "publish":
             return cmd_publish(path, opts["--out"])
+        if cmd == "docs":
+            if not opts["--do"] or not opts["--sekce"]:
+                print("aid-process-map: docs needs --do <docusaurus root> --sekce <path under docs/>", file=sys.stderr); return 2
+            return cmd_docs(path, opts["--do"], opts["--sekce"], opts["--out"])
         return cmd_flags(path, nove, opts["--zodpovezeno"], opts["--out"])
     if cmd == "check":
         if rest:

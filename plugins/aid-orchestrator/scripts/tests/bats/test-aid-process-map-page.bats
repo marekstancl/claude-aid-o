@@ -39,3 +39,17 @@ json.dump(r['records'], open('$BATS_TEST_TMPDIR/$1-records.json', 'w'))"
 @test "page: the state map (Mermaid) renders, makes no request, a click shows the state and its mark comes back through flags" {
   _roundtrip objednavka NEZAPLACENA "Nezaplacená"
 }
+
+@test "docs: the same picture lands in the site with every step name, a page beside it; a section outside docs/ is refused" {
+  SITE="$BATS_TEST_TMPDIR/site"; mkdir -p "$SITE/docs/aid/architecture" "$SITE/static"
+  cp "$FX/zivot-planu.mapa.yaml" "$D/zivot-planu.mapa.yaml"
+  run bash "$PM" docs "$D/zivot-planu.mapa.yaml" --do "$SITE" --sekce aid/architecture --out "$BATS_TEST_TMPDIR/dz"; [ "$status" -eq 0 ]
+  [ "$output" = "$SITE/docs/aid/architecture/procesni-mapa-zivot-planu.md" ]
+  grep -q '](/img/procesy/zivot-planu.svg)' "$SITE/docs/aid/architecture/procesni-mapa-zivot-planu.md"
+  run python3 -c "
+import re, yaml; svg = re.sub(r'\s+', '', re.sub(r'<[^>]+>', '', open('$SITE/static/img/procesy/zivot-planu.svg').read()))
+names = [re.sub(r'\s+', '', k['jmeno']) for k in yaml.safe_load(open('$D/zivot-planu.mapa.yaml'))['kroky']]
+missing = [n for n in names if n not in svg]; assert not missing, missing"
+  [ "$status" -eq 0 ]
+  run bash "$PM" docs "$D/zivot-planu.mapa.yaml" --do "$SITE" --sekce ../ven --out "$BATS_TEST_TMPDIR/dz"; [ "$status" -eq 2 ]
+}
