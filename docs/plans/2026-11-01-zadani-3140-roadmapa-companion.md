@@ -62,7 +62,14 @@ nález z 1. 11. (jména testů s číslem verze). Studio `/aid-ui` je mimo rozsa
 **Při stavbě 1. 11. (R):** uzávěr uzná data z commitu sloučení **nebo** z dnešního konce cílové větve (plán, který
 zapíše změnu dat až po sloučení, ji jinak nemá kam dát); pořadí P900 → P901 → uzávěr P900 proto drží jen pro data
 zapsaná před sloučením. Doklad o doručení, který zapisuje vydavatel vedle stránky (`page.html.published.json`), jde
-dál přes `>` bez ochrany proti odkazu (složku záznamů hlídá skript stránky). Administrativní uzávěr kontrolu nepouští
+dál přes `>` bez ochrany proti odkazu (složku záznamů hlídá skript stránky). Testy uzávěru přes `plan-close` pokrývají řádný, zrušený, `--force`,
+neúspěšné zveřejnění a změněné zadání; opakovaný uzávěr `CLOSED`, pořadí P900 → P901 a data z commitu sloučení jsou
+pokryté jen testem knihovny (`test-roadmap-page.bats`) — commit sloučení s daty roadmapy by fixture musela stavět
+s novým kandidátem plánu.
+
+**Při stavbě 1. 11. (AC10, WAN):** dnešní okno převodu klienta už vadu nemá (WAN 0.48.2). Kontrola ořezu je ověřená na
+komponentě z kopie P119 v kopii bez bloku kitu: telefon, tlačítko patičky +7 px, `show` možnost odmítl. Okna čerstvé
+kopie mají styly bez ručního `!src/components/ui/`. Administrativní uzávěr kontrolu nepouští
 (kód), test na něj chybí — sada administrativního uzávěru staví plán bez plan-final, se zadáním roadmapy nepočítá.
 
 **K1 – náhled bez ořezu** (C1, přání PM 31. 10.) [R9, R10, R17]
