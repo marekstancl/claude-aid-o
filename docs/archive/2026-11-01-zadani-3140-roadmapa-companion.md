@@ -1,3 +1,5 @@
+> Archivováno 2026-11-01: zadání vydáno jako AID 3.14.0. Náhrada: žádná (stav bodů v `docs/plans/2026-10-31-roadmapa-plugin-issues.md`).
+
 # AID 3.14.0 – stránka průběhu roadmapy a spolehlivý companion (zadání)
 
 Zdroj: rozbor plugin issues 31. 10. 2026, volby PM 10A a C1-C8 (`docs/plans/2026-10-31-roadmapa-plugin-issues.md`),
