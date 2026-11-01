@@ -91,7 +91,9 @@
     "odevsad": "z každého kroku",
     "odevsad_ends": "z každého kroku i z konců",
     "mark_only_shared": "Značit jde jen na sdílené stránce.",
-    "legend_title": "Legenda"
+    "legend_title": "Legenda",
+    "edge_added": "(nové)",
+    "edge_removed": "(zrušené)"
   },
   "edge": {
     "stroke": "#4b5563",

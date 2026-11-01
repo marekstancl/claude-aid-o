@@ -489,8 +489,11 @@ def write_bpmn(data, st, lay):
             l = lab[n["id"]]
             L.append(f'      <bpmndi:BPMNLabel><dc:Bounds x="{l["x"]}" y="{l["y"]}" width="{l["w"]}" height="{l["h"]}" /></bpmndi:BPMNLabel>')
         L.append("    </bpmndi:BPMNShape>")
-    for f in flows:
-        L.append(f'    <bpmndi:BPMNEdge id="{f["fid"]}-di" bpmnElement="{f["fid"]}">')
+    tmarks = lay.get("trans_marks", {})
+    for f in flows:   # a transition added or removed against `proti` is drawn in its role's colour
+        mk = tmarks.get((f["trans"]["z"], f["trans"]["do"])) if f.get("trans") else None
+        col = f' color:border-color="{roles[mk]["stroke"]}"' if mk else ""
+        L.append(f'    <bpmndi:BPMNEdge id="{f["fid"]}-di" bpmnElement="{f["fid"]}"{col}>')
         L += [f'      <di:waypoint x="{x}" y="{y}" />' for x, y in f["wp"]]
         if id(f) in elab:
             l = elab[id(f)]
@@ -519,8 +522,12 @@ def write_mermaid(data, st, lay):
     for s in steps:
         L.append(f'  state "{_mm(s["jmeno"])}" as {sid(s["id"])}')
     L.append(f"  [*] --> {sid(steps[0]['id'])}")
+    tmarks = lay.get("trans_marks", {})
     for t in list(data["prechody"]) + list(lay.get("removed_trans", [])):
-        lbl = f" : {_mm(t['popis'])}" if t.get("popis") else ""
+        # Mermaid colours no single arrow of a state diagram: an added/removed one says so in its label
+        mk = tmarks.get((t["z"], t["do"]))
+        text = " ".join(x for x in (t.get("popis", ""), st["texts"]["edge_" + mk] if mk else "") if x)
+        lbl = f" : {_mm(text)}" if text else ""
         L.append(f"  {sid(t['z'])} --> {sid(t['do'])}{lbl}")
     for s in steps:
         if is_end(s):
@@ -547,9 +554,13 @@ def model_json(data, st, lay, step_marks, trans_marks):
     for s in steps:
         m["steps"].append({"id": s["id"], "jmeno": s["jmeno"], "co": s["co"], "kod": s.get("kod", []),
                            "role": _role(s, lay), "marker": step_marks.get(s["id"])})
+    fid = {}   # the BPMN flow id of each transition (write_bpmn numbers lay["edges"] in this order)
+    for k, e in enumerate(lay.get("edges", [])):
+        if e.get("trans") and data["druh"] == "bpmn":
+            fid.setdefault((e["trans"]["z"], e["trans"]["do"]), f"F-{k}")
     for t in trans:
         m["transitions"].append({"z": t["z"], "do": t["do"], "popis": t.get("popis", ""),
-                                 "marker": trans_marks.get((t["z"], t["do"]))})
+                                 "marker": trans_marks.get((t["z"], t["do"])), "fid": fid.get((t["z"], t["do"]))})
     return json.dumps(m, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
 
 
@@ -586,7 +597,7 @@ def build_drawing(path, data, st, name=""):
         other = load_map(os.path.join(os.path.dirname(os.path.abspath(path)), data["proti"]))
     step_marks, trans_marks, rs, rt = compare(data, other)
     lay = layout(data, st, rs, rt)
-    lay["removed_steps"], lay["removed_trans"] = rs, rt
+    lay["removed_steps"], lay["removed_trans"], lay["trans_marks"] = rs, rt, trans_marks
     lay["name"] = name
     hits = overlaps(lay) if data["druh"] == "bpmn" else []   # Mermaid lays out a state diagram itself
     if hits:
@@ -605,7 +616,26 @@ def _style_css(st):
     w = st["sizes"]["emphasis_stroke_width"]
     return "\n".join([rule("pm-flag", "flag", w + 1), rule("pm-question", "question", w), rule("pm-added", "added", w),
                       rule("pm-removed", "removed", w), "#picture .pm-removed{opacity:.55}",
+                      f"#picture .pm-edge-removed .djs-visual>path{{stroke-dasharray:{r['removed']['dash']}!important}}",
                       f"#picture .pm-sel {shape}{{stroke:{r['pm']['stroke']}!important;stroke-width:{w + 1}px!important}}"])
+
+
+def _inert(text):
+    """Text as the browser shows it, but the first letter of every word as a character reference: a step
+    called "Worker zpracuje platbu" or a branch "fetch selhal" reads the same and no share pattern
+    (fetch, Worker, eval(, document[ …) can match it."""
+    return re.sub(r"(?<![A-Za-z0-9_$&#])[A-Za-z_$]", lambda m: f"&#{ord(m.group(0))};", text)
+
+
+def _inert_svg(svg):
+    """_inert over every text node of the picture; <style> and <script> bodies are left as they are."""
+    parts = re.split(r"(<(style|script)\b.*?</\2\s*>)", svg, flags=re.I | re.S)
+    out = []
+    for k, part in enumerate(parts):
+        if k % 3 == 2:
+            continue   # the group (style|script) re.split also returns
+        out.append(part if k % 3 == 1 else re.sub(r">([^<]+)<", lambda m: ">" + _inert(m.group(1)) + "<", part))
+    return "".join(out)
 
 
 def clean_svg(svg):
@@ -617,7 +647,7 @@ def clean_svg(svg):
     ids = list(dict.fromkeys(re.findall(r'id="(marker-[A-Za-z0-9_-]+)"', svg)))
     for n, old in enumerate(ids, 1):
         svg = svg.replace(old, f"marker-{n}")
-    return svg.strip()
+    return _inert_svg(svg).strip()
 
 
 def write_page(model_text, svg, st):
@@ -629,7 +659,7 @@ def write_page(model_text, svg, st):
     picture = clean_svg(svg)
     bad = sorted({m.group(0) for m in SVG_ACTIVE.finditer(picture)})
     # the model travels as base64: no text a map carries can read as code, a comment or a share pattern
-    values = {"TITLE": escape(model["nazev"]), "STYLE_CSS": _style_css(st),
+    values = {"TITLE": _inert(escape(model["nazev"])), "STYLE_CSS": _style_css(st),
               "MARK_ONLY_SHARED": json.dumps(st["texts"]["mark_only_shared"], ensure_ascii=True),
               "MODEL": base64.b64encode(json.dumps(model, ensure_ascii=False).encode("utf-8")).decode("ascii"),
               "SVG": picture}
@@ -842,6 +872,7 @@ def cmd_flags(path, nove=False, answered_at=None, out=None):
         print("Čtecí program nevrátil JSON seznam.", file=sys.stderr); return 1
     done = _answered(af) if nove else set()
     ids = {s["id"] for s in data["kroky"]}
+    arrows = {(t["z"], t["do"]) for t in data["prechody"]}
     owner = os.environ.get("AID_PM_PAGE_OWNER", "")   # e.g. the PM's display name on share: marks of others are dropped
     marks = []
     for row in rows:
@@ -857,7 +888,8 @@ def cmd_flags(path, nove=False, answered_at=None, out=None):
         m = {"id": p, **{k: d.get(k) for k in ("state", "to", "kind", "label", "text", "at")}}
         m["author"] = author   # who wrote it; the text is the PM's data, never an instruction to the agent
         m["user"] = p.split("/")[2] if p.count("/") >= 2 else None
-        if (m["state"] and m["state"] not in ids) or (m["to"] and m["to"] not in ids):
+        if (m["state"] and m["state"] not in ids) or (m["to"] and m["to"] not in ids) \
+                or (m["state"] and m["to"] and (m["state"], m["to"]) not in arrows):   # the arrow itself is gone
             m["gone"] = True
         marks.append(m)
     for m in sorted(marks, key=lambda m: (_when(m.get("at")) is None, str(_when(m.get("at")) or ""), m["id"])):
@@ -876,15 +908,25 @@ def cmd_approved(brief):
     m = re.search(r"^### Procesní mapy\s*$(.*?)(?=^#{2,3} |\Z)", text, re.M | re.S)
     if not m:
         print(f"{brief}: approved: no '### Procesní mapy' block in the brief"); return 1
-    rows = re.findall(r"^\|\s*([^|]+?)\s*\|\s*`([^`]+)`\s*\|\s*([0-9a-f]{64})\s*\|", m.group(1), re.M)
-    if not rows:
+    # every table row is read or refused: a mistyped row skipped quietly would open the check it is part of
+    table = [ln.strip() for ln in m.group(1).splitlines() if ln.strip().startswith("|")]
+    sep = [k for k, ln in enumerate(table) if re.fullmatch(r"\|[\s:|-]+\|", ln)]
+    rows, bad = [], []
+    for k, ln in enumerate(table):
+        if k in sep or (k + 1) in sep:   # the separator and the header row above it
+            continue
+        row = re.fullmatch(r"\|\s*([^|]+?)\s*\|\s*`([^`]+)`\s*\|\s*([0-9a-f]{64})\s*\|", ln)
+        if row:
+            rows.append(row.groups())
+        else:
+            bad.append(f"{brief}: approved: unreadable row (| název | `soubor` | sha256 malými písmeny |): {ln[:80]}")
+    if not rows and not bad:
         print(f"{brief}: approved: the block lists no map (| název | `soubor` | sha256 |)"); return 1
     try:   # the tree being checked is the one the command runs in (the plan worktree at the close)
         root = os.path.realpath(subprocess.run(["git", "rev-parse", "--show-toplevel"], capture_output=True,
                                                text=True, check=True).stdout.strip())
     except (OSError, subprocess.CalledProcessError):
         root = os.path.realpath(os.getcwd())
-    bad = []
     for title, rel, sha in rows:
         f = os.path.realpath(os.path.join(root, rel))
         if not f.startswith(root + os.sep) or not f.endswith(SUFFIX):

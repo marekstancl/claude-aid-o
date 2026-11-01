@@ -21,6 +21,7 @@
 # Prints ONE line for the controller:
 #   none <page>         AID_PM_PAGES=off and not --on-request: publish nothing, the card alone goes to the chat (exit 0)
 #   artifact <page>     no publisher configured: publish the page with the Artifact tool, as before (exit 0)
+#   local <page>        --kind map and no publisher configured: open the file locally, no marks (exit 0)
 #   link <https://…>    published; the controller adds "Stránka: <link>" under the chat card (exit 0)
 # and on failure exits 1 with one sentence on stderr — never "artifact": a page a configured publisher refused is
 # not quietly sent elsewhere (the controller adds "Stránka se nezveřejnila: <reason>" under the card).

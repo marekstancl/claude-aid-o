@@ -2,7 +2,8 @@
 //   node aid-ui-map-page.mjs <page.html> <out.json> <step id>
 // Opens the page from the file with every other request aborted (and recorded), gives it a stub of share's
 // runtime with exactly the shapes of share/static/share-runtime.js (claude.use("db"|"user"), user.me(),
-// db.collection(path).add/get), clicks the step, marks it, and writes {requests, detail, records} as JSON.
+// db.collection(path).add/get), clicks the step, marks it, and writes {requests, detail, detailText, edges, records}
+// as JSON (edges: every arrow the page marked added/removed, with its class and line dash).
 // Exit: 0 written, 1 the page did not behave, 2 usage.
 import { chromium } from '@playwright/test';
 import fs from 'node:fs';
@@ -32,15 +33,19 @@ try {
   });
   await page.goto(url);
   await page.waitForFunction(() => window.__processMapReady === true);
+  const edges = await page.evaluate(() => Array.from(document.querySelectorAll('#picture [class*="pm-edge-"]')).map(g => ({
+    id: g.getAttribute('data-element-id'), cls: Array.from(g.classList).filter(c => c.startsWith('pm-edge-')),
+    dash: getComputedStyle(g.querySelector('.djs-visual > path')).strokeDasharray })));
   await page.click(`[data-step="${step}"]`);
   const detail = await page.textContent('#detail h2');
+  const detailText = await page.textContent('#detail');
   await page.click('text=Označit tento krok');
   await page.fill('#ftext', 'Zkouška označení');
   await page.click('#fsave');
   await page.waitForFunction(() => window.__records.length > 0 && !document.getElementById('form').classList.contains('on'));
   await page.waitForFunction(() => document.querySelectorAll('#flags .f').length > 0);
   const records = await page.evaluate(() => window.__records);
-  fs.writeFileSync(out, JSON.stringify({ requests, detail, records }, null, 1));
+  fs.writeFileSync(out, JSON.stringify({ requests, detail, detailText, edges, records }, null, 1));
   console.log(out);
 } catch (e) {
   console.error(`map_page_failed: ${e.message}`);

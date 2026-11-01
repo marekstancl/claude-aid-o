@@ -225,8 +225,8 @@ Output: `=== Step 3/9: Zastavení ===`
 No PM here. Approaches, design, section validation and the opponent run without
 stopping; agreements go straight into the interim, disagreements are collected
 for the result. When the PM said yes to process maps, draw them here following
-`skills/process-maps/SKILL.md` (`stav: dnes` from the code you read, `stav: po`
-for the design), `check` each - a map that fails `check` is fixed, never shown -
+`skills/process-maps/SKILL.md` (`<name>-dnes.mapa.yaml` with `stav: dnes` from the
+code you read, `<name>.mapa.yaml` with `stav: po` and `proti` for the design), `check` each - a map that fails `check` is fixed, never shown -
 and `publish` it; the links go to Step 7a. A resumed brainstorm reuses the maps
 already drawn; `stav` stays `po` until Step 8.
 
@@ -327,7 +327,8 @@ paragraph from `## Účel a co je v sázce`, section 2 from the grounding reads,
 section 3 from the approved scope list (Step 7a), section 4 from the measured
 paths, section 5 from the project's rules, section 6 from the done-when points,
 each `- [ ] AC<n>:` with its `verification_pattern` block. With process maps:
-set each map's `stav: schvaleno`, `check` it, list it in section 4 under
+set each design map's (`stav: po`) `stav: schvaleno`, `check` it - a map of today
+(`stav: dnes`) is never approved, it stays as the file `proti` points to - list it in section 4 under
 `### Procesní mapy` (`| Mapa | Soubor | sha256 |`, the sha256 of the file as
 committed), add the point "Postavené odpovídá schváleným procesním mapám v §4"
 with the pattern `aid-process-map.sh approved` (the template's example), and

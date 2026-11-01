@@ -68,6 +68,11 @@ select{font:inherit;border:1px solid #d1d5db;border-radius:8px;padding:3px}
   function mark(id, cls, on) { var g = shapes[id]; if (g) g.classList[on ? "add" : "remove"](cls); }
   M.steps.forEach(function (s) { if (s.marker) mark(s.id, "pm-" + s.marker, true); });
   (M.otazky || []).forEach(function (q) { if (q.stav === "neovereno") mark(q.cil, "pm-question", true); });
+  M.transitions.forEach(function (t) {   // an arrow added or removed against the approved map
+    var g = t.marker && t.fid && document.querySelector('#picture [data-element-id="' + t.fid + '"]');
+    if (g) g.classList.add("pm-edge-" + t.marker);
+  });
+  var EDGE = { added: " · nové", removed: " · zrušené" };
 
   var legend = document.getElementById("legend");
   M.legend.forEach(function (l) { var span = el("span"); var i = el("i"); i.style.background = l.fill || "transparent"; i.style.borderColor = l.stroke; span.appendChild(i); span.appendChild(document.createTextNode(l.label)); legend.appendChild(span); });
@@ -87,7 +92,7 @@ select{font:inherit;border:1px solid #d1d5db;border-radius:8px;padding:3px}
     d.appendChild(el("h3", null, "Kam odsud vede (" + outs.length + ")"));
     var ul = el("ul", "arr");
     outs.forEach(function (t) {
-      var li = el("li"); li.appendChild(el("span", null, "→ " + (steps[t.do] ? steps[t.do].jmeno : t.do) + (t.popis ? " (" + t.popis + ")" : "")));
+      var li = el("li"); li.appendChild(el("span", null, "→ " + (steps[t.do] ? steps[t.do].jmeno : t.do) + (t.popis ? " (" + t.popis + ")" : "") + (EDGE[t.marker] || "")));
       var b = el("button", "sm", "označit"); b.addEventListener("click", function () { openForm(id, t.do, "šipka " + s.jmeno + " → " + (steps[t.do] ? steps[t.do].jmeno : t.do)); });
       li.appendChild(b); ul.appendChild(li);
     });

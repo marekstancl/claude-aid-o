@@ -42,6 +42,31 @@ json.dump(r['records'], open('$BATS_TEST_TMPDIR/$1-records.json', 'w'))"
   _roundtrip objednavka NEZAPLACENA "Nezaplacená"
 }
 
+@test "page: changed arrows are coloured and the removed one dashed, a share word shows as text, two builds give the same page" {
+  cp "$FX/zivot-planu.mapa.yaml" "$D/zivot-planu.mapa.yaml"
+  python3 - "$FX/zivot-planu.mapa.yaml" "$D/zmena.mapa.yaml" <<'PY'
+import sys, yaml
+m = yaml.safe_load(open(sys.argv[1])); m["proti"] = "zivot-planu.mapa.yaml"
+m["prechody"] = [t for t in m["prechody"] if (t["z"], t["do"]) != ("CONFLICT", "PLAN_SYNC")]
+[t.update(popis="opraveno") for t in m["prechody"] if (t["z"], t["do"]) == ("PLAN_FIX", "PLAN_SYNC")]
+m["prechody"].append({"z": "PLAN_FIX", "do": "AWAITING_PM", "popis": "fetch selhal"})
+[k.update(jmeno="Worker opraví nálezy") for k in m["kroky"] if k["id"] == "PLAN_FIX"]
+yaml.safe_dump(m, open(sys.argv[2], "w"), allow_unicode=True, sort_keys=False)
+PY
+  run bash "$PM" build "$D/zmena.mapa.yaml" --out "$BATS_TEST_TMPDIR/z1"; [ "$status" -eq 0 ]
+  run bash "$PM" build "$D/zmena.mapa.yaml" --out "$BATS_TEST_TMPDIR/z2"; [ "$status" -eq 0 ]
+  cmp "$BATS_TEST_TMPDIR/z1/page.html" "$BATS_TEST_TMPDIR/z2/page.html"   # the rendered picture too, not only the drawing
+  run bash "$TOOL" map-page "$BATS_TEST_TMPDIR/z1/page.html" "$BATS_TEST_TMPDIR/z.json" PLAN_FIX; [ "$status" -eq 0 ]
+  run python3 -c "
+import json; r = json.load(open('$BATS_TEST_TMPDIR/z.json'))
+assert r['requests'] == [] and r['detail'] == 'Worker opraví nálezy', r
+e = {x['cls'][0]: x for x in r['edges']}
+assert sorted(e) == ['pm-edge-added', 'pm-edge-removed'], r['edges']
+assert e['pm-edge-removed']['dash'] not in ('none', '') and e['pm-edge-added']['dash'] in ('none', ''), r['edges']
+assert 'fetch selhal) · nové' in r['detailText'], r['detailText']"
+  [ "$status" -eq 0 ]
+}
+
 @test "docs: the same picture lands in the site with every step name, a page beside it; a section outside docs/ is refused" {
   SITE="$BATS_TEST_TMPDIR/site"; mkdir -p "$SITE/docs/aid/architecture" "$SITE/static"
   cp "$FX/zivot-planu.mapa.yaml" "$D/zivot-planu.mapa.yaml"
@@ -61,7 +86,7 @@ PY
   run bash "$PM" docs "$D/zivot-planu.mapa.yaml" --do "$SITE" --sekce aid/architecture --out "$BATS_TEST_TMPDIR/dz2"; [ "$status" -eq 0 ]
   cmp "$BATS_TEST_TMPDIR/first.svg" "$SITE/static/img/procesy/procesy/zivot-planu.svg"
   run python3 -c "
-import re, yaml; svg = re.sub(r'\s+', '', re.sub(r'<[^>]+>', '', open('$SITE/static/img/procesy/procesy/zivot-planu.svg').read()))
+import html, re, yaml; svg = re.sub(r'\s+', '', html.unescape(re.sub(r'<[^>]+>', '', open('$SITE/static/img/procesy/procesy/zivot-planu.svg').read())))
 names = [re.sub(r'\s+', '', k['jmeno']) for k in yaml.safe_load(open('$D/zivot-planu.mapa.yaml'))['kroky']]
 missing = [n for n in names if n not in svg]; assert not missing, missing"
   [ "$status" -eq 0 ]

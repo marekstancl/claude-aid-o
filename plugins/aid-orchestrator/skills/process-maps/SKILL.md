@@ -40,6 +40,9 @@ File `docs/procesy/<name>.mapa.yaml` (`<name>` = `[a-z0-9-]`, at most 49 charact
 places), `prechody` (`z`, `do`, `popis` ≤ 24 - required on every branch of a step with several exits),
 `odevsad` (a target reachable from every step, drawn once with a note: cancel, failure), `otazky`
 (your questions to the PM about a step, `stav: neovereno`), `proti` (the map this one is compared with).
+**Today and after:** when a change has both, the map of today is `<name>-dnes.mapa.yaml` (`stav: dnes`) and the
+design is `<name>.mapa.yaml` (`stav: po`, `proti: <name>-dnes.mapa.yaml`), so the page shows what changes.
+Only the design is approved and listed in the brief; the map of today stays as the file `proti` points to.
 Schema: `defaults/schemas/process-map.schema.json`. A new application's map is `puvod: rozhovor` (no
 `zdroj`). A process with no end (a daemon loop) is valid when every step has a way out.
 
@@ -100,6 +103,9 @@ plan over the same process starts from the newest `postaveno` file, else from th
 
 Recommend `aid-process-map.sh docs` only for a process that outlives the plan (the main flow of an
 application, AID's own state machines), and only when the PM agrees. Never for a one-off.
+Where: `--do` is the project's Docusaurus site and `--sekce` the section of the documentation the process
+belongs to (for AID itself `/opt/eco/docs` and `aid/architecture`). The project's CLAUDE.md names its site;
+when it names none, ask the PM in the same message as the recommendation - never guess a site.
 
 ---
 

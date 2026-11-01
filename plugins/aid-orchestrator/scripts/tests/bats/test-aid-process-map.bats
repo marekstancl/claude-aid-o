@@ -155,6 +155,28 @@ s = {x['id']: x['marker'] for x in m['steps']}; t = {(x['z'], x['do']): x['marke
 assert s['BALENA'] == 'added' and s['NEZAPLACENA'] == 'removed' and s['NOVA'] is None, s
 assert t[('ZAPLACENA', 'BALENA')] == 'added' and t[('ZAPLACENA', 'ODESLANA')] == 'removed', t"
   [ "$status" -eq 0 ]
+  # a state diagram cannot colour one arrow: the changed ones say so in their label
+  grep -q 's_ZAPLACENA --> s_BALENA : (nové)$' "$BATS_TEST_TMPDIR/p/drawing.mmd"
+  grep -q 's_ZAPLACENA --> s_ODESLANA : (zrušené)$' "$BATS_TEST_TMPDIR/p/drawing.mmd"
+}
+
+@test "build: in BPMN an added and a removed arrow carry their role's colour, and the page knows which flow they are" {
+  cp "$FX/zivot-planu.mapa.yaml" "$D/zivot-planu.mapa.yaml"
+  _variant zivot-planu zivot-planu-po 'm["proti"] = "zivot-planu.mapa.yaml"; m["prechody"] = [t for t in m["prechody"] if (t["z"], t["do"]) != ("CONFLICT", "PLAN_SYNC")]; [t.update(popis="opraveno") for t in m["prechody"] if (t["z"], t["do"]) == ("PLAN_FIX", "PLAN_SYNC")]; m["prechody"].append({"z": "PLAN_FIX", "do": "AWAITING_PM", "popis": "nic k opravě"})'
+  run bash "$PM" build "$D/zivot-planu-po.mapa.yaml" --no-render --out "$BATS_TEST_TMPDIR/b"; [ "$status" -eq 0 ]
+  run python3 - "$BATS_TEST_TMPDIR/b" "$AID_PLUGIN_PATH/lib/process-map/style.json" <<'PY'
+import json, sys, xml.etree.ElementTree as ET
+d, st = sys.argv[1], json.load(open(sys.argv[2]))["roles"]
+m = json.load(open(d + "/model.json"))
+t = {(x["z"], x["do"]): x for x in m["transitions"]}
+add, rem = t[("PLAN_FIX", "AWAITING_PM")], t[("CONFLICT", "PLAN_SYNC")]
+assert add["marker"] == "added" and rem["marker"] == "removed", (add, rem)
+col = {e.get("bpmnElement"): e.get("{http://www.omg.org/spec/BPMN/non-normative/color/1.0}border-color")
+       for e in ET.parse(d + "/drawing.bpmn").getroot().iter("{http://www.omg.org/spec/BPMN/20100524/DI}BPMNEdge")}
+assert col[add["fid"]] == st["added"]["stroke"] and col[rem["fid"]] == st["removed"]["stroke"], col
+assert sum(1 for v in col.values() if v) == 2, col   # nothing else is coloured
+PY
+  [ "$status" -eq 0 ]
 }
 
 @test "build: roles come from the map (ends, ceka) and from the drawing (a step the process goes back from)" {
@@ -269,6 +291,22 @@ assert '@@SVG@@' in json.loads(base64.b64decode(b))['steps'][0]['co']"
   [ "$status" -eq 0 ]
 }
 
+@test "page-static: ordinary words that share treats as code (Worker, fetch, document[) in step names reach the page as plain text" {
+  _variant objednavka slova 'm["nazev"] = "Worker a fetch"; m["kroky"][1]["jmeno"] = "Worker zpracuje platbu"; m["prechody"][1]["popis"] = "fetch selhal"'
+  printf '<svg xmlns="http://www.w3.org/2000/svg"><style>.a{fill:red}</style><text>Worker zpracuje platbu</text><text>fetch selhal &amp; document[0] eval(x)</text></svg>' > "$BATS_TEST_TMPDIR/w.svg"
+  run bash "$PM" page "$D/slova.mapa.yaml" --svg "$BATS_TEST_TMPDIR/w.svg" --out "$BATS_TEST_TMPDIR/w"; [ "$status" -eq 0 ]
+  f="$BATS_TEST_TMPDIR/w/page.html"
+  run ! grep -qE 'Worker|fetch|document\[|eval\(' "$f"
+  grep -q '<style>.a{fill:red}</style>' "$f"   # a style body is left as it is
+  run python3 -c "
+import html, re; t = open('$f').read()
+svg = re.search(r'<div id=\"picture\">(.*?)</div>', t, re.S).group(1)
+text = html.unescape(re.sub(r'<style>.*?</style>|<[^>]+>', ' ', svg))
+assert 'Worker zpracuje platbu' in text and 'fetch selhal & document[0] eval(x)' in text, text
+assert html.unescape(re.search(r'<title>(.*?)</title>', t).group(1)) == 'Worker a fetch'"
+  [ "$status" -eq 0 ]
+}
+
 @test "page-static: a picture with a script, an event handler or a javascript: link is refused" {
   for svg in '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' '<svg xmlns="http://www.w3.org/2000/svg" onload="alert(1)"></svg>' '<svg xmlns="http://www.w3.org/2000/svg"><a href="javascript:alert(1)"><text>x</text></a></svg>'; do
     printf '%s' "$svg" > "$BATS_TEST_TMPDIR/act.svg"
@@ -299,6 +337,19 @@ J
   run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fl" --nove; [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 1 ]; [[ "${lines[0]}" == *'"text": "první"'* ]]   # the older unanswered one stays new
   [ "$sha_before" = "$(sha256sum "$D/objednavka.mapa.yaml")" ]   # answering never touches the map file
+}
+
+@test "flags: a mark on an arrow that is no longer in the map is gone, a mark on an existing arrow is not" {
+  cp "$FX/objednavka.mapa.yaml" "$D/objednavka.mapa.yaml"
+  cat > "$BATS_TEST_TMPDIR/arrows.json" <<'J'
+[{"path": "data/users/u1/mapy/oznaceni/a", "data": {"map": "objednavka", "state": "NOVA", "to": "ZAPLACENA", "text": "je", "at": "2026-11-01T09:00:00Z"}},
+ {"path": "data/users/u1/mapy/oznaceni/b", "data": {"map": "objednavka", "state": "ODESLANA", "to": "NOVA", "text": "zmizela", "at": "2026-11-01T10:00:00Z"}}]
+J
+  _fake_reader "$BATS_TEST_TMPDIR/arrows.json"
+  run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/ar"; [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 2 ]
+  [[ "${lines[0]}" == *'"text": "je"'* && "${lines[0]}" != *'"gone"'* ]]
+  [[ "${lines[1]}" == *'"text": "zmizela"'* && "${lines[1]}" == *'"gone": true'* ]]
 }
 
 @test "flags: no reader, a failing reader and a non-JSON reader each exit 1 with a sentence, never an empty list" {
@@ -350,6 +401,20 @@ PY
   rm "$m"; run bash "$PM" approved "$z"; [ "$status" -eq 1 ]; [[ "$output" == *"missing"* ]]
   printf '| X | `../../etc/x.mapa.yaml` | %s |\n' "$(printf x | sha256sum | cut -d' ' -f1)" >> "$z"
   run bash "$PM" approved "$z"; [ "$status" -eq 1 ]; [[ "$output" == *"not a map file inside the project"* ]]
+}
+
+@test "approved: a row that cannot be read (upper-case sha256, a path without backticks) fails instead of being skipped" {
+  git -C "$BATS_TEST_TMPDIR" init -q 2>/dev/null || true
+  mkdir -p "$BATS_TEST_TMPDIR/docs/procesy"
+  m="$BATS_TEST_TMPDIR/docs/procesy/objednavka.mapa.yaml"
+  sed 's/^stav: dnes/stav: schvaleno/' "$FX/objednavka.mapa.yaml" > "$m"; sha="$(sha256sum "$m" | cut -d' ' -f1)"
+  z="$BATS_TEST_TMPDIR/z.md"
+  printf '### Procesní mapy\n\n| Mapa | Soubor | sha256 |\n|---|---|---|\n| A | `docs/procesy/objednavka.mapa.yaml` | %s |\n' "$sha" > "$z"
+  cd "$BATS_TEST_TMPDIR"; run bash "$PM" approved "$z"; [ "$status" -eq 0 ]
+  printf '| B | `docs/procesy/chybi.mapa.yaml` | %s |\n' "${sha^^}" >> "$z"
+  run bash "$PM" approved "$z"; [ "$status" -eq 1 ]; [[ "$output" == *"unreadable row"*"chybi"* ]]
+  printf '### Procesní mapy\n\n| Mapa | Soubor | sha256 |\n|---|---|---|\n| C | docs/procesy/objednavka.mapa.yaml | %s |\n' "$sha" > "$z"
+  run bash "$PM" approved "$z"; [ "$status" -eq 1 ]; [[ "$output" == *"unreadable row"* ]]
 }
 
 @test "flags: marks sort by time, a bad --zodpovezeno is refused, AID_PM_PAGE_OWNER keeps only the owner's marks" {
