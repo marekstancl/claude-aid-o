@@ -322,3 +322,15 @@ EOF
   rm "$P/ui/vite.config.ts"
   run aid_ui_config_detect "$P"; [[ "$output" == "# ui: no vite.config"* ]]
 }
+
+@test "down stops a prototype whose leader renamed itself (npx runs as npm exec) with its child, closes the port, spares another group" {
+  # the leader execs under another name and serves from a child, as `npx vite` does
+  yq -i '.ui.dev_cmd = ["bash", "-c", "exec -a npm-exec bash -c '\''python3 -m http.server \"$0\" --bind 127.0.0.1 & wait'\'' \"$0\"", "{port}"]' "$P/.aid-o/config/project.yaml"
+  run _k proto; echo "$output"; [ "$status" -eq 0 ]
+  local pg port; pg="$(jq -r .pgid "$D/proto.json")"; port="$(jq -r .port "$D/proto.json")"
+  pgrep -g "$pg" -f http.server >/dev/null                                # the child serves
+  setsid sleep 60 & local other=$!                                        # someone else's group
+  run _k down; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"prototype group ${pg} stopped"* ]]
+  ! pgrep -g "$pg" >/dev/null; ! ss -ltnH "sport = :$port" | grep -q .; [ ! -e "$D/proto.json" ]
+  kill -0 "$other"; kill "$other"
+}

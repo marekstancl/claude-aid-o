@@ -37,11 +37,12 @@ ui:
   first_shot_timeout_s: 15               # optional, 1..120: the first shot's waits (a dev server compiles on it; a page load never under 30 s)
 ```
 
-**Vite whose config imports files outside `ui.dir`** (a `vite.config.ts` that reads `../shared/…`, or a
-TypeScript config the bundled loader cannot resolve from the copy): do not rewrite the app's sources and do
-not edit the copy's config. Run the config through Vite's runner instead and copy what it reads:
+**Vite whose config imports files outside `ui.dir`** (a `vite.config.ts` that reads `../shared/…`): do not
+rewrite the app's sources and do not edit the copy's config. First keep the default loader and add the files it
+reads to `copy_extra`. Only when the bundled loader cannot resolve the config from the copy, try Vite's runner:
 `dev_cmd: ["npx", "vite", "--configLoader", "runner", "--port", "{port}", "--host", "127.0.0.1", "--strictPort"]`
-(Vite 6.1 or newer) plus `copy_extra` for the files outside `ui.dir`. Still failing: write it to
+(Vite 6.1 or newer). The runner gives the config no `__dirname`: a config that uses it (WAN's `releaseInfo(__dirname)`,
+an `@` alias) fails with "ReferenceError: __dirname is not defined" — stay on the default loader then. Still failing: write it to
 `aid-plugin-issues.md` with the dev server's log (`<P>/proto.log`).
 
 ## The procedure (`P` = the brainstorm's plan id, `$K = $AID_PLUGIN_PATH/scripts/aid-companion.sh`)
@@ -53,7 +54,8 @@ not edit the copy's config. Run the config through Vite's runner instead and cop
    files do not exist): say so in chat and in `soulad_s_pravidly`, and ask the PM whether the app has
    UI rules written anywhere.
 2. **Start:** `bash $K up --plan P` (prints the address for the PM; a second `up` reuses the
-   server) and `bash $K proto --plan P` (a copy of `ui.dir` in `.aid-o/work/companion/P/proto/`,
+   server; with no brainstorm run behind it, for a quick look outside `/aid-plan`, first
+   `aid-brainstorm-state.sh init P --scope user_visible --topic-kind ui --no-worktree`) and `bash $K proto --plan P` (a copy of `ui.dir` in `.aid-o/work/companion/P/proto/`,
    outside the repository, its dev server on a loopback port).
 3. **Build the variants in `proto/`** — only from components in `ui.components`, each variant
    behind `?v=<klic>` (A, B, C … from A in every round). A component you must create is a new
@@ -150,4 +152,4 @@ only what the kit started and recorded.
   `ui-compare.mjs` and records `gestalt_approval` (skills/agent-protocol.md); `unverifiable` means
   no visual-fidelity claim.
 
-**Last Updated:** 2026-10-19
+**Last Updated:** 2026-11-01

@@ -98,12 +98,35 @@ cmd_down() {
     rm -f "$rec"
   fi
   if [[ -s "$p" ]]; then
-    local cmd; cmd="$(jq -r '.cmd // ""' "$p")"
-    read -r pid st pg < <(jq -r '[.pid, .starttime, .pgid] | map(tostring) | join(" ")' "$p")
-    if _alive_as "$pid" "$st" "$cmd" && [[ "$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')" == "$pg" ]]; then
-      kill -- "-$pg" && echo "prototype group ${pg} stopped"
+    local port; read -r pid st pg port < <(jq -r '[.pid, .starttime, .pgid, .port] | map(tostring) | join(" ")' "$p")
+    if _proto_ours "$pid" "$st" "$pg"; then
+      _stop_group "$pg" "$port" || return 1
+      echo "prototype group ${pg} stopped"
     else echo "prototype: the recorded process (pid ${pid}, group ${pg}) is not the one we started — nothing stopped"; fi
     rm -f "$p"
+  fi
+}
+
+# the prototype is the group the kit spawned: its leader (pgid == pid, both > 1) with the recorded start time. Not the
+# program's name: `npx vite` runs as `npm exec vite` (WAN P119 31. 10. 2026: down stopped nothing).
+_proto_ours() {  # <pid> <starttime> <pgid>
+  local pid="$1" st="$2" pg="$3"
+  [[ "$pid" =~ ^[0-9]+$ && "$pg" =~ ^[0-9]+$ ]] && (( pid > 1 && pg == pid )) || return 1
+  [[ -r "/proc/$pid/stat" && "$(_starttime "$pid")" == "$st" ]] || return 1
+  [[ "$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')" == "$pg" ]]
+}
+# TERM to the group, up to 5 s for it to empty, then KILL; done only when the group is gone and its port closed
+_stop_group() {  # <pgid> <port>
+  local pg="$1" port="$2" i
+  kill -TERM -- "-$pg" 2>/dev/null || true
+  for i in $(seq 50); do pgrep -g "$pg" >/dev/null 2>&1 || break; sleep 0.1; done
+  if pgrep -g "$pg" >/dev/null 2>&1; then
+    kill -KILL -- "-$pg" 2>/dev/null || true
+    for i in $(seq 20); do pgrep -g "$pg" >/dev/null 2>&1 || break; sleep 0.1; done
+  fi
+  if pgrep -g "$pg" >/dev/null 2>&1 || { [[ "$port" =~ ^[0-9]+$ ]] && ss -ltnH "sport = :$port" 2>/dev/null | grep -q .; }; then
+    echo "prototype: group ${pg} or its port ${port} is still alive after TERM and KILL — the record stays in ${DIR}/proto.json; stop it by hand" >&2
+    return 1
   fi
 }
 
