@@ -12,6 +12,48 @@ setup() {
   D="$BATS_TEST_TMPDIR/procesy"; mkdir -p "$D"
 }
 
+_measure() {
+  python3 - "$1" <<'PY'
+import sys, xml.etree.ElementTree as ET
+ns = {"bpmn": "http://www.omg.org/spec/BPMN/20100524/MODEL", "bpmndi": "http://www.omg.org/spec/BPMN/20100524/DI",
+      "dc": "http://www.omg.org/spec/DD/20100524/DC", "di": "http://www.omg.org/spec/DD/20100524/DI"}
+t = ET.parse(sys.argv[1]).getroot()
+proc = t.find("bpmn:process", ns)
+src = {f.get("id"): (f.get("sourceRef"), f.get("targetRef")) for f in proc.findall("bpmn:sequenceFlow", ns)}
+src.update({a.get("id"): (a.get("sourceRef"), a.get("targetRef")) for a in proc.findall("bpmn:association", ns)})
+box = {}
+for s in t.iter("{%s}BPMNShape" % ns["bpmndi"]):
+    b = s.find("dc:Bounds", ns); box[s.get("bpmnElement")] = tuple(float(b.get(k)) for k in ("x", "y", "width", "height"))
+def hit(a, b): return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
+bad = []
+ks = sorted(box)
+for i, a in enumerate(ks):
+    for b in ks[i + 1:]:
+        if hit(box[a], box[b]): bad.append(("box", a, b))
+for e in t.iter("{%s}BPMNEdge" % ns["bpmndi"]):
+    own = set(src[e.get("bpmnElement")])
+    pts = [(float(w.get("x")), float(w.get("y"))) for w in e.findall("di:waypoint", ns)]
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+        for k, (rx, ry, rw, rh) in box.items():
+            if k in own: continue
+            if x1 == x2 and rx < x1 < rx + rw and min(y1, y2) < ry + rh and ry < max(y1, y2): bad.append(("line", e.get("bpmnElement"), k))
+            if y1 == y2 and ry < y1 < ry + rh and min(x1, x2) < rx + rw and rx < max(x1, x2): bad.append(("line", e.get("bpmnElement"), k))
+    lb = e.find("bpmndi:BPMNLabel/dc:Bounds", ns)
+    if lb is not None:
+        r = tuple(float(lb.get(k)) for k in ("x", "y", "width", "height"))
+        bad += [("label", e.get("bpmnElement"), k) for k, b in box.items() if hit(r, b)]
+for s in t.iter("{%s}BPMNShape" % ns["bpmndi"]):
+    lb = s.find("bpmndi:BPMNLabel/dc:Bounds", ns)
+    if lb is not None:
+        r = tuple(float(lb.get(k)) for k in ("x", "y", "width", "height"))
+        bad += [("shape-label", s.get("bpmnElement"), k) for k, b in box.items() if k != s.get("bpmnElement") and hit(r, b)]
+        if r[0] < 0: bad.append(("negative-x", s.get("bpmnElement"), r[0]))
+ids = [el.get("id") for el in t.iter() if el.get("id")]
+bad += [("duplicate-id", i) for i in sorted(set(ids)) if ids.count(i) > 1]
+print(bad); sys.exit(1 if bad else 0)
+PY
+}
+
 # _variant <fixture> <name> <python expression on m> — a changed copy of a fixture
 _variant() {
   python3 - "$FX/$1.mapa.yaml" "$D/$2.mapa.yaml" "$3" <<'PY'
@@ -58,11 +100,13 @@ PY
 
 @test "check: a map from code without zdroj, a missing proti, a wrong name and unreadable YAML" {
   _variant zivot-planu src 'del m["zdroj"]'
-  run bash "$PM" check "$D/src.mapa.yaml"; [ "$status" -eq 1 ]; [[ "$output" == *"zdroj"* ]]
+  run bash "$PM" check "$D/src.mapa.yaml"; [ "$status" -eq 1 ]; [[ "$output" == *"schema: (root): 'zdroj' is a required property"* ]]
   _variant objednavka pro 'm["proti"] = "neni.mapa.yaml"'
   run bash "$PM" check "$D/pro.mapa.yaml"; [ "$status" -eq 1 ]; [[ "$output" == *"proti_missing: neni.mapa.yaml"* ]]
   _variant objednavka cesta 'm["proti"] = "../x.mapa.yaml"'
   run bash "$PM" check "$D/cesta.mapa.yaml"; [ "$status" -eq 1 ]; [[ "$output" == *"schema"*"proti"* ]]
+  cp "$FX/objednavka.mapa.yaml" "$D/.mapa.yaml"
+  run bash "$PM" check "$D/.mapa.yaml"; [ "$status" -eq 1 ]; [[ "$output" == *"name:"* ]]
   cp "$FX/objednavka.mapa.yaml" "$D/objednavka.yaml"
   run bash "$PM" check "$D/objednavka.yaml"; [ "$status" -eq 1 ]; [[ "$output" == *".mapa.yaml"* ]]
   printf 'kroky: [\n' > "$D/rozbita.mapa.yaml"
@@ -85,45 +129,18 @@ PY
 
 @test "build: measured from the written DI, no box, line segment or label crosses another box" {
   run bash "$PM" build "$FX/zivot-planu.mapa.yaml" --no-render --out "$BATS_TEST_TMPDIR/o"; [ "$status" -eq 0 ]
-  run python3 - "$BATS_TEST_TMPDIR/o/drawing.bpmn" <<'PY'
-import sys, xml.etree.ElementTree as ET
-ns = {"bpmn": "http://www.omg.org/spec/BPMN/20100524/MODEL", "bpmndi": "http://www.omg.org/spec/BPMN/20100524/DI",
-      "dc": "http://www.omg.org/spec/DD/20100524/DC", "di": "http://www.omg.org/spec/DD/20100524/DI"}
-t = ET.parse(sys.argv[1]).getroot()
-proc = t.find("bpmn:process", ns)
-src = {f.get("id"): (f.get("sourceRef"), f.get("targetRef")) for f in proc.findall("bpmn:sequenceFlow", ns)}
-src.update({a.get("id"): (a.get("sourceRef"), a.get("targetRef")) for a in proc.findall("bpmn:association", ns)})
-box = {}
-for s in t.iter("{%s}BPMNShape" % ns["bpmndi"]):
-    b = s.find("dc:Bounds", ns); box[s.get("bpmnElement")] = tuple(float(b.get(k)) for k in ("x", "y", "width", "height"))
-def hit(a, b): return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
-bad = []
-ks = sorted(box)
-for i, a in enumerate(ks):
-    for b in ks[i + 1:]:
-        if hit(box[a], box[b]): bad.append(("box", a, b))
-for e in t.iter("{%s}BPMNEdge" % ns["bpmndi"]):
-    own = set(src[e.get("bpmnElement")])
-    pts = [(float(w.get("x")), float(w.get("y"))) for w in e.findall("di:waypoint", ns)]
-    for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
-        for k, (rx, ry, rw, rh) in box.items():
-            if k in own: continue
-            if x1 == x2 and rx < x1 < rx + rw and min(y1, y2) < ry + rh and ry < max(y1, y2): bad.append(("line", e.get("bpmnElement"), k))
-            if y1 == y2 and ry < y1 < ry + rh and min(x1, x2) < rx + rw and rx < max(x1, x2): bad.append(("line", e.get("bpmnElement"), k))
-    lb = e.find("bpmndi:BPMNLabel/dc:Bounds", ns)
-    if lb is not None:
-        r = tuple(float(lb.get(k)) for k in ("x", "y", "width", "height"))
-        bad += [("label", e.get("bpmnElement"), k) for k, b in box.items() if hit(r, b)]
-print(bad); sys.exit(1 if bad else 0)
-PY
+  run _measure "$BATS_TEST_TMPDIR/o/drawing.bpmn"
   [ "$status" -eq 0 ]
 }
 
 @test "build: every self-loop is drawn and gateways follow branching steps" {
   run bash "$PM" build "$FX/zivot-planu.mapa.yaml" --no-render --out "$BATS_TEST_TMPDIR/s"; [ "$status" -eq 0 ]
   grep -q 'sourceRef="PLAN_SYNC" targetRef="PLAN_SYNC"' "$BATS_TEST_TMPDIR/s/drawing.bpmn"
-  grep -q 'exclusiveGateway id="GW_AWAITING_PM"' "$BATS_TEST_TMPDIR/s/drawing.bpmn"
-  grep -q 'textAnnotation id="ANN_ABORTED"' "$BATS_TEST_TMPDIR/s/drawing.bpmn"
+  grep -q 'exclusiveGateway id="GW-AWAITING_PM"' "$BATS_TEST_TMPDIR/s/drawing.bpmn"
+  grep -q 'textAnnotation id="ANN-ABORTED"' "$BATS_TEST_TMPDIR/s/drawing.bpmn"
+  # the self-loop does not go through the gateway: EPIC_INTEGRATION's gateway has exactly its two other exits
+  [ "$(grep -c 'sourceRef="GW-EPIC_INTEGRATION"' "$BATS_TEST_TMPDIR/s/drawing.bpmn")" -eq 2 ]
+  grep -q 'sourceRef="EPIC_INTEGRATION" targetRef="EPIC_INTEGRATION"' "$BATS_TEST_TMPDIR/s/drawing.bpmn"
 }
 
 @test "build: against proti, an added and a removed step and transition are marked" {
@@ -144,4 +161,73 @@ assert t[('ZAPLACENA', 'BALENA')] == 'added' and t[('ZAPLACENA', 'ODESLANA')] ==
 import json; r = {x['id']: x['role'] for x in json.load(open('$BATS_TEST_TMPDIR/r/model.json'))['steps']}
 assert r['CLOSED'] == 'ok' and r['ABORTED'] == 'bad' and r['AWAITING_PM'] == 'pm' and r['PLAN_FIX'] == 'warn', r"
   [ "$status" -eq 0 ]
+}
+
+@test "check: proti is held to the schema too; an id smuggled through proti never reaches the drawing" {
+  printf 'nazev: x\n' > "$D/stara.mapa.yaml"
+  _variant objednavka nova 'm["proti"] = "stara.mapa.yaml"'
+  run bash "$PM" check "$D/nova.mapa.yaml"; [ "$status" -eq 1 ]; [[ "$output" == *"proti_invalid: stara.mapa.yaml"* ]]
+  _variant objednavka stara2 'm["kroky"][0]["id"] = "X\"/><bpmn:task id=\"EVIL"'
+  _variant zivot-planu nova2 'm["proti"] = "stara2.mapa.yaml"'
+  run bash "$PM" build "$D/nova2.mapa.yaml" --no-render --out "$BATS_TEST_TMPDIR/inj"; [ "$status" -eq 1 ]
+  [[ "$output" == *"proti_invalid"* ]]; [ ! -e "$BATS_TEST_TMPDIR/inj" ]
+}
+
+@test "check: a self-loop on an end is an exit" {
+  _variant objednavka endloop 'm["prechody"].append({"z": "ODESLANA", "do": "ODESLANA"})'
+  run bash "$PM" check "$D/endloop.mapa.yaml"; [ "$status" -eq 1 ]; [[ "$output" == *"end_with_exit: ODESLANA -> ODESLANA"* ]]
+}
+
+@test "build: generated ids can never collide with step ids (GW_A, F0 and friends are plain steps)" {
+  _variant objednavka kolize 'm["kroky"][1]["id"] = "GW_NOVA"; m["kroky"][3]["id"] = "F0"; m["druh"] = "bpmn"
+for t in m["prechody"]:
+    t["z"] = {"ZAPLACENA": "GW_NOVA", "NEZAPLACENA": "F0"}.get(t["z"], t["z"]); t["do"] = {"ZAPLACENA": "GW_NOVA", "NEZAPLACENA": "F0"}.get(t["do"], t["do"])'
+  run bash "$PM" build "$D/kolize.mapa.yaml" --no-render --out "$BATS_TEST_TMPDIR/k"; [ "$status" -eq 0 ]
+  run _measure "$BATS_TEST_TMPDIR/k/drawing.bpmn"; [ "$status" -eq 0 ]
+  grep -q '<bpmn:task id="GW_NOVA"' "$BATS_TEST_TMPDIR/k/drawing.bpmn"
+}
+
+@test "build: an odevsad target that is not an end stays a task (a pause the process resumes from)" {
+  _variant objednavka pauza 'm["druh"] = "bpmn"; m["kroky"].insert(1, {"id": "PAUZA", "jmeno": "Pozastaveno", "co": "Čeká na zákazníka."}); m["prechody"].append({"z": "PAUZA", "do": "NOVA", "popis": "pokračuje"}); m["odevsad"] = [{"do": "PAUZA", "popis": "pauza"}]'
+  run bash "$PM" build "$D/pauza.mapa.yaml" --no-render --out "$BATS_TEST_TMPDIR/pz"; [ "$status" -eq 0 ]
+  grep -q '<bpmn:task id="PAUZA"' "$BATS_TEST_TMPDIR/pz/drawing.bpmn"
+  run _measure "$BATS_TEST_TMPDIR/pz/drawing.bpmn"; [ "$status" -eq 0 ]
+}
+
+@test "build: long names (36 chars) and a fan of five branches with 24-char labels lay out without overlap" {
+  _variant objednavka siroka 'm["druh"] = "bpmn"; m["kroky"][0]["jmeno"] = "S" * 36; m["kroky"][2]["jmeno"] = "K" * 36
+m["kroky"] += [{"id": f"T{i}", "jmeno": f"Větev {i}", "co": "x", "konec": "ok"} for i in range(5)]
+m["prechody"] += [{"z": "ZAPLACENA", "do": f"T{i}", "popis": chr(65 + i) * 24} for i in range(5)]
+m["prechody"] = [t for t in m["prechody"] if not (t["z"] == "ZAPLACENA" and t["do"] == "ODESLANA")]
+m["prechody"].append({"z": "ZAPLACENA", "do": "ODESLANA", "popis": "Z" * 24})'
+  run bash "$PM" build "$D/siroka.mapa.yaml" --no-render --out "$BATS_TEST_TMPDIR/w"; [ "$status" -eq 0 ]
+  run _measure "$BATS_TEST_TMPDIR/w/drawing.bpmn"; [ "$status" -eq 0 ]
+}
+
+@test "build: a one-step map and two steps with the same name build" {
+  printf 'nazev: Jeden\ndruh: bpmn\nstav: dnes\npuvod: rozhovor\nkroky:\n  - {id: A, jmeno: Jediný, co: Hotovo hned., konec: ok}\nprechody: []\n' > "$D/jeden.mapa.yaml"
+  run bash "$PM" build "$D/jeden.mapa.yaml" --no-render --out "$BATS_TEST_TMPDIR/j"; [ "$status" -eq 0 ]
+  _variant objednavka stejne 'm["kroky"][1]["jmeno"] = m["kroky"][3]["jmeno"]'
+  run bash "$PM" build "$D/stejne.mapa.yaml" --no-render --out "$BATS_TEST_TMPDIR/st"; [ "$status" -eq 0 ]
+}
+
+@test "build: the Mermaid drawing avoids keywords, uses block notes and no reserved class name" {
+  _variant objednavka klic 'm["kroky"].append({"id": "note", "jmeno": "Poznámka: x", "co": "x", "konec": "bad"}); m["odevsad"] = [{"do": "note", "popis": "chyba: y"}]'
+  run bash "$PM" build "$D/klic.mapa.yaml" --no-render --out "$BATS_TEST_TMPDIR/m"; [ "$status" -eq 0 ]
+  f="$BATS_TEST_TMPDIR/m/drawing.mmd"
+  ! grep -q 'classDef default' "$f"; ! grep -Eq '^  note .*:' "$f"; grep -q 'end note' "$f"
+  ! grep -Eq '^  state "[^"]*" as [^s]' "$f"; ! grep -Eq ' : [^\n]*:' "$f"
+}
+
+@test "build: when the layout check finds an overlap, build exits 1 and writes nothing" {
+  run python3 - "$AID_PLUGIN_PATH/scripts" "$FX/zivot-planu.mapa.yaml" "$BATS_TEST_TMPDIR/ov" <<'PY'
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("apm", sys.argv[1] + "/aid-process-map.py"); m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+two = {"nodes": {"A": {"id": "A", "x": 0, "y": 0, "w": 50, "h": 50}, "B": {"id": "B", "x": 10, "y": 10, "w": 50, "h": 50}}, "edges": [], "labels": [], "annotations": []}
+assert m.overlaps(two) == [("A", "B")], m.overlaps(two)
+m.overlaps = lambda lay: [("X", "Y")]
+rc = m.cmd_build(sys.argv[2], sys.argv[3])
+sys.exit(0 if rc == 1 else 3)
+PY
+  [ "$status" -eq 0 ]; [[ "$output" == *"layout_overlap: X Y"* ]]; [ ! -e "$BATS_TEST_TMPDIR/ov" ]
 }

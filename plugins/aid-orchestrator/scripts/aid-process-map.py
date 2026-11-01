@@ -15,6 +15,7 @@ sibling file (the schema's pattern has no slash), and every written text is XML-
 """
 import json
 import os
+import re
 import subprocess
 import sys
 from xml.sax.saxutils import escape, quoteattr
@@ -39,9 +40,10 @@ def load_style():
 
 def map_name(path):
     base = os.path.basename(path)
-    if not base.endswith(SUFFIX):
-        raise Refused(f"{path}: name: a map file ends with {SUFFIX}")
-    return base[: -len(SUFFIX)]
+    name = base[: -len(SUFFIX)] if base.endswith(SUFFIX) else ""
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
+        raise Refused(f"{path}: name: a map file is <name>{SUFFIX} with <name> matching [a-z0-9][a-z0-9-]*")
+    return name
 
 
 def load_map(path):
@@ -126,16 +128,18 @@ def check_rules(path, data):
     for i in ids:
         s = by_id[i]
         if is_end(s):
-            if outgoing[i]:
-                out.append(f"{path}: end_with_exit: {i} -> {outgoing[i][0]['do']}")
+            exits = [t for t in trans if t["z"] == i]   # a self-loop on an end is an exit too
+            if exits:
+                out.append(f"{path}: end_with_exit: {i} -> {exits[0]['do']}")
         elif not outgoing[i] and not (targets - {i}):
             out.append(f"{path}: dead_end: {i}")
-    if data["puvod"] == "kod" and not data.get("zdroj"):
-        out.append(f"{path}: zdroj_missing: puvod: kod needs zdroj")
     if data.get("proti"):
         other = os.path.join(os.path.dirname(os.path.abspath(path)), data["proti"])
         if not os.path.isfile(other):
             out.append(f"{path}: proti_missing: {data['proti']}")
+        else:
+            odata = load_map(other)
+            out += [f"{path}: proti_invalid: {data['proti']}: {e}" for e in schema_errors(odata)]
     return out
 
 
@@ -181,14 +185,14 @@ def layout(data, st, removed_steps=(), removed_trans=()):
     # nodes: steps; a gateway after a step with more than one non-self exit
     nodes = {}
     for s in steps:
-        kind = "start" if s["id"] == first else ("end" if (is_end(s) or s["id"] in targets) else "task")
+        kind = "start" if s["id"] == first else ("end" if is_end(s) else "task")
         nodes[s["id"]] = {"id": s["id"], "kind": kind, "order": order[s["id"]] * 2}
     edges, selfloops = [], []
     for s in steps:
         outs = [t for t in trans if t["z"] == s["id"] and t["do"] != s["id"]]
         selfloops += [t for t in trans if t["z"] == s["id"] and t["do"] == s["id"]]
         if len(outs) > 1:
-            gw = "GW_" + s["id"]
+            gw = "GW-" + s["id"]
             nodes[gw] = {"id": gw, "kind": "gateway", "order": order[s["id"]] * 2 + 1}
             edges.append({"src": s["id"], "dst": gw, "label": "", "trans": None})
             edges += [{"src": gw, "dst": t["do"], "label": t.get("popis", ""), "trans": t} for t in outs]
@@ -219,17 +223,20 @@ def layout(data, st, removed_steps=(), removed_trans=()):
     for _ in range(len(nodes)):
         moved = False
         for e in fwd:
-            if nodes[e["dst"]]["kind"] == "end":
+            if nodes[e["dst"]]["kind"] == "end" or e["dst"] in targets or e["src"] in targets:
                 continue
             if rank[e["dst"]] < rank[e["src"]] + 1:
                 rank[e["dst"]] = rank[e["src"]] + 1; moved = True
         if not moved:
             break
-    last = max([rank[n] for n in nodes if nodes[n]["kind"] != "end"] + [0]) + 1
+    lastcol = lambda n: nodes[n]["kind"] == "end" or n in targets   # ends and odevsad targets share the last column
+    last = max([rank[n] for n in nodes if not lastcol(n)] + [0]) + 1
     for n in nodes:
-        if nodes[n]["kind"] == "end":
+        if lastcol(n):
             rank[n] = last
-    ncols = max(rank.values()) + 1
+    used = sorted(set(rank.values()))   # no empty column, whatever the ranks skipped
+    rank = {n: used.index(r) for n, r in rank.items()}
+    ncols = len(used)
     cols = [sorted([n for n in nodes if rank[n] == c], key=lambda k: nodes[k]["order"]) for c in range(ncols)]
     row = {n: r for c in cols for r, n in enumerate(c)}
 
@@ -255,10 +262,20 @@ def layout(data, st, removed_steps=(), removed_trans=()):
             e["gap_out_lane"], e["gap_in_lane"] = take(e["gap_out"]), take(e["gap_in"])
     cw = sz["char_width"]
     def gap_width(g):
-        lab = max([len(e["label"]) for e in edges if adjacent(e) and rank[e["src"]] == g] + [0])
-        return max(sz["column_gap"], lab * cw + sz["label_padding"] + 20, 20 + lanes.get(g, 0) * sz["lane_step"] + 10)
-    left = max(sz["left"], 20 + lanes.get(-1, 0) * sz["lane_step"] + 10)
-    colw = [max(_size("task" if nodes[n]["kind"] in ("task",) else nodes[n]["kind"], st)[0] for n in c) for c in cols]
+        need = [sz["column_gap"], 20 + lanes.get(g, 0) * sz["lane_step"] + 10]
+        for e in edges:
+            if adjacent(e) and rank[e["src"]] == g and e["label"]:
+                lane = e.get("gap_out_lane", 0) if e.get("route") == "elbow" else 0
+                start = 20 + lane * sz["lane_step"] + 4 if e.get("route") == "elbow" else 4
+                need.append(start + len(e["label"]) * cw + sz["label_padding"])
+        return max(need)
+    def name_w(n):
+        return len(by_id[n]["jmeno"]) * cw if n in by_id else 0
+    def node_w(n):
+        w = _size("task" if nodes[n]["kind"] == "task" else nodes[n]["kind"], st)[0]
+        return max(w, name_w(n)) if nodes[n]["kind"] in ("start", "end") else w
+    colw = [max(node_w(n) for n in c) for c in cols]
+    left = max(sz["left"], 20 + lanes.get(-1, 0) * sz["lane_step"] + 10, (name_w(first) - _size("event", st)[0]) // 2 + 10)
     colx, x = [], left
     for c in range(ncols):
         colx.append(x)
@@ -308,7 +325,6 @@ def layout(data, st, removed_steps=(), removed_trans=()):
             e["wp"] = [(right(s), cy(s)), (xo, cy(s)), (xo, ty), (xi, ty), (xi, cy(d)), (lft(d), cy(d))]
             if e["label"]:
                 labels.append({"edge": e, "x": min(xo, xi) + 4, "y": ty - lh, "w": len(e["label"]) * cw, "h": lh})
-    track = n_below
     for t in selfloops:
         n = t["z"]
         e = {"src": n, "dst": n, "label": t.get("popis", ""), "trans": t, "self": True}
@@ -320,7 +336,7 @@ def layout(data, st, removed_steps=(), removed_trans=()):
     for n, node in nodes.items():   # external names of events, as bpmn-js draws them
         if node["kind"] in ("start", "end"):
             name = by_id[n]["jmeno"]
-            w = max(len(name) * cw, node["w"])
+            w = max(len(name) * cw, node["w"])   # the column is at least this wide (node_w)
             labels.append({"node": n, "x": cx(n) - w // 2, "y": node["y"] + node["h"] + 2, "w": w, "h": lh})
     annotations = []
     aw, ah = sz["annotation"]
@@ -328,9 +344,9 @@ def layout(data, st, removed_steps=(), removed_trans=()):
         text = st["texts"]["odevsad_ends" if o.get("vcetne_koncu") else "odevsad"]
         ax = colx[-1] + colw[-1] + 30
         ay = nodes[tid]["y"] + nodes[tid]["h"] // 2 - ah // 2
-        annotations.append({"id": "ANN_" + tid, "target": tid, "x": ax, "y": ay, "w": aw, "h": ah,
+        annotations.append({"id": "ANN-" + tid, "target": tid, "x": ax, "y": ay, "w": aw, "h": ah,
                             "text": f"{o['popis']}: {text}", "wp": [(ax, ay + ah // 2), (right(tid), cy(tid))]})
-    warn = {e["src"] if not e["src"].startswith("GW_") else e["src"][3:] for e in edges if e.get("route") == "below"}
+    warn = {e["src"][3:] if e["src"].startswith("GW-") else e["src"] for e in edges if e.get("route") == "below"}
     return {"nodes": nodes, "edges": edges, "labels": labels, "annotations": annotations, "back": back,
             "warn": warn, "width": max([a["x"] + a["w"] for a in annotations] + [x]) + 20,
             "height": bottom + sz["track_margin"] + n_below * sz["track_step"] + 20}
@@ -371,6 +387,13 @@ def overlaps(lay):
         for sid, r in shapes:
             if sid not in (a["id"], a["target"]) and _seg_hits_rect(a["wp"][0], a["wp"][1], r):
                 out.append((a["id"], sid))
+    labs = lay["labels"]
+    for i, a in enumerate(labs):
+        for b in labs[i + 1:]:
+            if _rect_hit(a["x"], a["y"], a["w"], a["h"], b["x"], b["y"], b["w"], b["h"]):
+                na = a.get("node") or f"{a['edge']['src']}->{a['edge']['dst']}"
+                nb = b.get("node") or f"{b['edge']['src']}->{b['edge']['dst']}"
+                out.append((f"label {na}", f"label {nb}"))
     for l in lay["labels"]:
         own = {l.get("node")}
         for sid, r in shapes:
@@ -382,7 +405,7 @@ def overlaps(lay):
 
 # --------------------------------------------------------------------------- writers
 
-def _role(step, lay, marks):
+def _role(step, lay):
     if step.get("konec") == "ok":
         return "ok"
     if step.get("konec") == "bad":
@@ -401,15 +424,15 @@ def write_bpmn(data, lay):
     nodes = sorted(lay["nodes"].values(), key=lambda n: n["order"])
     flows = []
     for k, e in enumerate(lay["edges"]):
-        e["fid"] = f"F{k}"
+        e["fid"] = f"F-{k}"
         flows.append(e)
     inc = {n["id"]: [f["fid"] for f in flows if f["dst"] == n["id"]] for n in nodes}
     out_ = {n["id"]: [f["fid"] for f in flows if f["src"] == n["id"]] for n in nodes}
     L = ['<?xml version="1.0" encoding="UTF-8"?>',
          '<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" '
          'xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" '
-         'xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions" targetNamespace="aid:process-map">',
-         f'  <bpmn:process id="Process" name={quoteattr(data["nazev"])} isExecutable="false">']
+         'xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions-" targetNamespace="aid:process-map">',
+         f'  <bpmn:process id="Process-" name={quoteattr(data["nazev"])} isExecutable="false">']
     tag = {"start": "startEvent", "end": "endEvent", "task": "task", "gateway": "exclusiveGateway"}
     for n in nodes:
         name = "" if n["kind"] == "gateway" else f' name={quoteattr(by_id[n["id"]]["jmeno"])}'
@@ -422,29 +445,29 @@ def write_bpmn(data, lay):
         L.append(f'    <bpmn:sequenceFlow id="{f["fid"]}" sourceRef="{f["src"]}" targetRef="{f["dst"]}"{name} />')
     for a in lay["annotations"]:
         L.append(f'    <bpmn:textAnnotation id="{a["id"]}"><bpmn:text>{escape(a["text"])}</bpmn:text></bpmn:textAnnotation>')
-        L.append(f'    <bpmn:association id="AS_{a["target"]}" sourceRef="{a["id"]}" targetRef="{a["target"]}" />')
+        L.append(f'    <bpmn:association id="AS-{a["target"]}" sourceRef="{a["id"]}" targetRef="{a["target"]}" />')
     L.append("  </bpmn:process>")
-    L.append('  <bpmndi:BPMNDiagram id="Diagram"><bpmndi:BPMNPlane id="Plane" bpmnElement="Process">')
+    L.append('  <bpmndi:BPMNDiagram id="Diagram-"><bpmndi:BPMNPlane id="Plane-" bpmnElement="Process-">')
     lab = {l["node"]: l for l in lay["labels"] if "node" in l}
     elab = {id(l["edge"]): l for l in lay["labels"] if "edge" in l}
     for n in nodes:
-        L.append(f'    <bpmndi:BPMNShape id="{n["id"]}_di" bpmnElement="{n["id"]}">'
+        L.append(f'    <bpmndi:BPMNShape id="{n["id"]}-di" bpmnElement="{n["id"]}">'
                  f'<dc:Bounds x="{n["x"]}" y="{n["y"]}" width="{n["w"]}" height="{n["h"]}" />')
         if n["id"] in lab:
             l = lab[n["id"]]
             L.append(f'      <bpmndi:BPMNLabel><dc:Bounds x="{l["x"]}" y="{l["y"]}" width="{l["w"]}" height="{l["h"]}" /></bpmndi:BPMNLabel>')
         L.append("    </bpmndi:BPMNShape>")
     for f in flows:
-        L.append(f'    <bpmndi:BPMNEdge id="{f["fid"]}_di" bpmnElement="{f["fid"]}">')
+        L.append(f'    <bpmndi:BPMNEdge id="{f["fid"]}-di" bpmnElement="{f["fid"]}">')
         L += [f'      <di:waypoint x="{x}" y="{y}" />' for x, y in f["wp"]]
         if id(f) in elab:
             l = elab[id(f)]
             L.append(f'      <bpmndi:BPMNLabel><dc:Bounds x="{l["x"]}" y="{l["y"]}" width="{l["w"]}" height="{l["h"]}" /></bpmndi:BPMNLabel>')
         L.append("    </bpmndi:BPMNEdge>")
     for a in lay["annotations"]:
-        L.append(f'    <bpmndi:BPMNShape id="{a["id"]}_di" bpmnElement="{a["id"]}">'
+        L.append(f'    <bpmndi:BPMNShape id="{a["id"]}-di" bpmnElement="{a["id"]}">'
                  f'<dc:Bounds x="{a["x"]}" y="{a["y"]}" width="{a["w"]}" height="{a["h"]}" /></bpmndi:BPMNShape>')
-        L.append(f'    <bpmndi:BPMNEdge id="AS_{a["target"]}_di" bpmnElement="AS_{a["target"]}">'
+        L.append(f'    <bpmndi:BPMNEdge id="AS-{a["target"]}-di" bpmnElement="AS-{a["target"]}">'
                  + "".join(f'<di:waypoint x="{x}" y="{y}" />' for x, y in a["wp"]) + "</bpmndi:BPMNEdge>")
     L.append("  </bpmndi:BPMNPlane></bpmndi:BPMNDiagram>")
     L.append("</bpmn:definitions>")
@@ -452,30 +475,32 @@ def write_bpmn(data, lay):
 
 
 def _mm(text):
-    return text.replace('"', "'").replace("\n", " ")
+    return text.replace('"', "'").replace("\n", " ").replace(":", " -")
 
 
 def write_mermaid(data, st, lay):
-    """Mermaid stateDiagram-v2; classes from style.json; deterministic."""
+    """Mermaid stateDiagram-v2; ids prefixed s_ and classes r_ (Mermaid keywords cannot collide);
+    a note as a block (a colon inside a one-line note breaks the parser); deterministic."""
     steps = list(data["kroky"]) + list(lay.get("removed_steps", []))
+    sid = lambda i: "s_" + i
     L = ["stateDiagram-v2", "  direction LR"]
     for s in steps:
-        L.append(f'  state "{_mm(s["jmeno"])}" as {s["id"]}')
-    L.append(f"  [*] --> {steps[0]['id']}")
+        L.append(f'  state "{_mm(s["jmeno"])}" as {sid(s["id"])}')
+    L.append(f"  [*] --> {sid(steps[0]['id'])}")
     for t in list(data["prechody"]) + list(lay.get("removed_trans", [])):
         lbl = f" : {_mm(t['popis'])}" if t.get("popis") else ""
-        L.append(f"  {t['z']} --> {t['do']}{lbl}")
+        L.append(f"  {sid(t['z'])} --> {sid(t['do'])}{lbl}")
     for s in steps:
         if is_end(s):
-            L.append(f"  {s['id']} --> [*]")
+            L.append(f"  {sid(s['id'])} --> [*]")
     for o in data.get("odevsad", []):
         text = st["texts"]["odevsad_ends" if o.get("vcetne_koncu") else "odevsad"]
-        L.append(f"  note right of {o['do']} : {_mm(o['popis'])}: {text}")
+        L += [f"  note right of {sid(o['do'])}", f"    {_mm(o['popis'])} - {text}", "  end note"]
     roles = st["roles"]
     for r in ("default", "ok", "bad", "warn", "pm"):
-        L.append(f"  classDef {r} fill:{roles[r]['fill']},stroke:{roles[r]['stroke']}")
+        L.append(f"  classDef r_{r} fill:{roles[r]['fill']},stroke:{roles[r]['stroke']}")
     for s in steps:
-        L.append(f"  class {s['id']} {_role(s, lay, {})}")
+        L.append(f"  class {sid(s['id'])} r_{_role(s, lay)}")
     return "\n".join(L) + "\n"
 
 
@@ -489,7 +514,7 @@ def model_json(data, st, lay, step_marks, trans_marks):
                     for r, v in st["roles"].items()]}
     for s in steps:
         m["steps"].append({"id": s["id"], "jmeno": s["jmeno"], "co": s["co"], "kod": s.get("kod", []),
-                           "role": _role(s, lay, step_marks), "marker": step_marks.get(s["id"])})
+                           "role": _role(s, lay), "marker": step_marks.get(s["id"])})
     for t in trans:
         m["transitions"].append({"z": t["z"], "do": t["do"], "popis": t.get("popis", ""),
                                  "marker": trans_marks.get((t["z"], t["do"]))})
@@ -530,7 +555,7 @@ def build_drawing(path, data, st):
     step_marks, trans_marks, rs, rt = compare(data, other)
     lay = layout(data, st, rs, rt)
     lay["removed_steps"], lay["removed_trans"] = rs, rt
-    hits = overlaps(lay)
+    hits = overlaps(lay) if data["druh"] == "bpmn" else []   # Mermaid lays out a state diagram itself
     if hits:
         raise Refused("\n".join(f"{path}: layout_overlap: {a} {b}" for a, b in hits))
     drawing = write_bpmn(data, lay) if data["druh"] == "bpmn" else write_mermaid(data, st, lay)
@@ -569,7 +594,10 @@ def main(argv):
         return 2
     cmd, path, rest = argv[0], argv[1], argv[2:]
     if cmd == "check":
-        return 2 if rest else cmd_check(path)
+        if rest:
+            print(f"aid-process-map: check takes one map file, got extra: {' '.join(rest)}", file=sys.stderr)
+            return 2
+        return cmd_check(path)
     out, render = None, True
     while rest:
         a = rest.pop(0)
