@@ -129,11 +129,11 @@ _ws() {
   run _k shots; [ "$status" -ne 0 ]; [[ "$output" == *"first_shot_timeout_s must be whole seconds from 1 to 120"* ]]
 }
 
-@test "AC5 down: a recorded prototype whose identity does not match (pid reused) is not killed" {
-  sleep 300 & local other=$!
-  jq -n --argjson p "$other" '{pid: $p, pgid: $p, starttime: "1", cmd: "python3", port: 1, url: "x"}' > "$D/proto.json" 2>/dev/null || { mkdir -p "$D"; jq -n --argjson p "$other" '{pid: $p, pgid: $p, starttime: "1", cmd: "python3", port: 1, url: "x"}' > "$D/proto.json"; }
+@test "AC5 down: a recorded prototype whose identity does not match (pid reused) is not killed and its record stays" {
+  mkdir -p "$D"; setsid sleep 300 & local other=$!; sleep 0.2                 # a real group leader of its own
+  jq -n --argjson p "$other" '{pid: $p, pgid: $p, starttime: "1", cmd: "sleep", port: 1, url: "x"}' > "$D/proto.json"
   run _k down; echo "$output"
-  [[ "$output" == *"not the one we started"* ]]
+  [[ "$output" == *"not the one we started"* ]]; [ "$status" -ne 0 ]; [ -e "$D/proto.json" ]
   kill -0 "$other"; kill "$other"
 }
 
@@ -323,14 +323,36 @@ EOF
   run aid_ui_config_detect "$P"; [[ "$output" == "# ui: no vite.config"* ]]
 }
 
-@test "down stops a prototype whose leader renamed itself (npx runs as npm exec) with its child, closes the port, spares another group" {
-  # the leader execs under another name and serves from a child, as `npx vite` does
-  yq -i '.ui.dev_cmd = ["bash", "-c", "exec -a npm-exec bash -c '\''python3 -m http.server \"$0\" --bind 127.0.0.1 & wait'\'' \"$0\"", "{port}"]' "$P/.aid-o/config/project.yaml"
+# a dev server as `npx vite` really runs: node renames itself to "npm exec vite" (a name with spaces) and serves from a
+# child; <child> is "term" (stops on TERM) or "stubborn" (ignores TERM)
+_renamed_dev() {
+  yq -i ".ui.dev_cmd = [\"node\", \"-e\", \"process.title='npm exec vite'; const {spawn}=require('child_process'); spawn('python3', ['-c', 'import signal,sys,http.server as h; signal.signal(signal.SIGTERM, signal.SIG_IGN) if sys.argv[2]==\\\"stubborn\\\" else None; h.test(HandlerClass=h.SimpleHTTPRequestHandler, port=int(sys.argv[1]), bind=\\\"127.0.0.1\\\")', process.argv[1], '$1'], {stdio: 'inherit'}); setInterval(()=>{}, 1000)\", \"{port}\"]" "$P/.aid-o/config/project.yaml"
+}
+_gone() {  # <pgid> <port>: no member left and the port closed
+  local rc=0; pgrep -g "$1" >/dev/null || rc=$?; [ "$rc" -eq 1 ]
+  [ -z "$(ss -ltnH "sport = :$2")" ]
+}
+
+@test "down stops a prototype whose leader renamed itself (npm exec vite) with its child, closes the port, spares another group" {
+  _renamed_dev term
   run _k proto; echo "$output"; [ "$status" -eq 0 ]
   local pg port; pg="$(jq -r .pgid "$D/proto.json")"; port="$(jq -r .port "$D/proto.json")"
-  pgrep -g "$pg" -f http.server >/dev/null                                # the child serves
-  setsid sleep 60 & local other=$!                                        # someone else's group
+  [[ "$(cat /proc/$pg/cmdline | tr '\0' ' ')" == "npm exec vite"* ]]
+  setsid sleep 60 & local other=$!
   run _k down; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"prototype group ${pg} stopped"* ]]
-  ! pgrep -g "$pg" >/dev/null; ! ss -ltnH "sport = :$port" | grep -q .; [ ! -e "$D/proto.json" ]
+  _gone "$pg" "$port"; [ ! -e "$D/proto.json" ]
   kill -0 "$other"; kill "$other"
+}
+
+@test "down kills a child that ignores TERM; a group whose leader is gone while a child serves keeps its record" {
+  _renamed_dev stubborn
+  run _k proto; [ "$status" -eq 0 ]
+  local pg port; pg="$(jq -r .pgid "$D/proto.json")"; port="$(jq -r .port "$D/proto.json")"
+  run _k down; echo "$output"; [ "$status" -eq 0 ]; _gone "$pg" "$port"
+  # the leader dies, its child keeps serving: nothing can prove the group is ours, so nothing is signalled or forgotten
+  run _k proto; [ "$status" -eq 0 ]; pg="$(jq -r .pgid "$D/proto.json")"; port="$(jq -r .port "$D/proto.json")"
+  kill -KILL "$pg"; sleep 0.3
+  run _k down; echo "$output"; [ "$status" -ne 0 ]; [ -e "$D/proto.json" ]; [[ "$output" == *"still"* ]]
+  kill -KILL -- "-$pg"; sleep 0.3; _gone "$pg" "$port"
+  run _k down; [ "$status" -eq 0 ]; [ ! -e "$D/proto.json" ]                  # nothing left: the stale record goes
 }

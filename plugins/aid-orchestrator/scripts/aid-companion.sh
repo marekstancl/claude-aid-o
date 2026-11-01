@@ -51,15 +51,15 @@ DIR="$ROOT/.aid-o/work/companion/$PLAN"
 mkdir -p "$DIR"
 export AID_COMPANION_DIR="$DIR" AID_COMPANION_PLAN="$PLAN" AID_COMPANION_PROJECT="$PROJECT" AID_COMPANION_STATE="$ROOT" AID_PLUGIN_ROOT="$PLUGIN_ROOT"
 
-# pid alive and still the process we started (start time from /proc/<pid>/stat field 22)
+# start time = field 22 of /proc/<pid>/stat, counted AFTER the name in parentheses: the name may hold spaces
+# (`npm exec vite`), so a plain field count reads the wrong field (as kit-proto.mjs does: split at ") ")
+_starttime() { [[ "$1" =~ ^[0-9]+$ ]] || return 1; sed -E 's/^.*\) //' "/proc/$1/stat" 2>/dev/null | awk '{print $20}'; }
+# pid alive and still the process we started
 _alive_as() {  # <pid> <starttime> <cmd substring>
-  local pid="$1" st="$2" want="$3" now
-  [[ "$pid" =~ ^[0-9]+$ && -r "/proc/$pid/stat" ]] || return 1
-  now="$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null)"
-  [[ "$now" == "$st" ]] || return 1
+  local pid="$1" st="$2" want="$3"
+  [[ "$pid" =~ ^[0-9]+$ && -r "/proc/$pid/stat" && "$(_starttime "$pid")" == "$st" ]] || return 1
   tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qF -- "$want"
 }
-_starttime() { awk '{print $22}' "/proc/$1/stat" 2>/dev/null; }
 
 url_host() {
   if [[ -n "${AID_COMPANION_URL_HOST:-}" ]]; then printf '%s' "$AID_COMPANION_URL_HOST"; return; fi
@@ -100,9 +100,14 @@ cmd_down() {
   if [[ -s "$p" ]]; then
     local port; read -r pid st pg port < <(jq -r '[.pid, .starttime, .pgid, .port] | map(tostring) | join(" ")' "$p")
     if _proto_ours "$pid" "$st" "$pg"; then
-      _stop_group "$pg" "$port" || return 1
+      _stop_group "$pid" "$st" "$pg" "$port" || return 1
       echo "prototype group ${pg} stopped"
-    else echo "prototype: the recorded process (pid ${pid}, group ${pg}) is not the one we started — nothing stopped"; fi
+    else
+      echo "prototype: the recorded process (pid ${pid}, group ${pg}) is not the one we started — nothing stopped"
+      # the record goes only when nothing of it is left: no member of the group, the port closed
+      local left; left="$(_group_or_port_alive "$pg" "$port")" || {
+        echo "prototype: ${left:-cannot tell whether group ${pg} or port ${port} is still in use} — the record stays in ${p}; stop it by hand" >&2; return 1; }
+    fi
     rm -f "$p"
   fi
 }
@@ -115,19 +120,38 @@ _proto_ours() {  # <pid> <starttime> <pgid>
   [[ -r "/proc/$pid/stat" && "$(_starttime "$pid")" == "$st" ]] || return 1
   [[ "$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')" == "$pg" ]]
 }
-# TERM to the group, up to 5 s for it to empty, then KILL; done only when the group is gone and its port closed
-_stop_group() {  # <pgid> <port>
-  local pg="$1" port="$2" i
-  kill -TERM -- "-$pg" 2>/dev/null || true
+# "" (and 0) when group <pgid> has no member and <port> is closed; else 1 with what is left, or why it cannot tell
+_group_or_port_alive() {  # <pgid> <port>
+  local pg="$1" port="$2" rc=0 out
+  [[ "$pg" =~ ^[0-9]+$ && "$port" =~ ^[0-9]+$ ]] || { echo "the record names no valid group or port"; return 1; }
+  out="$(pgrep -g "$pg" 2>/dev/null)" || rc=$?
+  (( rc == 0 )) && { echo "group ${pg} still has processes ($(tr '\n' ' ' <<< "$out"))"; return 1; }
+  (( rc == 1 )) || { echo "pgrep failed (exit ${rc})"; return 1; }
+  rc=0; out="$(ss -ltnH "sport = :$port" 2>/dev/null)" || rc=$?
+  (( rc == 0 )) || { echo "ss failed (exit ${rc})"; return 1; }
+  [[ -z "$out" ]] || { echo "port ${port} is still open"; return 1; }
+}
+# TERM to the group, up to 5 s for it to empty, then KILL; done only when the group is gone and its port closed.
+# A signal goes only to a group that still has members: while one lives, the kernel keeps the group's number, so it
+# cannot be another group's; with the leader alive its start time is checked again right before each signal.
+# ponytail: a group that empties and is reborn under the same number between pgrep and kill is not excluded (bash
+# has no pidfd); the window is microseconds on a number the kernel just freed.
+_signal_group() {  # <sig> <pid> <starttime> <pgid>
+  local sig="$1" pid="$2" st="$3" pg="$4"
+  pgrep -g "$pg" >/dev/null 2>&1 || return 0
+  if [[ -e "/proc/$pid" ]]; then [[ "$(_starttime "$pid")" == "$st" ]] || return 1; fi
+  kill "-$sig" -- "-$pg" 2>/dev/null || true
+}
+_stop_group() {  # <pid> <starttime> <pgid> <port>
+  local pid="$1" st="$2" pg="$3" port="$4" i left
+  _signal_group TERM "$pid" "$st" "$pg" || { echo "prototype: the leader ${pid} changed under us — nothing more signalled" >&2; return 1; }
   for i in $(seq 50); do pgrep -g "$pg" >/dev/null 2>&1 || break; sleep 0.1; done
   if pgrep -g "$pg" >/dev/null 2>&1; then
-    kill -KILL -- "-$pg" 2>/dev/null || true
+    _signal_group KILL "$pid" "$st" "$pg" || { echo "prototype: the leader ${pid} changed under us — nothing more signalled" >&2; return 1; }
     for i in $(seq 20); do pgrep -g "$pg" >/dev/null 2>&1 || break; sleep 0.1; done
   fi
-  if pgrep -g "$pg" >/dev/null 2>&1 || { [[ "$port" =~ ^[0-9]+$ ]] && ss -ltnH "sport = :$port" 2>/dev/null | grep -q .; }; then
-    echo "prototype: group ${pg} or its port ${port} is still alive after TERM and KILL — the record stays in ${DIR}/proto.json; stop it by hand" >&2
-    return 1
-  fi
+  left="$(_group_or_port_alive "$pg" "$port")" || {
+    echo "prototype: ${left} after TERM and KILL — the record stays in ${DIR}/proto.json; stop it by hand" >&2; return 1; }
 }
 
 cmd_answers() {
