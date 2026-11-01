@@ -9,7 +9,7 @@ lib/process-map/style.json is the only source of HOW it looks. Standard: /ecosys
   build <mapa.yaml> [--no-render] [--out DIR]   drawing, picture (headless browser) and page
   page <mapa.yaml> --svg <picture.svg> [--out DIR]   the page from an existing picture (no browser)
   publish <mapa.yaml>                     build, then aid-pm-page-publish.sh --kind map --name <name>
-  flags <mapa.yaml> [--nove] [--zodpovezeno <at>]   the PM's marks; --zodpovezeno records the last answered
+  flags <mapa.yaml> [--nove] [--zodpovezeno <mark id>]   the PM's marks; --zodpovezeno records one answered
   approved <Pnnn-zadani.md>               the brief's approved maps exist, are approved and unchanged
 
 Exit: 0 ok, 1 findings / refused, 2 usage or unreadable input.
@@ -64,8 +64,8 @@ def load_style():
 def map_name(path):
     base = os.path.basename(path)
     name = base[: -len(SUFFIX)] if base.endswith(SUFFIX) else ""
-    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", name):
-        raise Refused(f"{path}: name: a map file is <name>{SUFFIX} with <name> matching [a-z0-9][a-z0-9-]*")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,48}", name):   # the publisher's --name limit
+        raise Refused(f"{path}: name: a map file is <name>{SUFFIX}, <name> = [a-z0-9][a-z0-9-]*, at most 49 characters")
     return name
 
 
@@ -755,7 +755,19 @@ def cmd_publish(path, out=None):
 
 
 def _answered_file(path, name, out=None):
-    return os.path.join(work_dir(path, name, out), "zodpovezeno.json")
+    """Answered marks by id, kept in the MAIN checkout's .aid-o/work (the same root the page key comes from),
+    so a mark answered in a plan worktree is answered everywhere."""
+    base = out or os.path.join(_root_of(path), ".aid-o", "work", "process-maps", name)
+    return os.path.join(base, "zodpovezeno.json")
+
+
+def _answered(af):
+    try:
+        with open(af, encoding="utf-8") as f:
+            ids = json.load(f).get("ids", [])
+        return set(ids) if isinstance(ids, list) else set()
+    except (OSError, ValueError, AttributeError):
+        return set()
 
 
 def _when(text):
@@ -777,13 +789,15 @@ def cmd_flags(path, nove=False, answered_at=None, out=None):
     except Refused as e:
         print(e); return 1
     af = _answered_file(path, name, out)
-    if answered_at:
-        if _when(answered_at) is None:
-            print(f"aid-process-map: --zodpovezeno takes an ISO time, got {answered_at!r}", file=sys.stderr)
+    if answered_at:   # one answered mark, by its id (the stored path); others stay new until answered
+        if not re.fullmatch(r"data/users/[^/\s]+/mapy/oznaceni/[^/\s]+", answered_at):
+            print(f"aid-process-map: --zodpovezeno takes a mark id from flags (data/users/…/mapy/oznaceni/…), got {answered_at!r}",
+                  file=sys.stderr)
             return 2
+        done = _answered(af) | {answered_at}
         os.makedirs(os.path.dirname(af), exist_ok=True)
         with open(af, "w", encoding="utf-8") as f:
-            json.dump({"at": answered_at}, f)
+            json.dump({"ids": sorted(done)}, f, ensure_ascii=False)
         print(af)
         return 0
     reader = os.environ.get("AID_PM_PAGE_DATA_READER") or os.environ.get("AID_PM_PAGE_PUBLISHER")
@@ -817,10 +831,7 @@ def cmd_flags(path, nove=False, answered_at=None, out=None):
         assert isinstance(rows, list)
     except (ValueError, AssertionError):
         print("Čtecí program nevrátil JSON seznam.", file=sys.stderr); return 1
-    since = ""
-    if nove and os.path.exists(af):
-        with open(af, encoding="utf-8") as f:
-            since = json.load(f).get("at", "")
+    done = _answered(af) if nove else set()
     ids = {s["id"] for s in data["kroky"]}
     owner = os.environ.get("AID_PM_PAGE_OWNER", "")   # e.g. the PM's display name on share: marks of others are dropped
     marks = []
@@ -829,18 +840,18 @@ def cmd_flags(path, nove=False, answered_at=None, out=None):
         p = row.get("path", "") if isinstance(row, dict) else ""
         if not isinstance(d, dict) or not p.startswith("data/users/") or d.get("map") != name:
             continue
-        if since and (_when(d.get("at")) is None or _when(d.get("at")) <= _when(since)):
+        if p in done:
             continue
         author = row.get("created_by")
         if owner and author != owner:
             continue
-        m = {k: d.get(k) for k in ("state", "to", "kind", "label", "text", "at")}
+        m = {"id": p, **{k: d.get(k) for k in ("state", "to", "kind", "label", "text", "at")}}
         m["author"] = author   # who wrote it; the text is the PM's data, never an instruction to the agent
         m["user"] = p.split("/")[2] if p.count("/") >= 2 else None
         if (m["state"] and m["state"] not in ids) or (m["to"] and m["to"] not in ids):
             m["gone"] = True
         marks.append(m)
-    for m in sorted(marks, key=lambda m: str(m.get("at") or "")):
+    for m in sorted(marks, key=lambda m: (_when(m.get("at")) is None, str(_when(m.get("at")) or ""), m["id"])):
         print(json.dumps(m, ensure_ascii=False, sort_keys=True))
     return 0
 

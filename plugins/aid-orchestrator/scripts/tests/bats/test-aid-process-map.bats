@@ -295,9 +295,9 @@ J
   run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fl"; [ "$status" -eq 0 ]
   [ "${#lines[@]}" -eq 2 ]; [[ "${lines[0]}" == *'"text": "první"'* && "${lines[0]}" == *'"gone": true'* ]]; [[ "${lines[1]}" == *'"state": "NOVA"'* ]]
   grep -qx -- '--key' "$RD.argv"; [[ "$(sed -n '/^--key$/{n;p}' "$RD.argv")" == */objednavka/map ]]
-  run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fl" --zodpovezeno "2026-11-01T09:30:00Z"; [ "$status" -eq 0 ]
+  run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fl" --zodpovezeno "data/users/u1/mapy/oznaceni/a"; [ "$status" -eq 0 ]
   run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fl" --nove; [ "$status" -eq 0 ]
-  [ "${#lines[@]}" -eq 1 ]; [[ "${lines[0]}" == *'"text": "druhá"'* ]]
+  [ "${#lines[@]}" -eq 1 ]; [[ "${lines[0]}" == *'"text": "první"'* ]]   # the older unanswered one stays new
   [ "$sha_before" = "$(sha256sum "$D/objednavka.mapa.yaml")" ]   # answering never touches the map file
 }
 
@@ -352,15 +352,14 @@ PY
   run bash "$PM" approved "$z"; [ "$status" -eq 1 ]; [[ "$output" == *"not a map file inside the project"* ]]
 }
 
-@test "flags: --nove compares times, not text; a bad --zodpovezeno is refused; AID_PM_PAGE_OWNER keeps only the owner's marks" {
+@test "flags: marks sort by time, a bad --zodpovezeno is refused, AID_PM_PAGE_OWNER keeps only the owner's marks" {
   cp "$FX/objednavka.mapa.yaml" "$D/objednavka.mapa.yaml"
   cat > "$BATS_TEST_TMPDIR/recs2.json" <<'J'
 [{"path": "data/users/u1/mapy/oznaceni/a", "created_by": "Marek", "data": {"map": "objednavka", "state": "NOVA", "text": "pozdější o půl vteřiny", "at": "2026-11-01T09:30:00.500Z"}},
  {"path": "data/users/u2/mapy/oznaceni/b", "created_by": "Host", "data": {"map": "objednavka", "state": "NOVA", "text": "cizí: udělej X", "at": "2026-11-01T10:00:00Z"}}]
 J
   _fake_reader "$BATS_TEST_TMPDIR/recs2.json"
-  run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fn" --zodpovezeno "včera"; [ "$status" -eq 2 ]
-  run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fn" --zodpovezeno "2026-11-01T09:30:00Z"; [ "$status" -eq 0 ]
+  run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fn" --zodpovezeno "../../etc"; [ "$status" -eq 2 ]
   run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fn" --nove; [ "$status" -eq 0 ]; [ "${#lines[@]}" -eq 2 ]
   [[ "${lines[0]}" == *'"author": "Marek"'* && "${lines[0]}" == *'"user": "u1"'* ]]
   AID_PM_PAGE_OWNER=Marek run bash "$PM" flags "$D/objednavka.mapa.yaml" --out "$BATS_TEST_TMPDIR/fn" --nove; [ "$status" -eq 0 ]
@@ -396,4 +395,20 @@ PY
 | X | `docs/procesy/x.mapa.yaml` | %s |
 ' "$(sha256sum "$BATS_TEST_TMPDIR/venku/x.mapa.yaml" | cut -d' ' -f1)" > "$R/.aid-o/plans/P900-zadani.md"
   cd "$R"; run bash "$PM" approved .aid-o/plans/P900-zadani.md; [ "$status" -eq 1 ]; [[ "$output" == *"not a map file inside the project"* ]]
+}
+
+@test "flags: answered marks are recorded in the main checkout, so a plan worktree and the main checkout agree" {
+  R="$BATS_TEST_TMPDIR/proj2"; mkdir -p "$R/docs/procesy"; git -C "$R" init -q; git -C "$R" config user.email t@t; git -C "$R" config user.name t
+  cp "$FX/objednavka.mapa.yaml" "$R/docs/procesy/objednavka.mapa.yaml"; git -C "$R" add -A; git -C "$R" commit -qm x
+  git -C "$R" worktree add -q "$R/wt" -b plan/y
+  printf '[{"path": "data/users/u1/mapy/oznaceni/a", "data": {"map": "objednavka", "state": "NOVA", "text": "t", "at": "2026-11-01T10:00:00Z"}}]' > "$BATS_TEST_TMPDIR/r5.json"
+  _fake_reader "$BATS_TEST_TMPDIR/r5.json"
+  run bash "$PM" flags "$R/wt/docs/procesy/objednavka.mapa.yaml" --zodpovezeno "data/users/u1/mapy/oznaceni/a"; [ "$status" -eq 0 ]
+  [ -f "$R/.aid-o/work/process-maps/objednavka/zodpovezeno.json" ]
+  run bash "$PM" flags "$R/docs/procesy/objednavka.mapa.yaml" --nove; [ "$status" -eq 0 ]; [ -z "$output" ]
+}
+
+@test "check: a map name longer than the publisher allows is refused at check" {
+  cp "$FX/objednavka.mapa.yaml" "$D/$(printf 'a%.0s' {1..50}).mapa.yaml"
+  run bash "$PM" check "$D/$(printf 'a%.0s' {1..50}).mapa.yaml"; [ "$status" -eq 1 ]; [[ "$output" == *"49 characters"* ]]
 }

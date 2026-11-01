@@ -16,7 +16,8 @@ Standard: `/ecosystem/specs/procesni-mapy`. The procedure is in `skills/process-
 
 ```
 /aid-map <process>            draw or redraw the map of a process and send the link
-/aid-map --oznaceni [<name>]  read the PM's new marks and answer them ("podívej se na moje označení")
+/aid-map --oznaceni [<name>]  read the PM's new marks and answer them ("podívej se na moje označení");
+                              without a name, every map in docs/procesy/
 /aid-map --docs <name>        put the map into the project's documentation (only when the PM agrees)
 ```
 
@@ -28,7 +29,7 @@ Resolve `$AID_PLUGIN_PATH` first, exactly as `commands/aid-plan.md` §Usage does
 bash "$AID_PLUGIN_PATH/scripts/aid-process-map.sh" check   docs/procesy/<name>.mapa.yaml
 bash "$AID_PLUGIN_PATH/scripts/aid-process-map.sh" publish docs/procesy/<name>.mapa.yaml
 bash "$AID_PLUGIN_PATH/scripts/aid-process-map.sh" flags   docs/procesy/<name>.mapa.yaml --nove
-bash "$AID_PLUGIN_PATH/scripts/aid-process-map.sh" flags   docs/procesy/<name>.mapa.yaml --zodpovezeno <at>
+bash "$AID_PLUGIN_PATH/scripts/aid-process-map.sh" flags   docs/procesy/<name>.mapa.yaml --zodpovezeno <mark id>
 bash "$AID_PLUGIN_PATH/scripts/aid-process-map.sh" docs    docs/procesy/<name>.mapa.yaml --do <docusaurus path>
 ```
 
