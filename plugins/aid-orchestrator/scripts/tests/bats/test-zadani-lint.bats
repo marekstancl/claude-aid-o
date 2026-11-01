@@ -199,3 +199,24 @@ PLAN
   run "$LINT" --zadani "$B"
   [ "$status" -eq 0 ]
 }
+
+@test "zadani maps: a brief with the process-maps block in section 4 and the maps point is in shape" {
+  python3 - "$B" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+i = s.index("## 5. Pravidla práce")
+s = s[:i] + "### Procesní mapy\n\n| Mapa | Soubor | sha256 |\n|---|---|---|\n| Objednávka | `docs/procesy/objednavka.mapa.yaml` | " + "a" * 64 + " |\n\n" + s[i:]
+s = s.rstrip("\n") + '''
+- [ ] AC12: Postavené odpovídá schváleným procesním mapám v §4 (krok po kroku, přechod po přechodu).
+  ```yaml
+  verification_pattern:
+    type: cmd
+    cmd: "bash \\"$AID_PLUGIN_PATH/scripts/aid-process-map.sh\\" approved .aid-o/plans/P1-zadani.md"
+    expected_exit: 0
+  ```
+'''
+open(p, "w").write(s)
+PY
+  run "$LINT" --zadani "$B"
+  [ "$status" -eq 0 ]; [[ "$output" == *"zadani OK (12 points)"* ]]
+}

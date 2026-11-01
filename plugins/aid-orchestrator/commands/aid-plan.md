@@ -213,7 +213,9 @@ message (see `skills/brainstorming.md` → "The Single Planned Stop"):
 3. **Every question at once**, as a decision batch. Only the five kinds in
    `skills/brainstorming.md` MUST 15 — what it is for, who for, risk accepted,
    backwards compatibility, anything irreversible. Anything else you answer
-   yourself.
+   yourself. The one named exception: for a new application, a refactoring or a
+   change of a flow, one yes/no offer of process maps (MUST 15 of
+   `skills/brainstorming.md`).
 
 If the PM leaves part of it unanswered, ask again for those parts only.
 **Never turn silence into an assumption** (MUST 17).
@@ -222,7 +224,9 @@ Output: `=== Step 3/9: Zastavení ===`
 ### Steps 4–7: The autonomous part
 No PM here. Approaches, design, section validation and the opponent run without
 stopping; agreements go straight into the interim, disagreements are collected
-for the result.
+for the result. When the PM said yes to process maps, draw them here following
+`skills/process-maps/SKILL.md` (`stav: dnes` from the code you read, `stav: po`
+for the design), `check` each, and `publish` it — the links go to Step 7a.
 
 ```bash
 rc=0
@@ -291,6 +295,11 @@ notes (a smaller or larger scope, a different symptom, opportunity cost) are
 listed here as suggestions, each with what the PM would lose; an empty level 2
 is one line.
 
+With process maps: one line per map under the list, `Procesní mapy: <link>`
+(or the local path), shown with the list — not as a stop of its own. Before
+Step 8 every mark is answered: `aid-process-map.sh flags <map> --nove` prints
+nothing, or the PM says to go on.
+
 The PM accepts it, corrects it, or refuses it. **Refused → back to the stop in
 Step 3; the plan is not written.** Something added → it goes back through the
 autonomous part, it is not glued on.
@@ -314,7 +323,13 @@ section 1 from the interim's `## Zadání PM` verbatim plus the `**Co je v sázc
 paragraph from `## Účel a co je v sázce`, section 2 from the grounding reads,
 section 3 from the approved scope list (Step 7a), section 4 from the measured
 paths, section 5 from the project's rules, section 6 from the done-when points,
-each `- [ ] AC<n>:` with its `verification_pattern` block. Then:
+each `- [ ] AC<n>:` with its `verification_pattern` block. With process maps:
+set each map's `stav: schvaleno`, `check` it, list it in section 4 under
+`### Procesní mapy` (`| Mapa | Soubor | sha256 |`, the sha256 of the file as
+committed), add the point "Postavené odpovídá schváleným procesním mapám v §4"
+with the pattern `aid-process-map.sh approved` (the template's example), and
+commit the map files on the target branch with the brief before `plan-start`
+(`git add -f` where `docs/` is ignored) so the plan's worktree has them. Then:
 
 ```bash
 bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" --zadani .aid-o/plans/P{NNN}-zadani.md

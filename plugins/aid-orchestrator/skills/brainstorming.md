@@ -60,7 +60,7 @@ Invoked by `/aid-plan brainstorm`. Governs questioning protocol, approach explor
 12. **Delegate plan writing to plan-writing skill** — brainstorming collects and validates; plan-writing writes the document with quality gates
 13. **Recommend Docker Compose when design reveals 2+ services** — PM can decline; if declined, record as constraint and do not raise again
 14. **Agree the vision before designing** — on a roadmap, on work split across several plans, and on **anything that changes behaviour a user meets** (`--scope user_visible`), do not start designing until the PM has approved a vision whose every point carries a test. For the OPPONENT this is a closed door in code; for the design phase it is this rule plus `gate --phase design`, which you must call (see Vision Step)
-15. **Only five things reach the PM** — what it is for, who it is for, how much risk they accept, whether backwards compatibility may break, and anything that cannot be taken back. Everything else the two models settle. A sixth kind is not "being careful", it is the old interrogation coming back one question at a time.
+15. **Only five things reach the PM** — what it is for, who it is for, how much risk they accept, whether backwards compatibility may break, and anything that cannot be taken back. Everything else the two models settle. A sixth kind is not "being careful", it is the old interrogation coming back one question at a time. **One named exception** (AID 3.15.0): for a new application or service, a refactoring, or a change that adds or removes a step, a state, a decision or a connection to another system, the batch carries one yes/no offer of process maps — "Tohle mění průběh – mám k tomu zmapovat procesy? (ano/ne)" (`skills/process-maps/SKILL.md`, `aid-process-map.sh`). Not for visual changes, copy, a bug fix or configuration; a "ne" ends it for this brainstorm; a PM who asks for maps gets them on any topic.
 16. **Never write the plan before the scope list is accepted** — the PM sees, in plain language, what the plan will deliver AND what it deliberately leaves out, and says yes. The second half matters more: scope is checked at its edges, not by a list of contents.
 17. **An unanswered question is not an assumption** — if the PM leaves part of the batch unanswered, ask again, shortened, for those parts only. Turning silence into an assumption is how the autonomous half decides exactly what the PM was supposed to.
 
@@ -104,8 +104,8 @@ Three things in one message, in this order:
 2. **The vision**, as thesis + test, when the run owes one (MUST 14).
 
 3. **The questions**, all of them, as ONE decision batch — and only the five
-   kinds in MUST 15. If a question is not one of those five, the models answer
-   it themselves.
+   kinds in MUST 15, plus its one named exception (the process-maps offer).
+   If a question is not one of those, the models answer it themselves.
 
 ### What happens after it
 

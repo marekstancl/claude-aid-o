@@ -52,6 +52,25 @@ roadmapa: <optional — where this brief sits in a larger line of releases (free
 |---|---|
 | <thing> | `<path>` (`<function>` ř. <n>) |
 
+<!-- Optional, only when the brainstorm drew process maps (skills/process-maps/SKILL.md):
+
+### Procesní mapy
+
+| Mapa | Soubor | sha256 |
+|---|---|---|
+| <název> | `docs/procesy/<name>.mapa.yaml` | <sha256 of the committed file> |
+
+     and in section 6 one point:
+
+- [ ] AC<n>: Postavené odpovídá schváleným procesním mapám v §4 (krok po kroku, přechod po přechodu).
+  ```yaml
+  verification_pattern:
+    type: cmd
+    cmd: "bash \"$AID_PLUGIN_PATH/scripts/aid-process-map.sh\" approved .aid-o/plans/P<NNN>-zadani.md"
+    expected_exit: 0
+  ```
+-->
+
 ## 5. Pravidla práce
 
 <!-- The rules that bind this work: the project's CLAUDE.md and CONTRIBUTING,
