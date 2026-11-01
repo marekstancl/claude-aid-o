@@ -3,9 +3,9 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [3.14.0] — Unreleased
+## [3.14.0] — 2026-11-01
 
-Stránka průběhu roadmapy a spolehlivý companion (rozbor plugin issues 31. 10. 2026, volby PM 10A a C1-C8). Zadání: `docs/plans/2026-11-01-zadani-3140-roadmapa-companion.md`.
+Stránka průběhu roadmapy a spolehlivý companion (rozbor plugin issues 31. 10. 2026, volby PM 10A a C1-C8). Zadání: `docs/archive/2026-11-01-zadani-3140-roadmapa-companion.md`.
 
 - **Každá roadmapa má stránku průběhu a plán ji musí obnovit (bod 10, přání PM).** `aid-roadmap-page.sh init` zapíše do dokumentu roadmapy řádek stránky a vedle něj data `<roadmapa>.prubeh.json` (hotovo, co je dál, čísla, co chybí od koho; agent píše jen tento soubor) a stránku zveřejní přes share, i když jsou ostatní stránky AID vypnuté (`AID_PM_PAGES=off`). Zadání plánu roadmapy ji jmenuje v `roadmapa_dokument:`; kontrola plánu odmítne roadmapu bez stránky (`roadmap_page_missing`) i cestu ven z projektu nebo přes odkaz (`roadmap_path_invalid`) a `plan-close` neuzavře plán, který stránku ze svých dat neobnovil (`roadmap_page_not_refreshed`; `--force` s důvodem ji obejde). `/aid-do` nad položkou roadmapy má pokyn `publish --aid-do` (jen pokyn, nic ho nevynucuje). Záznamy v `.aid-o/work/roadmap-pages/` (běhová složka); odkaz se nikam neukládá.
 - **Jména testů říkají, co hlídají, ne odkud jsou (J).** Kontrola jmen nových testů (`test_named_after_plan`, kontrola kroku i brány uzávěru) odmítne kromě čísla plánu i úvodní číslo verze („3.14.0: …“, „v2.95 …“), verzi v závorce („(3.14.0)“) a odkaz na hlášení projektu („(WAN #1)“). Verze jako předmět věty („a 3.13 record“) projde. 113 dosavadních případů v AID je přejmenovaných.
