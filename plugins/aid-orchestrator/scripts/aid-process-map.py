@@ -6,13 +6,20 @@ This builder decides WHERE (a deterministic left-to-right layout written as BPMN
 lib/process-map/style.json is the only source of HOW it looks. Standard: /ecosystem/specs/procesni-mapy.
 
   check <mapa.yaml>                       schema + rules, one line per finding
-  build <mapa.yaml> [--no-render] [--out DIR]   drawing (+ picture and page, Step 3)
+  build <mapa.yaml> [--no-render] [--out DIR]   drawing, picture (headless browser) and page
+  page <mapa.yaml> --svg <picture.svg> [--out DIR]   the page from an existing picture (no browser)
+  publish <mapa.yaml>                     build, then aid-pm-page-publish.sh --kind map --name <name>
+  flags <mapa.yaml> [--nove] [--zodpovezeno <at>]   the PM's marks; --zodpovezeno records the last answered
+  approved <Pnnn-zadani.md>               the brief's approved maps exist, are approved and unchanged
 
 Exit: 0 ok, 1 findings / refused, 2 usage or unreadable input.
 Input boundary: the map file is text the agent or a person wrote. It is validated against the schema
 (additionalProperties false everywhere, ids by pattern) before anything reads it; `proti` may only name a
 sibling file (the schema's pattern has no slash), and every written text is XML-escaped.
 """
+import contextlib
+import hashlib
+import io
 import json
 import os
 import re
@@ -26,6 +33,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PLUGIN = os.path.dirname(HERE)
 SCHEMA = os.path.join(PLUGIN, "defaults", "schemas", "process-map.schema.json")
 STYLE = os.path.join(PLUGIN, "lib", "process-map", "style.json")
+TEMPLATE = os.path.join(PLUGIN, "defaults", "templates", "process-map.html")
+UI_TOOL = os.path.join(HERE, "aid-ui-tool.sh")
+PUBLISH = os.path.join(HERE, "aid-pm-page-publish.sh")
+MAX_PAGE = 2 * 1024 * 1024   # aid-pm-page-publish.sh MAX_BYTES and share's MAX_HTML
+# share's own refusals, copied from /opt/eco/projects/aidlab-apps/share/share/publish_check.py lines 26-33
+SHARE_NETWORK = re.compile(r"\b(fetch|XMLHttpRequest|WebSocket|EventSource|sendBeacon|importScripts|Worker"
+                           r"|SharedWorker|RTCPeerConnection)\b")
+SHARE_COMPUTED = re.compile(r"\b(?:window|globalThis|self|top|parent|frames|document)\s*\["
+                            r"|\bReflect\.|getOwnPropertyDescriptor|\bProxy\b|__proto__|constructor\s*\["
+                            r"|\[\s*[\"'`]constructor|\beval\s*\(|new\s+Function\s*\(|\bFunction\s*\("
+                            r"|\bset(?:Timeout|Interval)\s*\(\s*[\"'`]")
+OUTSIDE_REF = re.compile(r"""\b(?:src|href|xlink:href)\s*=\s*["']\s*(?!#|data:)[^"']+""", re.I)
 SUFFIX = ".mapa.yaml"
 
 
@@ -417,7 +436,7 @@ def _role(step, lay):
     return "default"
 
 
-def write_bpmn(data, lay):
+def write_bpmn(data, st, lay):
     """BPMN 2.0 XML with DI; fixed element order, integer coordinates, no timestamp."""
     by_id = {s["id"]: s for s in data["kroky"]}
     by_id.update({s["id"]: s for s in lay.get("removed_steps", [])})
@@ -431,7 +450,8 @@ def write_bpmn(data, lay):
     L = ['<?xml version="1.0" encoding="UTF-8"?>',
          '<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" '
          'xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI" xmlns:dc="http://www.omg.org/spec/DD/20100524/DC" '
-         'xmlns:di="http://www.omg.org/spec/DD/20100524/DI" id="Definitions-" targetNamespace="aid:process-map">',
+         'xmlns:di="http://www.omg.org/spec/DD/20100524/DI" xmlns:color="http://www.omg.org/spec/BPMN/non-normative/color/1.0" '
+         'id="Definitions-" targetNamespace="aid:process-map">',
          f'  <bpmn:process id="Process-" name={quoteattr(data["nazev"])} isExecutable="false">']
     tag = {"start": "startEvent", "end": "endEvent", "task": "task", "gateway": "exclusiveGateway"}
     for n in nodes:
@@ -450,8 +470,11 @@ def write_bpmn(data, lay):
     L.append('  <bpmndi:BPMNDiagram id="Diagram-"><bpmndi:BPMNPlane id="Plane-" bpmnElement="Process-">')
     lab = {l["node"]: l for l in lay["labels"] if "node" in l}
     elab = {id(l["edge"]): l for l in lay["labels"] if "edge" in l}
+    roles = st["roles"]
     for n in nodes:
-        L.append(f'    <bpmndi:BPMNShape id="{n["id"]}-di" bpmnElement="{n["id"]}">'
+        r = roles[_role(by_id[n["id"]], lay)] if n["id"] in by_id else roles["default"]
+        col = f' color:background-color="{r["fill"]}" color:border-color="{r["stroke"]}"'
+        L.append(f'    <bpmndi:BPMNShape id="{n["id"]}-di" bpmnElement="{n["id"]}"{col}>'
                  f'<dc:Bounds x="{n["x"]}" y="{n["y"]}" width="{n["w"]}" height="{n["h"]}" />')
         if n["id"] in lab:
             l = lab[n["id"]]
@@ -508,7 +531,7 @@ def model_json(data, st, lay, step_marks, trans_marks):
     """What the page reads: names, sentences, roles, markers, questions — no geometry."""
     steps = list(data["kroky"]) + list(lay.get("removed_steps", []))
     trans = list(data["prechody"]) + list(lay.get("removed_trans", []))
-    m = {"nazev": data["nazev"], "druh": data["druh"], "stav": data["stav"],
+    m = {"name": lay.get("name", ""), "nazev": data["nazev"], "druh": data["druh"], "stav": data["stav"],
          "steps": [], "transitions": [], "odevsad": data.get("odevsad", []), "otazky": data.get("otazky", []),
          "legend": [{"role": r, "label": v["label"], "fill": v.get("fill"), "stroke": v["stroke"]}
                     for r, v in st["roles"].items()]}
@@ -548,21 +571,74 @@ def cmd_check(path):
     return 1 if errs else 0
 
 
-def build_drawing(path, data, st):
+def build_drawing(path, data, st, name=""):
     other = None
     if data.get("proti"):
         other = load_map(os.path.join(os.path.dirname(os.path.abspath(path)), data["proti"]))
     step_marks, trans_marks, rs, rt = compare(data, other)
     lay = layout(data, st, rs, rt)
     lay["removed_steps"], lay["removed_trans"] = rs, rt
+    lay["name"] = name
     hits = overlaps(lay) if data["druh"] == "bpmn" else []   # Mermaid lays out a state diagram itself
     if hits:
         raise Refused("\n".join(f"{path}: layout_overlap: {a} {b}" for a, b in hits))
-    drawing = write_bpmn(data, lay) if data["druh"] == "bpmn" else write_mermaid(data, st, lay)
+    drawing = write_bpmn(data, st, lay) if data["druh"] == "bpmn" else write_mermaid(data, st, lay)
     return drawing, model_json(data, st, lay, step_marks, trans_marks), lay
 
 
-def cmd_build(path, out=None, render=True):
+def _style_css(st):
+    """The page's marker classes, from style.json only."""
+    r = st["roles"]
+    shape = ":is(rect,circle,polygon,ellipse)"
+    def rule(cls, role, width):
+        dash = f";stroke-dasharray:{r[role]['dash']}" if r[role].get("dash") else ""
+        return f"#picture .{cls} {shape}{{stroke:{r[role]['stroke']}!important;stroke-width:{width}px!important{dash}}}"
+    w = st["sizes"]["emphasis_stroke_width"]
+    return "\n".join([rule("pm-flag", "flag", w + 1), rule("pm-question", "question", w), rule("pm-added", "added", w),
+                      rule("pm-removed", "removed", w), "#picture .pm-removed{opacity:.55}",
+                      f"#picture .pm-sel {shape}{{stroke:{r['pm']['stroke']}!important;stroke-width:{w + 1}px!important}}"])
+
+
+def clean_svg(svg):
+    """The SVG as it goes into the page: no XML declaration, DOCTYPE or comment (xmlns stays)."""
+    svg = re.sub(r"<\?xml[^>]*\?>", "", svg)
+    svg = re.sub(r"<!DOCTYPE[^>]*>", "", svg, flags=re.I)
+    svg = re.sub(r"<!--.*?-->", "", svg, flags=re.S)
+    return svg.strip()
+
+
+def write_page(model_text, svg, st):
+    """The single-file page: template + picture + model + our script. Refused (page_refused) when it would
+    carry anything share refuses, a reference outside itself, a leftover placeholder, or more than 2 MiB."""
+    with open(TEMPLATE, encoding="utf-8") as f:
+        page = f.read()
+    model = json.loads(model_text)
+    page = (page.replace("@@TITLE@@", escape(model["nazev"]))
+                .replace("@@STYLE_CSS@@", _style_css(st))
+                .replace("@@MARK_ONLY_SHARED@@", json.dumps(st["texts"]["mark_only_shared"], ensure_ascii=False))
+                .replace("@@MODEL@@", json.dumps(model, ensure_ascii=False).replace("<", "\\u003c"))
+                .replace("@@SVG@@", clean_svg(svg)))
+    bad = []
+    if "@@" in page:
+        bad.append("placeholder left")
+    if len(page.encode("utf-8")) > MAX_PAGE:
+        bad.append(f"{len(page.encode('utf-8'))} bytes > {MAX_PAGE}")
+    bad += sorted({m.group(0) for m in SHARE_NETWORK.finditer(page)} | {m.group(0) for m in SHARE_COMPUTED.finditer(page)})
+    bad += sorted({m.group(0) for m in OUTSIDE_REF.finditer(page)})
+    if bad:
+        raise Refused("page_refused: " + "; ".join(bad))
+    return page
+
+
+def render(drawing_path, svg_path, ids):
+    """The picture, drawn once by bpmn-js / Mermaid in headless Chromium (aid-ui-tool.sh map-render)."""
+    r = subprocess.run(["bash", UI_TOOL, "map-render", drawing_path, svg_path, ",".join(ids)],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        raise Refused("render_failed: " + (r.stderr.strip().splitlines() or ["no output"])[-1])
+
+
+def cmd_page(path, svg_path, out=None):
     data = load_map(path)
     try:
         name = map_name(path)
@@ -575,7 +651,36 @@ def cmd_build(path, out=None, render=True):
         return 1
     st = load_style()
     try:
-        drawing, model, _ = build_drawing(path, data, st)
+        _, model, _ = build_drawing(path, data, st, name)
+        with open(svg_path, encoding="utf-8") as f:
+            page = write_page(model, f.read(), st)
+    except Refused as e:
+        print(e); return 1
+    except OSError as e:
+        print(f"{svg_path}: unreadable: {e}", file=sys.stderr); return 2
+    wd = work_dir(path, name, out)
+    os.makedirs(wd, exist_ok=True)
+    target = os.path.join(wd, "page.html")
+    with open(target, "w", encoding="utf-8", newline="\n") as f:
+        f.write(page)
+    print(target)
+    return 0
+
+
+def cmd_build(path, out=None, render_it=True):
+    data = load_map(path)
+    try:
+        name = map_name(path)
+    except Refused as e:
+        print(e); return 1
+    errs = check_rules(path, data)
+    if errs:
+        for e in errs:
+            print(e)
+        return 1
+    st = load_style()
+    try:
+        drawing, model, _ = build_drawing(path, data, st, name)
     except Refused as e:
         print(e); return 1
     wd = work_dir(path, name, out)
@@ -584,15 +689,186 @@ def cmd_build(path, out=None, render=True):
     for fname, text in ((f"drawing.{ext}", drawing), ("model.json", model)):
         with open(os.path.join(wd, fname), "w", encoding="utf-8", newline="\n") as f:
             f.write(text)
-    print(os.path.join(wd, f"drawing.{ext}"))
+    if not render_it:
+        print(os.path.join(wd, f"drawing.{ext}"))
+        return 0
+    svg_path = os.path.join(wd, "picture.svg")
+    try:
+        render(os.path.join(wd, f"drawing.{ext}"), svg_path, [s["id"] for s in json.loads(model)["steps"]])
+        with open(svg_path, encoding="utf-8") as f:
+            page = write_page(model, f.read(), st)
+    except Refused as e:
+        print(e); return 1
+    with open(os.path.join(wd, "page.html"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(page)
+    print(os.path.join(wd, "page.html"))
     return 0
 
 
+def _publisher_key(page, name, root):
+    """The key the publisher uses for this map — asked from the publisher itself (--print-key)."""
+    r = subprocess.run(["bash", PUBLISH, page, "--kind", "map", "--name", name, "--title", name,
+                        "--project-root", root, "--print-key"], capture_output=True, text=True)
+    if r.returncode != 0 or not r.stdout.strip():
+        raise Refused("key_unknown: " + (r.stderr.strip() or "the publisher printed no key"))
+    return r.stdout.strip()
+
+
+def _root_of(path):
+    d = os.path.dirname(os.path.abspath(path))
+    try:
+        return subprocess.run(["git", "-C", d, "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                              check=True).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return d
+
+
+def cmd_publish(path, out=None):
+    data = load_map(path)
+    try:
+        name = map_name(path)
+    except Refused as e:
+        print(e); return 1
+    with contextlib.redirect_stdout(io.StringIO()):   # stdout carries only the publisher's one line
+        rc = cmd_build(path, out)
+    if rc != 0:
+        return rc
+    page = os.path.join(work_dir(path, name, out), "page.html")
+    r = subprocess.run(["bash", PUBLISH, page, "--kind", "map", "--name", name, "--title", data["nazev"],
+                        "--project-root", _root_of(path), "--on-request"], capture_output=True, text=True)
+    sys.stderr.write(r.stderr)
+    sys.stdout.write(r.stdout)
+    return r.returncode
+
+
+def _answered_file(path, name, out=None):
+    return os.path.join(work_dir(path, name, out), "zodpovezeno.json")
+
+
+def cmd_flags(path, nove=False, answered_at=None, out=None):
+    """The PM's marks of this map as JSON lines, read through the reader (AID_PM_PAGE_DATA_READER, else the
+    publisher with `data`) by the publisher's own key. The record of answered marks lives in the build
+    directory, never in the map file (an approved map's sha256 must not change)."""
+    data = load_map(path)
+    try:
+        name = map_name(path)
+    except Refused as e:
+        print(e); return 1
+    af = _answered_file(path, name, out)
+    if answered_at:
+        os.makedirs(os.path.dirname(af), exist_ok=True)
+        with open(af, "w", encoding="utf-8") as f:
+            json.dump({"at": answered_at}, f)
+        print(af)
+        return 0
+    reader = os.environ.get("AID_PM_PAGE_DATA_READER") or os.environ.get("AID_PM_PAGE_PUBLISHER")
+    if not reader:
+        print("Žádný čtecí program (AID_PM_PAGE_DATA_READER ani AID_PM_PAGE_PUBLISHER); označení nejde přečíst.",
+              file=sys.stderr)
+        return 1
+    sub = (os.environ.get("AID_PM_PAGE_DATA_READER_SUBCOMMAND") if os.environ.get("AID_PM_PAGE_DATA_READER")
+           else "data")
+    wd = work_dir(path, name, out)
+    page = os.path.join(wd, "page.html")
+    try:
+        key = _publisher_key(page if os.path.exists(page) else path, name, _root_of(path))
+    except Refused as e:
+        print(e, file=sys.stderr); return 1
+    argv = [reader] + ([sub] if sub else []) + ["--key", key]
+    try:
+        r = subprocess.run(argv, capture_output=True, text=True)
+    except OSError as e:
+        print(f"Čtecí program nejde spustit: {e}", file=sys.stderr); return 1
+    if r.returncode != 0:
+        msg = r.stderr.strip()
+        if "--key" in msg or "unrecognized" in msg:
+            msg = "Čtecí program klíč nezná (share zatím neumí data --key). " + msg
+        print(msg or f"čtecí program skončil kódem {r.returncode}", file=sys.stderr)
+        return 1
+    try:
+        rows = json.loads(r.stdout)
+        assert isinstance(rows, list)
+    except (ValueError, AssertionError):
+        print("Čtecí program nevrátil JSON seznam.", file=sys.stderr); return 1
+    since = ""
+    if nove and os.path.exists(af):
+        with open(af, encoding="utf-8") as f:
+            since = json.load(f).get("at", "")
+    ids = {s["id"] for s in data["kroky"]}
+    marks = []
+    for row in rows:
+        d = row.get("data") if isinstance(row, dict) else None
+        p = row.get("path", "") if isinstance(row, dict) else ""
+        if not isinstance(d, dict) or not p.startswith("data/users/") or d.get("map") != name:
+            continue
+        if since and str(d.get("at", "")) <= since:
+            continue
+        m = {k: d.get(k) for k in ("state", "to", "kind", "label", "text", "at")}
+        if (m["state"] and m["state"] not in ids) or (m["to"] and m["to"] not in ids):
+            m["gone"] = True
+        marks.append(m)
+    for m in sorted(marks, key=lambda m: str(m.get("at") or "")):
+        print(json.dumps(m, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
+def cmd_approved(brief):
+    """Every map the brief's section 4 lists under '### Procesní mapy' exists, is approved and unchanged."""
+    try:
+        with open(brief, encoding="utf-8") as f:
+            text = f.read()
+    except OSError as e:
+        print(f"{brief}: unreadable: {e}", file=sys.stderr); return 2
+    m = re.search(r"^### Procesní mapy\s*$(.*?)(?=^#{2,3} |\Z)", text, re.M | re.S)
+    if not m:
+        print(f"{brief}: approved: no '### Procesní mapy' block in the brief"); return 1
+    rows = re.findall(r"^\|\s*([^|]+?)\s*\|\s*`([^`]+)`\s*\|\s*([0-9a-f]{64})\s*\|", m.group(1), re.M)
+    if not rows:
+        print(f"{brief}: approved: the block lists no map (| název | `soubor` | sha256 |)"); return 1
+    root = _root_of(brief)
+    bad = []
+    for title, rel, sha in rows:
+        f = os.path.normpath(os.path.join(root, rel))
+        if not f.startswith(root + os.sep) or not f.endswith(SUFFIX):
+            bad.append(f"{rel}: approved: not a map file inside the project"); continue
+        if not os.path.isfile(f):
+            bad.append(f"{rel}: approved: missing"); continue
+        with open(f, "rb") as fh:
+            got = hashlib.sha256(fh.read()).hexdigest()
+        if got != sha:
+            bad.append(f"{rel}: approved: changed since approval ({got[:12]} != {sha[:12]})"); continue
+        if load_map(f).get("stav") != "schvaleno":
+            bad.append(f"{rel}: approved: stav is not schvaleno")
+    for b in bad:
+        print(b)
+    return 1 if bad else 0
+
+
 def main(argv):
-    if len(argv) < 2 or argv[0] not in ("check", "build"):
+    if len(argv) < 2 or argv[0] not in ("check", "build", "page", "publish", "flags", "approved"):
         print(__doc__.strip().split("\n\n")[1], file=sys.stderr)
         return 2
     cmd, path, rest = argv[0], argv[1], argv[2:]
+    if cmd == "approved":
+        return 2 if rest else cmd_approved(path)
+    if cmd in ("page", "publish", "flags"):
+        opts = {"--svg": None, "--out": None, "--zodpovezeno": None}
+        nove = False
+        while rest:
+            a = rest.pop(0)
+            if a == "--nove":
+                nove = True
+            elif a in opts and rest:
+                opts[a] = rest.pop(0)
+            else:
+                print(f"aid-process-map: unknown argument {a}", file=sys.stderr); return 2
+        if cmd == "page":
+            if not opts["--svg"]:
+                print("aid-process-map: page needs --svg <picture.svg>", file=sys.stderr); return 2
+            return cmd_page(path, opts["--svg"], opts["--out"])
+        if cmd == "publish":
+            return cmd_publish(path, opts["--out"])
+        return cmd_flags(path, nove, opts["--zodpovezeno"], opts["--out"])
     if cmd == "check":
         if rest:
             print(f"aid-process-map: check takes one map file, got extra: {' '.join(rest)}", file=sys.stderr)
