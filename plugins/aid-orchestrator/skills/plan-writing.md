@@ -523,6 +523,26 @@ per subfáze that can be copy-pasted into a new Claude Code window:
 **Quality rule:** Each session prompt must be SELF-CONTAINED — a developer opening a new CC window
 with zero context must be able to execute it. No "see previous phase" references without specifics.
 
+### Process maps (a brief with `### Procesní mapy` in §4)
+
+Optional: a plan whose brief carries no maps skips this section entirely. When it does
+(`skills/process-maps/SKILL.md`, AID 3.15.0):
+
+- **Every step that builds part of a mapped process** closes the maps point in its
+  `**Zavírá:**` and carries one criterion per map that quotes the transitions it builds:
+  `- [ ] Přechody A→B, B→C z mapy \`docs/procesy/<name>.mapa.yaml\` existují v \`<file>\`.`
+  The step reviewer sees only the step's `dod.md`, so the transitions must be in the
+  criterion, not only in the map.
+- **The last implementation step reconciles the maps** (role docs), before plan-final
+  freezes the candidate: compare each approved map with the code as built (each transition
+  located with its place) and with the run's accepted findings
+  (`.aid-o/work/evidence/<plan>/**/merged.json`). When the build deviated with an accepted
+  finding or a recorded PM decision, write `docs/procesy/<name>.postaveno.mapa.yaml`
+  (`stav: po`, `proti: <name>.mapa.yaml`), `check` and `publish` it; the approved file is
+  never edited. No deviation: the step writes nothing and says so.
+- A deviation found only at CP7 is a CP7 finding; its fix round reruns the reconcile
+  comparison before the next candidate is frozen.
+
 ### Tests are designed, not counted
 
 A step does NOT need a `Test:` bullet. Generation has never required one, and
