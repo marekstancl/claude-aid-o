@@ -1,6 +1,6 @@
 # AID — AI Development Orchestrator
 
-- **Plugin:** 3.14.1
+- **Plugin:** 3.15.0
 - **License:** AGPL-3.0-only
 - **Requires:** Claude Code with plugin support
 
@@ -85,6 +85,7 @@ PATH_add "$AID_PLUGIN_PATH/scripts"
 
 - `/aid-help` — progressive help (Level 0-3)
 - `/aid-ui` — guided UI design outside the AID pipeline (visual direction always chosen by the PM)
+- `/aid-map` — a process as a clickable map in one fixed look (BPMN or a state diagram); the PM marks what is wrong, the agent checks it in the code
 - `CHANGELOG.md` — version history
 - `scripts/README.md` — bash script documentation
 

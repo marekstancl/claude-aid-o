@@ -48,7 +48,7 @@ version: 1
 audit_run: p041-2026-06-01
 promoted_by: E-046-1_3-step-5
 totals:
-  enforcements: 703 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
+  enforcements: 709 # recompute: yq '.enforcements | length' defaults/enforcement-registry.yaml
   # ── Plan amendments recorded here because this file is the TRACKED authority ──
   # `.aid-o/plans/`, `docs/plans/` and `docs/design/` are gitignored (verified with
   # `git check-ignore`; `docs/extending-aid.md` is the tracked exception), so an
@@ -5050,3 +5050,63 @@ enforcements:
     tier: t2
     description: "P117 (20, WAN P112): ui.copy_extra copies repository files beside the copy, never a secret in any path component, never outside the repository, through no link, never over the kit's files; capture {scroll} shoots a scrolling container whole; ui.first_shot_timeout_s (1..120) governs the first shot's waits."
     test: "scripts/tests/bats/test-companion-kit.bats (grep: 'kit F')"
+  - id: process_map_check
+    type: 1
+    source: "scripts/aid-process-map.py (check_rules, schema_errors) + defaults/schemas/process-map.schema.json"
+    instruction: "skills/process-maps/SKILL.md (Writing the map)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P118 (3.15.0): a process map is refused before anything is drawn when it breaks the schema (a colour or coordinate in the map, an id out of pattern, zdroj missing for puvod: kod, a path in proti) or a rule (duplicate_id, unknown_step, branch_without_label, unreachable_step, dead_end, end_with_exit, proti_missing, proti_invalid); the map name must fit the publisher's --name."
+    recovery: "Fix the map per the printed lines (file: rule: detail) and run aid-process-map.sh check again."
+    test: "scripts/tests/bats/test-aid-process-map.bats (grep: 'check:')"
+  - id: process_map_layout_overlap
+    type: 1
+    source: "scripts/aid-process-map.py (layout, overlaps)"
+    instruction: "skills/process-maps/SKILL.md (Building and showing it)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P118: after every layout the builder measures shape/shape, line/shape, label/shape and label/label overlaps and writes no drawing when one exists (layout_overlap is a builder defect, never a reason to bend the map); the test measures the written DI independently."
+    recovery: "Report the layout_overlap lines as a builder defect; do not change the map to dodge it."
+    test: "scripts/tests/bats/test-aid-process-map.bats (grep: 'overlap')"
+  - id: process_map_page_refused
+    type: 1
+    source: "scripts/aid-process-map.py (write_page, clean_svg) + defaults/templates/process-map.html"
+    instruction: "skills/process-maps/SKILL.md (Building and showing it)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P118: the map page carries no library and no outside reference; it is refused (page_refused) over 2 MiB, with a placeholder left, with any pattern share's publish_check refuses (NETWORK, COMPUTED, a non-literal claude.use, comment quirks) or with active content in the picture (script, on-handler, javascript:); map text travels as base64 and is put into the page with textContent only."
+    recovery: "Fix the cause the page_refused line names; a refused picture from the renderer is a defect to report."
+    test: "scripts/tests/bats/test-aid-process-map.bats (grep: 'page-static:')"
+  - id: process_map_approved
+    type: 1
+    source: "scripts/aid-process-map.py (cmd_approved)"
+    instruction: "commands/aid-plan.md (Step 8) + skills/plan-writing.md (Process maps)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P118: the brief's maps point fails when a map listed under '### Procesní mapy' is missing, changed since approval (sha256), not stav: schvaleno, or resolves outside the tree the command runs in (a symlink included); the content against the code is judged by the step and CP7 reviewers."
+    recovery: "Restore the approved map, or change it through a new brief version (verze +1, new sha256)."
+    test: "scripts/tests/bats/test-aid-process-map.bats (grep: 'approved:')"
+  - id: pm_page_publish_map_kind
+    type: 1
+    source: "scripts/aid-pm-page-publish.sh (--kind map, --name, --print-key)"
+    instruction: "skills/process-maps/SKILL.md (Building and showing it)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "P118: a map page is published only with --kind map --name <[a-z0-9-], 49> and no --plan (key <project-id>/<name>/map, the main checkout's project id from any worktree), always on request; --print-key publishes nothing; with no publisher the map stays a local file (local <page>), never an artifact."
+    recovery: "Pass --name; read the key with --print-key; open the local page when no publisher is configured."
+    test: "scripts/tests/bats/test-pm-page-publish.bats (grep: 'pm page map:')"
