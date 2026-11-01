@@ -557,6 +557,9 @@ _dialog_pages() {
   echo "<html><body><div role=dialog style='$dlg'><div style='overflow-x:auto'><table style='width:900px'><tr><td>siroka tabulka</td></tr></table></div></div></body></html>" > "$P/ui/scroll.html"
   echo "<html><body><div role=dialog aria-label=Prevod style='$dlg'><div class=paticka style='width:520px'>tlacitko uriznute</div></div></body></html>" > "$P/ui/clip.html"
   echo "<html><body style='margin:0'><div style='width:600px'>siroka stranka</div></body></html>" > "$P/ui/wide.html"
+  echo "<html><body><div role=dialog style='position:fixed;top:40px;left:900px;width:600px;height:100px;background:#fff'>mimo</div></body></html>" > "$P/ui/offscreen.html"
+  echo "<html><body><div role=dialog style='$dlg'><div class=bunka style='overflow-x:hidden;width:100px;white-space:nowrap'>dlouhy text ktery se nevejde do bunky</div><div style='overflow:hidden;width:100px;white-space:nowrap;text-overflow:ellipsis'>dlouhy text s vypustkou</div></div></body></html>" > "$P/ui/cell.html"
+  echo "<html><body><div role=dialog style='$dlg;overflow-x:auto'><div style='width:900px'>okno se posouva samo</div></div></body></html>" > "$P/ui/selfscroll.html"
 }
 _navrh() {  # <minule shot> <option A shot> [vady json]
   cat > "$D/navrh.json" <<J
@@ -569,7 +572,7 @@ J
 
 @test "every shot is checked for a cut-off dialog and a page wider than the window; show refuses one in an option, shows one of today's app as its defect" {
   _dialog_pages; run _k proto; [ "$status" -eq 0 ]; run _k up; [ "$status" -eq 0 ]; echo '[]' > "$D/mocks.json"
-  echo '{"base": "proto", "shots": [{"name": "ok", "path": "/ok.html"}, {"name": "hidden", "path": "/hidden.html"}, {"name": "scroll", "path": "/scroll.html"}, {"name": "clip", "path": "/clip.html"}, {"name": "wide", "path": "/wide.html"}]}' > "$D/shots.json"
+  echo '{"base": "proto", "shots": [{"name": "ok", "path": "/ok.html"}, {"name": "hidden", "path": "/hidden.html"}, {"name": "scroll", "path": "/scroll.html"}, {"name": "clip", "path": "/clip.html"}, {"name": "wide", "path": "/wide.html"}, {"name": "offscreen", "path": "/offscreen.html", "only": ["desktop"]}, {"name": "cell", "path": "/cell.html", "only": ["desktop"]}, {"name": "selfscroll", "path": "/selfscroll.html", "only": ["desktop"]}]}' > "$D/shots.json"
   run _k shots; echo "$output"; [ "$status" -eq 0 ]
   local c=$D/shots
   [ "$(jq -c '[(.clipped|length), .dialogs]' "$c/desktop/ok.check.json")" = "[0,1]" ]
@@ -577,6 +580,10 @@ J
   [ "$(jq '.clipped|length' "$c/desktop/scroll.check.json")" = 0 ]
   jq -e '.clipped[] | select(.pravidlo == "beyond_dialog_edge" and (.prvek | test("paticka")))' "$c/desktop/clip.check.json"
   [ "$(jq '.clipped|length' "$c/desktop/wide.check.json")" = 0 ]
+  jq -e '.clipped[] | select(.pravidlo == "dialog_off_screen")' "$c/desktop/offscreen.check.json"
+  jq -e '.clipped[] | select(.pravidlo == "content_clipped" and (.prvek | test("bunka")))' "$c/desktop/cell.check.json"
+  [ "$(jq '[.clipped[] | select(.pravidlo == "content_clipped")] | length' "$c/desktop/cell.check.json")" = 1 ]   # the ellipsis passes
+  [ "$(jq '.clipped|length' "$c/desktop/selfscroll.check.json")" = 0 ]
   jq -e '.clipped[] | select(.pravidlo == "page_wider_than_window")' "$c/mobile/wide.check.json"
   _navrh ok clip; run _k show; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"option A snimky[0]: shot 'clip' (desktop) is cut off — beyond_dialog_edge"* ]]
   _navrh clip ok; run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"list it in vady_aplikace"* ]]

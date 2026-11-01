@@ -223,7 +223,7 @@ aid_test_names_plan_refs() {
           m ~ /(^|[^a-z0-9])imp-[0-9]+([^a-z0-9]|$)/ ||
           m ~ /^[ \t]*v?[0-9]+\.[0-9]+(\.[0-9]+)?[: ]/ ||
           m ~ /\(v?[0-9]+\.[0-9]+(\.[0-9]+)?\)/ ||
-          m ~ /\((wan|agents|acta|apps)[^)]*\)/) printf "%s\t%s\n", f, n }
+          m ~ /\((wan|agents|acta|apps)[ #0-9][^)]*\)/) printf "%s\t%s\n", f, n }
   ' <<<"$diff")" || return 2
   [[ -z "$hits" ]] && return 0
   printf '%s\n' "$hits"

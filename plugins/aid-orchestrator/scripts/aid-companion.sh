@@ -8,14 +8,17 @@
 #            over the VPN), or reuse its own running one from the same plugin
 #            version; prints the PM's address
 #   proto    copy ui.dir into <P>/proto (outside the repo), start ui.dev_cmd on a
-#            free loopback port in its own process group, wait for ui.ready_path
+#            free loopback port in its own process group, wait for ui.ready_path; a reused
+#            copy gets the copy_extra files and says how stale it is; --refresh sets the copy,
+#            its manifest and shots aside in old/<time>-<pid>/ and makes a new one
 #   shots    capture every shot of <P>/shots.json on every viewport the project
-#            owes, over <P>/mocks.json; fails on an API call without a mock
+#            owes, over <P>/mocks.json; fails on an API call without a mock; writes a check per
+#            shot (<shot>.check.json: cut-off dialogs, overflow); --only a,b takes those shots
 #   show     check <P>/navrh.json, build navrh-<kolo>.html from the fixed template,
 #            check the page itself (fits, controls reachable, images present),
 #            write proposal.json; prints the PM's address
 #   answers  the PM's latest choices and notes for a round (--kolo N, --history)
-#   down     stop this plan's server and its verified prototype group
+#   down     stop this plan's server and its verified prototype group (by group and start time)
 #
 # Usage: aid-companion.sh <step> --plan <P> [--project-dir <root>] [step options]
 # answers.jsonl is the agent's input, never proof of a PM choice (anyone with

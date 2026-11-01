@@ -178,7 +178,8 @@ Before the plan, `/aid-plan` writes the brief: `.aid-o/plans/P{NNN}-zadani.md`
 from `defaults/templates/zadani.md` (brainstorm Step 8, Write mode item 3). It is
 the PM's specification as a file, and it outlives the interim.
 
-- Frontmatter: `zadani: P{NNN}`, `verze: <int ≥ 1>`, `datum`, `autor`, optional `roadmapa`.
+- Frontmatter: `zadani: P{NNN}`, `verze: <int ≥ 1>`, `datum`, `autor`, optional `roadmapa` (free text) and
+  `roadmapa_dokument` (a plan of a roadmap with a progress page: §The roadmap's progress page).
 - Six sections, numbered, in this order: `## 1. Co PM chce` (the PM's words
   verbatim and one paragraph starting `**Co je v sázce:**`), `## 2. Změřený výchozí
   stav`, `## 3. Co udělat`, `## 4. Kde co je`, `## 5. Pravidla práce`,

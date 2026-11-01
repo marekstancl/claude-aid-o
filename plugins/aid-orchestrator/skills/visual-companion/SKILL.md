@@ -116,13 +116,15 @@ Steps: `goto`, `click`, `fill` (+`value`), `select` (+`value`), `hover`, `press`
 `"network"` or `{"for": <selector>}`). Selectors: `{role, name}`, `{testid}`, `{text}`, `{css}` —
 each must find exactly one element. `capture`: `"viewport"`, `"full"`, `{"element": <selector>}` or
 `{"scroll": <selector>}` (a container that scrolls on its own, captured at its full content height, the
-ancestors that clip it opened too); with `"full"` the pinned bars (`fixed`, `sticky`) are printed once where they sit;
+ancestors that clip it opened too); with `"full"` the pinned bars (`fixed`, `sticky`) are printed once where they sit (an open dialog and its overlay stay put);
 `"only": ["desktop"]` limits a shot.
 
 `navrh.json` — the content of the page:
 
 ```json
 {"plan": "P110", "kolo": 4, "rozhodnuto": ["3A: assignment in its own window"],
+ "prohlidka_snimku": "Every shot read: the dialogs fit, the table scrolls inside its card, nothing cut off.",
+ "vady_aplikace": [],
  "spolecne": ["src/proto/variant.ts"],
  "body": [{"id": "1", "title": "Row in To investigate",
    "otazka": "What the PM decides, in one or two sentences.",

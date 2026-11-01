@@ -2572,13 +2572,16 @@ _roadmap_data_of_plan() {  # the plan writes its change into the data on main
   _close; echo "$output"; [ "$status" -eq 0 ]; [ -f "$(_marker)" ]
 }
 
-@test "close: a failed publish does not count, a brief changed after the binding is refused, not skipped" {
+@test "close: a failed publish does not count; a brief changed after the binding is read as it is now, with a warning" {
   _seed_closable; _roadmap_brief; _roadmap_data_of_plan
   printf '#!/usr/bin/env bash\necho down >&2; exit 3\n' > "$BATS_TEST_TMPDIR/pub"; chmod +x "$BATS_TEST_TMPDIR/pub"
   (cd "$TEST_PROJECT_ROOT" && AID_PM_PAGE_PUBLISHER="$BATS_TEST_TMPDIR/pub" bash "$AID_PLUGIN_PATH/scripts/aid-roadmap-page.sh" publish "$DOC" --plan "$PLAN_ID") || true
   _close; [ "$status" -ne 0 ]; [[ "$output" == *"roadmap_page_not_refreshed"* ]]
-  sed -i '/^roadmapa_dokument:/d' "$TEST_PROJECT_ROOT/.aid-o/plans/${PLAN_ID}-zadani.md"   # the roadmap dropped from the brief after the binding
-  _close; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"the brief changed since the plan bound it"* ]]; [ ! -f "$(_marker)" ]
+  echo "pozn." >> "$TEST_PROJECT_ROOT/.aid-o/plans/${PLAN_ID}-zadani.md"     # changed, still naming the roadmap: still checked
+  _close; [ "$status" -ne 0 ]; [[ "$output" == *"brief changed since the plan bound it"*"roadmap_page_not_refreshed"* ]]
+  # a brief that no longer names a roadmap closes as before 3.14.0 (the known ceiling: the bound version is not kept)
+  sed -i '/^roadmapa_dokument:/d' "$TEST_PROJECT_ROOT/.aid-o/plans/${PLAN_ID}-zadani.md"
+  _close; echo "$output"; [ "$status" -eq 0 ]; [ -f "$(_marker)" ]
 }
 
 @test "close: an aborted plan of a roadmap is closed without asking for its page" {

@@ -243,6 +243,7 @@ def init(project, state, doc, title):
         at = 1 if lines and lines[0].startswith('# ') else 0
         lines.insert(at, f'<!-- aid-roadmap-page: id={rid} -->')
         write_no_follow(d_abs, '\n'.join(lines))
+    claim(project, rel, rid, record_dir(state, rid))         # a copied page line is refused before anything is written
     if not os.path.lexists(os.path.join(project, data_rel)):
         if not isinstance(title, str) or not title.strip() or len(title) > 60:
             raise Refused(1, '--title must be a text of 1-60 characters')
@@ -253,7 +254,6 @@ def init(project, state, doc, title):
         publish(project, state, rel, 'init')
     else:
         inside(project, data_rel, 'the data file')       # an existing one is a plain file in the project, not a link
-        claim(project, rel, rid, record_dir(state, rid))
         if not published_ok(state, rid):                  # the first publish failed: init tries again
             return publish(project, state, rel, None, any_author=True)
         print(f'kept {rid} {data_rel}')
@@ -306,6 +306,8 @@ def main(a):
             project, rel, d_abs, data_abs, data_rel = doc_paths(a[1], a[2])
             if not marker(d_abs):
                 raise Refused(1, f'{rel} has no page line — aid-roadmap-page.sh init {rel} --title "<topic>"')
+            if not os.path.lexists(data_abs):
+                raise Refused(1, f'{rel} has its page line but no data {data_rel} — aid-roadmap-page.sh init {rel} --title "<topic>"')
             inside(project, data_rel, 'the data file')
             print(marker(d_abs)); return 0
         if a[:1] == ['refreshed'] and len(a) >= 6:

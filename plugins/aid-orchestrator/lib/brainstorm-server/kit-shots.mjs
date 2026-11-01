@@ -99,9 +99,11 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
   // clips it (overflow hidden or a fixed height: WAN AdminLayout h-[100dvh] overflow-hidden)
   const unpin = page => page.evaluate(() => {
     const saved = [];
+    // an open dialog and its overlay stay where the user sees them
+    const dlg = [...document.querySelectorAll('[role=dialog],[role=alertdialog],dialog[open]')];
     for (const el of document.querySelectorAll('*')) {
       const p = getComputedStyle(el).position;
-      if (p === 'fixed' || p === 'sticky') { saved.push([el, el.getAttribute('style')]); el.style.setProperty('position', 'static', 'important'); }
+      if ((p === 'fixed' || p === 'sticky') && !dlg.some(d => el.contains(d) || d.contains(el))) { saved.push([el, el.getAttribute('style')]); el.style.setProperty('position', 'static', 'important'); }
     }
     window.__aidSaved = saved;
   });
@@ -141,7 +143,7 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
         if (!vis(el)) continue;
         // inside a scroller of its own (overflow-x auto|scroll) the content scrolls on purpose
         let own = false;
-        for (let a = el.parentElement; a && a !== d; a = a.parentElement) { if (/(auto|scroll)/.test(getComputedStyle(a).overflowX)) { own = true; break; } }
+        for (let a = el.parentElement; a; a = a.parentElement) { if (/(auto|scroll)/.test(getComputedStyle(a).overflowX)) { own = true; break; } if (a === d) break; }
         const r = el.getBoundingClientRect(), over = Math.max(r.right - dr.right, dr.left - r.left);
         if (!own && over > 1) out.push({ pravidlo: 'beyond_dialog_edge', prvek: name(el), presah_px: Math.round(over) });
         const cs = getComputedStyle(el);

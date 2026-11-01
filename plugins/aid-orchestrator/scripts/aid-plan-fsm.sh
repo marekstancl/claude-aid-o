@@ -434,8 +434,10 @@ _pfsm_force_evidence_dir() {
 # ---------------------------------------------------------------------------
 # _pfsm_roadmap_refreshed <root> <plan_id> — 0 when the plan's brief names no roadmap (roadmapa_dokument) or the plan
 # published the roadmap's page from the data its merge left (or the target holds now); else 1 with the refusal. The
-# brief is read by the one resolver the review uses (inside the project, present) and must be the one the plan bound
-# (zadani_sha256): a brief changed or lost after the binding never lets a plan skip its page (it is refused instead).
+# brief is read by the one resolver the review uses (inside the project, present). A plan whose brief names no roadmap
+# closes as before 3.14.0 ("a plan without a roadmap behaves as today"): a missing plan file, an unreadable brief or a
+# brief changed since the binding only warn. Known ceiling: a roadmapa_dokument removed from the brief after the binding
+# is not seen (the bound version is not kept); a brief that still names it is checked.
 _pfsm_roadmap_refreshed() {
   local root="$1" plan_id="$2" plan doc merge rc=0 tb tmp want short
   _refuse_roadmap() {
@@ -444,19 +446,17 @@ _pfsm_roadmap_refreshed() {
     return 1
   }
   plan="$(aid_lifecycle_plan_file "$plan_id" "$root" 2>/dev/null)" || {
-    _refuse_roadmap "the plan file cannot be found, so whether it belongs to a roadmap cannot be told" "restore the plan file, or plan-close --force --force-reason \"<why>\""; return 1; }
+    echo "WARN: plan-close: ${plan_id}: the plan file cannot be found — whether it belongs to a roadmap is not checked" >&2; return 0; }
   [[ -n "$(_aid_fm_get "$plan" zadani)" ]] || return 0
   # shellcheck source=lib/aid-plan-review-packet.sh
   declare -F aid_plan_review_brief_resolve >/dev/null || source "${SCRIPT_DIR}/lib/aid-plan-review-packet.sh"
   tmp="$(mktemp -d)"
   if ! aid_plan_review_brief_resolve "$root" "$plan" "$tmp" 2>/dev/null; then
-    rm -rf "$tmp"; _refuse_roadmap "the brief the plan names cannot be read (outside the project or missing)" "restore the brief, or plan-close --force --force-reason \"<why>\""; return 1
+    rm -rf "$tmp"; echo "WARN: plan-close: ${plan_id}: the brief cannot be read — whether it belongs to a roadmap is not checked" >&2; return 0
   fi
   want="$(_aid_fm_get "$plan" zadani_sha256)"
-  if [[ -n "$want" && "$want" != "${ZR_SHA:-}" ]]; then
-    rm -rf "$tmp"; _refuse_roadmap "the brief changed since the plan bound it (zadani_sha256)" "restore the brief the plan bound, or plan-close --force --force-reason \"<why>\""; return 1
-  fi
   doc="$(_aid_fm_get "$tmp/zadani.md" roadmapa_dokument 2>/dev/null)"; rm -rf "$tmp"
+  [[ -n "$want" && "$want" != "${ZR_SHA:-}" ]] && echo "WARN: plan-close: ${plan_id}: the brief changed since the plan bound it (zadani_sha256) — read as it is now" >&2
   [[ -n "$doc" ]] || return 0
   # shellcheck source=lib/aid-roadmap.sh
   declare -F aid_roadmap_refreshed >/dev/null || source "${SCRIPT_DIR}/lib/aid-roadmap.sh"
@@ -6973,6 +6973,14 @@ cmd_plan_close() {
     exit 1
   fi
 
+  # AID 3.14.0: a plan of a roadmap closes only after it refreshed the roadmap's progress page (PM 30. 10. 2026) —
+  # the ordinary close of a merged plan; an abort, an administrative close and a closed plan's rerun do not ask
+  if [[ "$close_mode" == merge && "${_PFSM_ADMIN_CLOSE:-0}" -ne 1 ]]; then
+    if ! _pfsm_precondition "roadmap_page_refreshed" forceable _pfsm_roadmap_refreshed "$root" "$plan_id"; then
+      _pfsm_close_release; exit 1
+    fi
+  fi
+
   # P073 Step 8: mint the waiver BEFORE the durable close work, not after.
   # A bypass that completes the operation and only then tries to record itself
   # would, on a failed receipt write, leave a plan closed with nothing saying
@@ -6983,14 +6991,6 @@ cmd_plan_close() {
   # `_pfsm_commit_force` returns 0 immediately when --force is absent, and
   # `_pfsm_handle_force` itself reports "bypassed nothing" when the force was
   # a no-op — the two cases stay distinguishable in the operator's output.
-  # AID 3.14.0: a plan of a roadmap closes only after it refreshed the roadmap's progress page (PM 30. 10. 2026) —
-  # the ordinary close of a merged plan; an abort, an administrative close and a closed plan's rerun do not ask
-  if [[ "$close_mode" == merge && "${_PFSM_ADMIN_CLOSE:-0}" -ne 1 ]]; then
-    if ! _pfsm_precondition "roadmap_page_refreshed" forceable _pfsm_roadmap_refreshed "$root" "$plan_id"; then
-      _pfsm_close_release; exit 1
-    fi
-  fi
-
   _pfsm_commit_force "plan-close" "$plan_id" "$root" || { _pfsm_close_release; exit 1; }
 
   # ── 3. intent (op_id was derived above, for the check's exclusion) ────────

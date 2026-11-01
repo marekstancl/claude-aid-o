@@ -91,6 +91,11 @@ P
                    'navazuje na 3.7.0 (companion + 20 oprav); vstup = záznamy WAN P109–P112 z 19.–20. 10. 2026'; do
     printf -- '---\nroadmapa: %s\n---\n' "$l" > "$B"; run aid_roadmap_brief_check "$B" "$R"; [ "$status" -eq 0 ]; [ -z "$output" ]
   done
+  # the page line without its data is a missing page, not a bad path; through the lint itself (aid-plan-lint.sh --zadani)
+  mv "$DATA" "$DATA.bak"; printf -- '---\nroadmapa_dokument: %s\n---\n' "$DOC" > "$B"
+  run aid_roadmap_brief_check "$B" "$R"; [ "$status" -eq 1 ]; [[ "$output" == "ERROR roadmap_page_missing:"*"no data"* ]]
+  run bash "$AID_PLUGIN_PATH/scripts/aid-plan-lint.sh" --zadani "$B"; [ "$status" -ne 0 ]; [[ "$output" == *"roadmap_page_missing"* ]]
+  mv "$DATA.bak" "$DATA"
   printf -- '---\nroadmapa_dokument: docs/plans/nic.md\n---\n' > "$B"
   run aid_roadmap_brief_check "$B" "$R"; [ "$status" -eq 1 ]; [[ "$output" == "ERROR roadmap_page_missing:"*"does not exist"* ]]
 }

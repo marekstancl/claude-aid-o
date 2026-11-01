@@ -294,7 +294,7 @@ _cp2_start() {  # <round> <focus> [age seconds] — a start in the round's pendi
   _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
 }
 
-@test "turn: the background agent and the takeover are still recognised (3.11.0 paths kept)" {
+@test "turn: the background agent and the takeover are still recognised by their earlier paths" {
   _takeover_running; _bg_call toolu_land; _say "AID-WAIT: převzetí kroku 0"
   run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; _takeover_gone; [ "$status" -eq 3 ]
 }
