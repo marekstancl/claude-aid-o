@@ -427,7 +427,7 @@ _with_epic_bound_gate() {
   [ "$(jq -r '[.gates[] | .reused_from // empty] | length' "$(_run_dir)/gates_report.json")" -eq 0 ]
 }
 
-@test "P100: a runner that died before its report does not block the next gates run (WAN #16: one orphaned start)" {
+@test "a runner that died before its report does not block the next gates run" {
   _project
   _stage freeze; [ "$status" -eq 0 ]
   printf '{"ts":"2026-09-24T10:00:00Z","event":"gate_runner_start"}\n' >> "$(_run_dir)/timeline.jsonl"
@@ -470,7 +470,7 @@ _followup_attempt() {   # attempt 1 holds a blocker open; the fix rewrites the c
 }
 _FU_MINOR='.findings = [{id: "g-1", checkpoint: "cp7", step: null, severity: "minor", claim: "the ignore list names a folder nobody uses", command: "grep -n reports .gitignore", evidence: ".gitignore:2", fix: "drop it"}] | del(.no_findings_reason)'
 
-@test "follow-up (3.12.0): a confirmation round whose only new finding is a minor outside the fix lets decide release, and decide names it for the backlog" {
+@test "follow-up: a confirmation round whose only new finding is a minor outside the fix lets decide release, and decide names it for the backlog" {
   _followup_attempt "$_FU_MINOR"
   local rd="$(_run_dir)/cp7/round-1"
   [ "$(jq -r .mode "$rd/round.json")" = confirmation ]
@@ -479,7 +479,7 @@ _FU_MINOR='.findings = [{id: "g-1", checkpoint: "cp7", step: null, severity: "mi
   [[ "$output" == *"FOLLOW-UPS: 1 finding(s)"* ]]
 }
 
-@test "follow-up (3.12.0): a finding written to follow_up by hand after close makes decide refuse" {
+@test "follow-up: a finding written to follow_up by hand after close makes decide refuse" {
   _followup_attempt '.findings = [{id: "g-2", checkpoint: "cp7", step: null, severity: "major", claim: "the new greeting comment misleads", command: "grep -n greets app.py", evidence: "app.py:1", fix: "drop it", rule: "comments say what the code does"}] | del(.no_findings_reason)'
   local m="$(_run_dir)/cp7/round-1/merged.json"
   [ "$(jq -r '.findings[0].status' "$m")" = open ]                 # on the line the fix wrote: it blocks

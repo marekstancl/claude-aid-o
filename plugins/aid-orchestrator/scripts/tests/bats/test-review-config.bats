@@ -98,7 +98,7 @@ _load_step() { aid_review_config_load "$ROOT" step_review "$STEP_SKILL" && aid_r
 }
 
 # ── the step and EPIC blocks ───────────────────────────────────────────────
-@test "step_review: the plugin default asks both roles on every reviewed step (2.109.0) and the claims role on a documentation step (3.8.0); a gated role lowers the floor to the unconditional count" {
+@test "step_review: the plugin default asks both roles on every reviewed step and the claims role on a documentation step; a gated role lowers the floor to the unconditional count" {
   aid_review_config_load "$ROOT" step_review "$STEP_SKILL"
   [ "${#RC_ROLE[@]}" -eq 3 ]; [ "${RC_WHEN[0]}" = "" ]; [ "${RC_WHEN[1]}" = "" ]
   [ "${RC_ROLE[2]}" = final_claims ]; [ "${RC_WHEN[2]}" = docs_surface ]
@@ -109,7 +109,7 @@ _load_step() { aid_review_config_load "$ROOT" step_review "$STEP_SKILL" && aid_r
   [ "$RC_EXTRA_SKIP_THRESHOLD_FILES" = 3 ]; [ "$RC_EXTRA_SKIP_THRESHOLD_LINES" = 120 ]   # P110 threshold
   aid_review_config_validate
 }
-@test "step_review: a project policy that lists final_claims itself keeps it as written — one claims role, never a second added (3.9.1)" {
+@test "step_review: a project policy that lists final_claims itself keeps it as written — one claims role, never a second added" {
   _project '.review_checkpoints.step_review.reviewers = [{"role":"step_generalist","provider":"claude","model":"opus"},{"role":"final_claims","provider":"claude","model":"sonnet","when":"review+security"}]'
   run _load_step; echo "$output"; [ "$status" -eq 0 ]
   aid_review_config_load "$ROOT" step_review "$STEP_SKILL"

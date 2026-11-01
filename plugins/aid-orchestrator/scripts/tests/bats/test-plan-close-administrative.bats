@@ -256,7 +256,7 @@ _lifecycle_manifest() {
   git -C "$R" add -f .aid-lifecycle; git -C "$R" commit -qm "lifecycle: manifest for P900"
 }
 
-@test "2.107.1: a hand-merged plan with a lifecycle manifest closes administratively with a receipt that says so, hash refs only; unmerged, no receipt" {
+@test "a hand-merged plan with a lifecycle manifest closes administratively with a receipt that says so, hash refs only; unmerged, no receipt" {
   local R="$BATS_TEST_TMPDIR/p"; mkdir -p "$R"; _gates_plan "$R"; _lifecycle_manifest "$R"
   local reason='merged by hand as 2.106.0 on /opt/x, token: none — PM 25. 9.'
   run bash -c "cd '$R' && AID_TEST_MODE=1 bash '$FSM' plan-close P900 --project-root '$R' --administrative --reason '$reason'"
@@ -273,7 +273,7 @@ _lifecycle_manifest() {
   [ "$output" = closed ]
 }
 
-@test "2.107.1: the lifecycle library refuses an administrative close whose commit is not in the target branch" {
+@test "the lifecycle library refuses an administrative close whose commit is not in the target branch" {
   local R="$BATS_TEST_TMPDIR/p"; mkdir -p "$R"; _gates_plan "$R"; _lifecycle_manifest "$R"
   git -C "$R" checkout -q -b elsewhere; git -C "$R" commit -q --allow-empty -m "not merged"
   local stray; stray="$(git -C "$R" rev-parse HEAD)"; git -C "$R" checkout -q main
@@ -469,7 +469,7 @@ _branchless_plan() {   # <root> <merged|unmerged|none> [noev] — plan/P900 dele
   git -C "$R" branch -q -D plan/P900 step/s1 2>/dev/null || true
 }
 
-@test "3.9.1: a hand-merged plan whose branch is gone closes administratively through its recorded candidate; an unmerged candidate is refused" {
+@test "a hand-merged plan whose branch is gone closes administratively through its recorded candidate; an unmerged candidate is refused" {
   local R="$BATS_TEST_TMPDIR/m"; mkdir -p "$R"; _branchless_plan "$R" merged
   run bash -c "cd '$R' && AID_TEST_MODE=1 bash '$FSM' plan-close P900 --project-root '$R' --administrative --reason 'P900 merged by hand, its branch cleaned up'"
   echo "$output"; [ "$status" -eq 0 ]
@@ -481,7 +481,7 @@ _branchless_plan() {   # <root> <merged|unmerged|none> [noev] — plan/P900 dele
   [ "$(yq -r .plan_state "$U/.aid-o/work/plan-state/P900/plan-state.yaml")" != CLOSED ]
 }
 
-@test "3.9.1: no branch, no candidate, PARTIAL plan-final evidence — closed_administrative with the evidence listed, no merge claim, no receipt" {
+@test "no branch, no candidate, PARTIAL plan-final evidence — closed_administrative with the evidence listed, no merge claim, no receipt" {
   local R="$BATS_TEST_TMPDIR/n"; mkdir -p "$R"; _branchless_plan "$R" none; _lifecycle_manifest "$R"
   run bash -c "cd '$R' && AID_TEST_MODE=1 bash '$FSM' plan-close P900 --project-root '$R' --administrative --reason 'P900 merged by hand, its branch cleaned up'"
   echo "$output"; [ "$status" -eq 0 ]
@@ -492,7 +492,7 @@ _branchless_plan() {   # <root> <merged|unmerged|none> [noev] — plan/P900 dele
   [ ! -e "$R/.aid-lifecycle/receipts/P900.yaml" ]
 }
 
-@test "3.9.1: no branch, no candidate and no plan-final evidence — closed_administrative, no merge claim, no receipt" {
+@test "no branch, no candidate and no plan-final evidence — closed_administrative, no merge claim, no receipt" {
   local R="$BATS_TEST_TMPDIR/e"; mkdir -p "$R"; _branchless_plan "$R" none noev; _lifecycle_manifest "$R"
   run bash -c "cd '$R' && AID_TEST_MODE=1 bash '$FSM' plan-close P900 --project-root '$R' --administrative --reason 'P900 merged by hand, its branch cleaned up'"
   echo "$output"; [ "$status" -eq 0 ]

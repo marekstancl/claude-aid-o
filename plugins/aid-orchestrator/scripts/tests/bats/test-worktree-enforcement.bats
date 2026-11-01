@@ -528,7 +528,7 @@ _from_no_yq() {
   [[ "$output" == *"--recreate-worktree"* ]]
 }
 
-@test "v2.95.8 (agents #8): aid-fsm.sh transition invoked FROM THE PRIMARY CHECKOUT redirects into the plan worktree" {
+@test "aid-fsm.sh transition invoked FROM THE PRIMARY CHECKOUT redirects into the plan worktree" {
   _mk_project
   _seed_plan 1
   local sf=".aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml"
@@ -548,7 +548,7 @@ _from_no_yq() {
   [[ "$output" == *"executes in its own worktree"* ]]
 }
 
-@test "v2.95.8 (agents #8): transition GATES→DONE from the primary checkout also redirects (the gates read the worktree's HEAD)" {
+@test "transition GATES→DONE from the primary checkout also redirects (the gates read the worktree's HEAD)" {
   _mk_project
   _seed_plan 1
   local sf=".aid-o/work/evidence/${EPIC_ID}/R-${EPIC_ID}-1/fsm-state.yaml"

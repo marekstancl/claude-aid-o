@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import { spawn, execFileSync } from 'node:child_process';
+import { syncExtra, withKitBlock, manFiles, kitWrite, safeTarget, sha, giSha } from './kit-extra.mjs';
 
 const RUNTIME = new Set(['node_modules', 'dist', 'dev-dist', '.git', '.vite', 'vite-cache', '.next', '.turbo', 'coverage', 'storybook-static']);
 
@@ -24,42 +25,6 @@ function portOwners(port) {
 }
 
 export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
-  // ui.copy_extra[] (P117 (20), WAN P112): files of the repository outside ui.dir the app reads by a relative path
-  // (../tsconfig.base.json, ../shared/x.ts), copied beside the copy at the same relative place. Never a secret,
-  // never outside the repository, never over the kit's own files; they are not part of the copy's manifest, so a
-  // change to them is never an option's file (spolecne/soubory list files inside proto/ only).
-  const KIT = new Set(['proto', 'shots', 'proto.json', 'proto-manifest.json', 'proto.log', 'server.json', 'mocks.json', 'shots.json', 'navrh.json', 'answers.jsonl', 'proposal.json']);
-  // any component of the path (a file inside .env.d/ or credentials/ is as secret as the directory)
-  const SECRET_PART = /^(\.env.*|.*secret.*|.*credential.*|.*\.(pem|key|p12|pfx)|id_(rsa|ed25519).*|\.ssh|\.aws|\.gnupg)$/i;
-  const secretPath = p => p.split(/[\\/]/).some(c => SECRET_PART.test(c));
-  const copyExtra = (src, dest) => {
-    const extra = UI.copy_extra || [];
-    if (!Array.isArray(extra)) die('proto: ui.copy_extra must be a list of repository paths');
-    const repo = fs.realpathSync(PROJECT);
-    for (const [i, e] of extra.entries()) {
-      if (typeof e !== 'string' || !e || path.isAbsolute(e)) die(`proto: ui.copy_extra[${i}] must be a path relative to the repository`);
-      const from = path.resolve(PROJECT, e);
-      let real = ''; try { real = fs.realpathSync(from); } catch { die(`proto: ui.copy_extra[${i}] ${e} does not exist`); }
-      if (real !== repo && !real.startsWith(repo + path.sep)) die(`proto: ui.copy_extra[${i}] ${e} is outside the repository`);
-      if (secretPath(path.relative(repo, real)) || secretPath(e)) die(`proto: ui.copy_extra[${i}] ${e} looks like a secret (.env, a key, credentials) — it never goes into the copy`);
-      if (fs.statSync(real).isDirectory()) die(`proto: ui.copy_extra[${i}] ${e} is a directory — list the files`);
-      const to = path.resolve(dest, path.relative(src, from));
-      if (!to.startsWith(path.resolve(DIR) + path.sep) || to.startsWith(path.resolve(dest) + path.sep)) die(`proto: ui.copy_extra[${i}] ${e} would land at ${to}, not beside the copy in ${DIR}`);
-      if (KIT.has(path.relative(DIR, to).split(path.sep)[0])) die(`proto: ui.copy_extra[${i}] ${e} would overwrite the kit's own ${path.relative(DIR, to)}`);
-      // no link on the way: a link inside the companion directory could steer the write outside it or onto the
-      // kit's own files (Codex review of P117 F) — every existing component is checked, then the real parent
-      const dirReal = fs.realpathSync(DIR);
-      for (let c = path.dirname(to); c.startsWith(path.resolve(DIR) + path.sep); c = path.dirname(c)) {
-        if (fs.existsSync(c) && fs.lstatSync(c).isSymbolicLink()) die(`proto: ui.copy_extra[${i}] ${e}: ${c} is a link — the companion directory holds no links`);
-      }
-      if (fs.existsSync(to) && fs.lstatSync(to).isSymbolicLink()) die(`proto: ui.copy_extra[${i}] ${e}: ${to} is a link`);
-      fs.mkdirSync(path.dirname(to), { recursive: true });
-      const parentReal = fs.realpathSync(path.dirname(to));
-      if (!(parentReal + path.sep).startsWith(dirReal + path.sep) || (parentReal + path.sep).startsWith(fs.realpathSync(dest) + path.sep)
-          || KIT.has(path.relative(dirReal, path.join(parentReal, path.basename(to))).split(path.sep)[0])) die(`proto: ui.copy_extra[${i}] ${e} does not land beside the copy`);
-      fs.copyFileSync(real, to);
-    }
-  };
   const need = k => die(`proto: project.yaml has no ui.${k} — add it, for example:\n  ui:\n    dir: ui\n    components: ui/src/components/shared\n    dev_cmd: ["npx", "vite", "--port", "{port}", "--host", "127.0.0.1", "--strictPort"]\n    ready_path: /\n    api_prefix: /api/`);
   if (!UI.dir) need('dir');
   if (!Array.isArray(UI.dev_cmd) || !UI.dev_cmd.length) need('dev_cmd (a list of arguments, one of them {port})');
@@ -69,6 +34,32 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
   if (!fs.existsSync(path.join(src, 'node_modules'))) die(`proto: ${src}/node_modules is missing — install the UI's dependencies there first (a workspace or pnpm layout without node_modules in ui.dir is not supported; write it to aid-plugin-issues.md)`);
 
   const dest = path.join(DIR, 'proto'), manFile = path.join(DIR, 'proto-manifest.json'), rec = path.join(DIR, 'proto.json');
+  // an existing copy is brought to today's settings before it is reused (WAN P117, P119): the kit's .gitignore block,
+  // the copy_extra files beside it; and it says how many files of the app changed since the copy was made
+  const writeMan = m => kitWrite(DIR, 'proto-manifest.json', JSON.stringify(m, null, 1), die);
+  const settle = () => {
+    safeTarget(DIR, 'proto', die, { kit: true }); safeTarget(DIR, 'proto-manifest.json', die, { kit: true });
+    const man = JSON.parse(fs.readFileSync(manFile, 'utf8')), gi = safeTarget(DIR, 'proto/.gitignore', die, { kit: true });
+    const t = fs.existsSync(gi) ? fs.readFileSync(gi, 'utf8') : '';
+    const was = { ...manFiles(man) };
+    // a manifest from before 3.14.0 hashed the .gitignore byte for byte: an unchanged one is re-hashed the new way
+    if (man.version !== 2 && was['.gitignore'] && t && sha(gi) === was['.gitignore']) was['.gitignore'] = giSha(t);
+    const w = withKitBlock(t, RUNTIME);
+    if (w !== t) kitWrite(DIR, 'proto/.gitignore', w, die);
+    const { record, done } = syncExtra({ DIR, PROJECT, UI, die, recorded: man.extra && man.extra.length ? man.extra : recordedBefore() });
+    // stale: today's ui.dir against the snapshot of it taken when the copy was made, by the same function on both sides
+    const srcWas = man.src_files, now = manifest(src);
+    const stale = srcWas ? new Set([...Object.keys(srcWas), ...Object.keys(now)].filter(k => srcWas[k] !== now[k])).size : null;
+    writeMan({ version: 2, files: was, src_files: srcWas || null, extra: record });
+    return { stale, extra: done,
+      ...(stale ? { refresh: `${stale} file(s) of the app changed since this copy was made — a new copy (your variants set aside): aid-companion.sh proto --plan ${PLAN} --refresh` } : {}),
+      ...(stale === null ? { refresh: 'this copy was made before 3.14.0 and cannot say whether the app changed since; aid-companion.sh proto --plan ' + PLAN + ' --refresh makes a new one' } : {}) };
+  };
+  // proto --refresh set the old manifest aside: its copy_extra record still says which files beside the copy are the kit's
+  const recordedBefore = () => {
+    const f = process.env.AID_COMPANION_EXTRA_RECORDED;
+    try { return f ? (JSON.parse(fs.readFileSync(f, 'utf8')).extra || []) : []; } catch { return []; }
+  };
   // a running prototype of this plan is reused only when it is still ours
   if (fs.existsSync(rec)) {
     const r = JSON.parse(fs.readFileSync(rec, 'utf8'));
@@ -76,7 +67,7 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
     if (alive) {   // ours, but still serving? the port must be the group's and answer
       const owners = portOwners(r.port);
       let up = false; try { up = (await fetch(r.url + (UI.ready_path || '/'))).status === 200; } catch {}
-      if (up && owners.length && owners.every(p => pgrpOf(p) === r.pgid)) { console.log(JSON.stringify({ ...r, reused: true })); return; }
+      if (up && owners.length && owners.every(p => pgrpOf(p) === r.pgid)) { console.log(JSON.stringify({ ...r, reused: true, ...settle() })); return; }
       try { process.kill(-r.pgid, 'SIGTERM'); } catch {}
     }
     fs.rmSync(rec);
@@ -100,15 +91,15 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
       if (e === '.vite' || e === '.vite-temp' || e === '.cache') continue;
       fs.symlinkSync(path.join(src, 'node_modules', e), path.join(nm, e));
     }
-    fs.writeFileSync(manFile, JSON.stringify(manifest(dest), null, 1));
-    copyExtra(src, dest);
+    writeMan({ version: 2, files: manifest(dest), src_files: manifest(src), extra: recordedBefore() });
   } else if (!fs.existsSync(manFile)) {
-    die(`proto: ${dest} exists without its manifest (${manFile}) — the copy's changes cannot be told from the app; move ${dest} away and run proto again`);
+    die(`proto: ${dest} exists without its manifest (${manFile}) — the copy's changes cannot be told from the app; run: aid-companion.sh proto --plan ${PLAN} --refresh`);
   }
+  const state = settle();
 
   const port = await freePort();
   const args = UI.dev_cmd.map(a => String(a).replaceAll('{port}', String(port)));
-  const log = fs.openSync(path.join(DIR, 'proto.log'), 'a');
+  const log = fs.openSync(safeTarget(DIR, 'proto.log', die, { kit: true }), fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW, 0o644);
   const child = spawn(args[0], args.slice(1), { cwd: dest, detached: true, stdio: ['ignore', log, log], env: { ...process.env, BROWSER: 'none' } });
   child.unref();
   const pgid = child.pid, url = `http://127.0.0.1:${port}`, ready = UI.ready_path || '/';
@@ -127,6 +118,6 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
   const owners = portOwners(port);
   if (!owners.length || !owners.every(p => pgrpOf(p) === pgid)) stop(`port ${port} answers, but not from the process group we started (owners: ${owners.join(', ') || 'unknown'}) — another process took it`);
   const out = { pid: pgid, pgid, starttime: startOf(pgid), cmd: args[0], port, url, dir: dest, reused: false };
-  fs.writeFileSync(rec, JSON.stringify(out, null, 1));
-  console.log(JSON.stringify({ ...out, next: `build the variants in ${dest} behind ?v=<klic> from ui.components only; then write mocks.json and shots.json and run: aid-companion.sh shots --plan ${PLAN}` }));
+  kitWrite(DIR, 'proto.json', JSON.stringify(out, null, 1), die);
+  console.log(JSON.stringify({ ...out, ...state, next: `build the variants in ${dest} behind ?v=<klic> from ui.components only; then write mocks.json and shots.json and run: aid-companion.sh shots --plan ${PLAN}` }));
 }

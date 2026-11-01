@@ -91,7 +91,7 @@ if [[ -n "$PROJECT_DIR" ]]; then
   [[ "$PLAN_ID" =~ ^P[0-9]+$ ]] || fail "--plan must look like P108 (got '$PLAN_ID')"
   STATE_DIR="$PROJECT_DIR/.aid-o/work/brainstorm/$PLAN_ID"
   STATE="$STATE_DIR/state.yaml"
-  [[ -r "$STATE" ]] || fail "no brainstorm run $PLAN_ID at $STATE — start it: aid-brainstorm-state.sh init $PLAN_ID --scope <scope> [--topic-kind ui|other]"
+  [[ -r "$STATE" ]] || fail "no brainstorm run $PLAN_ID at $STATE — start it: aid-brainstorm-state.sh init $PLAN_ID --scope <scope> [--topic-kind ui|other]; a companion with no brainstorm behind it (a quick look for the PM): aid-brainstorm-state.sh init $PLAN_ID --scope user_visible --topic-kind ui --no-worktree"
   TOPIC_KIND="$(sed -n 's/^topic_kind: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' "$STATE" | head -1)"
   TOPIC_REASON="$(sed -n 's/^topic_kind_reason: *"\{0,1\}\([^"]*\)"\{0,1\} *$/\1/p' "$STATE" | head -1)"
   case "$TOPIC_KIND" in

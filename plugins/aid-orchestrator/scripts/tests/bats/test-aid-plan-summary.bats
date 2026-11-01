@@ -118,7 +118,7 @@ EOF
   grep -q '1 kolo' "$OUT"
 }
 
-@test "a plan read from a linked worktree shows the review recorded in the state root (agents 27. 9.)" {
+@test "a plan read from a linked worktree shows the review recorded in the state root" {
   local plan; plan="$(write_plan P955 'plugins/aid-orchestrator/commands/aid-help.md')"
   mkdir -p "$TMP/.aid-o/plans" "$TMP/.aid-o/work/plan-state/P001"
   mv "$plan" "$TMP/.aid-o/plans/P955.md"; : > "$TMP/.aid-o/work/plan-state/P001/x"

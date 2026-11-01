@@ -136,7 +136,7 @@ _seed_aborted_plan() {
   [[ "$output" == *"Execution worktree torn down"* ]]
 }
 
-@test "plan-close refuses while the worktree holds an untracked or changed file, changes nothing, and names it; --discard-worktree-changes removes it (WAN 19. 10. 2026)" {
+@test "plan-close refuses while the worktree holds an untracked or changed file, changes nothing, and names it; --discard-worktree-changes removes it" {
   _mk_project
   _seed_aborted_plan P901
   echo "# návrh pro PM" > "$(_wt P901)/navrh-pro-pm.md"

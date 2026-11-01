@@ -25,6 +25,10 @@ codes:
   release_prep_version_changed: {class: agent_fix, how: "verzi změnil commit po přípravě: prepare-plan --bump none (vydání) / rebind --adopt-version (bez vydání), nebo změnu vrátit"}
   plan_version_not_above_target: {class: agent_fix, how: "cíl má mezitím vyšší nebo stejný tag (souběžný plán): zvednout verzi prepare-plan --bump …"}
   step_test_named_after_plan: {class: agent_fix, how: "test pojmenovaný podle plánu, nálezu nebo backlogu: role kroku ho přejmenuje podle chování a kontrola kroku se pustí znovu"}
+  roadmap_page_missing: {class: prevent, how: "kontrola plánu: zadání jmenuje roadmapu bez stránky průběhu - aid-roadmap-page.sh init"}
+  roadmap_path_invalid: {class: prevent, how: "kontrola plánu: cesta k dokumentu roadmapy mimo projekt nebo přes odkaz"}
+  roadmap_page_not_refreshed: {class: agent_fix, how: "agent zapíše změnu plánu do .prubeh.json roadmapy, pustí aid-roadmap-page.sh publish --plan a plan-close znovu"}
+  roadmap_page_refreshed: {class: agent_fix, how: "podmínka uzávěru (roadmap_page_not_refreshed); --force ji obejde s důvodem v záznamu"}
   accepted_risk_stale: {class: pm, how: "přijetí rizika PM platí jen pro svého kandidáta a svou sadu nálezů: nová karta"}
   active_runs_unreadable: {class: incident, how: "poškozený soubor stavu"}
   active_runs_write_failed: {class: incident, how: "zápis stavu selhal"}

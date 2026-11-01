@@ -62,7 +62,7 @@ EOF
   [ "$absent" -eq 0 ]
 }
 
-@test "one criterion checked, one prose criterion skipped → partial, never pass (ACTA P024)" {
+@test "one criterion checked, one prose criterion skipped → partial, never pass" {
   echo "test content" > "${TMPDIR_TEST}/foo.ts"
   cat > "${PLANS_DIR}/P-TEST.md" <<'EOF'
 ## Acceptance Criteria

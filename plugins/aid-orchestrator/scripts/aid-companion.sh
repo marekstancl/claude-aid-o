@@ -8,14 +8,17 @@
 #            over the VPN), or reuse its own running one from the same plugin
 #            version; prints the PM's address
 #   proto    copy ui.dir into <P>/proto (outside the repo), start ui.dev_cmd on a
-#            free loopback port in its own process group, wait for ui.ready_path
+#            free loopback port in its own process group, wait for ui.ready_path; a reused
+#            copy gets the copy_extra files and says how stale it is; --refresh sets the copy,
+#            its manifest and shots aside in old/<time>-<pid>/ and makes a new one
 #   shots    capture every shot of <P>/shots.json on every viewport the project
-#            owes, over <P>/mocks.json; fails on an API call without a mock
+#            owes, over <P>/mocks.json; fails on an API call without a mock; writes a check per
+#            shot (<shot>.check.json: cut-off dialogs, overflow); --only a,b takes those shots
 #   show     check <P>/navrh.json, build navrh-<kolo>.html from the fixed template,
 #            check the page itself (fits, controls reachable, images present),
 #            write proposal.json; prints the PM's address
 #   answers  the PM's latest choices and notes for a round (--kolo N, --history)
-#   down     stop this plan's server and its verified prototype group
+#   down     stop this plan's server and its verified prototype group (by group and start time)
 #
 # Usage: aid-companion.sh <step> --plan <P> [--project-dir <root>] [step options]
 # answers.jsonl is the agent's input, never proof of a PM choice (anyone with
@@ -34,13 +37,17 @@ die() { echo "aid-companion: $*" >&2; exit 1; }
 
 step="${1:-}"; [[ -n "$step" ]] || die "usage: aid-companion.sh up|proto|shots|show|answers|down --plan <P> [--project-dir <root>]"
 shift
-PLAN=""; PROJECT=""; KOLO=""; HISTORY=0
+PLAN=""; PROJECT=""; KOLO=""; HISTORY=0; REFRESH=0; ONLY=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --plan) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PLAN="${2:-}"; shift 2 ;;
     --project-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PROJECT="${2:-}"; shift 2 ;;
     --kolo) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; KOLO="${2:-}"; shift 2 ;;
     --history) HISTORY=1; shift ;;
+    --refresh) [[ "$step" == proto ]] || die "--refresh belongs to proto"; REFRESH=1; shift ;;
+    --only) [[ "$step" == shots ]] || die "--only belongs to shots"
+            [[ $# -ge 2 && "$2" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(,[A-Za-z0-9][A-Za-z0-9._-]*)*$ ]] || die "--only needs shot names separated by commas (letters, digits, . _ -)"
+            ONLY="$2"; shift 2 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -51,15 +58,15 @@ DIR="$ROOT/.aid-o/work/companion/$PLAN"
 mkdir -p "$DIR"
 export AID_COMPANION_DIR="$DIR" AID_COMPANION_PLAN="$PLAN" AID_COMPANION_PROJECT="$PROJECT" AID_COMPANION_STATE="$ROOT" AID_PLUGIN_ROOT="$PLUGIN_ROOT"
 
-# pid alive and still the process we started (start time from /proc/<pid>/stat field 22)
+# start time = field 22 of /proc/<pid>/stat, counted AFTER the name in parentheses: the name may hold spaces
+# (`npm exec vite`), so a plain field count reads the wrong field (as kit-proto.mjs does: split at ") ")
+_starttime() { [[ "$1" =~ ^[0-9]+$ ]] || return 1; sed -E 's/^.*\) //' "/proc/$1/stat" 2>/dev/null | awk '{print $20}'; }
+# pid alive and still the process we started
 _alive_as() {  # <pid> <starttime> <cmd substring>
-  local pid="$1" st="$2" want="$3" now
-  [[ "$pid" =~ ^[0-9]+$ && -r "/proc/$pid/stat" ]] || return 1
-  now="$(awk '{print $22}' "/proc/$pid/stat" 2>/dev/null)"
-  [[ "$now" == "$st" ]] || return 1
+  local pid="$1" st="$2" want="$3"
+  [[ "$pid" =~ ^[0-9]+$ && -r "/proc/$pid/stat" && "$(_starttime "$pid")" == "$st" ]] || return 1
   tr '\0' ' ' < "/proc/$pid/cmdline" 2>/dev/null | grep -qF -- "$want"
 }
-_starttime() { awk '{print $22}' "/proc/$1/stat" 2>/dev/null; }
 
 url_host() {
   if [[ -n "${AID_COMPANION_URL_HOST:-}" ]]; then printf '%s' "$AID_COMPANION_URL_HOST"; return; fi
@@ -97,14 +104,113 @@ cmd_down() {
     else echo "server: not running as recorded (pid ${pid}) — nothing stopped"; fi
     rm -f "$rec"
   fi
+  _down_proto
+}
+
+_down_proto() {
+  local p="$DIR/proto.json" pid st pg port
   if [[ -s "$p" ]]; then
-    local cmd; cmd="$(jq -r '.cmd // ""' "$p")"
-    read -r pid st pg < <(jq -r '[.pid, .starttime, .pgid] | map(tostring) | join(" ")' "$p")
-    if _alive_as "$pid" "$st" "$cmd" && [[ "$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')" == "$pg" ]]; then
-      kill -- "-$pg" && echo "prototype group ${pg} stopped"
-    else echo "prototype: the recorded process (pid ${pid}, group ${pg}) is not the one we started — nothing stopped"; fi
+    read -r pid st pg port < <(jq -r '[.pid, .starttime, .pgid, .port] | map(tostring) | join(" ")' "$p")
+    if _proto_ours "$pid" "$st" "$pg"; then
+      _stop_group "$pid" "$st" "$pg" "$port" || return 1
+      echo "prototype group ${pg} stopped"
+    else
+      echo "prototype: the recorded process (pid ${pid}, group ${pg}) is not the one we started — nothing stopped"
+      # the record goes only when nothing of it is left: no member of the group, the port closed
+      local left; left="$(_group_or_port_alive "$pg" "$port")" || {
+        echo "prototype: ${left:-cannot tell whether group ${pg} or port ${port} is still in use} — the record stays in ${p}; stop it by hand" >&2; return 1; }
+    fi
     rm -f "$p"
   fi
+}
+
+# the prototype is the group the kit spawned: its leader (pgid == pid, both > 1) with the recorded start time. Not the
+# program's name: `npx vite` runs as `npm exec vite` (WAN P119 31. 10. 2026: down stopped nothing).
+_proto_ours() {  # <pid> <starttime> <pgid>
+  local pid="$1" st="$2" pg="$3"
+  [[ "$pid" =~ ^[0-9]+$ && "$pg" =~ ^[0-9]+$ ]] && (( pid > 1 && pg == pid )) || return 1
+  [[ -r "/proc/$pid/stat" && "$(_starttime "$pid")" == "$st" ]] || return 1
+  [[ "$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ')" == "$pg" ]]
+}
+# "" (and 0) when group <pgid> has no member and <port> is closed; else 1 with what is left, or why it cannot tell
+_group_or_port_alive() {  # <pgid> <port>
+  local pg="$1" port="$2" rc=0 out
+  [[ "$pg" =~ ^[0-9]+$ && "$port" =~ ^[0-9]+$ ]] || { echo "the record names no valid group or port"; return 1; }
+  out="$(pgrep -g "$pg" 2>/dev/null)" || rc=$?
+  (( rc == 0 )) && { echo "group ${pg} still has processes ($(tr '\n' ' ' <<< "$out"))"; return 1; }
+  (( rc == 1 )) || { echo "pgrep failed (exit ${rc})"; return 1; }
+  rc=0; out="$(ss -ltnH "sport = :$port" 2>/dev/null)" || rc=$?
+  (( rc == 0 )) || { echo "ss failed (exit ${rc})"; return 1; }
+  [[ -z "$out" ]] || { echo "port ${port} is still open"; return 1; }
+}
+# TERM, up to 5 s, then KILL — only to the processes that were members of the group while its leader was proven
+# alive (pid, start time). A pidfd is opened on each of them at that moment and every signal goes through it, so it
+# reaches exactly that process even if a number is reused later (a pidfd pins the process, not the number). A
+# member that appears afterwards is never signalled: down then reports the group as still alive and keeps the record.
+# ponytail: the record identifies the leader by pid + start time (clock ticks, 10 ms); a pid the kernel hands out
+# again within the same tick to a new group leader is not told apart — pids are allocated round-robin over 4M.
+_stop_group() {  # <pid> <starttime> <pgid> <port>
+  local pid="$1" st="$2" pg="$3" port="$4" left rc=0
+  python3 -I -c '
+import os, sys, signal, select, time
+pid, st, pg = int(sys.argv[1]), sys.argv[2], int(sys.argv[3])
+def stat(p):
+    with open(f"/proc/{p}/stat") as f: return f.read().rsplit(") ", 1)[1].split()
+def leader_ok():
+    try: return stat(pid)[19] == st and int(stat(pid)[2]) == pg
+    except OSError: return False
+try: lead = os.pidfd_open(pid)
+except OSError: sys.exit(3)
+if not leader_ok(): sys.exit(3)
+fds = {}
+for e in os.listdir("/proc"):
+    if not e.isdigit(): continue
+    try: fd = os.pidfd_open(int(e))
+    except OSError: continue
+    try: ours = int(stat(e)[2]) == pg
+    except (OSError, IndexError, ValueError): ours = False
+    if ours: fds[int(e)] = fd
+    else: os.close(fd)
+if not leader_ok(): sys.exit(3)       # the leader lived through the whole scan: every pgid == pg seen was this group
+def alive():
+    out = {}
+    for m, fd in fds.items():
+        p = select.poll(); p.register(fd, select.POLLIN)
+        if not p.poll(0): out[m] = fd     # a pidfd turns readable when its process exits
+    return out
+def send(sig):
+    for fd in alive().values():
+        try: signal.pidfd_send_signal(fd, sig)
+        except OSError: pass
+def wait(sec):
+    end = time.time() + sec
+    while time.time() < end and alive(): time.sleep(0.1)
+    return not alive()
+send(signal.SIGTERM)
+if not wait(5): send(signal.SIGKILL); wait(2)
+sys.exit(0 if not alive() else 1)
+' "$pid" "$st" "$pg" || rc=$?
+  (( rc == 3 )) && { echo "prototype: the leader ${pid} changed before it was signalled — nothing sent" >&2; return 1; }
+  # an exited process is still listed until it is reaped: wait for the group to empty and the port to close (no
+  # more signals), up to 3 s
+  local i; for i in $(seq 30); do _group_or_port_alive "$pg" "$port" >/dev/null && break; sleep 0.1; done
+  left="$(_group_or_port_alive "$pg" "$port")" || {
+    echo "prototype: ${left} after TERM and KILL — the record stays in ${DIR}/proto.json; stop it by hand" >&2; return 1; }
+}
+
+# proto --refresh (WAN P113): the running prototype stopped as down stops it, the copy with its manifest and the shots
+# set aside together in old/<time>-<pid>/ (never over an earlier one), then proto makes a new copy of today's ui.dir
+_refresh_proto() {
+  _down_proto || die "--refresh: the prototype could not be stopped (above) — nothing was set aside"
+  [[ -e "$DIR/proto" || -e "$DIR/proto-manifest.json" || -e "$DIR/shots" ]] || return 0
+  local f; for f in old proto proto-manifest.json shots; do [[ ! -L "$DIR/$f" ]] || die "--refresh: ${DIR}/${f} is a link — the companion directory holds no links"; done
+  local old; old="$DIR/old/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  [[ ! -e "$old" ]] || die "--refresh: ${old} already exists"
+  mkdir -p "$DIR/old" && mkdir "$old" || die "--refresh: cannot create ${old}"
+  for f in proto proto-manifest.json shots; do [[ -e "$DIR/$f" ]] && mv -- "$DIR/$f" "$old/"; done
+  # the copy_extra record goes with the old manifest: the new copy still knows which files beside it are the kit's
+  [[ -f "$old/proto-manifest.json" ]] && export AID_COMPANION_EXTRA_RECORDED="$old/proto-manifest.json"
+  echo "aid-companion: the old copy, its manifest and shots are in ${old}" >&2
 }
 
 cmd_answers() {
@@ -148,6 +254,8 @@ case "$step" in
   up) cmd_up ;;
   down) cmd_down ;;
   answers) cmd_answers ;;
-  proto|shots|show) node_step "$step" ;;
+  proto) (( REFRESH )) && _refresh_proto; node_step proto ;;
+  shots) export AID_COMPANION_ONLY="$ONLY"; node_step shots ;;
+  show) node_step show ;;
   *) die "unknown step '${step}' (up|proto|shots|show|answers|down)" ;;
 esac

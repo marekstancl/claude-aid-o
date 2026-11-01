@@ -125,7 +125,7 @@ teardown() { rm -rf "$TMP"; }
   [ ! -e "$OUT/proposal.json" ]
 }
 
-@test "proposal: the page as rendered is recorded per viewport when the capture wrote it, null when it did not (2.114.0)" {
+@test "proposal: the page as rendered is recorded per viewport when the capture wrote it, null when it did not" {
   aid_ui_proposal_build "$TMP/proj" "$TMP/out" --screen http://x/ --fixture-data "$TMP/mocks.json"
   [ "$(jq -r '.viewports[0].page' "$TMP/out/proposal.json")" = "$TMP/out/desktop/baseline.html" ]
   [ -s "$TMP/out/desktop/baseline.html" ]

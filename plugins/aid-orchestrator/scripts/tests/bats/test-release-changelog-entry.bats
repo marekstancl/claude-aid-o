@@ -442,7 +442,7 @@ PY
   [ "$output" = "1" ]
 }
 
-@test "prepare-plan --bump none: a version the plan already raised (CHANGELOG above the last tag) is recorded with no commit; one not above the tag is refused (WAN P109 18. 10. 2026)" {
+@test "prepare-plan --bump none: a version the plan already raised (CHANGELOG above the last tag) is recorded with no commit; one not above the tag is refused" {
   _seed "2.0.1" "$(_changelog_complete_target)"
   cd "$TEST_PROJECT_ROOT"; git tag v2.0.0; git checkout -q -b plan/P900
   local commits_before; commits_before="$(git rev-list --count HEAD)"
@@ -461,7 +461,7 @@ PY
   [ "$status" -ne 0 ]; [[ "$output" == *"not above the last tag"* ]]
 }
 
-@test "prepare-plan --bump none: an example header inside a fenced block above the real sections is not the version (WAN P112, P113, 3.9.1)" {
+@test "prepare-plan --bump none: an example header inside a fenced block above the real sections is not the version" {
   _seed "2.0.1" "$(_changelog_complete_target)"
   cd "$TEST_PROJECT_ROOT"; git tag v2.0.0; git checkout -q -b plan/P900
   { printf '# Changelog\n\n## Jak psát záznam\n\n```\n## [0.15.0] — 2026-08-10\n```\n\n~~~\n## [0.1.0]\n~~~\n\n'; sed '1{/^# /d}' CHANGELOG.md; } > CHANGELOG.new && mv CHANGELOG.new CHANGELOG.md

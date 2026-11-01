@@ -4,6 +4,9 @@
 #
 #   aid-pm-page-publish.sh <page.html> --plan <Pnnn> --kind plan|close|brainstorm --title "<title>" [--project-root <r>]
 #                          [--on-request]   the PM asked for this page: publish it even when AID_PM_PAGES=off
+#   aid-pm-page-publish.sh <page.html> --kind roadmap --roadmap <id> --title "<title>" [--project-root <r>]
+#                          a roadmap's progress page (AID 3.14.0, scripts/aid-roadmap-page.sh): the one page the PM
+#                          wants without asking (30. 10. 2026), so it goes out even when AID_PM_PAGES=off
 #
 # Prints ONE line for the controller:
 #   none <page>         AID_PM_PAGES=off and not --on-request: publish nothing, the card alone goes to the chat (exit 0)
@@ -40,7 +43,7 @@ LOGO_MAX=8192
 
 _die() { echo "aid-pm-page-publish: $1" >&2; exit "${2:-1}"; }
 
-page="" plan="" kind="" title="" root="" on_request=0
+page="" plan="" kind="" title="" root="" on_request=0 roadmap=""
 [[ $# -ge 1 && "$1" != --* ]] && { page="$1"; shift; }
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -49,12 +52,19 @@ while [[ $# -gt 0 ]]; do
     --title) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; title="${2:-}"; shift 2 ;;
     --project-root) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; root="${2:-}"; shift 2 ;;
     --on-request) on_request=1; shift ;;
+    --roadmap) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; roadmap="${2:-}"; shift 2 ;;
     *) _die "unknown argument: $1" 2 ;;
   esac
 done
 [[ -n "$page" && -f "$page" && -r "$page" ]] || _die "no readable page: ${page:-<none>}" 2
-[[ "$plan" =~ ^P[0-9]{3,}$ ]] || _die "--plan must be P<number>, got '${plan}'" 2
-[[ "$kind" =~ ^(plan|close|brainstorm)$ ]] || _die "--kind must be plan, close or brainstorm, got '${kind}'" 2
+if [[ "$kind" == roadmap ]]; then
+  [[ "$roadmap" =~ ^[a-z0-9][a-z0-9-]{0,48}-[0-9a-f]{8}$ && -z "$plan" ]] || _die "--kind roadmap takes --roadmap <id> (as aid-roadmap-page.sh writes it), no --plan; got '${roadmap}'" 2
+  plan="roadmap-${roadmap}"; on_request=1   # the key's middle part; published even with AID_PM_PAGES=off
+else
+  [[ -z "$roadmap" ]] || _die "--roadmap belongs to --kind roadmap" 2
+  [[ "$plan" =~ ^P[0-9]{3,}$ ]] || _die "--plan must be P<number>, got '${plan}'" 2
+  [[ "$kind" =~ ^(plan|close|brainstorm)$ ]] || _die "--kind must be plan, close, brainstorm or roadmap, got '${kind}'" 2
+fi
 title="${title//[$'\t\r\n']/ }"
 [[ -n "${title// /}" ]] || _die "--title is required" 2
 

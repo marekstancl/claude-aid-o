@@ -135,7 +135,7 @@ opponent_ran() { dispute '{"opponent":"answered","plan_id":"P900","agree":[],"di
   ! grep -q "Nedokončeno" "$OUT"
 }
 
-@test "approve: a vision proposed straight into .aid-o/plans/<id>-vision.md is already promoted, not refused (WAN P113, 3.9.1)" {
+@test "approve: a vision proposed straight into .aid-o/plans/<id>-vision.md is already promoted, not refused" {
   start_run
   mkdir -p "$AID_PROJECT_ROOT/.aid-o/plans"
   printf '## Vision\n\n- V1: One rule.\n  - test: a check names it.\n' > "$AID_PROJECT_ROOT/.aid-o/plans/P900-vision.md"
@@ -148,7 +148,7 @@ opponent_ran() { dispute '{"opponent":"answered","plan_id":"P900","agree":[],"di
   grep -q "V1: One rule" "$AID_PROJECT_ROOT/.aid-o/plans/P900-vision.md"
 }
 
-@test "3.10.0: with a publisher configured, approve waits until the page reached the PM" {
+@test "with a publisher configured, approve waits until the page reached the PM" {
   start_run; approve_vision; opponent_ran
   aid_brainstorm_summary_render P900 "$RUN_DIR/brainstorm-summary-artifact.html" >/dev/null
   local fake="$TMP/pub"; printf '#!/usr/bin/env bash\ncat >/dev/null; echo https://share.example/p/b#k=K\n' > "$fake"; chmod +x "$fake"
@@ -164,7 +164,7 @@ opponent_ran() { dispute '{"opponent":"answered","plan_id":"P900","agree":[],"di
   echo "$output"; [ "$status" -eq 0 ]
 }
 
-@test "3.10.0: another .html in the run's directory is no brainstorm page (with or without a publisher)" {
+@test "another .html in the run's directory is no brainstorm page (with or without a publisher)" {
   start_run; approve_vision; opponent_ran
   mkdir -p "$RUN_DIR"; printf '<p>notes</p>' > "$RUN_DIR/notes.html"
   local fake="$TMP/pub"; printf '#!/usr/bin/env bash\ncat >/dev/null; echo https://share.example/p/b#k=K\n' > "$fake"; chmod +x "$fake"

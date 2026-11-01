@@ -5,9 +5,9 @@
 // Every refusal names the field or file and exits 1; nothing is guessed.
 import fs from 'node:fs';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { sha, giSha, extraTargets, manFiles, reserved, stripKitBlock, shotSha } from './kit-extra.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ENV = process.env;
@@ -67,7 +67,7 @@ function validate(n, shotsOnly) {
     const keys = moznosti.map(m => m.klic);
     keys.forEach((k, j) => { if (k !== String.fromCharCode(65 + j)) fail(`${w}.moznosti[${j}].klic must be "${String.fromCharCode(65 + j)}" — options are A, B, C… from A in every round (got ${JSON.stringify(k)})`); });
     if (!keys.includes(b.doporuceni)) fail(`${w}.doporuceni '${b.doporuceni}' is not the key of one of its options (${keys.join(', ')})`);
-    const minule = arr(b.minule, `${w}.minule`).map((s, k) => ({ popisek: str(s.popisek, `${w}.minule[${k}].popisek`), soubory: shotFiles(s.shot, `${w}.minule[${k}]`, shotsOnly[s.shot]) }));
+    const minule = arr(b.minule, `${w}.minule`).map((s, k) => ({ popisek: str(s.popisek, `${w}.minule[${k}].popisek`), shot: s.shot, soubory: shotFiles(s.shot, `${w}.minule[${k}]`, shotsOnly[s.shot]) }));
     const pravidla = arr(b.soulad_s_pravidly, `${w}.soulad_s_pravidly`).map((r, k) => ({ pravidlo: str(r.pravidlo, `${w}.soulad_s_pravidly[${k}].pravidlo`), jak: str(r.jak, `${w}.soulad_s_pravidly[${k}].jak`) }));
     return {
       id, title: str(b.title, `${w}.title`), otazka: str(b.otazka, `${w}.otazka`), doporuceni: b.doporuceni,
@@ -89,7 +89,42 @@ function validate(n, shotsOnly) {
       }),
     };
   });
-  return { plan: PLAN, kolo: n.kolo, rozhodnuto, spolecne, body: out };
+  // K1 (PM 31. 10. 2026): the agent says what it saw in the shots; a defect of today's app is shown as one, never hidden
+  const prohlidka = str(n.prohlidka_snimku, 'prohlidka_snimku (what you saw when you looked at every shot)');
+  const vady = arr(n.vady_aplikace, 'vady_aplikace').map((x, i) => {
+    if (typeof x.snimek !== 'string' || !SAFE.test(x.snimek)) fail(`vady_aplikace[${i}].snimek must be a shot name`);
+    return { snimek: x.snimek, popis: str(x.popis, `vady_aplikace[${i}].popis`) };
+  });
+  return { plan: PLAN, kolo: n.kolo, rozhodnuto, spolecne, body: out, prohlidka_snimku: prohlidka, vady_aplikace: vady };
+}
+
+// every shot the proposal shows has its check from the shots step (K1): of this png, this viewport, this entry of
+// shots.json and a run with every API call mocked; a cut-off dialog or overflow may stand only in today's state
+// (minule[]) and only when vady_aplikace names it. Returns the shots with dialogs, for the orchestrator to look at.
+function shotChecks(v, spec) {
+  const entries = Object.fromEntries((spec.shots || []).map(x => [x.name, x])), look = new Set();
+  const vady = new Set(v.vady_aplikace.map(x => x.snimek)), inMinule = new Set();
+  const one = (name, soubory, where, today) => {
+    for (const [vp, rel] of Object.entries(soubory)) {
+      const cf = path.join(DIR, rel.replace(/\.png$/, '.check.json'));
+      let c = null; try { c = JSON.parse(fs.readFileSync(cf, 'utf8')); } catch {}
+      if (!c) { fail(`${where}: shot '${name}' (${vp}) has no check record — run: aid-companion.sh shots --plan ${PLAN}`); continue; }
+      if (c.png_sha256 !== sha(path.join(DIR, rel)) || c.viewport !== vp || !entries[name] || c.shot_sha256 !== shotSha(entries[name]))
+        { fail(`${where}: shot '${name}' (${vp}) changed since it was checked (another png, viewport or shots.json entry) — run shots again`); continue; }
+      if (c.mocks_missing) { fail(`${where}: shot '${name}' (${vp}) comes from a run with API calls without a mock — the screen may be empty; fix mocks.json and run shots again`); continue; }
+      if (c.dialogs) look.add(rel);
+      if (!c.clipped || !c.clipped.length) continue;
+      const what = c.clipped.map(x => `${x.pravidlo} ${x.prvek} (+${x.presah_px} px)`).join('; ');
+      if (!today) fail(`${where}: shot '${name}' (${vp}) is cut off — ${what}. Fix the variant (a defect of a shared component: fix it in the variant and list the file in spolecne) and run shots again`);
+      else if (!vady.has(name)) fail(`${where}: today's shot '${name}' (${vp}) is cut off — ${what}. It is a defect of today's app: list it in vady_aplikace [{snimek: "${name}", popis}] so the PM sees it`);
+    }
+  };
+  for (const b of v.body) {
+    b.minule.forEach((m, k) => { inMinule.add(m.shot); one(m.shot, m.soubory, `body ${b.id} minule[${k}]`, true); });
+    for (const m of b.moznosti) m.snimky.forEach((x, k) => one(x.shot, x.soubory, `body ${b.id} option ${m.klic} snimky[${k}]`, false));
+  }
+  for (const x of v.vady_aplikace) if (!inMinule.has(x.snimek)) fail(`vady_aplikace: '${x.snimek}' is not a shot of today's state (minule[]) — a defect is shown on today's shot`);
+  return [...look].sort();
 }
 
 // ── the copy of the app: which files the variants touched, and what they import ──
@@ -103,11 +138,14 @@ function walk(root, rel = '', out = []) {
   }
   return out;
 }
-const sha = f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
-export function manifest(root) { return Object.fromEntries(walk(root).map(r => [r, sha(path.join(root, r))])); }
+const fileSha = (root, r) => r === '.gitignore' ? giSha(fs.readFileSync(path.join(root, r), 'utf8')) : sha(path.join(root, r));
+// a .gitignore that holds only the kit's block counts as absent (the app had none)
+const kitOnly = (root, r) => r === '.gitignore' && stripKitBlock(fs.readFileSync(path.join(root, r), 'utf8')) === '';
+export function manifest(root) { return Object.fromEntries(walk(root).filter(r => !kitOnly(root, r)).map(r => [r, fileSha(root, r)])); }
 
-function changedFiles(protoDir, man) {
-  const now = manifest(protoDir), out = [];
+
+function changedFiles(protoDir, manAll) {
+  const now = manifest(protoDir), out = [], man = manFiles(manAll);
   for (const [r, h] of Object.entries(now)) if (man[r] !== h) out.push({ file: r, kind: man[r] ? 'changed' : 'added' });
   for (const r of Object.keys(man)) if (!(r in now)) out.push({ file: r, kind: 'deleted' });
   return out;
@@ -148,13 +186,26 @@ function imports(file, protoDir, al) {
   return out;
 }
 
-// what may lie in the plan's directory: the agent's three files and the variants (proto/), and what the kit
-// itself writes — anything else is a tool the agent built (Codex, 19. 10. 2026: the promise was not enforced)
-const ALLOWED = [/^proto$/, /^proto-manifest\.json$/, /^proto\.json$/, /^proto\.log$/, /^shots$/, /^mocks\.json$/, /^shots\.json$/,
-  /^navrh\.json$/, /^navrh-\d+\.html$/, /^check-\d+x\d+\.png$/, /^answers\.jsonl$/, /^server\.json$/, /^\.server\.(log|log\.prev|pid)$/,
-  /^\.events$/, /^\.started$/, /^\.keep$/];
+// what may lie in the plan's directory: the agent's three files and the variants (proto/), what the kit itself writes
+// (kit-extra.mjs RESERVED) and the copy_extra files — anything else is a tool the agent built (Codex, 19. 10. 2026)
+const foreign = p => fail(`${p} is not one of the kit's files — the agent writes only mocks.json, shots.json, navrh.json and the variants in proto/; move it out (a missing ability goes to aid-plugin-issues.md)`);
 function dirCheck() {
-  for (const e of fs.readdirSync(DIR)) if (!ALLOWED.some(r => r.test(e))) fail(`${path.join(DIR, e)} is not one of the kit's files — the agent writes only mocks.json, shots.json, navrh.json and the variants in proto/; move it out (a missing ability goes to aid-plugin-issues.md)`);
+  // the ui.copy_extra files proto put beside the copy are the kit's too — exactly those files, nothing else beside them
+  const extra = new Set(extraTargets({ DIR, PROJECT, UI, die }).map(t => t.rel.split(path.sep).join('/')));
+  const tops = new Set([...extra].map(r => r.split('/')[0]));
+  const inside = (rel) => {
+    for (const e of fs.readdirSync(path.join(DIR, rel), { withFileTypes: true })) {
+      const r = `${rel}/${e.name}`;
+      if (e.isDirectory() && !e.isSymbolicLink() && [...extra].some(x => x.startsWith(r + '/'))) inside(r);
+      else if (!extra.has(r) || !e.isFile()) foreign(path.join(DIR, r));
+    }
+  };
+  for (const e of fs.readdirSync(DIR, { withFileTypes: true })) {
+    if (reserved(e.name)) continue;
+    if (!tops.has(e.name)) { foreign(path.join(DIR, e.name)); continue; }
+    if (e.isFile() && extra.has(e.name)) continue;
+    if (e.isDirectory() && !e.isSymbolicLink()) inside(e.name); else foreign(path.join(DIR, e.name));
+  }
 }
 function exportsName(file, name) {   // a barrel names it: export { X }, export { Y as X }, export function/const/class X, export * from
   const src = fs.readFileSync(file, 'utf8');
@@ -278,6 +329,7 @@ async function show() {
   const only = Object.fromEntries((shotsSpec.shots || []).filter(s => s.only).map(s => [s.name, s.only]));
   dirCheck();
   const v = validate(readJson(f, 'navrh.json'), only); stop();
+  const look = shotChecks(v, shotsSpec); stop();
   codeChecks(v); stop();
   const page = render(v);
   await pageCheck(page); stop();
@@ -286,6 +338,7 @@ async function show() {
   try { url = JSON.parse(fs.readFileSync(path.join(DIR, 'server.json'), 'utf8')).url; } catch {}
   console.log(JSON.stringify({ page: path.join(DIR, page), url: url ? `${url}/` : null, proposal: prop,
     check: [path.join(DIR, 'check-1440x900.png'), path.join(DIR, 'check-390x844.png')],
+    look: look.map(r => path.join(DIR, r)),
     next: url ? 'give the PM the url; then aid-companion.sh answers --plan ' + PLAN : 'start the server: aid-companion.sh up --plan ' + PLAN }));
 }
 

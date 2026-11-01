@@ -404,7 +404,7 @@ YAML
   [[ "$(yq '.gates.plan_diff.command' .aid-o/config/execution.yaml)" == *"aid-plan-diff.sh --plan {plan_path}"*"--isolated --cwd ."* ]]
 }
 
-@test "project_tests is proposed from the test files the repository tracks, an existing project without tests is told so with no key, a fresh workspace keeps the stack defaults with a note (agents 12. 10. 2026)" {
+@test "project_tests is proposed from the test files the repository tracks, an existing project without tests is told so with no key, a fresh workspace keeps the stack defaults with a note" {
   source "$HELPER"
   git init -q .; mkdir -p tests asistent/tests web/src
   touch tests/tests-a.sh asistent/tests/test_x.py web/src/b.test.ts

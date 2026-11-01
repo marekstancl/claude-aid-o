@@ -578,7 +578,7 @@ _ledger() {
   grep -q 'delegovaná rozhodnutí: 1 — cp2 rozpor: claude → accepted — the reviewer read the live checkout' "$OUT_DIR/plan-close-artifact.html"
 }
 
-@test "3.12.0: the close page lists the follow-ups still owed (one a later round fixed is not) and the settled count, the same count decide prints" {
+@test "the close page lists the follow-ups still owed (one a later round fixed is not) and the settled count, the same count decide prints" {
   local d="$BATS_TEST_TMPDIR/proj"; mkdir -p "$d"; git -C "$d" init -q
   local ev="$d/.aid-o/work/evidence/P9"; mkdir -p "$ev/R-P9-final-3/cp7/round-1"
   printf '%s\n' '{"match":"m-a","severity":"minor","claim":"a stale name","first_citation":"x.py:2"}' \

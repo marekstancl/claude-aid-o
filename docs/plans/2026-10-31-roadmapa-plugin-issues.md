@@ -4,7 +4,7 @@
 položku dodá, ji tu ve stejném commitu označí `HOTOVO vX.Y.Z`. Do zdrojového hlášení projektu se dopíše
 `> **HOTOVO vX.Y.Z (datum):** …` až při vydání. Rozbor dělá skill `rozbor-plugin-issues`.
 
-Zadání 3.14.0: `docs/plans/2026-11-01-zadani-3140-roadmapa-companion.md` (3 kola revize Codexem, resolved).
+Zadání 3.14.0 (archiv): `docs/archive/2026-11-01-zadani-3140-roadmapa-companion.md` (3 kola revize Codexem, resolved; vydáno 3.14.0, navíc přejmenování 113 testů s původem ve jménu).
 Zadání 3.13.0 (archiv): `docs/archive/2026-10-31-zadani-3130-beh-planu.md` (7 kol revize Codexem, resolved; vydáno 3.13.0).
 
 Volby PM 31. 10. 2026: „beru tvoje doporučení“ = 1A, 2A, 3A, 4A, 5A, 6A, 7A, 8A, 9A, 10A, 11A, 12B;
@@ -38,15 +38,15 @@ nové věci z companionu přihodit; **studio (`/aid-ui`) teď neřešit**.
 
 | # | Co | Zdroj | Stav |
 |---|---|---|---|
-| 10 | **Přání PM:** povinná stránka průběhu roadmapy na share. `/aid-plan` ji při založení roadmapy vytvoří, uzávěr plánu a `/aid-do` nad položkou roadmapy ji obnoví, uzávěr neprojde, když se neobnovila. Vzor WAN `cc/wan/provize-stav`. | WAN 30. 10. (pokyn PM 03:32) | čeká |
-| C1 | **Přání PM:** companion nesmí předat rozbitý náhled. (a) `shots`/`show` kontrolují v každém snímku vodorovné přetečení a ořez (okno `role=dialog`, `scrollWidth > clientWidth`, obsah za hranou panelu) a stránku odmítnou s výpisem snímku a prvku; (b) skill: agent se podívá na každý snímek a v `navrh.json` potvrdí, že je bez ořezu, vadu dnešní komponenty opraví ve variantě nebo ukáže jako bod „vada dnešní aplikace“; (c) orchestrátor před odkazem PM prohlédne snímky s okny, ne jen `check-1440x900.png`. | WAN P119 31. 10. (pokyn PM 05:32) | čeká |
-| C2 | Kopie aplikace bez stylů oken: `.gitignore` projektu (`.aid-o/work/**/ui/`) skryje `proto/src/components/ui/` před Tailwindem. `proto` založí kopii tak, aby ji ignor nezasáhl (nebo doplní `!` výjimky). | WAN P119 31. 10. | čeká |
-| C3 | `show` odmítá soubory `ui.copy_extra`, které tam dal `proto`; `proto` je nedoplní do existující kopie. `show` je zná, `proto` je doplní a zapíše do manifestu. | WAN P117 29. 10., P119 31. 10. (potvrzeno) | čeká |
-| C4 | Celostránkový snímek (`capture: full` / `scroll: main`): pevné a lepivé lišty se otisknou doprostřed, předek s `overflow:hidden` ořízne výšku. Při celé stránce přepnout `fixed/sticky` na `static` a uvolnit předky. | WAN P117 29. 10., P119 31. 10. (potvrzeno) | čeká |
-| C5 | `up` bez běhu brainstormu odmítne: v chybě a ve skillu říct `aid-brainstorm-state.sh init … --no-worktree`. | WAN P113, P900, P119 (potvrzeno) | čeká |
-| C6 | `--configLoader runner` neposkytuje `__dirname`: ve skillu to říct, zkoušet až po výchozím načítání. | WAN P113, P117 29. 10. (potvrzeno) | čeká |
-| C7 | `shots`: jeden snímek při síťové chybě (`ERR_NETWORK_CHANGED`) zopakovat, ne zahodit celou sadu; `shots --only <jméno>`. | WAN P113 22. a 23. 10. (potvrzeno) | čeká |
-| C8 | `proto --refresh` (stará kopie stranou, nová ze současného main, upozornění na zastaralou kopii); `down` pozná vlastní dev server podle skupiny procesů, ne jména. | WAN P113 22. 10. | čeká |
+| 10 | **Přání PM:** povinná stránka průběhu roadmapy na share. `/aid-plan` ji při založení roadmapy vytvoří, uzávěr plánu a `/aid-do` nad položkou roadmapy ji obnoví, uzávěr neprojde, když se neobnovila. Vzor WAN `cc/wan/provize-stav`. | WAN 30. 10. (pokyn PM 03:32) | HOTOVO v3.14.0 |
+| C1 | **Přání PM:** companion nesmí předat rozbitý náhled. (a) `shots`/`show` kontrolují v každém snímku vodorovné přetečení a ořez (okno `role=dialog`, `scrollWidth > clientWidth`, obsah za hranou panelu) a stránku odmítnou s výpisem snímku a prvku; (b) skill: agent se podívá na každý snímek a v `navrh.json` potvrdí, že je bez ořezu, vadu dnešní komponenty opraví ve variantě nebo ukáže jako bod „vada dnešní aplikace“; (c) orchestrátor před odkazem PM prohlédne snímky s okny, ne jen `check-1440x900.png`. | WAN P119 31. 10. (pokyn PM 05:32) | HOTOVO v3.14.0 |
+| C2 | Kopie aplikace bez stylů oken: `.gitignore` projektu (`.aid-o/work/**/ui/`) skryje `proto/src/components/ui/` před Tailwindem. `proto` založí kopii tak, aby ji ignor nezasáhl (nebo doplní `!` výjimky). | WAN P119 31. 10. | HOTOVO v3.14.0 |
+| C3 | `show` odmítá soubory `ui.copy_extra`, které tam dal `proto`; `proto` je nedoplní do existující kopie. `show` je zná, `proto` je doplní a zapíše do manifestu. | WAN P117 29. 10., P119 31. 10. (potvrzeno) | HOTOVO v3.14.0 |
+| C4 | Celostránkový snímek (`capture: full` / `scroll: main`): pevné a lepivé lišty se otisknou doprostřed, předek s `overflow:hidden` ořízne výšku. Při celé stránce přepnout `fixed/sticky` na `static` a uvolnit předky. | WAN P117 29. 10., P119 31. 10. (potvrzeno) | HOTOVO v3.14.0 |
+| C5 | `up` bez běhu brainstormu odmítne: v chybě a ve skillu říct `aid-brainstorm-state.sh init … --no-worktree`. | WAN P113, P900, P119 (potvrzeno) | HOTOVO v3.14.0 |
+| C6 | `--configLoader runner` neposkytuje `__dirname`: ve skillu to říct, zkoušet až po výchozím načítání. | WAN P113, P117 29. 10. (potvrzeno) | HOTOVO v3.14.0 |
+| C7 | `shots`: jeden snímek při síťové chybě (`ERR_NETWORK_CHANGED`) zopakovat, ne zahodit celou sadu; `shots --only <jméno>`. | WAN P113 22. a 23. 10. (potvrzeno) | HOTOVO v3.14.0 |
+| C8 | `proto --refresh` (stará kopie stranou, nová ze současného main, upozornění na zastaralou kopii); `down` pozná vlastní dev server podle skupiny procesů, ne jména. | WAN P113 22. 10. | HOTOVO v3.14.0 |
 
 ## Čeká na druhý případ (12B, PM 31. 10.)
 

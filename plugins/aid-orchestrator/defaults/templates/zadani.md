@@ -3,7 +3,8 @@ zadani: P<NNN>
 verze: 1
 datum: YYYY-MM-DD
 autor: PM + AI
-roadmapa: <optional — where this brief sits in a larger line of releases>
+roadmapa: <optional — where this brief sits in a larger line of releases (free text)>
+# roadmapa_dokument: docs/plans/<roadmap>.md — uncomment when this plan belongs to a roadmap with a progress page; the plan then refreshes the page before plan-close (skills/plan-writing.md §The roadmap's progress page)
 ---
 
 # P<NNN> - <short name of what is being built>

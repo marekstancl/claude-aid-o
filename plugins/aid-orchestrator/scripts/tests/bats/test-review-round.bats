@@ -275,7 +275,7 @@ _round1_closed() {
   run "$ROUND_SH" finalize "$PLAN"
   [ "$status" -eq 1 ]; [[ "$output" == *"outside the fix list"* ]]
 }
-@test "fix-check (3.13.0): a plan-level finding allows any step; --also-steps only records, it does not narrow" {
+@test "fix-check: a plan-level finding allows any step; --also-steps only records, it does not narrow" {
   _round1_closed '.findings[0].severity = "blocker" | .findings[0].step = null'
   jq -e ".findings | any(.status == \"open\" and .severity == \"blocker\" and .step == null)" "$CP1/round-1/merged.json"
   # step 1 changes (the plan-level fix) and step 2 restates it: with `any,2` the old code allowed only step 2
@@ -287,7 +287,7 @@ _round1_closed() {
   [ "$(jq '.added_outside_fixes | length' "$CP1/round-1/fix-diff.json")" -eq 0 ]
 }
 
-@test "plan-check (3.13.0): --fixes reads 'any' as a whole item — any,2 allows every step, many,2 does not" {
+@test "plan-check: --fixes reads 'any' as a whole item — any,2 allows every step, many,2 does not" {
   printf -- '---\nid: P900\n---\n# Plan\n\n### Step 1: first\n\ntext\n\n### Step 2: second\n\ntext\n' > "$ROOT/fp.md"; cp "$ROOT/fp.md" "$ROOT/fp-snap.md"
   sed -i 's/^### Step 1: first$/### Step 1: first\n\n- Create: `x.sh` — new/' "$ROOT/fp.md"
   run bash "$AID_PLUGIN_PATH/scripts/aid-plan-check.sh" "$ROOT/fp.md" --snapshot "$ROOT/fp-snap.md" --fixes any,2 --json "$ROOT/o.json" --quiet
@@ -296,7 +296,7 @@ _round1_closed() {
   [ "$(jq '.added_outside_fixes | length' "$ROOT/o.json")" -gt 0 ]
 }
 
-@test "finalize (3.13.0): --also-steps lets a consequential edit through and records it in finalize.json" {
+@test "finalize: --also-steps lets a consequential edit through and records it in finalize.json" {
   _round1_closed
   printf '\n- Modify: `scripts/a.sh` — the name step 1 changed\n' >> "$PLAN"
   run "$ROUND_SH" finalize "$PLAN"; [ "$status" -eq 1 ]
@@ -714,14 +714,14 @@ _mplan() {
   [ "$(jq -r '.fixer.tokens' "$(D 2)/measurement.json")" = unknown ]
   [ "$(jq -r '.verdict' "$(D 2)/measurement.json")" = pass ]
 }
-@test "cp2 (3.13.0): a criterion the takeover measured with another command is listed for the reviewers in dod.md" {
+@test "cp2: a criterion the takeover measured with another command is listed for the reviewers in dod.md" {
   _repo; mkdir -p "$E/steps/step_1_backend"
   jq -n '{replacements: [{ac: 1, command: "test -e src/new.py", plan_command: "docker compose exec api test -e src/new.py", reason: "the container reads the main checkout"}]}' > "$E/steps/step_1_backend/land.json"
   _sc; _S prepare --round 1 >/dev/null
   grep -q 'measured with another command than the plan names' "$(D 1)/packet/dod.md"
   grep -q '^- AC1: `test -e src/new.py` instead of `docker compose exec api test -e src/new.py` — the container reads the main checkout$' "$(D 1)/packet/dod.md"
 }
-@test "cp2 (3.13.0): at the same HEAD a new round is allowed only when the takeover's replacements changed" {
+@test "cp2: at the same HEAD a new round is allowed only when the takeover's replacements changed" {
   _repo; mkdir -p "$E/steps/step_1_backend"
   jq -n '{replacements: [{ac: 1, command: "test -e src/new.py", plan_command: "docker compose exec api test -e src/new.py", reason: "the container reads the main checkout"}]}' > "$E/steps/step_1_backend/land.json"
   _sc; _S prepare --round 1 >/dev/null
@@ -732,7 +732,7 @@ _mplan() {
   _sc; run _S prepare --round 2; echo "$output"; [ "$status" -eq 0 ]
   grep -q '`test -f src/new.py` instead of' "$(D 2)/packet/dod.md"
 }
-@test "cp2 (3.13.0): the bracket that counts is the LAST start's — an older start cancelled later does not void the newer one's answer" {
+@test "cp2: the bracket that counts is the LAST start's — an older start cancelled later does not void the newer one's answer" {
   _repo; _sc; _S prepare --round 1 >/dev/null
   local d; d="$(D 1)"; local EMIT="$AID_PLUGIN_PATH/scripts/aid-emit-dispatch.sh" o a b
   o="$(bash "$EMIT" start --focus cp2-step-0-step-generalist --agent-id aid-orchestrator:review --evidence-dir "$d")"; a="$(sed -E 's/^nonce=([^ ]+) .*/\1/' <<< "$o")"
@@ -1136,7 +1136,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   ! grep -q "This is a FULL round over the new candidate" "$(FD 1)/prompt-final_generalist.md"
 }
 
-@test "cp7 (3.13.0): final_generalist answers each security and operations question; a missing one is a form re-ask, an unknown one is refused" {
+@test "cp7: final_generalist answers each security and operations question; a missing one is a form re-ask, an unknown one is refused" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
   _fanswer 1 final_criteria; _fanswer 1 final_generalist 'del(.security_and_operations.forged_trust)'
   run _F collect --round 1; echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"retry only: final_generalist"* ]]
@@ -1182,7 +1182,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   _conf "$(git -C "$R" rev-parse HEAD)"; [ "$status" -eq 1 ]; [[ "$output" == *"rewrote the branch"* ]]
 }
 
-@test "cp7 (3.12.0): after a CODE fix the next attempt confirms; a new non-blocker outside the fix is a follow-up, everything else blocks" {
+@test "cp7: after a CODE fix the next attempt confirms; a new non-blocker outside the fix is a follow-up, everything else blocks" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
   _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_MAJOR"
   _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null || true
@@ -1215,7 +1215,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   # collecting again neither duplicates the list nor reopens the follow-up
   _F collect --round 1 >/dev/null; [ "$(grep -c '' "$(dirname "$E")/follow-ups.jsonl")" -eq 1 ]; [ "$(st 'an old helper name')" = follow_up ]
 }
-@test "cp7 (3.12.0): the chain passes an attempt with no round (its gates failed) and confirms the last closed round; a rewritten branch in the chain makes it full" {
+@test "cp7: the chain passes an attempt with no round (its gates failed) and confirms the last closed round; a rewritten branch in the chain makes it full" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
   [ "$(jq -r .mode "$(FD 1)/round.json")" = full ]                      # a first attempt is full
   _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_MAJOR"
@@ -1239,7 +1239,7 @@ _BLOCKER='.findings = [{id: "c-1", checkpoint: "cp7", step: null, severity: "blo
   [ "$(jq -r .mode "$(FD 1)/round.json")" = full ]
 }
 
-@test "follow-up (3.12.0): aid_follow_up_mark — only a new non-blocker whose first citation is an unchanged line of a candidate file" {
+@test "follow-up: aid_follow_up_mark — only a new non-blocker whose first citation is an unchanged line of a candidate file" {
   source "$AID_PLUGIN_PATH/scripts/lib/aid-follow-up.sh"
   local g="$BATS_TEST_TMPDIR/repo" run rd; mkdir -p "$g"; git -C "$g" init -q
   printf '1\n2\n3\n4\n5\n6\n7\n8\n9\n' > "$g/x.py"; git -C "$g" add -A; git -C "$g" -c user.email=t@t -c user.name=t commit -qm base
@@ -2120,7 +2120,7 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   run _DLG --fingerprint "$FP"; [ "$status" -eq 1 ]; [[ "$output" == *"delegation_out_of_scope"*"a third opinion is not asked"* ]]
   [ "$(grep -c . "$L")" = 2 ]
 }
-@test "delegate (3.13.0): a fix that changed the cited lines hands the dispute to the next round — the finding stays open, the round closes" {
+@test "delegate: a fix that changed the cited lines hands the dispute to the next round — the finding stays open, the round closes" {
   _dlg auto; _dispute; _fake_codex
   yq -i '.review_checkpoints.step_review.rounds_default = 2' "$R/.aid-o/config/policies/review-checkpoints.yaml"   # round 1 is not the last
   export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "fine", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
@@ -2144,7 +2144,7 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   echo "an unrelated line" >> "$R/$file"; git -C "$R" -c user.email=t@t -c user.name=t commit -qam "elsewhere"
   run _DLG --fingerprint "$FP"; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"dispute settled by codex"* ]]
 }
-@test "delegate (3.13.0): in the last step round the dispute is handed over too, and no round is added — the budget refuses as before" {
+@test "delegate: in the last step round the dispute is handed over too, and no round is added — the budget refuses as before" {
   _dlg auto; _dispute; _fake_codex
   export CODEX_VERDICT="$(jq -nc --arg f "$FP" '{fingerprint: $f, kind: "dispute", answer: "accepted", class: "technical", reason: "fixed at HEAD", rerun: {cmd: "grep", exit: 0, output_tail: "ok"}}')"
   local ev h1; ev="$(jq -r --arg f "$FP" '.findings[] | select(.fingerprint == $f) | .evidence' "$(D 1)/merged.json")"; h1="$(jq -r .head_sha "$(D 1)/round.json")"
@@ -2268,7 +2268,7 @@ _dispute() { _S dispute --round 1 --fingerprint "${1:-$FP}" --reason "the worktr
   run _DLG --fingerprint "$FP" --verdict "$VF"; echo "$output"; [ "$status" -eq 0 ]
 }
 
-@test "delegate: a CP7 dispute settled after the round closed leaves every cp7 file recorded — the decision's stage-writes check passes (WAN 18. 10. 2026)" {
+@test "delegate: a CP7 dispute settled after the round closed leaves every cp7 file recorded — the decision's stage-writes check passes" {
   _frepo; _fsc
   # what the earlier stages (produce, gates) record in a real close
   bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-stage-log.sh' && aid_stage_writes_record '$E' fixture \$(aid_stage_writes_inputs '$E')"
@@ -2389,7 +2389,7 @@ _dep() {
   [ "$status" -eq 1 ]; [[ "$output" == *"plan_not_ready"*"readiness fails"* ]]; [ ! -d "$CP1/round-1/packet" ]
 }
 
-@test "accept-risk (3.12.0): a card rendered with the candidate and the full fingerprint in its quotes passes on the first answer" {
+@test "accept-risk: a card rendered with the candidate and the full fingerprint in its quotes passes on the first answer" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
   _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_BLOCKER"
   _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null || true
@@ -2484,7 +2484,7 @@ _pm_card() {  # <fingerprint> — a rendered card quoting it, answered by the PM
   [ "$(jq -r '.findings[1] | "\(.dispute.pm == null) \(.dispute.delegated.settled_by)"' "$M")" = "true d2" ]
 }
 
-@test "follow-up (3.12.1): a repository of thousands of files marks follow-ups (no list on the command line)" {
+@test "follow-up: a repository of thousands of files marks follow-ups (no list on the command line)" {
   # WAN P116 28. 10. and P118 30. 10. 2026: the candidate's file list went to jq as one argument, which Linux caps
   # at 128 KiB — `jq: Argument list too long`, and no follow-up was ever marked in a big repository
   source "$AID_PLUGIN_PATH/scripts/lib/aid-follow-up.sh"
@@ -2547,7 +2547,7 @@ _pm_card() {  # <fingerprint> — a rendered card quoting it, answered by the PM
   _ver; [ "$status" -eq 1 ]
 }
 
-@test "cp7 (3.12.0): a confirmation round left with only a follow-up passes, and the final record calls it deferred" {
+@test "cp7: a confirmation round left with only a follow-up passes, and the final record calls it deferred" {
   _frepo; _fsc; _F prepare --round 1 >/dev/null
   _fanswer 1 final_criteria; _fanswer 1 final_generalist "$_MAJOR"
   _F collect --round 1 >/dev/null; _F close --round 1 --tokens final_criteria=5 final_generalist=5 >/dev/null || true

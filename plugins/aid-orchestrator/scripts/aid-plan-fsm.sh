@@ -432,6 +432,44 @@ _pfsm_force_evidence_dir() {
 # A `hard` failure under --force additionally says that force cannot bypass
 # it, so the operator is not left guessing.
 # ---------------------------------------------------------------------------
+# _pfsm_roadmap_refreshed <root> <plan_id> — 0 when the plan's brief names no roadmap (roadmapa_dokument) or the plan
+# published the roadmap's page from the data its merge left (or the target holds now); else 1 with the refusal. The
+# brief is read by the one resolver the review uses (inside the project, present). A plan whose brief names no roadmap
+# closes as before 3.14.0 ("a plan without a roadmap behaves as today"): a missing plan file, an unreadable brief or a
+# brief changed since the binding only warn. Known ceiling: a roadmapa_dokument removed from the brief after the binding
+# is not seen (the bound version is not kept); a brief that still names it is checked.
+_pfsm_roadmap_refreshed() {
+  local root="$1" plan_id="$2" plan doc merge rc=0 tb tmp want short
+  _refuse_roadmap() {
+    echo "REFUSED (roadmap_page_not_refreshed): ${plan_id}: $1" >&2
+    echo "  next: $2 (pipeline.md §When AID refuses: roadmap_page_not_refreshed)" >&2
+    return 1
+  }
+  plan="$(aid_lifecycle_plan_file "$plan_id" "$root" 2>/dev/null)" || {
+    echo "WARN: plan-close: ${plan_id}: the plan file cannot be found — whether it belongs to a roadmap is not checked" >&2; return 0; }
+  [[ -n "$(_aid_fm_get "$plan" zadani)" ]] || return 0
+  # shellcheck source=lib/aid-plan-review-packet.sh
+  declare -F aid_plan_review_brief_resolve >/dev/null || source "${SCRIPT_DIR}/lib/aid-plan-review-packet.sh"
+  tmp="$(mktemp -d)"
+  if ! aid_plan_review_brief_resolve "$root" "$plan" "$tmp" 2>/dev/null; then
+    rm -rf "$tmp"; echo "WARN: plan-close: ${plan_id}: the brief cannot be read — whether it belongs to a roadmap is not checked" >&2; return 0
+  fi
+  want="$(_aid_fm_get "$plan" zadani_sha256)"
+  doc="$(_aid_fm_get "$tmp/zadani.md" roadmapa_dokument 2>/dev/null)"; rm -rf "$tmp"
+  [[ -n "$want" && "$want" != "${ZR_SHA:-}" ]] && echo "WARN: plan-close: ${plan_id}: the brief changed since the plan bound it (zadani_sha256) — read as it is now" >&2
+  [[ -n "$doc" ]] || return 0
+  # shellcheck source=lib/aid-roadmap.sh
+  declare -F aid_roadmap_refreshed >/dev/null || source "${SCRIPT_DIR}/lib/aid-roadmap.sh"
+  tb="$(aid_target_branch)"
+  # the data as the plan's merge left them, or as they are on the target now (a change written there after the merge)
+  merge="$(git -C "$root" log "$tb" --merges --grep "^merge(plan): ${plan_id}\b" -1 --format=%H 2>/dev/null)"
+  aid_roadmap_refreshed "$root" "$(aid_state_root "$root" 2>/dev/null || printf '%s' "$root")" "$doc" "$plan_id" ${merge:+"$merge"} "$tb" || rc=$?
+  (( rc == 0 )) && return 0
+  short="${merge:0:12}"; [[ -n "$short" ]] || short="no merge commit found on ${tb}"
+  _refuse_roadmap "it belongs to the roadmap ${doc}, but its progress page was not published from the data the merge left (${short}) or ${tb} holds" \
+    "write this plan's change into ${doc%.md}.prubeh.json (posledni_zmena.kdo: ${plan_id}) in the plan's branch before the merge, or on ${tb} after it, run aid-roadmap-page.sh publish ${doc} --plan ${plan_id}, then plan-close again"
+}
+
 _pfsm_precondition() {
   [[ $# -ge 2 ]] || { echo "${0##*/}: needs 2 arguments, got $#" >&2; return 2 2>/dev/null || exit 2; }
   local name="$1" class="$2"; shift 2
@@ -6933,6 +6971,14 @@ cmd_plan_close() {
     fi
     printf '%s\n' "$ccout" >&2
     exit 1
+  fi
+
+  # AID 3.14.0: a plan of a roadmap closes only after it refreshed the roadmap's progress page (PM 30. 10. 2026) —
+  # the ordinary close of a merged plan; an abort, an administrative close and a closed plan's rerun do not ask
+  if [[ "$close_mode" == merge && "${_PFSM_ADMIN_CLOSE:-0}" -ne 1 ]]; then
+    if ! _pfsm_precondition "roadmap_page_refreshed" forceable _pfsm_roadmap_refreshed "$root" "$plan_id"; then
+      _pfsm_close_release; exit 1
+    fi
   fi
 
   # P073 Step 8: mint the waiver BEFORE the durable close work, not after.

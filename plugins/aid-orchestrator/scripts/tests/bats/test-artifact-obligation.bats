@@ -66,7 +66,7 @@ render_page() {
   [ "$status" -eq 0 ]
 }
 
-@test "3.10.0: with a publisher configured, a rendered page counts only once it was published (a delivery record over these bytes)" {
+@test "with a publisher configured, a rendered page counts only once it was published (a delivery record over these bytes)" {
   render_page
   local fake="$BATS_TEST_TMPDIR/pub"; printf '#!/usr/bin/env bash\ncat >/dev/null; echo https://share.example/p/x#k=K\n' > "$fake"; chmod +x "$fake"
   AID_PM_PAGE_PUBLISHER="$fake" run bash "$GATE" --plan "$PLAN"
@@ -247,7 +247,7 @@ _close_page() {
   printf '<h1>close</h1>\n' > "$ROOT/.aid-o/work/evidence/P900/R-P900-final-1/plan-close-artifact.html"
 }
 
-@test "3.10.0: a closing page with a publisher needs its delivery record; with AID_PM_PAGES=off the rendered page is enough" {
+@test "a closing page with a publisher needs its delivery record; with AID_PM_PAGES=off the rendered page is enough" {
   local ps; ps="$(_closed_plan CLOSED)"
   sleep 1; _close_page
   local fake="$BATS_TEST_TMPDIR/pub"; printf '#!/usr/bin/env bash\ncat >/dev/null; echo https://share.example/p/c#k=K\n' > "$fake"; chmod +x "$fake"

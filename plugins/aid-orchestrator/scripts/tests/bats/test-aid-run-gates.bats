@@ -50,7 +50,7 @@ teardown() {
   [[ "$output" =~ ^aid-run-gates\.sh@v ]]
 }
 
-@test "run-all: a gate's description from execution.yaml rides on its row; a gate without one has none (3.9.2)" {
+@test "run-all: a gate's description from execution.yaml rides on its row; a gate without one has none" {
   yq -i '.gates.alpha.description = "Unit tests of the API pass"' "$EXEC_YAML"
   "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" >/dev/null 2>&1
   [ "$(jq -r '.gates.alpha.description' "$REPORT")" = "Unit tests of the API pass" ]
@@ -1645,7 +1645,7 @@ YAML
   [[ "$output" == *"gate 'beta'"* && "$output" == *"invented"* ]]
 }
 
-@test "3.9.2: a row restored from its checkpoint carries the gate's description as execution.yaml says it NOW" {
+@test "a row restored from its checkpoint carries the gate's description as execution.yaml says it NOW" {
   _git_init_project
   local ev="$TEST_PROJECT/.aid-o/work/evidence/E-X/R-1"
   "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT" >/dev/null 2>&1
@@ -1661,7 +1661,7 @@ YAML
   [ "$(jq -r '.gates.beta | has("description")' "$REPORT")" = false ]
 }
 
-@test "3.9.2: execution.yaml unreadable for the descriptions ends the run loudly, never as a report without them" {
+@test "execution.yaml unreadable for the descriptions ends the run loudly, never as a report without them" {
   local real; real="$(command -v yq)"; mkdir -p "$TEST_TMPDIR/fakebin"
   printf '#!/usr/bin/env bash\n[[ "$*" == *map_values* ]] && exit 1\nexec %q "$@"\n' "$real" > "$TEST_TMPDIR/fakebin/yq"; chmod +x "$TEST_TMPDIR/fakebin/yq"
   PATH="$TEST_TMPDIR/fakebin:$PATH" run "$RUN_GATES" run-all "$EXEC_YAML" "E-X" "R-1" --report-file "$REPORT"

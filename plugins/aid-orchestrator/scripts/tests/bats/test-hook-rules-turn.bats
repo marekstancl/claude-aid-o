@@ -244,7 +244,7 @@ _cp2_start() {  # <round> <focus> [age seconds] — a start in the round's pendi
   jq -nc --arg id "$id" --arg t "nonce=$n focus=$2 evidence=$rd" '{type:"user",message:{content:[{type:"tool_result",tool_use_id:$id,content:$t}]}}' >> "$TRANSCRIPT"
   LAST_NONCE="$n"
 }
-@test "turn (3.13.0): AID-WAIT ends the turn while this session's CP2 reviewer or fixer of the open step runs, and not after" {
+@test "turn: AID-WAIT ends the turn while this session's CP2 reviewer or fixer of the open step runs, and not after" {
   _cp2_start 1 cp2-step-0-step-generalist; _say "AID-WAIT: revize kroku 1"
   run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; echo "$output"; [ "$status" -eq 3 ]
   # complete removes the start from the ledger: nothing to wait on
@@ -254,7 +254,7 @@ _cp2_start() {  # <round> <focus> [age seconds] — a start in the round's pendi
   _cp2_start 1 fix-cp2-0-r1; _say "AID-WAIT: oprava kroku 1"
   run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 3 ]
 }
-@test "turn (3.13.0): another session's start, a start past its time limit, or another step's round does not excuse the step" {
+@test "turn: another session's start, a start past its time limit, or another step's round does not excuse the step" {
   # another session: in the ledger, but its nonce never appears in this transcript
   mkdir -p "$EV/cp2/step-0/round-1"
   jq -nc --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{ts: $ts, event: "start", focus: "cp2-step-0-step-generalist", expected_duration_max: 600, nonce: "foreign1"}' >> "$EV/cp2/step-0/round-1/pending-dispatches.jsonl"
@@ -269,7 +269,7 @@ _cp2_start() {  # <round> <focus> [age seconds] — a start in the round's pendi
   _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
 }
 
-@test "turn (3.13.0): an older start of a focus whose newer start ended, a nonce the model only typed, or another evidence dir does not excuse the step" {
+@test "turn: an older start of a focus whose newer start ended, a nonce the model only typed, or another evidence dir does not excuse the step" {
   _cp2_start 1 cp2-step-0-step-generalist; local a="$LAST_NONCE"
   _cp2_start 1 cp2-step-0-step-generalist; local b="$LAST_NONCE"
   # B completes: its line leaves the ledger, A stays — but A is not the focus's last start
@@ -288,24 +288,24 @@ _cp2_start() {  # <round> <focus> [age seconds] — a start in the round's pendi
   _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
 }
 
-@test "turn (3.13.0): a start of round 1 superseded by the same focus in round 2 does not count once round 2's ended" {
+@test "turn: a start of round 1 superseded by the same focus in round 2 does not count once round 2's ended" {
   _cp2_start 1 cp2-step-0-step-generalist; sleep 1; _cp2_start 2 cp2-step-0-step-generalist
   : > "$EV/cp2/step-0/round-2/pending-dispatches.jsonl"            # round 2's start completed
   _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
 }
 
-@test "turn (3.13.0): the background agent and the takeover are still recognised (3.11.0 paths kept)" {
+@test "turn: the background agent and the takeover are still recognised by their earlier paths" {
   _takeover_running; _bg_call toolu_land; _say "AID-WAIT: převzetí kroku 0"
   run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; _takeover_gone; [ "$status" -eq 3 ]
 }
 
-@test "turn (3.13.0): a pending line in another round's ledger with the last start's nonce does not count" {
+@test "turn: a pending line in another round's ledger with the last start's nonce does not count" {
   _cp2_start 1 cp2-step-0-step-generalist; local n="$LAST_NONCE"
   mkdir -p "$EV/cp2/step-0/round-2"; mv "$EV/cp2/step-0/round-1/pending-dispatches.jsonl" "$EV/cp2/step-0/round-2/pending-dispatches.jsonl"
   _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]
 }
 
-@test "turn (3.13.0): a pending line whose evidence_dir names another run does not count" {
+@test "turn: a pending line whose evidence_dir names another run does not count" {
   _cp2_start 1 cp2-step-0-step-generalist
   jq -c '.evidence_dir = "/other/run/cp2/step-0/round-1"' "$EV/cp2/step-0/round-1/pending-dispatches.jsonl" > "$TMP/p" && mv "$TMP/p" "$EV/cp2/step-0/round-1/pending-dispatches.jsonl"
   _say "AID-WAIT: revize"; run aid_hook_rule_turn_step_open <<< "$(_stop_event)"; [ "$status" -eq 2 ]

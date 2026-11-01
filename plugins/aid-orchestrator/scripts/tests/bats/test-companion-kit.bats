@@ -124,16 +124,16 @@ _ws() {
   # the first shot's wait follows the setting: 2 s for a text that never comes fails in seconds, not 15
   yq -i '.ui.first_shot_timeout_s = 2' "$P/.aid-o/config/project.yaml"
   echo '{"base": "proto", "shots": [{"name": "nic", "path": "/index.html", "steps": [{"wait": {"for": {"text": "nikdy"}}}]}]}' > "$D/shots.json"
-  local t0=$SECONDS; run _k shots; [ "$status" -ne 0 ]; (( SECONDS - t0 < 12 ))
+  local t0=$SECONDS; run _k shots; [ "$status" -ne 0 ]; (( SECONDS - t0 < 12 )); [[ "$output" != *"taken again"* ]]   # not a network error: no retry
   yq -i '.ui.first_shot_timeout_s = 500' "$P/.aid-o/config/project.yaml"
   run _k shots; [ "$status" -ne 0 ]; [[ "$output" == *"first_shot_timeout_s must be whole seconds from 1 to 120"* ]]
 }
 
-@test "AC5 down: a recorded prototype whose identity does not match (pid reused) is not killed" {
-  sleep 300 & local other=$!
-  jq -n --argjson p "$other" '{pid: $p, pgid: $p, starttime: "1", cmd: "python3", port: 1, url: "x"}' > "$D/proto.json" 2>/dev/null || { mkdir -p "$D"; jq -n --argjson p "$other" '{pid: $p, pgid: $p, starttime: "1", cmd: "python3", port: 1, url: "x"}' > "$D/proto.json"; }
+@test "AC5 down: a recorded prototype whose identity does not match (pid reused) is not killed and its record stays" {
+  mkdir -p "$D"; setsid sleep 300 & local other=$!; sleep 0.2                 # a real group leader of its own
+  jq -n --argjson p "$other" '{pid: $p, pgid: $p, starttime: "1", cmd: "sleep", port: 1, url: "x"}' > "$D/proto.json"
   run _k down; echo "$output"
-  [[ "$output" == *"not the one we started"* ]]
+  [[ "$output" == *"not the one we started"* ]]; [ "$status" -ne 0 ]; [ -e "$D/proto.json" ]
   kill -0 "$other"; kill "$other"
 }
 
@@ -174,16 +174,32 @@ EOF
 }
 
 # a proposal over the sample app: option A edits Page.tsx through the alias, B adds a component through the barrel
+# _checks [<clipped json>] — a check record for every png in shots/, as the shots step writes it (K1): bound to the png,
+# the viewport and the entry of shots.json; <clipped> (default []) for every shot
+_checks() {
+  (cd "$AID_PLUGIN_PATH/lib/brainstorm-server" && node --input-type=module -e '
+    import fs from "node:fs"; import path from "node:path"; import { sha, shotSha } from "./kit-extra.mjs";
+    const [D, clipped] = process.argv.slice(1); const spec = JSON.parse(fs.readFileSync(path.join(D, "shots.json"), "utf8"));
+    const by = Object.fromEntries(spec.shots.map(x => [x.name, x]));
+    for (const vp of fs.readdirSync(path.join(D, "shots"))) for (const f of fs.readdirSync(path.join(D, "shots", vp))) {
+      if (!f.endsWith(".png")) continue; const n = f.slice(0, -4), png = path.join(D, "shots", vp, f);
+      fs.writeFileSync(png.replace(/\.png$/, ".check.json"), JSON.stringify({ png_sha256: sha(png), viewport: vp,
+        shot_sha256: by[n] ? shotSha(by[n]) : "none", mocks_missing: false, dialogs: 0, clipped: JSON.parse(clipped) }));
+    }' "$D" "${1:-[]}")
+}
+
 _proposal() {
   _k proto >/dev/null
   mkdir -p "$D/shots/desktop" "$D/shots/mobile"
   local v s
   node -e 'const z=require("zlib"),fs=require("fs");const w=+process.argv[2],h=+process.argv[3];const raw=Buffer.alloc((w*3+1)*h,255);for(let y=0;y<h;y++)raw[y*(w*3+1)]=0;const c=t=>{let r=0xffffffff;for(const x of t){r^=x;for(let k=0;k<8;k++)r=r&1?(r>>>1)^0xedb88320:r>>>1}return (r^0xffffffff)>>>0};const ch=(t,d)=>{const l=Buffer.alloc(4);l.writeUInt32BE(d.length);const td=Buffer.concat([Buffer.from(t),d]);const cr=Buffer.alloc(4);cr.writeUInt32BE(c(td));return Buffer.concat([l,td,cr])};const ih=Buffer.alloc(13);ih.writeUInt32BE(w,0);ih.writeUInt32BE(h,4);ih[8]=8;ih[9]=2;fs.writeFileSync(process.argv[1],Buffer.concat([Buffer.from([137,80,78,71,13,10,26,10]),ch("IHDR",ih),ch("IDAT",z.deflateSync(raw)),ch("IEND",Buffer.alloc(0))]))' "$D/shots/desktop/a.png" 1280 720
   for v in desktop mobile; do for s in dnes a b; do [[ "$v/$s" == desktop/a ]] || cp "$D/shots/desktop/a.png" "$D/shots/$v/$s.png"; done; done
+  echo '{"base": "proto", "shots": [{"name": "dnes", "path": "/"}, {"name": "a", "path": "/?v=A"}, {"name": "b", "path": "/?v=B"}]}' > "$D/shots.json"
+  _checks
   printf "import { Button } from '@/components/shared/Button';\nimport { Card } from '../components/shared';\nexport function Page() { return Button({ label: 'new' }) + Card({ title: 'x' }); }\n" > "$D/proto/src/pages/Page.tsx"
   printf "import { Card } from './shared';\nexport function Novy() { return Card({ title: 'n' }); }\n" > "$D/proto/src/components/Novy.tsx"
   cat > "$D/navrh.json" <<'EOF'
-{"plan": "P900", "kolo": 1, "rozhodnuto": [],
+{"plan": "P900", "kolo": 1, "rozhodnuto": [], "prohlidka_snimku": "Každý snímek prohlédnut: řádek, blok i dnešní stav celé, nic neuříznuté.",
  "body": [{"id": "1", "title": "Řádek", "otazka": "Jak má řádek vypadat?", "doporuceni": "A", "proc": "Je kratší.",
    "soulad_s_pravidly": [{"pravidlo": "ui/CLAUDE.md#Komponenty", "jak": "jen sdílené komponenty"}],
    "minule": [{"popisek": "Dnes", "shot": "dnes"}],
@@ -321,4 +337,274 @@ EOF
   [ "$(yq '.ui.ready_path' <<< "$output")" = / ]; [ "$(yq '.ui.api_prefix' <<< "$output")" = /api/ ]
   rm "$P/ui/vite.config.ts"
   run aid_ui_config_detect "$P"; [[ "$output" == "# ui: no vite.config"* ]]
+}
+
+# a dev server as `npx vite` really runs: node renames itself to "npm exec vite" (a name with spaces) and serves from a
+# child; <child> is "term" (stops on TERM) or "stubborn" (ignores TERM)
+_renamed_dev() {
+  yq -i ".ui.dev_cmd = [\"node\", \"-e\", \"process.title='npm exec vite'; const {spawn}=require('child_process'); spawn('python3', ['-c', 'import signal,sys,http.server as h; signal.signal(signal.SIGTERM, signal.SIG_IGN) if sys.argv[2]==\\\"stubborn\\\" else None; h.test(HandlerClass=h.SimpleHTTPRequestHandler, port=int(sys.argv[1]), bind=\\\"127.0.0.1\\\")', process.argv[1], '$1'], {stdio: 'inherit'}); setInterval(()=>{}, 1000)\", \"{port}\"]" "$P/.aid-o/config/project.yaml"
+}
+_gone() {  # <pgid> <port>: no member left and the port closed (a failing pgrep or ss is not "gone")
+  local rc=0 out; pgrep -g "$1" >/dev/null || rc=$?; [ "$rc" -eq 1 ]
+  out="$(ss -ltnH "sport = :$2")"; [ -z "$out" ]
+}
+
+@test "down stops a prototype whose leader renamed itself (npm exec vite) with its child, closes the port, spares another group" {
+  _renamed_dev term
+  run _k proto; echo "$output"; [ "$status" -eq 0 ]
+  local pg port; pg="$(jq -r .pgid "$D/proto.json")"; port="$(jq -r .port "$D/proto.json")"
+  [[ "$(cat /proc/$pg/cmdline | tr '\0' ' ')" == "npm exec vite"* ]]
+  setsid sleep 60 & local other=$!
+  run _k down; echo "$output"; [ "$status" -eq 0 ]; [[ "$output" == *"prototype group ${pg} stopped"* ]]
+  _gone "$pg" "$port"; [ ! -e "$D/proto.json" ]
+  kill -0 "$other"; kill "$other"
+}
+
+@test "down kills a child that ignores TERM; a group whose leader is gone while a child serves keeps its record" {
+  _renamed_dev stubborn
+  run _k proto; [ "$status" -eq 0 ]
+  local pg port; pg="$(jq -r .pgid "$D/proto.json")"; port="$(jq -r .port "$D/proto.json")"
+  run _k down; echo "$output"; [ "$status" -eq 0 ]; _gone "$pg" "$port"
+  # the leader dies, its child keeps serving: nothing can prove the group is ours, so nothing is signalled or forgotten
+  run _k proto; [ "$status" -eq 0 ]; pg="$(jq -r .pgid "$D/proto.json")"; port="$(jq -r .port "$D/proto.json")"
+  kill -KILL "$pg"; sleep 0.3
+  run _k down; echo "$output"; [ "$status" -ne 0 ]; [ -e "$D/proto.json" ]; [[ "$output" == *"still"* ]]
+  kill -KILL -- "-$pg"; sleep 0.3; _gone "$pg" "$port"
+  run _k down; [ "$status" -eq 0 ]; [ ! -e "$D/proto.json" ]                  # nothing left: the stale record goes
+}
+
+@test "down keeps the record of a group that is gone while its port is still taken" {
+  mkdir -p "$D"; python3 -c 'import socket,time; s=socket.socket(); s.bind(("127.0.0.1",0)); s.listen(); print(s.getsockname()[1], flush=True); time.sleep(60)' > "$BATS_TEST_TMPDIR/port" &
+  local holder=$!; sleep 0.3; local port; port="$(cat "$BATS_TEST_TMPDIR/port")"
+  jq -n --argjson port "$port" '{pid: 999999999, pgid: 999999999, starttime: "1", cmd: "x", port: $port, url: "x"}' > "$D/proto.json"
+  run _k down; echo "$output"; [ "$status" -ne 0 ]; [ -e "$D/proto.json" ]; [[ "$output" == *"port ${port} is still open"* ]]
+  kill "$holder"
+}
+
+@test "the copy carries the kit's .gitignore block after the app's own lines, an older copy gets it on the next proto, and it is no change of a variant" {
+  printf 'secret.txt\n' > "$P/ui/.gitignore"
+  run _k proto; [ "$status" -eq 0 ]
+  head -1 "$D/proto/.gitignore" | grep -qx 'secret.txt'
+  grep -qx '!\*/' "$D/proto/.gitignore"; grep -qx 'node_modules/' "$D/proto/.gitignore"
+  _k down >/dev/null
+  # a copy made before the block existed: the block comes with the next proto
+  printf 'secret.txt\n' > "$D/proto/.gitignore"
+  run _k proto; [ "$status" -eq 0 ]; grep -qx '!\*/' "$D/proto/.gitignore"
+  _proposal; run _k show; echo "$output"; [ "$status" -eq 0 ]                 # the block is not an unlisted change
+}
+
+@test "copy_extra added, changed and removed after the first proto is brought in line; show refuses a foreign file beside an allowed one" {
+  mkdir -p "$P/shared"; echo "a{}" > "$P/shared/base.css"; echo "b{}" > "$P/shared/other.css"
+  run _k proto; [ "$status" -eq 0 ]; [ ! -e "$D/shared" ]
+  yq -i '.ui.copy_extra = ["shared/base.css", "shared/other.css"]' "$P/.aid-o/config/project.yaml"
+  run _k proto; echo "$output"; [ "$status" -eq 0 ]                            # reused: the running copy gets them
+  [ "$(jq -r .reused <<< "$output")" = true ]; [ "$(cat "$D/shared/base.css")" = "a{}" ]
+  echo "a2{}" > "$P/shared/base.css"; yq -i '.ui.copy_extra = ["shared/base.css"]' "$P/.aid-o/config/project.yaml"
+  run _k proto; [ "$status" -eq 0 ]
+  [ "$(cat "$D/shared/base.css")" = "a2{}" ]; [ ! -e "$D/shared/other.css" ]   # changed copied again, removed taken away
+  [ "$(jq -r '.extra[0].rel' "$D/proto-manifest.json")" = "shared/base.css" ]
+  _proposal; run _k show; echo "$output"; [ "$status" -eq 0 ]                 # the file proto put there is the kit's
+  echo x > "$D/shared/tool.sh"
+  run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"shared/tool.sh is not one of the kit's files"* ]]
+}
+
+@test "proto says how stale the copy is; --refresh stops it, sets the copy, manifest and shots aside, twice without collision, and show works after" {
+  _proposal; run _k up; [ "$status" -eq 0 ]
+  echo "/* changed */" >> "$P/ui/index.html"
+  run _k proto; echo "$output"; [ "$status" -eq 0 ]; [ "$(jq -r .stale <<< "$output")" = 1 ]; [[ "$(jq -r .refresh <<< "$output")" == *"--refresh"* ]]
+  local pg; pg="$(jq -r .pgid "$D/proto.json")"
+  run _k proto --refresh; echo "$output"; [ "$status" -eq 0 ]
+  local rc=0; pgrep -g "$pg" >/dev/null || rc=$?; [ "$rc" -eq 1 ]             # the old group is gone
+  [ "$(ls "$D/old" | wc -l)" -eq 1 ]; local o; o="$D/old/$(ls "$D/old")"
+  [ -f "$o/proto/src/pages/Page.tsx" ] && [ -f "$o/proto-manifest.json" ] && [ -d "$o/shots" ]
+  [ "$(tail -1 <<< "$output" | jq -r .stale)" = 0 ]; cmp "$P/ui/src/pages/Page.tsx" "$D/proto/src/pages/Page.tsx"   # a fresh copy of the app
+  run _k proto --refresh; [ "$status" -eq 0 ]; [ "$(ls "$D/old" | wc -l)" -eq 2 ]
+  _proposal; run _k show; echo "$output"; [ "$status" -eq 0 ]                 # old/ does not block the kit
+}
+
+@test "the kit never writes or removes through a link or a crafted path: a linked .gitignore, a dangling extra target, a recorded ../ path, a reserved name" {
+  printf 'keep.txt\n' > "$P/ui/.gitignore"; local app_gi; app_gi="$(sha256sum < "$P/ui/.gitignore")"
+  run _k proto; [ "$status" -eq 0 ]; _k down >/dev/null
+  rm "$D/proto/.gitignore"; ln -s "$P/ui/.gitignore" "$D/proto/.gitignore"          # the copy's .gitignore points at the app's
+  sed -i '/aid-companion/d' "$P/ui/.gitignore"
+  run _k proto; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"is a link"* ]]; [ "$(sha256sum < "$P/ui/.gitignore")" = "$app_gi" ]
+  rm "$D/proto/.gitignore"; printf 'keep.txt\n' > "$D/proto/.gitignore"
+  mkdir -p "$P/shared" "$BATS_TEST_TMPDIR/out"; echo "a{}" > "$P/shared/a.css"
+  mkdir -p "$D/shared"; ln -s "$BATS_TEST_TMPDIR/out/a.css" "$D/shared/a.css"     # a dangling link where the extra lands
+  yq -i '.ui.copy_extra = ["shared/a.css"]' "$P/.aid-o/config/project.yaml"
+  run _k proto; [ "$status" -ne 0 ]; [[ "$output" == *"is a link"* ]]; [ ! -e "$BATS_TEST_TMPDIR/out/a.css" ]
+  rm "$D/shared/a.css"; run _k proto; [ "$status" -eq 0 ]; _k down >/dev/null
+  jq '.extra += [{rel: "shared/../proto/src/pages/Page.tsx", sha256: "x"}]' "$D/proto-manifest.json" > "$BATS_TEST_TMPDIR/m" && cp "$BATS_TEST_TMPDIR/m" "$D/proto-manifest.json"
+  run _k proto; [ "$status" -ne 0 ]; [[ "$output" == *"not a plain relative path"* ]]; [ -f "$D/proto/src/pages/Page.tsx" ]
+  jq '.extra |= map(select(.rel == "shared/a.css"))' "$D/proto-manifest.json" > "$BATS_TEST_TMPDIR/m" && cp "$BATS_TEST_TMPDIR/m" "$D/proto-manifest.json"
+  echo x > "$P/navrh-1.html"; yq -i '.ui.copy_extra = ["navrh-1.html"]' "$P/.aid-o/config/project.yaml"
+  run _k proto; [ "$status" -ne 0 ]; [[ "$output" == *"the kit's own navrh-1.html"* ]]
+}
+
+@test "the last extra removed takes its empty directory, --refresh keeps the record so a dropped extra still goes, a fresh copy is not stale, and an older copy's .gitignore is no change" {
+  mkdir -p "$P/shared" "$P/ui/storybook-static"; echo "a{}" > "$P/shared/a.css"; echo x > "$P/ui/storybook-static/s.js"
+  ln -s index.html "$P/ui/alias.html"                                              # a link inside ui.dir is copied as content
+  printf 'keep.txt\n' > "$P/ui/.gitignore"
+  yq -i '.ui.copy_extra = ["shared/a.css"]' "$P/.aid-o/config/project.yaml"
+  run _k proto; [ "$status" -eq 0 ]; run _k proto; [ "$(tail -1 <<< "$output" | jq -r .stale)" = 0 ]    # fresh: not stale
+  yq -i '.ui.copy_extra = []' "$P/.aid-o/config/project.yaml"
+  run _k proto; [ "$status" -eq 0 ]; [ ! -e "$D/shared" ]
+  yq -i '.ui.copy_extra = ["shared/a.css"]' "$P/.aid-o/config/project.yaml"; run _k proto; [ -f "$D/shared/a.css" ]
+  yq -i '.ui.copy_extra = []' "$P/.aid-o/config/project.yaml"
+  run _k proto --refresh; echo "$output"; [ "$status" -eq 0 ]; [ ! -e "$D/shared" ]       # dropped while refreshing: still removed
+  # a copy made before 3.14.0: a flat manifest that hashed .gitignore byte for byte
+  _k down >/dev/null
+  jq --arg h "$(sha256sum < "$D/proto/.gitignore" | cut -d' ' -f1)" '.files + {".gitignore": $h}' "$D/proto-manifest.json" > "$BATS_TEST_TMPDIR/m"
+  sed -i '/aid-companion: begin/,/aid-companion: end/d' "$D/proto/.gitignore"
+  jq --arg h "$(sha256sum < "$D/proto/.gitignore" | cut -d' ' -f1)" '. + {".gitignore": $h}' "$BATS_TEST_TMPDIR/m" > "$D/proto-manifest.json"
+  run _k proto; echo "$output"; [ "$status" -eq 0 ]; [ "$(tail -1 <<< "$output" | jq -r .stale)" = null ]
+  _proposal; run _k show; echo "$output"; [ "$status" -eq 0 ]
+}
+
+# a dev server that answers the first request for /flaky.html with bytes that are no HTTP (the browser fails it with a
+# net::ERR_ error and does not repeat it, as a dropped connection would be repeated) and every
+# request for /broken.html; set.html stores a value, flaky.html shows what storage holds
+_flaky_dev() {
+  cat > "$P/ui/server.py" <<'PY'
+import http.server, sys
+seen = {}
+class H(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        p = self.path.split('?')[0]
+        seen[p] = seen.get(p, 0) + 1
+        if p == '/broken.html' or (p in ('/flaky.html', '/flaky2.html') and seen[p] == 1):
+            self.wfile.write(b'garbage that is no HTTP\r\n\r\n'); self.close_connection = True; return
+        return super().do_GET()
+    def log_message(self, *a): pass
+http.server.ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), H).serve_forever()
+PY
+  echo '<html><body><script>localStorage.setItem("x","1"); document.cookie="c=1"</script>set</body></html>' > "$P/ui/set.html"
+  echo '<html><body><p id="v"></p><script>document.getElementById("v").textContent = "x=" + (localStorage.getItem("x") || "none") + " c=" + (document.cookie.includes("c=1") ? "1" : "none")</script></body></html>' > "$P/ui/flaky.html"
+  cp "$P/ui/flaky.html" "$P/ui/broken.html"
+  echo '<html><body><script>localStorage.setItem("n", String(+(localStorage.getItem("n") || 0) + 1))</script>bump</body></html>' > "$P/ui/bump.html"
+  echo '<html><body><p id="v"></p><script>document.getElementById("v").textContent = "n=" + localStorage.getItem("n") + " s=" + localStorage.getItem("s")</script></body></html>' > "$P/ui/flaky2.html"
+  yq -i '.ui.dev_cmd = ["python3", "server.py", "{port}"] | .ui.ready_path = "/index.html"' "$P/.aid-o/config/project.yaml"
+  mkdir -p "$D"; echo '[]' > "$D/mocks.json"
+}
+
+@test "a shot that fails on a network error is taken again once in a fresh context; a second failure stops the set; --only takes just the named shots" {
+  _flaky_dev; run _k proto; [ "$status" -eq 0 ]
+  cat > "$D/shots.json" <<'J'
+{"base": "proto", "shots": [{"name": "nastav", "path": "/set.html"},
+  {"name": "flaky", "path": "/flaky.html", "only": ["desktop"], "steps": [{"wait": {"for": {"text": "x=none c=none"}}}]}]}
+J
+  run _k shots; echo "$output"; [ "$status" -eq 0 ]                          # retried, and nothing of shot 1 carried over
+  [ -s "$D/shots/desktop/flaky.png" ]
+  echo '{"base": "proto", "shots": [{"name": "broken", "path": "/broken.html"}]}' > "$D/shots.json"
+  run _k shots; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"net::ERR_"* ]]
+  [ "$(grep -c 'taken again' <<< "$output")" -eq 1 ]                           # once, not twice
+  # a step of the same shot changed storage before the failing navigation: the retry starts from shots.json's storage
+  cat > "$D/shots.json" <<'J'
+{"base": "proto", "storage": {"localStorage": {"s": "spec"}}, "shots": [{"name": "kroky", "path": "/bump.html", "only": ["desktop"],
+  "steps": [{"goto": "/flaky2.html"}, {"wait": {"for": {"text": "n=1 s=spec"}}}]}]}
+J
+  run _k shots; echo "$output"; [ "$status" -eq 0 ]; [ "$(grep -c 'taken again' <<< "$output")" -eq 1 ]
+  cat > "$D/shots.json" <<'J'
+{"base": "proto", "shots": [{"name": "nastav", "path": "/set.html"}, {"name": "flaky", "path": "/flaky.html"}]}
+J
+  local before nastav; before="$(stat -c %Y "$D/shots/desktop/flaky.png")"; nastav="$(stat -c %Y "$D/shots/desktop/nastav.png")"; sleep 1
+  run _k shots --only nastav; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(stat -c %Y "$D/shots/desktop/flaky.png")" = "$before" ]                # the other shot is untouched
+  [ "$(stat -c %Y "$D/shots/desktop/nastav.png")" -gt "$nastav" ]              # the named one is taken again
+  run _k shots --only nikdo; [ "$status" -ne 0 ]; [[ "$output" == *"no such shot"* ]]
+}
+
+@test "a full-page shot prints a pinned bar once, where it sits in the page, not over the content" {
+  echo '<html><body style="margin:0"><div style="position:fixed;bottom:0;left:0;right:0;height:40px;background:#ff0000"></div><div style="height:3000px;background:#ffffff">dlouhy obsah</div></body></html>' > "$P/ui/long.html"
+  run _k proto; [ "$status" -eq 0 ]; mkdir -p "$D"; echo '[]' > "$D/mocks.json"
+  echo '{"base": "proto", "shots": [{"name": "dlouha", "path": "/long.html", "capture": "full"}]}' > "$D/shots.json"
+  run _k shots; echo "$output"; [ "$status" -eq 0 ]
+  run node -e '
+    const { createRequire } = require("module"); const r = createRequire(process.argv[2]);
+    const { PNG } = r("pngjs"); const p = PNG.sync.read(require("fs").readFileSync(process.argv[1]));
+    const red = []; for (let y = 0; y < p.height; y++) { const i = (y * p.width + 5) * 4; if (p.data[i] > 200 && p.data[i + 1] < 60) red.push(y); }
+    console.log(red.length, red[0], p.height);' "$D/shots/desktop/dlouha.png" "$AID_PLUGIN_PATH/lib/ui-fidelity/package.json"
+  echo "$output"; read -r n first h <<< "$output"
+  [ "$n" -ge 35 ] && [ "$n" -le 45 ]; [ "$first" -le 5 ]                       # once, at the top of the page's flow
+  # the page's styles are put back: a next shot in the same page (only the #hash changes, no reload) sees the bar pinned
+  echo '{"base": "proto", "shots": [{"name": "dlouha", "path": "/long.html", "capture": "full"}, {"name": "okno", "path": "/long.html#dole", "only": ["desktop"]}]}' > "$D/shots.json"
+  run _k shots; [ "$status" -eq 0 ]
+  run node -e '
+    const { createRequire } = require("module"); const r = createRequire(process.argv[2]);
+    const { PNG } = r("pngjs"); const p = PNG.sync.read(require("fs").readFileSync(process.argv[1]));
+    const i = ((p.height - 10) * p.width + 5) * 4; console.log(p.data[i] > 200 && p.data[i + 1] < 60 ? "pinned" : "gone");' "$D/shots/desktop/okno.png" "$AID_PLUGIN_PATH/lib/ui-fidelity/package.json"
+  [ "$output" = pinned ]
+}
+
+@test "a scrolling container is captured whole also when an ancestor clips it (overflow hidden, a fixed height)" {
+  echo '<html><body style="margin:0"><div id="shell" style="height:200px;overflow:hidden"><div id="list" style="height:100px;overflow:auto"><div style="height:600px;background:#00ff00">obsah</div></div></div></body></html>' > "$P/ui/shell.html"
+  run _k proto; [ "$status" -eq 0 ]; echo '[]' > "$D/mocks.json"
+  echo '{"base": "proto", "shots": [{"name": "seznam", "path": "/shell.html", "only": ["desktop"], "capture": {"scroll": {"css": "#list"}}}]}' > "$D/shots.json"
+  run _k shots; echo "$output"; [ "$status" -eq 0 ]
+  run node -e '
+    const { createRequire } = require("module"); const r = createRequire(process.argv[2]);
+    const { PNG } = r("pngjs"); const p = PNG.sync.read(require("fs").readFileSync(process.argv[1])); let g = 0;
+    for (let y = 0; y < p.height; y++) { const i = (y * p.width + 5) * 4; if (p.data[i + 1] > 200 && p.data[i] < 60) g++; } console.log(g);' "$D/shots/desktop/seznam.png" "$AID_PLUGIN_PATH/lib/ui-fidelity/package.json"
+  [ "$output" -ge 590 ]                                                        # the whole 600 px of content, not the 200 the shell shows
+}
+
+# pages with dialogs: one that fits, a hidden one with overflowing content, a table that scrolls inside its dialog on
+# purpose, a dialog whose content is cut off at its edge, and a page wider than the phone
+_dialog_pages() {
+  local dlg='position:fixed;top:40px;left:40px;width:300px;height:200px;overflow:hidden;background:#fff;border:1px solid #000'
+  echo "<html><body><div role=dialog aria-label=Ok style='$dlg'><p>vejde se</p></div></body></html>" > "$P/ui/ok.html"
+  echo "<html><body><div role=dialog style='$dlg;display:none'><div style='width:900px'>skryte</div></div></body></html>" > "$P/ui/hidden.html"
+  echo "<html><body><div role=dialog style='$dlg'><div style='overflow-x:auto'><table style='width:900px'><tr><td>siroka tabulka</td></tr></table></div></div></body></html>" > "$P/ui/scroll.html"
+  echo "<html><body><div role=dialog aria-label=Prevod style='$dlg'><div class=paticka style='width:520px'>tlacitko uriznute</div></div></body></html>" > "$P/ui/clip.html"
+  echo "<html><body style='margin:0'><div style='width:600px'>siroka stranka</div></body></html>" > "$P/ui/wide.html"
+  echo "<html><body><div role=dialog style='position:fixed;top:40px;left:900px;width:600px;height:100px;background:#fff'>mimo</div></body></html>" > "$P/ui/offscreen.html"
+  echo "<html><body><div role=dialog style='$dlg'><div class=bunka style='overflow-x:hidden;width:100px;white-space:nowrap'>dlouhy text ktery se nevejde do bunky</div><div style='overflow:hidden;width:100px;white-space:nowrap;text-overflow:ellipsis'>dlouhy text s vypustkou</div></div></body></html>" > "$P/ui/cell.html"
+  echo "<html><body><div role=dialog style='$dlg;overflow-x:auto'><div style='width:900px'>okno se posouva samo</div></div></body></html>" > "$P/ui/selfscroll.html"
+}
+_navrh() {  # <minule shot> <option A shot> [vady json]
+  cat > "$D/navrh.json" <<J
+{"plan": "P900", "kolo": 1, "prohlidka_snimku": "Prohlédl jsem všechny snímky.", "vady_aplikace": ${3:-[]},
+ "body": [{"id": "1", "title": "Okno", "otazka": "Jak?", "doporuceni": "A", "proc": "Proto.",
+   "minule": [{"popisek": "Dnes", "shot": "$1"}],
+   "moznosti": [{"klic": "A", "nazev": "A", "popis": "a", "snimky": [{"popisek": "A", "shot": "$2"}]}]}]}
+J
+}
+
+@test "every shot is checked for a cut-off dialog and a page wider than the window; show refuses one in an option, shows one of today's app as its defect" {
+  _dialog_pages; run _k proto; [ "$status" -eq 0 ]; run _k up; [ "$status" -eq 0 ]; echo '[]' > "$D/mocks.json"
+  echo '{"base": "proto", "shots": [{"name": "ok", "path": "/ok.html"}, {"name": "hidden", "path": "/hidden.html"}, {"name": "scroll", "path": "/scroll.html"}, {"name": "clip", "path": "/clip.html"}, {"name": "wide", "path": "/wide.html"}, {"name": "offscreen", "path": "/offscreen.html", "only": ["desktop"]}, {"name": "cell", "path": "/cell.html", "only": ["desktop"]}, {"name": "selfscroll", "path": "/selfscroll.html", "only": ["desktop"]}]}' > "$D/shots.json"
+  run _k shots; echo "$output"; [ "$status" -eq 0 ]
+  local c=$D/shots
+  [ "$(jq -c '[(.clipped|length), .dialogs]' "$c/desktop/ok.check.json")" = "[0,1]" ]
+  [ "$(jq '.clipped|length' "$c/desktop/hidden.check.json")" = 0 ]
+  [ "$(jq '.clipped|length' "$c/desktop/scroll.check.json")" = 0 ]
+  jq -e '.clipped[] | select(.pravidlo == "beyond_dialog_edge" and (.prvek | test("paticka")))' "$c/desktop/clip.check.json"
+  [ "$(jq '.clipped|length' "$c/desktop/wide.check.json")" = 0 ]
+  jq -e '.clipped[] | select(.pravidlo == "dialog_off_screen")' "$c/desktop/offscreen.check.json"
+  jq -e '.clipped[] | select(.pravidlo == "content_clipped" and (.prvek | test("bunka")))' "$c/desktop/cell.check.json"
+  [ "$(jq '[.clipped[] | select(.pravidlo == "content_clipped")] | length' "$c/desktop/cell.check.json")" = 1 ]   # the ellipsis passes
+  [ "$(jq '.clipped|length' "$c/desktop/selfscroll.check.json")" = 0 ]
+  jq -e '.clipped[] | select(.pravidlo == "page_wider_than_window")' "$c/mobile/wide.check.json"
+  _navrh ok clip; run _k show; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"option A snimky[0]: shot 'clip' (desktop) is cut off — beyond_dialog_edge"* ]]
+  _navrh clip ok; run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"list it in vady_aplikace"* ]]
+  _navrh clip ok '[{"snimek": "clip", "popis": "Okno převodu klienta je širší než panel, patička je uříznutá."}]'
+  run _k show; echo "$output"; [ "$status" -eq 0 ]; [[ "$(jq -r '.look[0]' <<< "$output")" == *"shots/desktop/clip.png" ]]
+  grep -q 'Vada dnešní aplikace' "$D/navrh-1.html"; grep -q 'patička je uříznutá' "$D/navrh-1.html"
+  jq 'del(.prohlidka_snimku)' "$D/navrh.json" > "$D/n.t" && mv "$D/n.t" "$D/navrh.json"
+  run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"prohlidka_snimku"* ]]
+}
+
+@test "show refuses a shot without its check, one whose png or shots.json entry changed since, and the shots of a run with an unmocked call" {
+  _dialog_pages; run _k proto; [ "$status" -eq 0 ]; echo '[]' > "$D/mocks.json"
+  echo '{"base": "proto", "shots": [{"name": "ok", "path": "/ok.html"}, {"name": "scroll", "path": "/scroll.html"}]}' > "$D/shots.json"
+  run _k shots; [ "$status" -eq 0 ]; _navrh ok scroll; run _k show; echo "$output"; [ "$status" -eq 0 ]
+  rm "$D/shots/mobile/scroll.check.json"
+  run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"shot 'scroll' (mobile) has no check record"* ]]
+  run _k shots; [ "$status" -eq 0 ]; cp "$D/shots/desktop/ok.png" "$D/shots/desktop/scroll.png"
+  run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"shot 'scroll' (desktop) changed since it was checked"* ]]
+  run _k shots; [ "$status" -eq 0 ]; jq '.shots[1].path = "/scroll.html?x=1"' "$D/shots.json" > "$D/s.t" && mv "$D/s.t" "$D/shots.json"
+  run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"changed since it was checked"* ]]
+  echo "<html><body><script>fetch('/api/nic')</script><div role=dialog style='width:100px'>x</div></body></html>" > "$D/proto/scroll.html"
+  run _k shots; [ "$status" -ne 0 ]; [[ "$output" == *"no mock"* ]]
+  run _k show; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"API calls without a mock"* ]]
 }
