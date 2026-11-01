@@ -531,17 +531,34 @@ Optional: a plan whose brief carries no maps skips this section entirely. When i
 - **Every step that builds part of a mapped process** closes the maps point in its
   `**Zavírá:**` and carries one criterion per map that quotes the transitions it builds:
   `- [ ] Přechody A→B, B→C z mapy \`docs/procesy/<name>.mapa.yaml\` existují v \`<file>\`.`
-  The step reviewer sees only the step's `dod.md`, so the transitions must be in the
-  criterion, not only in the map.
+  The step reviewer's packet carries only the step's `dod.md` (objective and criteria), so
+  the transitions must be in the criterion, not only in the map.
 - **The last implementation step reconciles the maps** (role docs), before plan-final
-  freezes the candidate: compare each approved map with the code as built (each transition
-  located with its place) and with the run's accepted findings
-  (`.aid-o/work/evidence/<plan>/**/merged.json`). When the build deviated with an accepted
-  finding or a recorded PM decision, write `docs/procesy/<name>.postaveno.mapa.yaml`
-  (`stav: po`, `proti: <name>.mapa.yaml`), `check` and `publish` it; the approved file is
-  never edited. No deviation: the step writes nothing and says so.
+  freezes the candidate. It ALWAYS writes `docs/procesy/<name>.sladeni.md` (every transition
+  of the approved map → the code place that builds it, or "nepostaveno" with the reason), so
+  the step has an output even when nothing deviated. It reads the run's findings in the MAIN
+  checkout by absolute path (`<state root>/.aid-o/work/evidence/<plan>/**/merged.json`, the
+  worktree has no `.aid-o/work`): a finding counts as support when its `status` is `fixed`,
+  or `disputed` with `dispute.pm.answer` recorded. A deviation WITH such support (or a PM
+  decision recorded in the run) goes into `docs/procesy/<name>.postaveno.mapa.yaml`
+  (`stav: po`, `proti: <name>.mapa.yaml`), checked and published; the approved file is never
+  edited. A deviation WITHOUT support is never written into a map: the step fixes the code,
+  or raises it as a finding for the PM.
+- The reconcile step's shape:
+
+  ```
+  ### Step N: Reconcile the process maps
+  **Files:**
+  - Create: `docs/procesy/<name>.sladeni.md` — transition → code place, for every map of §4
+  - Create: `docs/procesy/<name>.postaveno.mapa.yaml` — only when a supported deviation exists (say so)
+  **Acceptance Criteria:**
+  - [ ] Every transition of each approved map is in `<name>.sladeni.md` with a code place or "nepostaveno" and a reason.
+  - [ ] `aid-process-map.sh check` passes on every `*.postaveno.mapa.yaml` written.
+  - [ ] No deviation without a `fixed` finding, a PM-answered dispute or a recorded PM decision is in a map.
+  **Zavírá:** the maps point
+  ```
 - A deviation found only at CP7 is a CP7 finding; its fix round reruns the reconcile
-  comparison before the next candidate is frozen.
+  comparison (`commands/aid-run.md`, the CP7 fix path) before the next candidate is frozen.
 
 ### Tests are designed, not counted
 

@@ -90,8 +90,10 @@ left for later stays new.
 A map in a brief's §4 "### Procesní mapy" has `stav: schvaleno` and a recorded sha256: never edit it. When
 the PM marks an approved map and chooses a change, the change goes through a new version of the brief
 (`verze` +1, new map file, new sha256) - never silently.
-When the build deviated with an accepted finding or a PM decision, the plan's reconcile step writes
-`docs/procesy/<name>.postaveno.mapa.yaml` (`stav: po`, `proti: <name>.mapa.yaml`) and publishes it. A later
+The plan's reconcile step (`skills/plan-writing.md` §Process maps) always writes
+`docs/procesy/<name>.sladeni.md` (transition → code place) and, for a deviation supported by a fixed finding,
+a PM-answered dispute or a PM decision, `docs/procesy/<name>.postaveno.mapa.yaml` (`stav: po`,
+`proti: <name>.mapa.yaml`, page name `<name>-postaveno`), which it publishes. A later
 plan over the same process starts from the newest `postaveno` file, else from the approved map.
 
 ## Documentation

@@ -412,3 +412,17 @@ PY
   cp "$FX/objednavka.mapa.yaml" "$D/$(printf 'a%.0s' {1..50}).mapa.yaml"
   run bash "$PM" check "$D/$(printf 'a%.0s' {1..50}).mapa.yaml"; [ "$status" -eq 1 ]; [[ "$output" == *"49 characters"* ]]
 }
+
+@test "build: the as-built map <name>.postaveno.mapa.yaml checks, builds against the approved map and has its own page name" {
+  sed 's/^stav: dnes/stav: schvaleno/' "$FX/objednavka.mapa.yaml" > "$D/objednavka.mapa.yaml"
+  _variant objednavka objednavka.postaveno 'm["stav"] = "po"; m["proti"] = "objednavka.mapa.yaml"; m["kroky"].insert(2, {"id": "BALENA", "jmeno": "Balí se", "co": "Sklad balí."}); m["prechody"] = [t for t in m["prechody"] if not (t["z"] == "ZAPLACENA" and t["do"] == "ODESLANA")] + [{"z": "ZAPLACENA", "do": "BALENA"}, {"z": "BALENA", "do": "ODESLANA"}]'
+  run bash "$PM" check "$D/objednavka.postaveno.mapa.yaml"; [ "$status" -eq 0 ]
+  run bash "$PM" build "$D/objednavka.postaveno.mapa.yaml" --no-render --out "$BATS_TEST_TMPDIR/post"; [ "$status" -eq 0 ]
+  run python3 -c "
+import json; m = json.load(open('$BATS_TEST_TMPDIR/post/model.json'))
+assert m['name'] == 'objednavka-postaveno', m['name']
+assert {s['id']: s['marker'] for s in m['steps']}['BALENA'] == 'added'"
+  [ "$status" -eq 0 ]
+  cp "$FX/objednavka.mapa.yaml" "$D/a.b.mapa.yaml"
+  run bash "$PM" check "$D/a.b.mapa.yaml"; [ "$status" -eq 1 ]; [[ "$output" == *"name:"* ]]
+}

@@ -63,9 +63,13 @@ def load_style():
 
 def map_name(path):
     base = os.path.basename(path)
-    name = base[: -len(SUFFIX)] if base.endswith(SUFFIX) else ""
-    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,48}", name):   # the publisher's --name limit
-        raise Refused(f"{path}: name: a map file is <name>{SUFFIX}, <name> = [a-z0-9][a-z0-9-]*, at most 49 characters")
+    stem = base[: -len(SUFFIX)] if base.endswith(SUFFIX) else ""
+    # <name>.mapa.yaml, or <name>.postaveno.mapa.yaml (the as-built map of a plan's reconcile step), whose page
+    # name is <name>-postaveno; the page name is the publisher's --name: [a-z0-9][a-z0-9-]*, at most 49 characters
+    name = stem[: -len(".postaveno")] + "-postaveno" if stem.endswith(".postaveno") else stem
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,48}", name):
+        raise Refused(f"{path}: name: a map file is <name>{SUFFIX} or <name>.postaveno{SUFFIX}, <name> = [a-z0-9][a-z0-9-]*, "
+                      "the page name at most 49 characters")
     return name
 
 
