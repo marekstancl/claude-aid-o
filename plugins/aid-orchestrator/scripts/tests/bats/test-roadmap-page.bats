@@ -56,6 +56,7 @@ P
   cp "$DATA" "$R/docs/plans/jina.prubeh.json"
   run _rp publish "$DOC" --plan P900; [ "$status" -eq 0 ]
   run _rp publish "$other" --plan P900; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"copied marker line"* ]]
+  run _rp init "$other" --title X; [ "$status" -ne 0 ]; [[ "$output" == *"copied marker line"* ]]
 }
 
 @test "a path out of the project, through a link or a dangling link is refused and nothing outside changes; odd names work" {
@@ -83,8 +84,15 @@ P
   printf -- '---\nroadmapa_dokument: %s\n---\n' "$DOC" > "$B"; run aid_roadmap_brief_check "$B" "$R"; [ "$status" -eq 0 ]; [ -z "$output" ]
   printf -- '---\nroadmapa: navazuje na %s (fáze 2)\n---\n' "$DOC" > "$B"
   run aid_roadmap_brief_check "$B" "$R"; [ "$status" -eq 0 ]; [[ "$output" == "WARN roadmap_document_unnamed:"* ]]
-  printf -- '---\nroadmapa: P109 → P110 → P111 (docs/plans/2026-10-09-roadmapa-p109.md)\n---\n' > "$B"
-  run aid_roadmap_brief_check "$B" "$R"; [ "$status" -eq 0 ]; [ -z "$output" ]   # the document has no page: nothing to say
+  # the free-text roadmapa: of the briefs P113, P114 and P117 (their real lines): a path to a document without a page
+  # and plain text bind nothing and say nothing
+  local l; for l in '.aid-o/work/P113-stav-a-plan-2026-10-14.md kapitola 10 (P113 = studio podle dílny; napojení na plán a běh, hosting, aplikace = P115 a dál)' \
+                   'docs/plans/2026-10-09-roadmapa-p109.md (vydání 3b – poslední plán sady po experimentu P014; mazání EPIC cesty, které roadmapa vedla jako „P112 — maže“)' \
+                   'navazuje na 3.7.0 (companion + 20 oprav); vstup = záznamy WAN P109–P112 z 19.–20. 10. 2026'; do
+    printf -- '---\nroadmapa: %s\n---\n' "$l" > "$B"; run aid_roadmap_brief_check "$B" "$R"; [ "$status" -eq 0 ]; [ -z "$output" ]
+  done
+  printf -- '---\nroadmapa_dokument: docs/plans/nic.md\n---\n' > "$B"
+  run aid_roadmap_brief_check "$B" "$R"; [ "$status" -eq 1 ]; [[ "$output" == "ERROR roadmap_page_missing:"*"does not exist"* ]]
 }
 
 @test "published also with AID_PM_PAGES=off (the other pages are not); a failing publisher is failed, never local; the link is not stored" {
@@ -97,6 +105,12 @@ P
   _data '.posledni_zmena = {kdo: "P900", co: "x"}'
   FAIL=1 run _rp publish "$DOC" --plan P900; echo "$output"; [ "$status" -ne 0 ]
   [ "$(_hist | tail -1 | jq -r '"\(.vysledek) \(.duvod)"')" = "failed aid-pm-page-publish: the publisher refused the page (exit 3): share is down" ]
+  # a failed first publish: the next init publishes; an error text carrying the link never stores it
+  rm -rf "$R/.aid-o/work/roadmap-pages"; FAIL=1 run _rp publish "$DOC" --plan P900
+  run _rp init "$DOC" --title X; echo "$output"; [[ "$output" == "link "* ]]
+  printf '#!/usr/bin/env bash\necho "published https://share.example/p/x#k=secret but the record failed" >&2; exit 1\n' > "$BATS_TEST_TMPDIR/pub"
+  run _rp publish "$DOC" --plan P900; [ "$status" -ne 0 ]; ! grep -rq 'k=secret' "$R/.aid-o/work/roadmap-pages"
+  grep -q '<link>' "$R"/.aid-o/work/roadmap-pages/*/history.jsonl
 }
 
 @test "a later plan's refresh does not hide an earlier plan's; a failed publish does not count; the data as merged or as on the target count" {

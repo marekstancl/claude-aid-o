@@ -56,7 +56,9 @@ def write_no_follow(path, data):
 def doc_paths(project, doc):
     project = os.path.realpath(project)
     rel = os.path.relpath(os.path.abspath(doc), project) if os.path.isabs(doc) else doc
-    d = inside(project, rel, 'the roadmap document')
+    d = inside(project, rel, 'the roadmap document', must_exist=False)
+    if not os.path.isfile(d):
+        raise Refused(1, f'the roadmap document {rel} does not exist')
     if not d.endswith('.md'):
         raise Refused(2, f'the roadmap document {rel} is not a .md file')
     return project, rel, d, d[:-3] + '.prubeh.json', rel[:-3] + '.prubeh.json'
@@ -156,7 +158,29 @@ def record_dir(state, rid):
     return inside(state, rel, 'the record directory', must_exist=False)
 
 
-def publish(project, state, doc, who, aid_do=False):
+def claim(project, rel, rid, rdir):
+    """a page id belongs to one document: another document still carrying it (a copied line) is refused"""
+    cur = os.path.join(rdir, 'current.json')
+    if os.path.isfile(cur) and not os.path.islink(cur):
+        other = json.load(open(cur)).get('dokument')
+        if other and other != rel and os.path.isfile(os.path.join(project, other)) and marker(os.path.join(project, other)) == rid:
+            raise Refused(1, f'{rel} carries the page id {rid} of {other} (a copied marker line) — remove the line and run init')
+
+
+def published_ok(state, rid):
+    hist = os.path.join(os.path.realpath(state), '.aid-o', 'work', 'roadmap-pages', rid, 'history.jsonl')
+    if not os.path.isfile(hist) or os.path.islink(hist):
+        return False
+    for ln in open(hist, encoding='utf-8'):
+        try:
+            if json.loads(ln).get('vysledek') in ('link', 'local'):
+                return True
+        except ValueError:
+            pass
+    return False
+
+
+def publish(project, state, doc, who, aid_do=False, any_author=False):
     project, rel, d_abs, data_abs, data_rel = doc_paths(project, doc)
     rid = marker(d_abs)
     if not rid:
@@ -166,17 +190,16 @@ def publish(project, state, doc, who, aid_do=False):
         raw = f.read()          # read ONCE: hashed, rendered and published from these bytes
     d = validate(raw.decode('utf-8', 'replace'), data_rel)
     kdo = d['posledni_zmena']['kdo']
-    if aid_do and kdo != 'aid-do':
+    if any_author:
+        pass
+    elif aid_do and kdo != 'aid-do':
         raise Refused(1, f'{data_rel}: posledni_zmena.kdo is {kdo}, not aid-do — say what this /aid-do changed there first')
-    if not aid_do and who != kdo:
+    if not aid_do and not any_author and who != kdo:
         raise Refused(1, f'{data_rel}: posledni_zmena.kdo is {kdo}, not {who} — the page would claim a change of somebody else')
     digest = hashlib.sha256(raw).hexdigest()
     rdir = record_dir(state, rid)
+    claim(project, rel, rid, rdir)
     cur = os.path.join(rdir, 'current.json')
-    if os.path.isfile(cur) and not os.path.islink(cur):
-        other = json.load(open(cur)).get('dokument')
-        if other and other != rel and os.path.isfile(os.path.join(project, other)) and marker(os.path.join(project, other)) == rid:
-            raise Refused(1, f'{rel} carries the page id {rid} of {other} (a copied marker line) — remove the line and run init')
     page = os.path.join(rdir, 'page.html')
     write_no_follow(page, render(d, rel))
     pub = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'aid-pm-page-publish.sh')
@@ -192,7 +215,8 @@ def publish(project, state, doc, who, aid_do=False):
     entry = {'kdo': kdo, 'data_sha256': digest, 'dokument': rel, 'at': datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
              'vysledek': result}
     if result == 'failed':
-        entry['duvod'] = (p.stderr.strip().splitlines() or ['the publisher failed'])[-1][:300]
+        # the link carries the PM's key: never into a file, even inside an error text
+        entry['duvod'] = re.sub(r'https?://\S+', '<link>', (p.stderr.strip().splitlines() or ['the publisher failed'])[-1])[:300]
     hist = os.path.join(rdir, 'history.jsonl')
     if os.path.islink(hist):
         raise Refused(2, f'{hist} is a link')
@@ -228,12 +252,26 @@ def init(project, state, doc, title):
         publish(project, state, rel, 'init')
     else:
         inside(project, data_rel, 'the data file')       # an existing one is a plain file in the project, not a link
+        claim(project, rel, rid, record_dir(state, rid))
+        if not published_ok(state, rid):                  # the first publish failed: init tries again
+            return publish(project, state, rel, None, any_author=True)
         print(f'kept {rid} {data_rel}')
 
 
 def refreshed(project, state, doc, plan, *revs):
-    project, rel, d_abs, _, data_rel = doc_paths(project, doc)
-    rid = marker(d_abs)
+    project = os.path.realpath(project)
+    d_abs = inside(project, doc, 'the roadmap document', must_exist=False)    # read from the commits, not the disk
+    rel, data_rel = os.path.normpath(doc), os.path.normpath(doc)[:-3] + '.prubeh.json'
+    if not rel.endswith('.md'):
+        return 2
+    # the page id as the committed document says (the working copy may be on another branch), else as it is on disk
+    rid = None
+    for rev in revs:
+        shown = subprocess.run(['git', '-C', project, 'show', f'{rev}:{rel}'], capture_output=True, text=True)
+        m = MARK.search(shown.stdout) if shown.returncode == 0 else None
+        if m:
+            rid = m.group(1); break
+    rid = rid or (marker(d_abs) if os.path.isfile(d_abs) else None)
     if not rid:
         return 1
     want = set()

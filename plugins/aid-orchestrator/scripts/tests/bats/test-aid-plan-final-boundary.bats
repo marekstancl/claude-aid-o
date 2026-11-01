@@ -2548,34 +2548,53 @@ _main_put() {
   c="$(git -C "$r" commit-tree "$t" -p main -m "roadmap data")"; git -C "$r" update-ref refs/heads/main "$c"
 }
 
+# _roadmap_brief [--not-on-main] — the plan gets a brief naming a roadmap that has its progress page (init done, not refreshed by
+# the plan yet); DOC is the roadmap document, PLANFILE the plan
+_roadmap_brief() {
+  local r="$TEST_PROJECT_ROOT"; DOC=docs/plans/2026-11-01-x-roadmapa.md; export AID_PM_PAGE_PUBLISHER=""
+  mkdir -p "$r/docs/plans"; printf '# X\n' > "$r/$DOC"
+  (cd "$r" && bash "$AID_PLUGIN_PATH/scripts/aid-roadmap-page.sh" init "$DOC" --title "X kde jsme" >/dev/null)
+  PLANFILE="$(source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" && aid_lifecycle_plan_file "$PLAN_ID" "$r")"
+  printf -- '---\nzadani: P900\nverze: 1\nroadmapa_dokument: %s\n---\n# zadani\n' "$DOC" > "$r/.aid-o/plans/${PLAN_ID}-zadani.md"
+  printf -- '---\nzadani: .aid-o/plans/%s-zadani.md\nzadani_sha256: %s\n---\n' "$PLAN_ID" "$(sha256sum < "$r/.aid-o/plans/${PLAN_ID}-zadani.md" | cut -d' ' -f1)" \
+    | cat - "$PLANFILE" > "$r/p.tmp" && mv "$r/p.tmp" "$PLANFILE"
+  [[ "${1:-}" == --not-on-main ]] || _main_put "$DOC" "${DOC%.md}.prubeh.json"
+}
+_roadmap_data_of_plan() {  # the plan writes its change into the data on main
+  local r="$TEST_PROJECT_ROOT" d="$TEST_PROJECT_ROOT/${DOC%.md}.prubeh.json"
+  jq --arg p "$PLAN_ID" '.posledni_zmena = {kdo: $p, co: "hotovo"}' "$d" > "$d.t" && mv "$d.t" "$d"; _main_put "${DOC%.md}.prubeh.json"
+}
+
 @test "close: a plan of a roadmap closes only after it published the roadmap's page from its data" {
-  _seed_closable
-  local r="$TEST_PROJECT_ROOT" doc=docs/plans/2026-11-01-x-roadmapa.md plan
-  export AID_PM_PAGE_PUBLISHER=""
-  mkdir -p "$r/docs/plans"; printf '# X\n' > "$r/$doc"
-  (cd "$r" && bash "$AID_PLUGIN_PATH/scripts/aid-roadmap-page.sh" init "$doc" --title "X kde jsme")
-  plan="$(source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" && aid_lifecycle_plan_file "$PLAN_ID" "$r")"
-  printf -- '---\nzadani: P900\nverze: 1\nroadmapa_dokument: %s\n---\n# zadani\n' "$doc" > "$r/.aid-o/plans/${PLAN_ID}-zadani.md"
-  printf -- '---\nzadani: .aid-o/plans/%s-zadani.md\n---\n' "$PLAN_ID" | cat - "$plan" > "$r/p.tmp" && mv "$r/p.tmp" "$plan"
-  jq --arg p "$PLAN_ID" '.posledni_zmena = {kdo: $p, co: "hotovo"}' "$r/${doc%.md}.prubeh.json" > "$r/x.json" && mv "$r/x.json" "$r/${doc%.md}.prubeh.json"
-  _main_put "$doc" "${doc%.md}.prubeh.json"
+  _seed_closable; _roadmap_brief; _roadmap_data_of_plan
   _close; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"REFUSED (roadmap_page_not_refreshed)"* ]]; [ ! -f "$(_marker)" ]
-  (cd "$r" && bash "$AID_PLUGIN_PATH/scripts/aid-roadmap-page.sh" publish "$doc" --plan "$PLAN_ID")
+  (cd "$TEST_PROJECT_ROOT" && bash "$AID_PLUGIN_PATH/scripts/aid-roadmap-page.sh" publish "$DOC" --plan "$PLAN_ID")
   _close; echo "$output"; [ "$status" -eq 0 ]; [ -f "$(_marker)" ]
 }
 
-@test "close: --force waives an unrefreshed roadmap page and records why" {
-  _seed_closable
-  local r="$TEST_PROJECT_ROOT" doc=docs/plans/2026-11-01-x-roadmapa.md plan
-  export AID_PM_PAGE_PUBLISHER=""
-  mkdir -p "$r/docs/plans"; printf '# X\n' > "$r/$doc"
-  (cd "$r" && bash "$AID_PLUGIN_PATH/scripts/aid-roadmap-page.sh" init "$doc" --title "X kde jsme")
-  plan="$(source "$AID_PLUGIN_PATH/scripts/lib/aid-lifecycle.sh" && aid_lifecycle_plan_file "$PLAN_ID" "$r")"
-  printf -- '---\nzadani: P900\nverze: 1\nroadmapa_dokument: %s\n---\n# zadani\n' "$doc" > "$r/.aid-o/plans/${PLAN_ID}-zadani.md"
-  printf -- '---\nzadani: .aid-o/plans/%s-zadani.md\n---\n' "$PLAN_ID" | cat - "$plan" > "$r/p.tmp" && mv "$r/p.tmp" "$plan"
-  _main_put "$doc" "${doc%.md}.prubeh.json"
+@test "close: a failed publish does not count, a brief changed after the binding is refused, not skipped" {
+  _seed_closable; _roadmap_brief; _roadmap_data_of_plan
+  printf '#!/usr/bin/env bash\necho down >&2; exit 3\n' > "$BATS_TEST_TMPDIR/pub"; chmod +x "$BATS_TEST_TMPDIR/pub"
+  (cd "$TEST_PROJECT_ROOT" && AID_PM_PAGE_PUBLISHER="$BATS_TEST_TMPDIR/pub" bash "$AID_PLUGIN_PATH/scripts/aid-roadmap-page.sh" publish "$DOC" --plan "$PLAN_ID") || true
+  _close; [ "$status" -ne 0 ]; [[ "$output" == *"roadmap_page_not_refreshed"* ]]
+  sed -i '/^roadmapa_dokument:/d' "$TEST_PROJECT_ROOT/.aid-o/plans/${PLAN_ID}-zadani.md"   # the roadmap dropped from the brief after the binding
+  _close; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"the brief changed since the plan bound it"* ]]; [ ! -f "$(_marker)" ]
+}
+
+@test "close: an aborted plan of a roadmap is closed without asking for its page" {
+  _seed_merge_project
+  local d; d="$(_decision_file '.decision = "ABORT" | .reason = "superseded by P069"')"
+  _merge "$d"; [ "$status" -eq 3 ]
+  _roadmap_brief --not-on-main                                                 # an aborted plan publishes nothing on main
+  _close; echo "$output"; [[ "$output" != *"roadmap_page"* ]]; [ "$status" -eq 0 ]
+}
+
+@test "close: --force waives an unrefreshed roadmap page and the waiver records it with the reason" {
+  _seed_closable; _roadmap_brief
   _close --force --force-reason "the roadmap page is published by hand this time, the share is down"; echo "$output"
   [ "$status" -eq 0 ]; [[ "$output" == *"bypassing precondition 'roadmap_page_refreshed'"* ]]
+  local w; w="$(grep -rl 'roadmap_page_refreshed' "$TEST_PROJECT_ROOT/.aid-o/work/evidence/" --include='waiver-plan-plan-close-*.json' | head -1)"
+  [ -n "$w" ]; grep -q 'the share is down' "$w"
 }
 
 @test "AC7: a plan whose .lock sidecars EXIST but are not held closes normally (and the close takes its own lock)" {

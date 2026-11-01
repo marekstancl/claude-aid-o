@@ -433,24 +433,41 @@ _pfsm_force_evidence_dir() {
 # it, so the operator is not left guessing.
 # ---------------------------------------------------------------------------
 # _pfsm_roadmap_refreshed <root> <plan_id> — 0 when the plan's brief names no roadmap (roadmapa_dokument) or the plan
-# published the roadmap's page from the data as its merge left them; else 1 with the refusal and its next: line.
+# published the roadmap's page from the data its merge left (or the target holds now); else 1 with the refusal. The
+# brief is read by the one resolver the review uses (inside the project, present) and must be the one the plan bound
+# (zadani_sha256): a brief changed or lost after the binding never lets a plan skip its page (it is refused instead).
 _pfsm_roadmap_refreshed() {
-  local root="$1" plan_id="$2" plan z zpath doc merge rc=0
-  plan="$(aid_lifecycle_plan_file "$plan_id" "$root" 2>/dev/null)" || return 0
-  z="$(_aid_fm_get "$plan" zadani)"; [[ -n "$z" ]] || return 0
-  [[ "$z" == /* ]] && zpath="$z" || zpath="${root}/${z}"
-  [[ -f "$zpath" ]] || return 0
-  doc="$(_aid_fm_get "$zpath" roadmapa_dokument)"; [[ -n "$doc" ]] || return 0
+  local root="$1" plan_id="$2" plan doc merge rc=0 tb tmp want short
+  _refuse_roadmap() {
+    echo "REFUSED (roadmap_page_not_refreshed): ${plan_id}: $1" >&2
+    echo "  next: $2 (pipeline.md §When AID refuses: roadmap_page_not_refreshed)" >&2
+    return 1
+  }
+  plan="$(aid_lifecycle_plan_file "$plan_id" "$root" 2>/dev/null)" || {
+    _refuse_roadmap "the plan file cannot be found, so whether it belongs to a roadmap cannot be told" "restore the plan file, or plan-close --force --force-reason \"<why>\""; return 1; }
+  [[ -n "$(_aid_fm_get "$plan" zadani)" ]] || return 0
+  # shellcheck source=lib/aid-plan-review-packet.sh
+  declare -F aid_plan_review_brief_resolve >/dev/null || source "${SCRIPT_DIR}/lib/aid-plan-review-packet.sh"
+  tmp="$(mktemp -d)"
+  if ! aid_plan_review_brief_resolve "$root" "$plan" "$tmp" 2>/dev/null; then
+    rm -rf "$tmp"; _refuse_roadmap "the brief the plan names cannot be read (outside the project or missing)" "restore the brief, or plan-close --force --force-reason \"<why>\""; return 1
+  fi
+  want="$(_aid_fm_get "$plan" zadani_sha256)"
+  if [[ -n "$want" && "$want" != "${ZR_SHA:-}" ]]; then
+    rm -rf "$tmp"; _refuse_roadmap "the brief changed since the plan bound it (zadani_sha256)" "restore the brief the plan bound, or plan-close --force --force-reason \"<why>\""; return 1
+  fi
+  doc="$(_aid_fm_get "$tmp/zadani.md" roadmapa_dokument 2>/dev/null)"; rm -rf "$tmp"
+  [[ -n "$doc" ]] || return 0
   # shellcheck source=lib/aid-roadmap.sh
   declare -F aid_roadmap_refreshed >/dev/null || source "${SCRIPT_DIR}/lib/aid-roadmap.sh"
-  local tb; tb="$(aid_target_branch)"
+  tb="$(aid_target_branch)"
   # the data as the plan's merge left them, or as they are on the target now (a change written there after the merge)
   merge="$(git -C "$root" log "$tb" --merges --grep "^merge(plan): ${plan_id}\b" -1 --format=%H 2>/dev/null)"
   aid_roadmap_refreshed "$root" "$(aid_state_root "$root" 2>/dev/null || printf '%s' "$root")" "$doc" "$plan_id" ${merge:+"$merge"} "$tb" || rc=$?
   (( rc == 0 )) && return 0
-  echo "REFUSED (roadmap_page_not_refreshed): ${plan_id} belongs to the roadmap ${doc}, but its progress page was not published from the data the merge left ($(git -C "$root" rev-parse --short "$merge" 2>/dev/null))" >&2
-  echo "  next: write this plan's change into ${doc%.md}.prubeh.json (posledni_zmena.kdo: ${plan_id}) (in the plan's branch before the merge, or on ${tb} after it), run aid-roadmap-page.sh publish ${doc} --plan ${plan_id}, then plan-close again (pipeline.md §When AID refuses: roadmap_page_not_refreshed)" >&2
-  return 1
+  short="${merge:0:12}"; [[ -n "$short" ]] || short="no merge commit found on ${tb}"
+  _refuse_roadmap "it belongs to the roadmap ${doc}, but its progress page was not published from the data the merge left (${short}) or ${tb} holds" \
+    "write this plan's change into ${doc%.md}.prubeh.json (posledni_zmena.kdo: ${plan_id}) in the plan's branch before the merge, or on ${tb} after it, run aid-roadmap-page.sh publish ${doc} --plan ${plan_id}, then plan-close again"
 }
 
 _pfsm_precondition() {
