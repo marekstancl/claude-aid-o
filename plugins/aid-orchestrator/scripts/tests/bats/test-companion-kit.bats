@@ -364,3 +364,44 @@ _gone() {  # <pgid> <port>: no member left and the port closed (a failing pgrep 
   run _k down; echo "$output"; [ "$status" -ne 0 ]; [ -e "$D/proto.json" ]; [[ "$output" == *"port ${port} is still open"* ]]
   kill "$holder"
 }
+
+@test "the copy carries the kit's .gitignore block after the app's own lines, an older copy gets it on the next proto, and it is no change of a variant" {
+  printf 'secret.txt\n' > "$P/ui/.gitignore"
+  run _k proto; [ "$status" -eq 0 ]
+  head -1 "$D/proto/.gitignore" | grep -qx 'secret.txt'
+  grep -qx '!\*/' "$D/proto/.gitignore"; grep -qx 'node_modules/' "$D/proto/.gitignore"
+  _k down >/dev/null
+  # a copy made before the block existed: the block comes with the next proto
+  printf 'secret.txt\n' > "$D/proto/.gitignore"
+  run _k proto; [ "$status" -eq 0 ]; grep -qx '!\*/' "$D/proto/.gitignore"
+  _proposal; run _k show; echo "$output"; [ "$status" -eq 0 ]                 # the block is not an unlisted change
+}
+
+@test "copy_extra added, changed and removed after the first proto is brought in line; show refuses a foreign file beside an allowed one" {
+  mkdir -p "$P/shared"; echo "a{}" > "$P/shared/base.css"; echo "b{}" > "$P/shared/other.css"
+  run _k proto; [ "$status" -eq 0 ]; [ ! -e "$D/shared" ]
+  yq -i '.ui.copy_extra = ["shared/base.css", "shared/other.css"]' "$P/.aid-o/config/project.yaml"
+  run _k proto; echo "$output"; [ "$status" -eq 0 ]                            # reused: the running copy gets them
+  [ "$(jq -r .reused <<< "$output")" = true ]; [ "$(cat "$D/shared/base.css")" = "a{}" ]
+  echo "a2{}" > "$P/shared/base.css"; yq -i '.ui.copy_extra = ["shared/base.css"]' "$P/.aid-o/config/project.yaml"
+  run _k proto; [ "$status" -eq 0 ]
+  [ "$(cat "$D/shared/base.css")" = "a2{}" ]; [ ! -e "$D/shared/other.css" ]   # changed copied again, removed taken away
+  [ "$(jq -r '.extra[0].rel' "$D/proto-manifest.json")" = "shared/base.css" ]
+  _proposal; run _k show; echo "$output"; [ "$status" -eq 0 ]                 # the file proto put there is the kit's
+  echo x > "$D/shared/tool.sh"
+  run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"shared/tool.sh is not one of the kit's files"* ]]
+}
+
+@test "proto says how stale the copy is; --refresh stops it, sets the copy, manifest and shots aside, twice without collision, and show works after" {
+  _proposal; run _k up; [ "$status" -eq 0 ]
+  echo "/* changed */" >> "$P/ui/index.html"
+  run _k proto; echo "$output"; [ "$status" -eq 0 ]; [ "$(jq -r .stale <<< "$output")" = 1 ]; [[ "$(jq -r .refresh <<< "$output")" == *"--refresh"* ]]
+  local pg; pg="$(jq -r .pgid "$D/proto.json")"
+  run _k proto --refresh; echo "$output"; [ "$status" -eq 0 ]
+  local rc=0; pgrep -g "$pg" >/dev/null || rc=$?; [ "$rc" -eq 1 ]             # the old group is gone
+  [ "$(ls "$D/old" | wc -l)" -eq 1 ]; local o; o="$D/old/$(ls "$D/old")"
+  [ -f "$o/proto/src/pages/Page.tsx" ] && [ -f "$o/proto-manifest.json" ] && [ -d "$o/shots" ]
+  [ "$(tail -1 <<< "$output" | jq -r .stale)" = 0 ]; cmp "$P/ui/src/pages/Page.tsx" "$D/proto/src/pages/Page.tsx"   # a fresh copy of the app
+  run _k proto --refresh; [ "$status" -eq 0 ]; [ "$(ls "$D/old" | wc -l)" -eq 2 ]
+  _proposal; run _k show; echo "$output"; [ "$status" -eq 0 ]                 # old/ does not block the kit
+}

@@ -56,7 +56,9 @@ an `@` alias) fails with "ReferenceError: __dirname is not defined" — stay on 
 2. **Start:** `bash $K up --plan P` (prints the address for the PM; a second `up` reuses the
    server; with no brainstorm run behind it, for a quick look outside `/aid-plan`, first
    `aid-brainstorm-state.sh init P --scope user_visible --topic-kind ui --no-worktree`) and `bash $K proto --plan P` (a copy of `ui.dir` in `.aid-o/work/companion/P/proto/`,
-   outside the repository, its dev server on a loopback port).
+   outside the repository, its dev server on a loopback port). A second `proto` reuses the copy, brings
+   in `copy_extra` changes and prints `stale: N` when the app changed since the copy was made; then
+   `proto --refresh` stops the prototype and sets the copy, its manifest and the shots aside in `old/`.
 3. **Build the variants in `proto/`** — only from components in `ui.components`, each variant
    behind `?v=<klic>` (A, B, C … from A in every round). A component you must create is a new
    `.tsx/.jsx/.vue/.svelte` file and goes in `nove[]` with the reason no shared one fits; the PM

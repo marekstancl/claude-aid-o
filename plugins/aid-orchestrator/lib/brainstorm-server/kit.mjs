@@ -8,6 +8,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { sha, extraTargets, stripKitBlock, manFiles } from './kit-extra.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ENV = process.env;
@@ -103,11 +104,14 @@ function walk(root, rel = '', out = []) {
   }
   return out;
 }
-const sha = f => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
-export function manifest(root) { return Object.fromEntries(walk(root).map(r => [r, sha(path.join(root, r))])); }
+const fileSha = (root, r) => r === '.gitignore' ? crypto.createHash('sha256').update(stripKitBlock(fs.readFileSync(path.join(root, r), 'utf8'))).digest('hex') : sha(path.join(root, r));
+// a .gitignore that holds only the kit's block counts as absent (the app had none)
+const kitOnly = (root, r) => r === '.gitignore' && stripKitBlock(fs.readFileSync(path.join(root, r), 'utf8')) === '';
+export function manifest(root) { return Object.fromEntries(walk(root).filter(r => !kitOnly(root, r)).map(r => [r, fileSha(root, r)])); }
 
-function changedFiles(protoDir, man) {
-  const now = manifest(protoDir), out = [];
+
+function changedFiles(protoDir, manAll) {
+  const now = manifest(protoDir), out = [], man = manFiles(manAll);
   for (const [r, h] of Object.entries(now)) if (man[r] !== h) out.push({ file: r, kind: man[r] ? 'changed' : 'added' });
   for (const r of Object.keys(man)) if (!(r in now)) out.push({ file: r, kind: 'deleted' });
   return out;
@@ -152,9 +156,25 @@ function imports(file, protoDir, al) {
 // itself writes — anything else is a tool the agent built (Codex, 19. 10. 2026: the promise was not enforced)
 const ALLOWED = [/^proto$/, /^proto-manifest\.json$/, /^proto\.json$/, /^proto\.log$/, /^shots$/, /^mocks\.json$/, /^shots\.json$/,
   /^navrh\.json$/, /^navrh-\d+\.html$/, /^check-\d+x\d+\.png$/, /^answers\.jsonl$/, /^server\.json$/, /^\.server\.(log|log\.prev|pid)$/,
-  /^\.events$/, /^\.started$/, /^\.keep$/];
+  /^\.events$/, /^\.started$/, /^\.keep$/, /^old$/];
+const foreign = p => fail(`${p} is not one of the kit's files — the agent writes only mocks.json, shots.json, navrh.json and the variants in proto/; move it out (a missing ability goes to aid-plugin-issues.md)`);
 function dirCheck() {
-  for (const e of fs.readdirSync(DIR)) if (!ALLOWED.some(r => r.test(e))) fail(`${path.join(DIR, e)} is not one of the kit's files — the agent writes only mocks.json, shots.json, navrh.json and the variants in proto/; move it out (a missing ability goes to aid-plugin-issues.md)`);
+  // the ui.copy_extra files proto put beside the copy are the kit's too — exactly those files, nothing else beside them
+  const extra = new Set(extraTargets({ DIR, PROJECT, UI, die }).map(t => t.rel.split(path.sep).join('/')));
+  const tops = new Set([...extra].map(r => r.split('/')[0]));
+  const inside = (rel) => {
+    for (const e of fs.readdirSync(path.join(DIR, rel), { withFileTypes: true })) {
+      const r = `${rel}/${e.name}`;
+      if (e.isDirectory() && !e.isSymbolicLink() && [...extra].some(x => x.startsWith(r + '/'))) inside(r);
+      else if (!extra.has(r) || !e.isFile()) foreign(path.join(DIR, r));
+    }
+  };
+  for (const e of fs.readdirSync(DIR, { withFileTypes: true })) {
+    if (ALLOWED.some(r => r.test(e.name))) continue;
+    if (!tops.has(e.name)) { foreign(path.join(DIR, e.name)); continue; }
+    if (e.isFile() && extra.has(e.name)) continue;
+    if (e.isDirectory() && !e.isSymbolicLink()) inside(e.name); else foreign(path.join(DIR, e.name));
+  }
 }
 function exportsName(file, name) {   // a barrel names it: export { X }, export { Y as X }, export function/const/class X, export * from
   const src = fs.readFileSync(file, 'utf8');

@@ -34,13 +34,17 @@ die() { echo "aid-companion: $*" >&2; exit 1; }
 
 step="${1:-}"; [[ -n "$step" ]] || die "usage: aid-companion.sh up|proto|shots|show|answers|down --plan <P> [--project-dir <root>]"
 shift
-PLAN=""; PROJECT=""; KOLO=""; HISTORY=0
+PLAN=""; PROJECT=""; KOLO=""; HISTORY=0; REFRESH=0; ONLY=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --plan) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PLAN="${2:-}"; shift 2 ;;
     --project-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PROJECT="${2:-}"; shift 2 ;;
     --kolo) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; KOLO="${2:-}"; shift 2 ;;
     --history) HISTORY=1; shift ;;
+    --refresh) [[ "$step" == proto ]] || die "--refresh belongs to proto"; REFRESH=1; shift ;;
+    --only) [[ "$step" == shots ]] || die "--only belongs to shots"
+            [[ $# -ge 2 && "$2" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(,[A-Za-z0-9][A-Za-z0-9._-]*)*$ ]] || die "--only needs shot names separated by commas (letters, digits, . _ -)"
+            ONLY="$2"; shift 2 ;;
     *) die "unknown argument: $1" ;;
   esac
 done
@@ -97,8 +101,13 @@ cmd_down() {
     else echo "server: not running as recorded (pid ${pid}) — nothing stopped"; fi
     rm -f "$rec"
   fi
+  _down_proto
+}
+
+_down_proto() {
+  local p="$DIR/proto.json" pid st pg port
   if [[ -s "$p" ]]; then
-    local port; read -r pid st pg port < <(jq -r '[.pid, .starttime, .pgid, .port] | map(tostring) | join(" ")' "$p")
+    read -r pid st pg port < <(jq -r '[.pid, .starttime, .pgid, .port] | map(tostring) | join(" ")' "$p")
     if _proto_ours "$pid" "$st" "$pg"; then
       _stop_group "$pid" "$st" "$pg" "$port" || return 1
       echo "prototype group ${pg} stopped"
@@ -186,6 +195,19 @@ sys.exit(0 if not alive() else 1)
     echo "prototype: ${left} after TERM and KILL — the record stays in ${DIR}/proto.json; stop it by hand" >&2; return 1; }
 }
 
+# proto --refresh (WAN P113): the running prototype stopped as down stops it, the copy with its manifest and the shots
+# set aside together in old/<time>-<pid>/ (never over an earlier one), then proto makes a new copy of today's ui.dir
+_refresh_proto() {
+  _down_proto || die "--refresh: the prototype could not be stopped (above) — nothing was set aside"
+  [[ -e "$DIR/proto" || -e "$DIR/proto-manifest.json" || -e "$DIR/shots" ]] || return 0
+  [[ ! -L "$DIR/old" ]] || die "--refresh: ${DIR}/old is a link — the companion directory holds no links"
+  local old; old="$DIR/old/$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  [[ ! -e "$old" ]] || die "--refresh: ${old} already exists"
+  mkdir -p "$DIR/old" && mkdir "$old" || die "--refresh: cannot create ${old}"
+  local f; for f in proto proto-manifest.json shots; do [[ -e "$DIR/$f" ]] && mv -- "$DIR/$f" "$old/"; done
+  echo "aid-companion: the old copy, its manifest and shots are in ${old}" >&2
+}
+
 cmd_answers() {
   local f="$DIR/answers.jsonl"
   [[ -s "$f" ]] || { echo "no answers yet (${f})"; return 0; }
@@ -227,6 +249,8 @@ case "$step" in
   up) cmd_up ;;
   down) cmd_down ;;
   answers) cmd_answers ;;
-  proto|shots|show) node_step "$step" ;;
+  proto) (( REFRESH )) && _refresh_proto; node_step proto ;;
+  shots) export AID_COMPANION_ONLY="$ONLY"; node_step shots ;;
+  show) node_step show ;;
   *) die "unknown step '${step}' (up|proto|shots|show|answers|down)" ;;
 esac
