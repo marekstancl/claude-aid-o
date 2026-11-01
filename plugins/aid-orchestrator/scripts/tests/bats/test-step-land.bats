@@ -413,7 +413,7 @@ _verify_file() {  # the bound step-0-verify.md at HEAD
   done
 }
 
-@test "an empty replacement is refused; --recheck keeps the replacement" {
+@test "step-land: an empty replacement command is refused; --recheck keeps the replacement" {
   _agent .
   run bash "$LAND" "$S" 0 --check '1:   ' --reason '1:a long enough reason here'
   [ "$status" -eq 1 ]; [[ "$output" == *"an empty command checks nothing"* ]]

@@ -90,16 +90,14 @@ _commit() { git -C "$REPO" add -A; git -C "$REPO" commit -qm change; }
 }
 
 @test "a release or a project report as the origin is reported; a version that is the subject of the sentence passes" {
-  {
-    printf '%s "3.14.0: refuses X" {\n}\n' '@test'
-    printf '%s "v2.95.5 (agents #8): keeps Y" {\n}\n' '@test'
-    printf '%s "merge (v3.14.0): resumes" {\n}\n' '@test'
-    printf '%s "close (WAN #3): names it" {\n}\n' '@test'
-    printf '%s "a 3.13 record without its tree is refused" {\n}\n' '@test'
-    printf '%s "schema 1.1 records carry the tree" {\n}\n' '@test'
-  } > "$REPO/tests/test-new.bats"
+  local -a bad=("3.14.0: refuses X" "3.14: refuses X" "v3.14.0: keeps Y" "v2.95 keeps Y" "merge (3.14.0) resumes"
+                "merge (3.14) resumes" "merge (v3.14.0) resumes" "close (WAN #3) names it" "close (agents #8) names it"
+                "close (ACTA 26) names it" "close (APPS 16. 10.) names it")
+  local -a good=("a 3.13 record without its tree is refused" "reads a v3.14 record" "schema 1.1 records carry the tree")
+  local n; for n in "${bad[@]}" "${good[@]}"; do printf '%s "%s" {\n}\n' '@test' "$n"; done > "$REPO/tests/test-new.bats"
   _commit
   run aid_test_names_plan_refs "$REPO" "$BASE"; echo "$output"
-  [ "$status" -eq 1 ]; [ "$(wc -l <<<"$output")" -eq 4 ]
-  [[ "$output" != *"3.13 record"* && "$output" != *"1.1 records"* ]]
+  [ "$status" -eq 1 ]; [ "$(wc -l <<<"$output")" -eq "${#bad[@]}" ]
+  for n in "${bad[@]}"; do grep -qxF -- $'tests/test-new.bats\t'"$n" <<<"$output"; done
+  for n in "${good[@]}"; do ! grep -qF -- "$n" <<<"$output"; done
 }

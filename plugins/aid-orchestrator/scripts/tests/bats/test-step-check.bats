@@ -284,7 +284,7 @@ _rr_step() {   # a declared foreign repository "docs" with a worktree on plan/P1
   [ "$status" -ne 0 ]; [[ "$output" == *"could not be read"* ]]
 }
 
-@test "--worktree checks the untracked new test too" {
+@test "test-name check with --worktree reads the untracked new test too" {
   printf "describe('a new one — P114', () => {})\n" > "$R/tests/new.test.ts"
   run _run --checkpoint cp2 --step 0 --worktree; echo "$output"; [ "$status" -eq 1 ]
   [[ "$output" == *"REFUSED (step_test_named_after_plan)"* ]]; [[ "$output" == *"tests/new.test.ts"* ]]
