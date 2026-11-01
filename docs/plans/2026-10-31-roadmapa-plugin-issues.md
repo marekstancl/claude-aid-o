@@ -4,6 +4,7 @@
 položku dodá, ji tu ve stejném commitu označí `HOTOVO vX.Y.Z`. Do zdrojového hlášení projektu se dopíše
 `> **HOTOVO vX.Y.Z (datum):** …` až při vydání. Rozbor dělá skill `rozbor-plugin-issues`.
 
+Zadání 3.14.0: `docs/plans/2026-11-01-zadani-3140-roadmapa-companion.md` (3 kola revize Codexem, resolved).
 Zadání 3.13.0 (archiv): `docs/archive/2026-10-31-zadani-3130-beh-planu.md` (7 kol revize Codexem, resolved; vydáno 3.13.0).
 
 Volby PM 31. 10. 2026: „beru tvoje doporučení“ = 1A, 2A, 3A, 4A, 5A, 6A, 7A, 8A, 9A, 10A, 11A, 12B;
