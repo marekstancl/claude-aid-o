@@ -499,6 +499,9 @@ _FU_MINOR='.findings = [{id: "g-1", checkpoint: "cp7", step: null, severity: "mi
   _stage freeze --one-more-attempt "PM: ještě jeden pokus, pak karta"; echo "$output"; [ "$status" -eq 0 ]
   echo 'print("hello!!")' > "$R/app.py"; git -C "$R" commit -qam "fix(review): louder still"
   _stage freeze; [ "$status" -ne 0 ]; [[ "$output" == *"closing_attempts_exhausted"* ]]
+  # a receipt written by hand (no ledger line) is no PM answer
+  jq -n '{attempt: 3, pm_words: "PM: ještě jeden pokus, pak karta"}' > "$R/.aid-o/work/plan-final/${PLAN_ID}/one-more-attempt-3.json"
+  _stage freeze; [ "$status" -ne 0 ]; [[ "$output" == *"closing_attempts_exhausted"* ]]
 }
 
 @test "closing measure: a first attempt that stopped at its gates (no CP7) still names the first candidate and the minutes (agents P017)" {
@@ -530,4 +533,14 @@ _FU_MINOR='.findings = [{id: "g-1", checkpoint: "cp7", step: null, severity: "mi
   [ "$(jq -r '.closing.minutes_since_first_freeze | type' "$m2")" = number ]
   grep -q '"review_closing_measure"' "$(_run_dir)/timeline.jsonl"
   [[ "$(jq -r 'select(.event == "review_closing_measure") | .findings_on_lines_changed_at_close' "$(_run_dir)/timeline.jsonl" | tail -1)" == 1 ]]
+}
+
+@test "freeze refreshes the project's old AID hook block from the installed plugin (a close begun on an older plugin, agents P017)" {
+  _project
+  local h; h="$(git -C "$R" rev-parse --path-format=absolute --git-path hooks)/pre-push"
+  printf '#!/usr/bin/env bash\n# AID-ORCHESTRATOR-PREPUSH-START (do not edit this block manually)\necho old\n# AID-ORCHESTRATOR-PREPUSH-END\n' > "$h"; chmod +x "$h"
+  jq -n --arg p "$AID_PLUGIN_PATH" '{plugins: {"aid-orchestrator@claude-aid-o": [{scope: "user", installPath: $p}]}}' > "$BATS_TEST_TMPDIR/inst.json"
+  AID_INSTALLED_PLUGINS_JSON="$BATS_TEST_TMPDIR/inst.json" _stage freeze; echo "$output"
+  [[ "$output" == *"pre-push refreshed to the plugin's"* ]]
+  grep -q '^# aid-hook-version: ' "$h"; ! grep -qx 'echo old' "$h"
 }

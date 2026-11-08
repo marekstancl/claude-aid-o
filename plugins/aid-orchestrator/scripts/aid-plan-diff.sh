@@ -500,6 +500,9 @@ while IFS= read -r line; do
   else
     IFS=$'\x1f' read -r verdict evidence duration_ms <<< "$(run_pattern "$pat_type" "$cmd" "$file" "$regex" "$expected_exit" "$ac_timeout" "$ac_label")"
     evidence+="${fnote}${subnote}"
+    # 3.16.0: a met point whose command cannot pass is replaced, never edited in the plan (ac_command_defective)
+    [[ "$pat_type" == cmd && "$verdict" == absent && -z "$subby" ]] \
+      && evidence+=" (if the command itself is defective, not the delivery: ac_command_defective — aid-ac-substitute.sh)"
   fi
 
   [[ "$verdict" == "present" ]] && present_count=$((present_count + 1))

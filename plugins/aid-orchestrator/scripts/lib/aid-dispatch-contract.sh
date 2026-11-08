@@ -574,6 +574,8 @@ _aid_dc_foreign_deleted() {
     else wt="$repo"; fi
     [[ "$(git -C "$wt" rev-parse --show-toplevel 2>/dev/null)" == "$top" ]] || continue
     git -C "$top" merge-base --is-ancestor "$start" "${range%%..*}" 2>/dev/null || continue
+    # and it ends on the worktree's own branch (HEAD there), not on a commit of another branch
+    git -C "$top" merge-base --is-ancestor "${range##*..}" HEAD 2>/dev/null || continue
     git -C "$top" diff --name-only --diff-filter=D "$range" -- "$rel" 2>/dev/null | grep -qxF -- "$rel" && return 0
   done < <(jq -r '.repo_commits[]? | [(.repo // ""), (.range // "")] | @tsv' "$r" 2>/dev/null)
   return 1

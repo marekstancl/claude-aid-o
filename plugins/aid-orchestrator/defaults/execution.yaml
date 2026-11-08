@@ -122,6 +122,13 @@
 #       command: "bash {plugin_path}/scripts/aid-run-gates.sh record-tests --evidence-file {evidence_dir}/gates/unit.evidence.json -- pytest -q"
 #       runs_project_tests: true
 
+# closing.max_attempts — how many plan-final attempts (freeze → gates → whole-plan round) a close may
+# take before freeze stops for the PM (closing_attempts_exhausted; his "one more" is
+# plan-finalize <plan> --stage freeze --one-more-attempt "<his words>"). 3.16.0, agents P017: six attempts,
+# ten hours. Default 4.
+# closing:
+#   max_attempts: 4
+
 gates:
   tests_pass:
     description: "Merge-path tests pass — the T0 and T1 tiers, not the whole portfolio"

@@ -1050,8 +1050,8 @@ _pfsm_warn_stale_hooks() {
   # still old after that (no block markers, a development plugin) is warned about below
   source "${SCRIPT_DIR}/lib/aid-project-refresh.sh"
   aid_hooks_refresh "$root"; aid_plugin_path_refresh "$root"
-  common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
-  hook="${common}/hooks/pre-commit"
+  common="$(git -C "$root" rev-parse --path-format=absolute --git-path hooks 2>/dev/null)" || return 0
+  hook="${common}/pre-commit"   # the same place the refresh writes (core.hooksPath respected)
   [[ -f "$hook" ]] || return 0
   grep -q '_aid_state_root' "$hook" 2>/dev/null && return 0
   echo "WARNING: installed hooks predate worktree support — commits from the plan worktree are unguarded until you re-run /aid-init" >&2
@@ -3242,6 +3242,8 @@ _pfsm_foreign_verify() {
 
 _pfsm_finalize_freeze() {
   local root="$1" plan_id="$2" frozen_at="${3:-}" accept_ancillary="${4:-0}"
+  # 3.16.0: a close that started on an older plugin (agents P017) gets the current hooks and plugin path here too
+  _pfsm_warn_stale_hooks "$root"
   # P074 Step 8/10: the TREE this stage acts on is the plan's execution
   # worktree when it has one (`$root` stays the STATE root — `.aid-o` never
   # moves). Refs/objects are shared between worktrees, so only the
@@ -3397,7 +3399,13 @@ _pfsm_finalize_freeze() {
   [[ "$_max" =~ ^[0-9]+$ ]] || _max=4
   [[ -n "${BATS_TEST_FILENAME:-}" && -n "${AID_CLOSING_MAX_ATTEMPTS:-}" ]] && _max="$AID_CLOSING_MAX_ATTEMPTS"
   local _rcpt="${root}/.aid-o/work/plan-final/${plan_id}/one-more-attempt-${attempt}.json"
-  if [[ "$attempt" =~ ^[0-9]+$ ]] && (( attempt > _max )) && [[ ! -f "$_rcpt" ]]; then
+  # the receipt counts only with its line in the plan's append-only ledger (as the stand-in's permissions and the
+  # substitutes do): a file written by hand is no PM answer
+  source "${SCRIPT_DIR}/lib/aid-delegate.sh"
+  local _ledger; _ledger="$(aid_delegate_ledger "$root" "$plan_id")"
+  _one_more_ok() { [[ -f "$_rcpt" ]] && jq -e -s --argjson a "$attempt" --arg s "$(sha256sum "$_rcpt" | cut -d' ' -f1)" \
+      'any(.[]; .checkpoint == "closing_one_more" and .attempt == $a and .receipt_sha256 == $s)' "$_ledger" >/dev/null 2>&1; }
+  if [[ "$attempt" =~ ^[0-9]+$ ]] && (( attempt > _max )) && ! _one_more_ok; then
     if [[ -n "${_PFSM_ONE_MORE:-}" ]]; then
       # in an --auto run the controller would type these words itself: the PM's card, never the controller
       source "${SCRIPT_DIR}/lib/aid-delegate.sh"
@@ -3409,6 +3417,9 @@ _pfsm_finalize_freeze() {
       mkdir -p "$(dirname "$_rcpt")"
       jq -n --argjson a "$attempt" --arg r "$_PFSM_ONE_MORE" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         '{attempt: $a, pm_words: $r, at: $at}' > "$_rcpt" || return 1
+      mkdir -p "$(dirname "$_ledger")"
+      jq -nc --argjson a "$attempt" --arg s "$(sha256sum "$_rcpt" | cut -d' ' -f1)" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{checkpoint: "closing_one_more", attempt: $a, receipt_sha256: $s, at: $at}' >> "$_ledger" || return 1
       echo "plan-finalize --stage freeze: attempt ${attempt} allowed once by the PM (${_rcpt})." >&2
     else
       echo "PRECONDITION FAIL: closing_attempts_exhausted — ${plan_id}'s close has had $(( attempt - 1 )) attempts (limit ${_max}); another fix-and-freeze is not tried without the PM." >&2
@@ -9889,6 +9900,7 @@ _pr_main() {
 
   PR_PLAN_ID="$plan_id"
   PR_ROOT="$(_pfsm_resolve_project_root "$project_root_opt")"
+  _pfsm_warn_stale_hooks "$PR_ROOT"   # 3.16.0: hooks and plugin path before anything runs, a resumed run too
   export AID_PLAN_STATE_PROJECT_ROOT="$PR_ROOT" AID_PLAN_MANIFEST_PROJECT_ROOT="$PR_ROOT"
   _aid_pipeline_state_root="$PR_ROOT"
   PR_NNN="$(aid_gen_plan_num "$plan_id")"
@@ -10297,6 +10309,8 @@ _pr_repo_roots_worktrees() {
     br="$(jq -r --argjson i "$i" '.repo_roots[$i].branch' "$pj")"
     base="$(jq -r --argjson i "$i" '.repo_roots[$i].base' "$pj")"
     gitignore_exclude_append "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/info/exclude" ".aid-worktrees/"
+    # 3.16.0: the foreign repository's hooks follow the installed plugin, its worktree new or kept
+    source "${SCRIPT_DIR}/lib/aid-project-refresh.sh"; aid_hooks_refresh "$path"
     if [[ -d "$wt" ]]; then
       cur="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
       if [[ "$cur" == "$br" ]]; then _pr_stage_done "worktree:${name}" || _pr_stage_record "worktree:${name}"; continue; fi
@@ -10310,7 +10324,6 @@ _pr_repo_roots_worktrees() {
     _pfsm_worktree_add "$path" "$wt" "$br" "plan-run never deletes a directory it did not create." "$base" >/dev/null \
       || _pr_refuse repo_root_invalid "repo_roots '${name}': the worktree ${wt} on ${br} could not be created (see above)" \
            "fix what git said, then run plan-run again" 1
-    source "${SCRIPT_DIR}/lib/aid-project-refresh.sh"; aid_hooks_refresh "$path"   # 3.16.0: the foreign repo's hooks too
     _pr_stage_record "worktree:${name}"
     _pfsm_crash_seam worktree
   done

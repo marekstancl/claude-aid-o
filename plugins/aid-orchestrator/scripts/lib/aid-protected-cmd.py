@@ -23,6 +23,9 @@ def out(msg):
     sys.exit(0)
 
 
+if any(ord(c) < 32 for c in cmd):
+    out("security: the new command has a newline or a control character — one line, printable characters only")
+
 # 1. what the shell would expand, outside single quotes (inside double quotes $ and ` still expand)
 q = None
 i = 0
@@ -94,23 +97,62 @@ def protected(word):
     return None
 
 
+GREP_LETTERS = set("qEFinclwxvsHh")
+GIT_BAD = ("--output", "--no-index", "--ext-diff", "--textconv", "--git-dir", "--work-tree", "--exec-path", "-O", "-c", "-C")
+JQ_BAD_WORDS = ("env", "$ENV", "input_filename", "import", "include", "$__loc__", "$__prog_args", "debug", "stderr")
+
+
+def plain_path(a, what):
+    if any(c in a for c in "*?[") or a.startswith(":("):
+        out("security: %s %s has a glob or pathspec magic — name the file" % (what, a))
+    if os.path.isabs(a) or ".." in os.path.normpath(a).split(os.sep):
+        out("security: %s %s is outside the plan's tree" % (what, a))
+
+
 for seg in segments:
-    prog, args = os.path.basename(seg[0]), seg[1:]
+    if "/" in seg[0]:
+        out("security: %s is a path to a program — name the program (grep, test, [, jq, wc, git)" % seg[0])
+    prog, args = seg[0], seg[1:]
     if prog == "grep":
-        for a in args:
-            if a in ("-r", "-R", "--recursive", "-f", "--file", "-d", "--directories") or (
-                    a.startswith("-") and not a.startswith("--") and any(f in a[1:] for f in "rRf")):
-                out("security: grep %s reads beyond the files it names — name the files" % a)
+        pattern_given, positional, k = False, [], 0
+        while k < len(args):
+            a = args[k]
+            if a == "-e":
+                pattern_given = True; k += 2; continue
+            if a == "--":
+                positional += args[k + 1:]; break
+            if a.startswith("-"):
+                if a.startswith("--") or not set(a[1:]) <= GREP_LETTERS:
+                    out("security: grep %s is not a flag a substitute may use (-%s, -e)" % (a, "".join(sorted(GREP_LETTERS))))
+            else:
+                positional.append(a)
+            k += 1
+        files = positional if pattern_given else positional[1:]
+        for a in files:
+            plain_path(a, "grep file")
     elif prog in ("test", "[", "wc"):
-        pass
+        for a in args:
+            if not a.startswith("-") and a not in ("!", "]", "=", "!="):
+                if any(c in a for c in "*?["):
+                    out("security: %s %s has a glob — name the file" % (prog, a))
     elif prog == "jq":
-        if any(a in ("--rawfile", "--slurpfile", "-L", "--from-file", "-f") for a in args):
-            out("security: jq with a file option reads beyond the files it names")
+        if any(a.startswith(("-L", "--library-path", "--rawfile", "--slurpfile", "--from-file", "-f", "--args", "--jsonargs")) for a in args):
+            out("security: jq with a file, library or argument option reads beyond what it names")
+        prog_txt = next((a for a in args if not a.startswith("-")), "")
+        if any(w in prog_txt for w in JQ_BAD_WORDS):
+            out("security: the jq program reads the environment, a library or a file name")
+        for a in [a for a in args if not a.startswith("-")][1:]:
+            plain_path(a, "jq file")
     elif prog == "git":
         if not args or args[0] not in GIT_SUB:
             out("security: git %s is not a read-only git a substitute may run (%s)" % (args[0] if args else "", ", ".join(sorted(GIT_SUB))))
         if args[0] == "cat-file" and "-e" not in args:
             out("security: git cat-file only as -e (existence) in a substitute")
+        for a in args[1:]:
+            if a.startswith(GIT_BAD):
+                out("security: git %s writes, runs a program or leaves the repository" % a)
+            if not a.startswith("-"):
+                plain_path(a.split(":", 1)[-1] if ":" in a else a, "git argument")
     else:
         out("security: %s is not one of the commands a substitute may run (grep, test, [, jq, wc, read-only git)" % prog)
     for a in args:

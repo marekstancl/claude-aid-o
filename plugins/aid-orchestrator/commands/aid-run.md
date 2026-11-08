@@ -1070,8 +1070,9 @@ page and the card from the two files it wrote (`aid-plan-close-summary.sh`, `com
 attempt's directory and prints the path), then
 `<fsm> plan-merge-to-main <plan> --decision <that path>`; FIX is the fix path; ABORT is
 `plan-abort` with the PM's reason. **Merged, not released** (the PM wants the version released later, 3.16.0):
-`plan-merge-to-main … --no-release "<his words>"` — no tag, the merge commit carries `No-Release:` (the release
-guard's exception), `no-release.json` holds his words and `plan-close` needs no tag; tag the version when it ships.
+`plan-merge-to-main … --no-release "<his words>"` — no tag, the merge commit records `No-Release: <his words>`,
+`no-release.json` holds them and `plan-close` needs no tag; not with `--push` (the release guard keeps unreleased
+work off the remote — it is pushed with the release that tags it) and not in an `--auto` run (the PM's answer).
 
 **The close cleans up.** `plan-close` removes the plan's own worktree, the step
 trees and `step/*` branches its merge contains, and its `brainstorm-`/`generation-`

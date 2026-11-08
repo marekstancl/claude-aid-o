@@ -45,7 +45,7 @@ _pd_env_load() {
 _pd_isolation_init() {
   local var probe rc=0
   _pd_env_load || rc=$?
-  if (( rc == 0 )); then PD_NET=host; PD_NET_LABEL="host (verification_env)"; return 0; fi
+  if (( rc == 0 )); then PD_NET=host; PD_NET_LABEL="host (verification_env; no pid isolation, the host's /proc)"; return 0; fi
   (( rc == 2 )) && return 0
   # a service address a test suite reads (ASISTENT_TEST_DATABASE_URL), not any
   # name with TEST in it (BATS_TEST_TMPDIR)

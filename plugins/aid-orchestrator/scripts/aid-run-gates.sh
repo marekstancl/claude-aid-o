@@ -213,7 +213,7 @@ run_gate() {
   # driver's stdin — in run_all_gates that stdin is the here-string of remaining
   # gate names, and eating it silently starves every subsequent gate while
   # overall still reports pass (OBS-20260708-07).
-  output=$(LC_ALL=C timeout "$timeout_s" bash -c "$command" </dev/null 2>&1) || exit_code=$?
+  output=$(LC_ALL=C env ${AID_GATE_ENV[@]+"${AID_GATE_ENV[@]}"} timeout "$timeout_s" bash -c "$command" </dev/null 2>&1) || exit_code=$?
 
   local end_ms completed_at
   end_ms=$(date +%s%3N)
@@ -600,7 +600,7 @@ run_background_gate() {
   # The EXACT argv the supervisor will run — and therefore the exact argv the
   # fingerprint has to cover. Computed by aid-job.sh itself: one definition of
   # the sha256-over-NUL-joined-argv formula, never a copy of it here.
-  local -a job_argv=(bash -c "$command")
+  local -a job_argv=(env ${AID_GATE_ENV[@]+"${AID_GATE_ENV[@]}"} bash -c "$command")   # 3.16.0: verification_env as inline gates
   # stdout and stderr captured SEPARATELY via a temp file — an assignment made
   # inside a command substitution happens in a subshell and would never reach
   # this scope.
@@ -1250,11 +1250,12 @@ run_all_gates() {
   # by hand): the project's verification_env (.aid-o/config/execution.yaml of the state root — the one reader the
   # measurement uses, lib/aid-measure-env.sh) reaches every gate command and wins over the controller's environment,
   # as in the measurement: a controller's DATABASE_URL must never point a gate's tests at the shared dev database.
-  local _ve_line _ve_key
+  # Only the gate commands get them (run_gate's env), never the runner's own tools (PATH, HOME stay the runner's).
+  local _ve_line _ve_key; AID_GATE_ENV=()
   while IFS= read -r -d '' _ve_line; do
     [[ "$_ve_line" == *=* ]] || continue
     _ve_key="${_ve_line%%=*}"
-    [[ "$_ve_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && export "$_ve_line"
+    [[ "$_ve_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && AID_GATE_ENV+=("$_ve_line")
   done < <( STATE_ROOT="$(aid_state_root 2>/dev/null || pwd)"; source "${SCRIPT_DIR}/lib/aid-measure-env.sh"
             PD_ENV=(); _pd_env_load >/dev/null 2>&1 || true; (( ${#PD_ENV[@]} )) && printf '%s\0' "${PD_ENV[@]}" )
 
