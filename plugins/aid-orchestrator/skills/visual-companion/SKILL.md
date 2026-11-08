@@ -67,14 +67,14 @@ ui:
    for the `aid-variant` event.
 3. Write `<P>/live.json`: `{"kolo": 1, "body": [{"bod": 1, "otazka": "…", "varianty": [{"klic": "A", "popis": "…",
    "cesta": "/provize"}]}]}` (`cesta` = the app's path where the variant shows).
-4. `bash $K live --plan P` prints the PM's address — it carries the run's access token once (`aid_t=`); without
-   it every request is 403. Give him exactly that address. Then `bash $K answers --plan P` (rows `page: live`).
-5. `bash $K down --plan P` when he has answered: proxy and copy stop.
+4. `bash $K live --plan P` prints the PM's address with the run's token (`aid_t=`; without it 403) — give him
+   exactly that. Then `bash $K answers --plan P` (rows `page: live`).
+5. **Marks (3.18.0):** „Komentovat“ — he clicks an element or drags an area and writes a note. `answers` → `znacky`
+   (`kotva.selector` + x/y[/w/h] % of it, `cesta`, `varianta`, `viewport`, `prvek`); find that element before you answer.
+6. `bash $K down --plan P` when he has answered: proxy and copy stop.
 
-What the kit holds, not you: only the proxy is reachable (the copy stays on loopback); the dev server's file reader
-(`/@fs/`) only under the copy; the page may call only the proxy (CSP `connect-src 'self'`); the API only from
-`allowed_api`; answers only from the proxy's own page; no `shots` of a live copy (dev data holds real people) —
-for captures `down`, then `proto` without `--live`.
+The kit holds (not you): only the proxy is reachable, `/@fs/` only under the copy, CSP `connect-src 'self'`, the API
+only from `allowed_api`, answers only from its page, no `shots` of a live copy (for captures `down`, then `proto`).
 
 ## The procedure (`P` = the brainstorm's plan id, `$K = $AID_PLUGIN_PATH/scripts/aid-companion.sh`)
 

@@ -136,3 +136,95 @@ _get() { curl -s -H "Cookie: $(_ck)" "$@"; }
   [ "$(jq -r '.env.GH_TOKEN // "absent"' <<< "$output")" = absent ]                           # the agent's keys stay out
   [[ "$(jq -r .digest <<< "$output")" =~ ^[0-9a-f]{16}$ ]]
 }
+
+
+@test "marks: a mark is checked by the proxy (druh, numbers, text, an existing id to delete), gets the server's id, lists per screen and variant, answers folds deletions (3.18.0)" {
+  _live; [ "$status" -eq 0 ]; local u="http://127.0.0.1:$(_port)"
+  _m() { _get -s -o "$BATS_TEST_TMPDIR/mr" -w '%{http_code}' -H "Origin: $u" -H 'content-type: application/json' -d "$1" "$u/__aid/answer"; }
+  local ok='{"type":"mark","druh":"bod","text":"tady","varianta":"A","cesta_path":"/index.html","kotva":{"selector":"main > p:nth-of-type(1)","x":10,"y":50},"rect":{"x":1,"y":2,"w":0,"h":0},"prvek":{"tag":"p"}}'
+  [ "$(_m "$ok")" = 200 ]; local id; id="$(jq -r .id "$BATS_TEST_TMPDIR/mr")"; [[ "$id" =~ ^[0-9a-f-]{36}$ ]]
+  [ "$(_m "$(jq -c '.druh = "sipka"' <<< "$ok")")" = 400 ]
+  [ "$(_m "$(jq -c '.kotva.x = 101' <<< "$ok")")" = 400 ]
+  [ "$(_m "${ok/\"w\":0/\"w\":1e400}")" = 400 ]                                                  # Infinity
+  [ "$(_m "$(jq -c '.rect.y = -1' <<< "$ok")")" = 400 ]
+  [ "$(_m "$(jq -c --arg t "$(head -c 4001 /dev/zero | tr '\0' x)" '.text = $t' <<< "$ok")")" = 400 ]
+  [ "$(_m "$(jq -c --arg t "$(head -c 501 /dev/zero | tr '\0' x)" '.kotva.selector = $t' <<< "$ok")")" = 400 ]
+  [ "$(_m "$(jq -c '.druh = "oblast"' <<< "$ok")")" = 400 ]                                      # an area needs w and h
+  [ "$(_m '{"type":"mark","smazano":true,"id":"no-such-id"}')" = 400 ]
+  [ "$(_get "$u/__aid/marks?p=/index.html&v=A" | jq -r '.[0].text')" = tady ]
+  [ "$(_get "$u/__aid/marks?p=/index.html&v=B" | jq length)" = 0 ]
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "$u/__aid/marks?p=/index.html&v=A")" = 403 ]                 # no token
+  # a mark belongs to its round: in round 2 the panel shows none of round 1 and cannot delete them
+  jq '.kolo = 2' "$D/live.json" > "$D/l.t" && mv "$D/l.t" "$D/live.json"
+  [ "$(_get "$u/__aid/marks?p=/index.html&v=A" | jq length)" = 0 ]
+  [ "$(_m "{\"type\":\"mark\",\"smazano\":true,\"id\":\"$id\"}")" = 400 ]
+  jq '.kolo = 1' "$D/live.json" > "$D/l.t" && mv "$D/l.t" "$D/live.json"
+  [ "$(_m "$(jq -c '.text = "druha"' <<< "$ok")")" = 200 ]
+  [ "$(_m "{\"type\":\"mark\",\"smazano\":true,\"id\":\"$id\"}")" = 200 ]
+  run bash "$C" answers --plan P970 --project-dir "$R"; echo "$output"
+  [ "$(jq -c '[.znacky[].text]' <<< "$output")" = '["druha"]' ]
+  [ "$(jq -r '.znacky[0].kotva.selector' <<< "$output")" = "main > p:nth-of-type(1)" ]
+  # the companion page (index.js) writes no marks: the shared writer allows them only where the live proxy asks
+  run node -e "const a = require('$AID_PLUGIN_PATH/lib/brainstorm-server/answers.js'); console.log(a.appendAnswer('$D', { type: 'mark', druh: 'bod' }, {}))"
+  [ "$output" = null ]
+}
+
+@test "marks in a browser: outside the mode the app gets its clicks, inside it does not; a point is anchored to its element and follows a scrolled <main>; a note is shown as text only; Esc leaves the mode" {
+  local lib="$AID_PLUGIN_PATH/lib/ui-fidelity" chrome
+  [[ -f "$lib/node_modules/.aid-installed" ]] || (cd "$lib" && npm ci --no-audit --no-fund >/dev/null 2>&1 && sha256sum package-lock.json | cut -d' ' -f1 > node_modules/.aid-installed)
+  chrome="$(ls -d "$HOME"/.cache/ms-playwright/chromium-*/chrome-linux*/chrome 2>/dev/null | sort -V | tail -1)"
+  [[ -n "$chrome" ]] || { echo "no chromium for the browser case (the kit's own tools)"; false; }
+  printf '<html><head></head><body style="margin:0"><main id="m" style="height:300px;overflow:auto"><div style="height:2000px">
+    <button id="b" onclick="window.cnt=(window.cnt||0)+1">app</button><p id="target" style="margin-top:400px;width:200px">cil</p></div></main></body></html>' > "$R/web/marks.html"
+  jq '.body[0].varianty[0].cesta = "/marks.html"' "$D/live.json" > "$D/l.t" && mv "$D/l.t" "$D/live.json"
+  _live; [ "$status" -eq 0 ]
+  run env CHROME="$chrome" node --input-type=module -e "
+    import { createRequire } from 'node:module';
+    const { chromium } = createRequire('$lib/package.json')('@playwright/test');
+    const b = await chromium.launch({ executablePath: process.env.CHROME }); const p = await b.newPage({ viewport: { width: 1200, height: 800 } });
+    await p.goto('$(jq -r .url "$D/live-server.json")');
+    await p.waitForFunction(() => window.__AID_MARKS__);
+    await p.click('#b'); const before = await p.evaluate(() => window.cnt);
+    await p.evaluate(() => window.__AID_MARKS__.setCommenting(true));
+    await p.click('#b', { force: true }); const during = await p.evaluate(() => window.cnt);
+    await p.keyboard.press('Escape'); await p.click('#b'); const after = await p.evaluate(() => window.cnt);
+    await p.evaluate(() => { document.getElementById('m').scrollTop = 300; window.__AID_MARKS__.setCommenting(true); });
+    await p.click('#target', { force: true, position: { x: 10, y: 5 } });
+    await p.locator('#aid-live-panel textarea').last().fill('<img src=x onerror=\"window.pwn=1\">pozor');
+    await p.locator('#aid-live-panel button', { hasText: 'Uložit' }).click();
+    await p.waitForFunction(() => window.__AID_MARKS__.marks.length === 1);
+    const listText = await p.evaluate(() => document.getElementById('aid-live-panel').shadowRoot.querySelector('.mk .t').textContent);
+    await p.keyboard.press('Escape');
+    // an area: a mouse drag over the target; then, with a bubble still open, Odeslat volby still sends (3.17.1 kept)
+    await p.evaluate(() => window.__AID_MARKS__.setCommenting(true));
+    const t = await p.locator('#target').boundingBox();
+    await p.mouse.move(t.x + 60, t.y + 2); await p.mouse.down(); await p.mouse.move(t.x + 180, t.y + 15, { steps: 5 }); await p.mouse.up();   // beside the first pin
+    await p.locator('#aid-live-panel .bubble textarea').fill('oblast');
+    await p.locator('#aid-live-panel .bubble button', { hasText: 'Uložit' }).click();
+    await p.waitForFunction(() => window.__AID_MARKS__.marks.length === 2);
+    await p.mouse.click(t.x + 190, t.y + 3);                                     // a new bubble stays open
+    const errs = []; p.on('pageerror', e => errs.push(e.message));
+    await p.locator('#aid-live-panel button', { hasText: 'Odeslat volby' }).click(); await p.waitForTimeout(300);
+    await p.keyboard.press('Escape');
+    // delete the first mark with its ×
+    await p.locator('#aid-live-panel .mk button').first().click();
+    await p.waitForFunction(() => window.__AID_MARKS__.marks.length === 1);
+    const druhy = await p.evaluate(() => window.__AID_MARKS__.marks.map(m => m.druh));
+    const pinAt = async () => p.evaluate(() => { const pin = document.getElementById('aid-live-panel').shadowRoot.querySelector('.pin'); const t = document.getElementById('target').getBoundingClientRect();
+      return pin ? { dy: parseFloat(pin.style.top) - t.top } : null; });
+    await p.waitForTimeout(100); const a = await pinAt();
+    await p.evaluate(() => { document.getElementById('m').scrollTop = 350; }); await p.waitForTimeout(150); const c = await pinAt();
+    console.log(JSON.stringify({ before, during, after, a, c, pwn: await p.evaluate(() => window.pwn || null), listText, errs, druhy }));
+    await b.close();"
+  echo "$output"; [ "$status" -eq 0 ]
+  local r; r="$(tail -1 <<< "$output")"
+  [ "$(jq -c '[.before, .during, .after]' <<< "$r")" = '[1,1,2]' ]          # app click; swallowed in the mode; app again after Esc
+  [ "$(jq -r '.pwn' <<< "$r")" = null ]
+  [[ "$(jq -r '.listText' <<< "$r")" == '<img src=x onerror="window.pwn=1">pozor'* ]]
+  local da dc; da="$(jq -r '.a.dy' <<< "$r")"; dc="$(jq -r '.c.dy' <<< "$r")"
+  python3 -c "import sys; a, c = float('$da'), float('$dc'); sys.exit(0 if abs(a - c) < 2 else 1)"      # the pin keeps its place on the element
+  [ "$(jq -r 'select(.type == "mark" and .druh == "bod") | .kotva.selector' "$D/answers.jsonl")" = '#target' ]
+  [ "$(jq -c '.errs' <<< "$r")" = '[]' ]; [ "$(jq -c '.druhy' <<< "$r")" = '["oblast"]' ]
+  [ "$(jq -r 'select(.type == "confirm") | .type' "$D/answers.jsonl" | wc -l)" -ge 1 ]
+  [ "$(jq -r 'select(.type == "note") | .bod' "$D/answers.jsonl" | grep -c null || true)" = 0 ]   # the bubble text never became a note
+}
