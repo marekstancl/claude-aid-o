@@ -67,7 +67,7 @@ const str = (v, n) => typeof v === 'string' && v.length <= n;
 const pct = v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100;
 const px = v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100000;
 function markOf(ev) {
-  if (ev.smazano === true) return str(ev.id, 64) && ANSWERS.marks(DIR).some(m => m.event_id === ev.id) ? { type: 'mark', id: ev.id, smazano: true } : null;
+  if (ev.smazano === true) return str(ev.id, 64) && ANSWERS.marks(DIR, (liveSpec() || {}).kolo ?? null).some(m => m.event_id === ev.id) ? { type: 'mark', id: ev.id, smazano: true } : null;
   const k = ev.kotva || {}, r = ev.rect || {}, p = ev.prvek || {};
   if (!['bod', 'oblast'].includes(ev.druh) || !str(ev.text, 4000) || !ev.text.trim() || !str(ev.cesta_path, 500) || !ev.cesta_path.startsWith('/')) return null;
   if (!str(k.selector, 500) || !k.selector || !pct(k.x) || !pct(k.y)) return null;
@@ -135,7 +135,7 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/__aid/answer') return answer(req, res);
   if (u.pathname === '/__aid/marks') {   // the marks of one screen and variant, for the panel to draw again
     const p = u.searchParams.get('p') || '', v = u.searchParams.get('v') || null;
-    const list = ANSWERS.marks(DIR).filter(m => m.cesta_path === p && (m.varianta ?? null) === v)
+    const list = ANSWERS.marks(DIR, (liveSpec() || {}).kolo ?? null).filter(m => m.cesta_path === p && (m.varianta ?? null) === v)
       .map(m => ({ id: m.event_id, druh: m.druh, text: m.text, kotva: m.kotva }));
     res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end(JSON.stringify(list));
   }

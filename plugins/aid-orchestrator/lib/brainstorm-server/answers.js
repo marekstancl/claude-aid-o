@@ -16,13 +16,14 @@ function appendAnswer(dir, event, meta, types = ['choice', 'note', 'confirm']) {
   return row;
 }
 
-// marks(dir) — the live marks: `mark` rows folded by id (a row with `id` and `smazano: true` removes the one it names)
-function marks(dir) {
+// marks(dir, kolo) — the live marks of one round (a mark belongs to its round like every answer): `mark` rows folded
+// by id (a row with `id` and `smazano: true` removes the one it names)
+function marks(dir, kolo = null) {
   let lines = []; try { lines = fs.readFileSync(path.join(dir, 'answers.jsonl'), 'utf8').split('\n'); } catch { return []; }
   const out = new Map();
   for (const l of lines) {
     let r; try { r = JSON.parse(l); } catch { continue; }
-    if (!r || r.type !== 'mark') continue;
+    if (!r || r.type !== 'mark' || (r.kolo ?? null) !== (kolo ?? null)) continue;
     if (r.smazano && r.id) out.delete(r.id); else if (!r.smazano) out.set(r.event_id, r);
   }
   return [...out.values()];

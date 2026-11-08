@@ -153,6 +153,12 @@ _get() { curl -s -H "Cookie: $(_ck)" "$@"; }
   [ "$(_m '{"type":"mark","smazano":true,"id":"no-such-id"}')" = 400 ]
   [ "$(_get "$u/__aid/marks?p=/index.html&v=A" | jq -r '.[0].text')" = tady ]
   [ "$(_get "$u/__aid/marks?p=/index.html&v=B" | jq length)" = 0 ]
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "$u/__aid/marks?p=/index.html&v=A")" = 403 ]                 # no token
+  # a mark belongs to its round: in round 2 the panel shows none of round 1 and cannot delete them
+  jq '.kolo = 2' "$D/live.json" > "$D/l.t" && mv "$D/l.t" "$D/live.json"
+  [ "$(_get "$u/__aid/marks?p=/index.html&v=A" | jq length)" = 0 ]
+  [ "$(_m "{\"type\":\"mark\",\"smazano\":true,\"id\":\"$id\"}")" = 400 ]
+  jq '.kolo = 1' "$D/live.json" > "$D/l.t" && mv "$D/l.t" "$D/live.json"
   [ "$(_m "$(jq -c '.text = "druha"' <<< "$ok")")" = 200 ]
   [ "$(_m "{\"type\":\"mark\",\"smazano\":true,\"id\":\"$id\"}")" = 200 ]
   run bash "$C" answers --plan P970 --project-dir "$R"; echo "$output"
@@ -187,13 +193,28 @@ _get() { curl -s -H "Cookie: $(_ck)" "$@"; }
     await p.locator('#aid-live-panel textarea').last().fill('<img src=x onerror=\"window.pwn=1\">pozor');
     await p.locator('#aid-live-panel button', { hasText: 'Uložit' }).click();
     await p.waitForFunction(() => window.__AID_MARKS__.marks.length === 1);
+    const listText = await p.evaluate(() => document.getElementById('aid-live-panel').shadowRoot.querySelector('.mk .t').textContent);
     await p.keyboard.press('Escape');
+    // an area: a mouse drag over the target; then, with a bubble still open, Odeslat volby still sends (3.17.1 kept)
+    await p.evaluate(() => window.__AID_MARKS__.setCommenting(true));
+    const t = await p.locator('#target').boundingBox();
+    await p.mouse.move(t.x + 60, t.y + 2); await p.mouse.down(); await p.mouse.move(t.x + 180, t.y + 15, { steps: 5 }); await p.mouse.up();   // beside the first pin
+    await p.locator('#aid-live-panel .bubble textarea').fill('oblast');
+    await p.locator('#aid-live-panel .bubble button', { hasText: 'Uložit' }).click();
+    await p.waitForFunction(() => window.__AID_MARKS__.marks.length === 2);
+    await p.mouse.click(t.x + 190, t.y + 3);                                     // a new bubble stays open
+    const errs = []; p.on('pageerror', e => errs.push(e.message));
+    await p.locator('#aid-live-panel button', { hasText: 'Odeslat volby' }).click(); await p.waitForTimeout(300);
+    await p.keyboard.press('Escape');
+    // delete the first mark with its ×
+    await p.locator('#aid-live-panel .mk button').first().click();
+    await p.waitForFunction(() => window.__AID_MARKS__.marks.length === 1);
+    const druhy = await p.evaluate(() => window.__AID_MARKS__.marks.map(m => m.druh));
     const pinAt = async () => p.evaluate(() => { const pin = document.getElementById('aid-live-panel').shadowRoot.querySelector('.pin'); const t = document.getElementById('target').getBoundingClientRect();
       return pin ? { dy: parseFloat(pin.style.top) - t.top } : null; });
     await p.waitForTimeout(100); const a = await pinAt();
     await p.evaluate(() => { document.getElementById('m').scrollTop = 350; }); await p.waitForTimeout(150); const c = await pinAt();
-    const listText = await p.evaluate(() => document.getElementById('aid-live-panel').shadowRoot.querySelector('.mk .t').textContent);
-    console.log(JSON.stringify({ before, during, after, a, c, pwn: await p.evaluate(() => window.pwn || null), listText }));
+    console.log(JSON.stringify({ before, during, after, a, c, pwn: await p.evaluate(() => window.pwn || null), listText, errs, druhy }));
     await b.close();"
   echo "$output"; [ "$status" -eq 0 ]
   local r; r="$(tail -1 <<< "$output")"
@@ -202,5 +223,8 @@ _get() { curl -s -H "Cookie: $(_ck)" "$@"; }
   [[ "$(jq -r '.listText' <<< "$r")" == '<img src=x onerror="window.pwn=1">pozor'* ]]
   local da dc; da="$(jq -r '.a.dy' <<< "$r")"; dc="$(jq -r '.c.dy' <<< "$r")"
   python3 -c "import sys; a, c = float('$da'), float('$dc'); sys.exit(0 if abs(a - c) < 2 else 1)"      # the pin keeps its place on the element
-  [ "$(jq -r 'select(.type == "mark") | .kotva.selector' "$D/answers.jsonl")" = '#target' ]
+  [ "$(jq -r 'select(.type == "mark" and .druh == "bod") | .kotva.selector' "$D/answers.jsonl")" = '#target' ]
+  [ "$(jq -c '.errs' <<< "$r")" = '[]' ]; [ "$(jq -c '.druhy' <<< "$r")" = '["oblast"]' ]
+  [ "$(jq -r 'select(.type == "confirm") | .type' "$D/answers.jsonl" | wc -l)" -ge 1 ]
+  [ "$(jq -r 'select(.type == "note") | .bod' "$D/answers.jsonl" | grep -c null || true)" = 0 ]   # the bubble text never became a note
 }

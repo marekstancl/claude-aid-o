@@ -93,7 +93,7 @@
     w.querySelectorAll('button.pick').forEach(btn => btn.onclick = async () => {
       if (await post({ type: 'choice', bod: btn.dataset.b, volba: btn.dataset.k })) { chosen[btn.dataset.b] = btn.dataset.k; store('aid_chosen', chosen); draw(); }
     });
-    root.querySelectorAll('textarea').forEach(t => {
+    w.querySelectorAll('textarea').forEach(t => {   // the panel's notes only, never the mark bubble in the layer
       t.oninput = () => store('aid_note_' + t.dataset.b, t.value);
       t.onblur = async () => {   // a note is never lost to a forgotten "Odeslat": it is sent when the PM leaves the field
         const v = t.value.trim(); if (!v || store('aid_note_sent_' + t.dataset.b) === v) return;
@@ -101,7 +101,7 @@
       };
     });
     root.getElementById('send').onclick = async () => {
-      for (const t of root.querySelectorAll('textarea')) await t.onblur();
+      for (const t of w.querySelectorAll('textarea')) await t.onblur();
       const ok = await post({ type: 'confirm', selected: chosen });
       root.getElementById('st').textContent = ok ? 'Odesláno. Agent to uvidí.' : 'Nepodařilo se odeslat, zkus to znovu.';
     };
@@ -119,7 +119,7 @@
   layer.append(pins, hlNode, dragNode);
   let marks = [], showMarks = store('aid_marks_show') !== false, commenting = false, drag = null, bubble = null;
   const ours = e => e.composedPath().includes(host);
-  const VAL = /^[A-Za-z][\w-]{0,60}$/;
+  const VAL = /^[A-Za-z][A-Za-z_-]{0,60}$/;   // no digits: an id like row-12345 carries a record, mui-17 changes on reload
   const sel = el => {   // an id, a data-testid or an aria-label anchors the path; nth-of-type below it; no data values
     const parts = [];
     for (let n = el; n && n.nodeType === 1 && n !== document.documentElement; n = n.parentElement) {
@@ -127,9 +127,9 @@
       const t = n.getAttribute('data-testid'); if (t && VAL.test(t)) { parts.unshift(`[data-testid="${CSS.escape(t)}"]`); break; }
       let i = 1; for (let p = n.previousElementSibling; p; p = p.previousElementSibling) if (p.tagName === n.tagName) i++;
       parts.unshift(`${n.tagName.toLowerCase()}:nth-of-type(${i})`);
-      if (parts.length >= 12 || n === document.body) break;
+      if (n === document.body) { parts[0] = 'body'; break; }
     }
-    return parts.join(' > ');
+    return parts.join(' > ');   // from an anchor or from body: never a path that could match elsewhere
   };
   const prvekOf = el => {
     let label = el.getAttribute('aria-label') || null;
@@ -141,22 +141,39 @@
   const closeBubble = () => { if (bubble) bubble.node.remove(); bubble = null; };
   const pct = (v, a, b) => Math.max(0, Math.min(100, b ? ((v - a) / b) * 100 : 0));
 
-  function place() {   // every frame while marks show: each follows its element (WAN scrolls inside <main>)
-    pins.replaceChildren();
-    if (showMarks) marks.forEach((m, i) => {
-      let el = null; try { el = document.querySelector(m.kotva.selector); } catch {}
-      m.gone = !el; if (!el) return;
-      const r = el.getBoundingClientRect(), x = r.left + r.width * m.kotva.x / 100, y = r.top + r.height * m.kotva.y / 100;
-      if (m.druh === 'oblast') pins.appendChild(box('area', { left: x, top: y, width: r.width * m.kotva.w / 100, height: r.height * m.kotva.h / 100 }));
-      const p = document.createElement('div'); p.className = 'pin'; p.textContent = String(i + 1); p.title = m.text;
-      Object.assign(p.style, { left: x + 'px', top: y + 'px' }); pins.appendChild(p);
+  // placement on demand (scroll anywhere, resize, DOM change, a new list) in one frame; nodes reused; all geometry
+  // read first, then written (one layout per frame, not one per mark)
+  const nodes = new Map();
+  let queued = false;
+  const schedule = () => { if (!queued) { queued = true; requestAnimationFrame(() => { queued = false; place(); }); } };
+  function place() {
+    const want = showMarks ? marks : [];
+    for (const [id, n] of nodes) if (!want.some(m => m.id === id)) { n.pin.remove(); if (n.area) n.area.remove(); nodes.delete(id); }
+    const geo = want.map(m => { let el = null; try { el = document.querySelector(m.kotva.selector); } catch {} return el ? el.getBoundingClientRect() : null; });
+    let goneChanged = false;
+    want.forEach((m, i) => {
+      const r = geo[i], gone = !r; if (gone !== !!m.gone) { m.gone = gone; goneChanged = true; }
+      let n = nodes.get(m.id);
+      if (!n) { n = { pin: document.createElement('div'), area: m.druh === 'oblast' ? document.createElement('div') : null };
+        n.pin.className = 'pin'; n.pin.title = m.text; if (n.area) { n.area.className = 'area'; pins.appendChild(n.area); } pins.appendChild(n.pin); nodes.set(m.id, n); }
+      n.pin.textContent = String(i + 1); n.pin.hidden = gone; if (n.area) n.area.hidden = gone;
+      if (gone) return;
+      const x = r.left + r.width * m.kotva.x / 100, y = r.top + r.height * m.kotva.y / 100;
+      Object.assign(n.pin.style, { left: x + 'px', top: y + 'px' });
+      if (n.area) at(n.area, { left: x, top: y, width: r.width * m.kotva.w / 100, height: r.height * m.kotva.h / 100 });
     });
+    if (goneChanged) drawMarks();
   }
-  (function loop() { if (showMarks && marks.length || commenting) place(); requestAnimationFrame(loop); })();
+  window.addEventListener('scroll', schedule, true); window.addEventListener('resize', schedule);
+  new MutationObserver(m => { if (marks.length && showMarks && m.some(x => !host.contains(x.target))) schedule(); })
+    .observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
 
-  async function loadMarks() {
-    try { marks = await (await fetch(`/__aid/marks?p=${encodeURIComponent(location.pathname)}&v=${encodeURIComponent(window.AID_VARIANT || '')}`)).json(); } catch { marks = []; }
-    place(); drawMarks();
+  let loadSeq = 0;
+  async function loadMarks() {   // only the latest answer counts: a fast switch of screens must not draw another's marks
+    const seq = ++loadSeq; let got;
+    try { got = await (await fetch(`/__aid/marks?p=${encodeURIComponent(location.pathname)}&v=${encodeURIComponent(window.AID_VARIANT || '')}`)).json(); } catch { got = []; }
+    if (seq !== loadSeq) return;
+    marks = Array.isArray(got) ? got : []; place(); drawMarks();
   }
   function drawMarks() {
     const host2 = root.getElementById('mlist'); if (!host2) return;
@@ -214,7 +231,8 @@
         ask('bod', el, { selector: sel(el), x: pct(e.clientX, r.left, r.width), y: pct(e.clientY, r.top, r.height) },
             { x: Math.round(e.clientX + sx), y: Math.round(e.clientY + sy), w: 0, h: 0 }, { x: e.clientX, y: e.clientY });
       } },
-    mousedown: swallow, mouseup: swallow, click: swallow, dblclick: swallow, contextmenu: swallow,
+    mousedown: swallow, mouseup: swallow, click: swallow, dblclick: swallow, contextmenu: swallow, dragstart: swallow, selectstart: swallow,
+    pointercancel: () => { drag = null; dragNode.hidden = true; },
     // Esc leaves the mode wherever the focus is (the note bubble too) and never reaches the app (a dialog stays open)
     keydown: e => { if (commenting && e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); setCommenting(false); } }
   };
