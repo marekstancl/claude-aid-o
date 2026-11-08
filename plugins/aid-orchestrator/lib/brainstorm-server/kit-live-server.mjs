@@ -32,10 +32,13 @@ const FS_ROOTS = (process.env.AID_LIVE_FS_ROOTS || '').split(':').filter(Boolean
 const require = createRequire(import.meta.url);
 const ANSWERS = require('./answers.js');
 const protoPort = () => { try { return JSON.parse(fs.readFileSync(path.join(DIR, 'proto.json'), 'utf8')).port; } catch { return null; } };
+const same = got => got.length === TOKEN.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(TOKEN));
+// either the cookie or the address may carry it: a cookie left from an earlier run on the same port must not hide the
+// valid token in the address (3.17.1, PM's second try: 403 with the right link) — the redirect then replaces the cookie
 const tokenOk = req => {
   const m = new RegExp(`(?:^|;\\s*)aid_t_${PORT}=([0-9a-f]+)`).exec(req.headers.cookie || '');
-  const got = (m && m[1]) || new URL(req.url, 'http://x').searchParams.get('aid_t') || '';
-  return got.length === TOKEN.length && crypto.timingSafeEqual(Buffer.from(got), Buffer.from(TOKEN));
+  let q = ''; try { q = new URL(req.url, 'http://x').searchParams.get('aid_t') || ''; } catch {}
+  return (!!m && same(m[1])) || (!!q && same(q));
 };
 const pathOk = pathname => {
   let p; try { p = decodeURIComponent(pathname); } catch { return false; }
