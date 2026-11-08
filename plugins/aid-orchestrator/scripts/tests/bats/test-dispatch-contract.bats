@@ -414,6 +414,10 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
     '{contract_version: $v, changed_files: [], deleted_files: [$d], gates: [], step_status: "done", repo_commits: [{repo: "docs", range: $r}]}' > ret.json
   run aid_dispatch_contract_validate "$C" ret.json "$TEST_DIR"; echo "$output"
   [ "$status" -eq 0 ]
+  # a range that is not <rev>..<rev> never reaches git (the agent's text: no option, no output file)
+  jq '.repo_commits[0].range = "--output='"$TEST_DIR"'/pwned..HEAD"' ret.json > ret-bad.json
+  run aid_dispatch_contract_validate "$C" ret-bad.json "$TEST_DIR"
+  [ "$status" -eq 1 ]; [ ! -e "$TEST_DIR/pwned" ]
   # a range that starts before the step's start (an old deletion) proves nothing
   local C2="$DEV/steps/step_1_docs/contract2.json"
   jq --arg h "$(git -C "$WT" rev-parse HEAD)" --arg t "$(git -C "$WT" rev-parse --show-toplevel)" '.foreign_heads_at_start[$t] = $h' "$C" > "$C2"

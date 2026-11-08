@@ -193,6 +193,9 @@ aid_dispatch_contract_build() {
     fi
     [[ "$_gone" != "[]" ]] && body_json="$(jq -c --argjson g "$_gone" '. + {deleted_before_start: $g}' <<< "$body_json")"
     # a foreign repository's HEAD when the step started: only a range from there proves a deletion was this step's
+    # a contract built again for the same step (a re-dispatch) keeps the heads of the first build: after the step's
+    # own commit there, today's head would hide that commit's deletion
+    [[ -f "$out" ]] && _starts="$(jq -c --argjson n "$_starts" '(.foreign_heads_at_start // {}) as $o | $n + $o' "$out" 2>/dev/null || echo "$_starts")"
     [[ "$_starts" != "{}" ]] && body_json="$(jq -c --argjson s "$_starts" '. + {foreign_heads_at_start: $s}' <<< "$body_json")"
   fi
 
@@ -549,6 +552,8 @@ _aid_dc_step_record() {
 # _aid_dc_abs_split <absolute path> — "<repository top>\t<path inside it>" for a path in some git tree (the file
 # itself may be gone: the nearest existing parent decides), or nothing. 3.16.0: a deletion in a foreign repository.
 _aid_dc_abs_split() {
+  local p; p="$(realpath -m -- "$1")"   # a symlinked spelling: git names the real top
+  set -- "$p"
   local d; d="$(dirname "$1")"
   while [[ ! -d "$d" && "$d" != / ]]; do d="$(dirname "$d")"; done
   local top; top="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" || return 1
@@ -562,7 +567,8 @@ _aid_dc_foreign_deleted() {
   local r="$1" pj="$2" top="$3" rel="$4" start="${5:-}" repo range wt br
   [[ -n "$start" ]] || return 1
   while IFS=$'\t' read -r repo range; do
-    [[ -n "$repo" && "$range" == *..* ]] || continue
+    # the range is the agent's text: only <rev>..<rev> made of commit-ish characters reaches git (no option, no path)
+    [[ -n "$repo" && "$range" =~ ^[0-9A-Za-z][0-9A-Za-z._/~^-]*\.\.[0-9A-Za-z][0-9A-Za-z._/~^-]*$ ]] || continue
     if [[ "$repo" != /* ]]; then
       [[ -n "$pj" ]] && IFS=$'\t' read -r wt br < <(aid_rr_resolve "$pj" "$repo") || continue
     else wt="$repo"; fi

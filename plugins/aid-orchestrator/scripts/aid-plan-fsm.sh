@@ -1046,6 +1046,10 @@ _pfsm_canonical_worktree_if_live() {
 # plan because a hook is old would be a worse failure than an unguarded commit.
 _pfsm_warn_stale_hooks() {
   local root="$1" common="" hook=""
+  # 3.16.0: first bring the hooks and plugin.yaml to the installed plugin (lib/aid-project-refresh.sh); what is
+  # still old after that (no block markers, a development plugin) is warned about below
+  source "${SCRIPT_DIR}/lib/aid-project-refresh.sh"
+  aid_hooks_refresh "$root"; aid_plugin_path_refresh "$root"
   common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
   hook="${common}/hooks/pre-commit"
   [[ -f "$hook" ]] || return 0
@@ -10250,6 +10254,7 @@ _pr_repo_roots_worktrees() {
     _pfsm_worktree_add "$path" "$wt" "$br" "plan-run never deletes a directory it did not create." "$base" >/dev/null \
       || _pr_refuse repo_root_invalid "repo_roots '${name}': the worktree ${wt} on ${br} could not be created (see above)" \
            "fix what git said, then run plan-run again" 1
+    source "${SCRIPT_DIR}/lib/aid-project-refresh.sh"; aid_hooks_refresh "$path"   # 3.16.0: the foreign repo's hooks too
     _pr_stage_record "worktree:${name}"
     _pfsm_crash_seam worktree
   done
