@@ -1870,3 +1870,15 @@ _ptrow() { jq -r ".gates.project_tests.$1 // empty" "$REPORT"; }
   run bash -c "source '$AID_PLUGIN_PATH/scripts/aid-run-gates.sh' >/dev/null 2>&1; set +e; run_gate g 'true' 5 2>&1"
   [[ "$output" != *WARNING* ]]; [ "$(tail -1 <<< "$output" | jq -r '.near_timeout // "none"')" = none ]
 }
+
+@test "run-all: the project's verification_env reaches the gate commands; a variable the caller set wins (WAN P123)" {
+  mkdir -p .aid-o/config
+  printf 'verification_env:\n  AID_VE_PROBE: from-config\n  AID_VE_KEEP: from-config\n' > .aid-o/config/execution.yaml
+  cat >> "$EXEC_YAML" <<'YAML'
+  ve:
+    command: 'test "$AID_VE_PROBE" = from-config && test "$AID_VE_KEEP" = caller'
+    required: true
+YAML
+  AID_VE_KEEP=caller run bash "$RUN_GATES" run-all "$EXEC_YAML" E-X R-1 --report-file "$REPORT"; echo "$output" | tail -5
+  [ "$(jq -r '.gates.ve.status' "$REPORT")" = pass ]
+}

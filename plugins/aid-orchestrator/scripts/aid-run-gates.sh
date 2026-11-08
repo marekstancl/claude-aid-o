@@ -1246,6 +1246,17 @@ run_all_gates() {
   # value, and the recovery ladder reads it by name from this scope.
   local _evidence_dir; _evidence_dir="$(_gates_evidence_dir "$epic_id" "$run_id")"
 
+  # 3.16.0 (WAN P123: the step's gates fell in 3 s on "service wan-api is not running", the close's wanted the same
+  # by hand): the project's verification_env (.aid-o/config/execution.yaml of the state root — the one reader the
+  # measurement uses, lib/aid-measure-env.sh) reaches every gate command; a variable the caller set already wins.
+  local _ve_line _ve_key
+  while IFS= read -r _ve_line; do
+    [[ "$_ve_line" == *=* ]] || continue
+    _ve_key="${_ve_line%%=*}"
+    [[ "$_ve_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ && -z "${!_ve_key+x}" ]] && export "$_ve_line"
+  done < <( STATE_ROOT="$(aid_state_root 2>/dev/null || pwd)"; source "${SCRIPT_DIR}/lib/aid-measure-env.sh"
+            PD_ENV=(); _pd_env_load >/dev/null 2>&1 || true; printf '%s\n' "${PD_ENV[@]}" )
+
   # Determine timeline_file: use positional $4 ONLY if it's not a flag.
   # Bug fix (PM-reported): the previous `${4:-default}` + unconditional
   # `shift` swallowed `--state-file` when caller skipped the positional
