@@ -25,6 +25,7 @@ codes:
   release_prep_version_changed: {class: agent_fix, how: "verzi změnil commit po přípravě: prepare-plan --bump none (vydání) / rebind --adopt-version (bez vydání), nebo změnu vrátit"}
   plan_version_not_above_target: {class: agent_fix, how: "cíl má mezitím vyšší nebo stejný tag (souběžný plán): zvednout verzi prepare-plan --bump …"}
   step_test_named_after_plan: {class: agent_fix, how: "test pojmenovaný podle plánu, nálezu nebo backlogu: role kroku ho přejmenuje podle chování a kontrola kroku se pustí znovu"}
+  closing_attempts_exhausted: {class: pm, how: "uzávěr po 4 pokusech stojí: nálezy do backlogu, karta PM (uzavřít se zapsanými / ještě jeden pokus / odložit); jeho ano = --one-more-attempt \"<slova>\" na jeden pokus"}
   ac_command_defective: {class: stand_in, how: "plan_diff padl a vadí měřicí příkaz bodu, ne dodávka: aid-stand-in.sh ask s kind ac_command, pak aid-ac-substitute.sh add; plán se nemění (3.16.0)"}
   ac_substitute_no_plan: {class: agent_fix, how: "spustit z přímého běhu plánu (jeho fsm-state.yaml jmenuje plán)"}
   ac_substitute_not_cmd: {class: agent_fix, how: "nahradit jde jen měřicí příkaz bodu typu cmd"}

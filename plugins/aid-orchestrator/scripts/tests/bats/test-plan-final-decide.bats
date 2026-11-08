@@ -489,6 +489,18 @@ _FU_MINOR='.findings = [{id: "g-1", checkpoint: "cp7", step: null, severity: "mi
 }
 
 # ── 2.114.0: the closing measurement ─────────────────────────────────────────
+@test "closing brake: past the attempt limit freeze stops for the PM; his one more attempt passes exactly once (agents P017)" {
+  _project_closed "$_BLOCKER"
+  export AID_CLOSING_MAX_ATTEMPTS=1
+  echo 'print("hello!")' > "$R/app.py"; git -C "$R" commit -qam "fix(review): louder"
+  _stage freeze; echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"closing_attempts_exhausted"*"--one-more-attempt"* ]]
+  _stage freeze --one-more-attempt "ok"; [ "$status" -ne 0 ]                      # the PM's words, not a token
+  _stage freeze --one-more-attempt "PM: ještě jeden pokus, pak karta"; echo "$output"; [ "$status" -eq 0 ]
+  echo 'print("hello!!")' > "$R/app.py"; git -C "$R" commit -qam "fix(review): louder still"
+  _stage freeze; [ "$status" -ne 0 ]; [[ "$output" == *"closing_attempts_exhausted"* ]]
+}
+
 @test "closing measure: a first attempt that stopped at its gates (no CP7) still names the first candidate and the minutes (agents P017)" {
   _project_closed "$_BLOCKER"
   local r1; r1="$(_run_dir)"

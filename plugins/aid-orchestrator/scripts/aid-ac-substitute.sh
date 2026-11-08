@@ -116,7 +116,11 @@ cmd_check() {
     'any(.[]; .checkpoint == "ac_substitute" and .criterion == $c and .cmd_plan_sha256 == $os and .cmd_new_sha256 == $ns and .by == $b)' \
     "$ledger" >/dev/null 2>&1 || { echo "ac-substitutes: ${CRIT}: no record in the plan's ledger — ignored" >&2; exit 3; }
   case "$(jq -r .by <<< "$e")" in
-    pm) [[ "$(jq -r '.pm_words // "" | length' <<< "$e")" -ge 20 ]] || { echo "ac-substitutes: ${CRIT}: a PM entry without the PM's words — ignored" >&2; exit 3; } ;;
+    pm) [[ "$(jq -r '.pm_words // "" | length' <<< "$e")" -ge 20 ]] || { echo "ac-substitutes: ${CRIT}: a PM entry without the PM's words — ignored" >&2; exit 3; }
+        # the same rule as add: while an --auto delegation holds, only the stand-in's permission counts. The PM's
+        # words are recorded by the controller, as everywhere in AID (dispute --pm, standing): no signature.
+        ! aid_delegate_in_force "$(aid_state_root "$(dirname "$(realpath -m "$PLAN")")")" "$(_aid_plan_id_of "$PLAN")" \
+          || { echo "ac-substitutes: ${CRIT}: a PM entry in an --auto run — ignored (the stand-in decides)" >&2; exit 3; } ;;
     stand_in)
       local auth ev; auth="$(jq -r '.auth // ""' <<< "$e")"; ev="${auth%/stand-in/*}"
       source "${SCRIPT_DIR}/lib/aid-stand-in.sh"

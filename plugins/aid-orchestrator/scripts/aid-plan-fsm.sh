@@ -45,7 +45,7 @@
 #
 # The end of a plan is one subcommand in four stages, each bound to ONE frozen
 # candidate and each naming the next command in what it prints:
-#   aid-plan-fsm.sh plan-finalize <plan_id> --stage freeze [--accept-ancillary] [--frozen-at <rfc3339>]
+#   aid-plan-fsm.sh plan-finalize <plan_id> --stage freeze [--accept-ancillary] [--frozen-at <rfc3339>] [--one-more-attempt "<the PM's words>"]
 #       merges the target branch into plan/<id>, freezes the candidate and
 #       mints the run directory R-<plan>-final-<N>; after a fix it writes
 #       fix-class.json, which says what the fix invalidated
@@ -3388,6 +3388,25 @@ _pfsm_finalize_freeze() {
   # ── Allocate the next attempt and create its immutable run directory ─────
   local attempt run_dir_rel run_dir_abs run_id
   attempt="$(_pfsm_next_plan_final_attempt "$root" "$plan_id")"
+  # 3.16.0 (agents P017: six attempts and ten hours, the "three attempts feeding on themselves" rule a sentence
+  # nobody counted): past AID_CLOSING_MAX_ATTEMPTS (4) attempts the close stops for the PM. His "one more" is a
+  # receipt for exactly that attempt number; the next one stops again.
+  local _max="${AID_CLOSING_MAX_ATTEMPTS:-4}" _rcpt="${root}/.aid-o/work/plan-final/${plan_id}/one-more-attempt-${attempt}.json"
+  if [[ "$attempt" =~ ^[0-9]+$ ]] && (( attempt > _max )) && [[ ! -f "$_rcpt" ]]; then
+    if [[ -n "${_PFSM_ONE_MORE:-}" ]]; then
+      (( ${#_PFSM_ONE_MORE} >= 20 )) || { echo "PRECONDITION FAIL: --one-more-attempt \"<the PM's words>\" needs 20+ characters." >&2; return 1; }
+      mkdir -p "$(dirname "$_rcpt")"
+      jq -n --argjson a "$attempt" --arg r "$_PFSM_ONE_MORE" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{attempt: $a, pm_words: $r, at: $at}' > "$_rcpt" || return 1
+      echo "plan-finalize --stage freeze: attempt ${attempt} allowed once by the PM (${_rcpt})." >&2
+    else
+      echo "PRECONDITION FAIL: closing_attempts_exhausted — ${plan_id}'s close has had $(( attempt - 1 )) attempts (limit ${_max}); another fix-and-freeze is not tried without the PM." >&2
+      echo "next: write the open findings to the backlog and show the PM a Decision card — close with the findings recorded / one more attempt (plan-finalize ${plan_id} --stage freeze --one-more-attempt \"<his words>\") / defer the plan" >&2
+      echo "class: pm" >&2
+      echo "(pipeline.md §When AID refuses: closing_attempts_exhausted)" >&2
+      return 1
+    fi
+  fi
   run_dir_rel="$(_pfsm_plan_final_run_dir_rel "$plan_id" "$attempt")"
   run_id="R-${plan_id}-final-${attempt}"
   run_dir_abs="${root}/${run_dir_rel}"
@@ -5560,6 +5579,9 @@ cmd_plan_finalize() {
         _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
         frozen_at="$2"; shift 2 ;;
       --accept-ancillary) accept_ancillary=1; shift ;;
+      --one-more-attempt)
+        _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
+        _PFSM_ONE_MORE="$2"; shift 2 ;;
       --waive-final-review) waive_final_review=1; shift ;;
       # P073 Step 8 — see the note on plan-start's loop.
       --force) _PFSM_FORCE=1; shift ;;

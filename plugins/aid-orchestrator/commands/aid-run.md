@@ -1042,7 +1042,10 @@ findings written by the fixes). Three rules, and one number to watch:
   above zero for the third attempt in a row, do not fix: write the open
   findings to the backlog and show the PM a **Decision** card — close with the
   findings disputed and recorded / one more attempt / defer the plan. This is a
-  rule for you, not a gate: the plugin counts, you stop.
+  rule for you; since 3.16.0 the plugin also stops on its own: past four attempts
+  (`AID_CLOSING_MAX_ATTEMPTS`) `freeze` refuses (`closing_attempts_exhausted`, class
+  `pm`), and the PM's "one more" (`--stage freeze --one-more-attempt "<his words>"`)
+  allows exactly that attempt.
 
 An ancillary-only move after the freeze (AID's own bookkeeping, e.g. the id
 counter) costs nothing: `freeze` names `--stage freeze --accept-ancillary`, which
