@@ -213,7 +213,9 @@ run_gate() {
   # driver's stdin — in run_all_gates that stdin is the here-string of remaining
   # gate names, and eating it silently starves every subsequent gate while
   # overall still reports pass (OBS-20260708-07).
-  output=$(LC_ALL=C env ${AID_GATE_ENV[@]+"${AID_GATE_ENV[@]}"} timeout "$timeout_s" bash -c "$command" </dev/null 2>&1) || exit_code=$?
+  # verification_env through the environment of a subshell, never argv (a database URL is a secret: ps, job.json)
+  output=$( if [[ -n "${AID_GATE_ENV[*]+x}" && ${#AID_GATE_ENV[@]} -gt 0 ]]; then export "${AID_GATE_ENV[@]}"; fi
+            LC_ALL=C timeout "$timeout_s" bash -c "$command" </dev/null 2>&1) || exit_code=$?
 
   local end_ms completed_at
   end_ms=$(date +%s%3N)
@@ -600,7 +602,7 @@ run_background_gate() {
   # The EXACT argv the supervisor will run — and therefore the exact argv the
   # fingerprint has to cover. Computed by aid-job.sh itself: one definition of
   # the sha256-over-NUL-joined-argv formula, never a copy of it here.
-  local -a job_argv=(env ${AID_GATE_ENV[@]+"${AID_GATE_ENV[@]}"} bash -c "$command")   # 3.16.0: verification_env as inline gates
+  local -a job_argv=(bash -c "$command")
   # stdout and stderr captured SEPARATELY via a temp file — an assignment made
   # inside a command substitution happens in a subshell and would never reach
   # this scope.
@@ -713,7 +715,9 @@ run_background_gate() {
     run_args+=(-- "${job_argv[@]}")
 
     local start_err start_rc=0
-    start_err="$(bash "$job_sh" "${run_args[@]}" 2>&1 >/dev/null)" || start_rc=$?
+    # 3.16.0: verification_env reaches the background job through its environment (never argv or job.json)
+    start_err="$( if [[ -n "${AID_GATE_ENV[*]+x}" && ${#AID_GATE_ENV[@]} -gt 0 ]]; then export "${AID_GATE_ENV[@]}"; fi
+                  bash "$job_sh" "${run_args[@]}" 2>&1 >/dev/null)" || start_rc=$?
     if (( start_rc != 0 )); then
       # A background declaration is a contract. The supervisor's own stderr is
       # surfaced verbatim; there is deliberately NO fallback to run_gate().

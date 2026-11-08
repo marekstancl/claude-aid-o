@@ -130,18 +130,31 @@ for seg in segments:
         files = positional if pattern_given else positional[1:]
         for a in files:
             plain_path(a, "grep file")
-    elif prog in ("test", "[", "wc"):
+    elif prog in ("test", "["):
         for a in args:
-            if not a.startswith("-") and a not in ("!", "]", "=", "!="):
-                if any(c in a for c in "*?["):
-                    out("security: %s %s has a glob — name the file" % (prog, a))
+            if not a.startswith("-") and a not in ("!", "]", "=", "!=", "-a", "-o"):
+                plain_path(a, "%s operand" % prog)
+    elif prog == "wc":
+        for a in args:
+            if a.startswith("-"):
+                if a.startswith("--") or not set(a[1:]) <= set("lcwm"):
+                    out("security: wc %s is not a flag a substitute may use (-l -c -w -m)" % a)
+            else:
+                plain_path(a, "wc file")
     elif prog == "jq":
-        if any(a.startswith(("-L", "--library-path", "--rawfile", "--slurpfile", "--from-file", "-f", "--args", "--jsonargs")) for a in args):
-            out("security: jq with a file, library or argument option reads beyond what it names")
-        prog_txt = next((a for a in args if not a.startswith("-")), "")
-        if any(w in prog_txt for w in JQ_BAD_WORDS):
+        positional = []
+        for k, a in enumerate(args):
+            if a == "--":
+                positional += args[k + 1:]
+                break
+            if a.startswith("-"):
+                if a.startswith("--") or not set(a[1:]) <= set("ercnsjaS"):
+                    out("security: jq %s is not a flag a substitute may use (-e -r -c -n -s -j -a -S)" % a)
+            else:
+                positional.append(a)
+        if any(w in a for a in positional for w in JQ_BAD_WORDS):
             out("security: the jq program reads the environment, a library or a file name")
-        for a in [a for a in args if not a.startswith("-")][1:]:
+        for a in positional[1:]:
             plain_path(a, "jq file")
     elif prog == "git":
         if not args or args[0] not in GIT_SUB:

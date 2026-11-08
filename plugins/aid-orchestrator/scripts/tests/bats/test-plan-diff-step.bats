@@ -196,7 +196,7 @@ _unlisten() { kill "$LPID" 2>/dev/null || true; }
   _iplan '"curl -sf -o /dev/null \"$SVC_URL\""'
   _irun; _unlisten; echo "$output"
   [ "$(_v AC1)" = present ]
-  [ "$(jq -r .isolation.network "$EV/plan-diff.json")" = "host (verification_env)" ]
+  [ "$(jq -r .isolation.network "$EV/plan-diff.json")" = "host (verification_env; no pid isolation, the host's /proc)" ]
   [ "$(jq -c .isolation.env_keys "$EV/plan-diff.json")" = '["SVC_URL"]' ]
 }
 @test "isolation: without unshare on PATH every cmd is absent (reason=no_isolation), never present, with next:" {
