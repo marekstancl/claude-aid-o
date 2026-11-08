@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.17.0] — 2026-11-08
+
+Živý náhled v companionu (volba PM 2A, přání z WAN P121, stavěno mimo AID). Zadání: `docs/plans/2026-11-08-3170-zivy-nahled.md`.
+
+- **U existující aplikace PM otevře skutečnou aplikaci, ne fotky.** `aid-companion.sh proto --live` spustí kopii aplikace s variantami proti vývojovému API (`ui.live.env`), `aid-companion.sh live` k ní dá adresu: PM ji otevře ve svém prohlížeči, ve svém rozlišení a na svém zařízení, na vývojových datech. Nad každou stránkou je malý panel AID: přepnout variantu, „vybrat", poznámka k bodu, „Odeslat volby"; odpovědi jdou do `answers.jsonl` jako dosud (`aid-companion.sh answers`). Varianta v kódu čte `window.AID_VARIANT` (z `?v=`). Ve WANu stál návrh přes fotky 45 minut a snímky byly „mimo realitu".
+- **Mantinely hlídá kód.** Adresa pro PM nese přístupový klíč platný po dobu běhu (bez něj 403 - vývojová data obsahují skutečné lidi); ven je jen proxy, kopie poslouchá jen lokálně; čtení souborů dev serverem (`/@fs/`) jen uvnitř kopie; stránka smí volat jen proxy (CSP); API jen ze seznamu povolených (`ui.live.allowed_api`, adresa se přeloží na IP); kopie běží v čistém prostředí bez klíčů agenta a bez `.env*` souborů aplikace; proměnná, která vypadá jako tajemství, se odmítne; živá kopie se nefotí; `down` zastaví proxy i kopii.
+- **Fotky zůstávají** pro návrh od nuly a přílohu plánu (`shots`/`show` beze změny); přepnutí běžící kopie mezi živou a na vymyšlených datech se odmítne (PM se na ni může dívat), nejdřív `down`.
+- **Jeden zapisovač odpovědí** pro stránku companionu i živý náhled (`lib/brainstorm-server/answers.js`); řádek nese `zdroj`.
+
 ## [3.16.0] — 2026-11-08
 
 Uzávěr, který doběhne (rozbor plugin issues 8. 11. 2026, stavěno mimo AID). Zadání: `docs/plans/2026-11-08-3160-uzaver.md`.

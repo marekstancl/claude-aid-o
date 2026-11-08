@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [3.17.0] — nevydáno
+## [3.17.0] — 2026-11-08
 
 Živý náhled v companionu (volba PM 2A, přání z WAN P121, stavěno mimo AID). Zadání: `docs/plans/2026-11-08-3170-zivy-nahled.md`.
 
