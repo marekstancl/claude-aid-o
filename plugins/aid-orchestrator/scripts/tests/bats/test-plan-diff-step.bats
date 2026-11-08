@@ -253,7 +253,8 @@ _unlisten() { kill "$LPID" 2>/dev/null || true; }
 }
 @test "isolation: a point sees /proc/<pid> of a process it started (its own /proc; agents P017 AC4)" {
   _nsprobe
-  _iplan '"sleep 7 & tr \"\\\\0\" \" \" < /proc/$!/cmdline | grep -q \"sleep 7\""'
+  # the child execs a moment after the fork: under load its cmdline is still the shell's — wait for it, up to 2 s
+  _iplan '"sleep 7 & for i in $(seq 20); do tr \"\\\\0\" \" \" < /proc/$!/cmdline | grep -q \"sleep 7\" && exit 0; sleep 0.1; done; exit 1"'
   _irun; echo "$output"; [ "$status" -eq 0 ]
   [ "$(_v AC1)" = present ]
 }
