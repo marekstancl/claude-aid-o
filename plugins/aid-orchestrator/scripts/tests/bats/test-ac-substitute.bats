@@ -47,6 +47,13 @@ _v() { jq -r '.results[0].verdict' "$EV/plan-diff.json"; }
   _pd; [ "$(_v)" = absent ]
 }
 
+@test "substitute: an entry written by hand (no line in the plan's ledger) is ignored" {
+  bash "$SUB" add --evidence-dir "$RUN" --criterion AC1 --cmd-file "$ROOT/new.cmd" --pm "PM 8. 11.: měř to tím opraveným grepem" >/dev/null
+  _pd; [ "$(_v)" = present ]
+  : > "$ROOT/.aid-o/work/evidence/P960/delegated-disputes.jsonl"
+  _pd; [ "$(_v)" = absent ]
+}
+
 @test "substitute: the PM path needs the PM's words; a stand-in entry without a valid permission is ignored" {
   run bash "$SUB" add --evidence-dir "$RUN" --criterion AC1 --cmd-file "$ROOT/new.cmd" --pm "ok"
   [ "$status" -eq 1 ]; [[ "$output" == *ac_substitute_pm_words* ]]

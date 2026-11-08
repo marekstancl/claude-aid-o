@@ -68,13 +68,17 @@ cmd_add() {
     [[ -n "$new" ]] || _refuse ac_substitute_unbound "the permission's proposal has no cmd_new" "ask the stand-in with kind ac_command"
     [[ "$(jq -r '.cmd_old // ""' "$(dirname "$AUTH")/proposal.json")" == "$old" ]] \
       || _refuse ac_substitute_unbound "the approved cmd_old is not ${CRIT}'s command in the plan now" "ask again with the plan's command"
-    local expect why; expect="$(jq -nc --arg c "$CRIT" --arg n "$new" '{criterion: $c, cmd_new: $n}')"
+    local expect why; expect="$(jq -nc --arg c "$CRIT" --arg o "$old" --arg n "$new" '{criterion: $c, cmd_old: $o, cmd_new: $n}')"
     why="$(aid_stand_in_verify "$EVID" "$AUTH" ac_command "$expect" "$(git rev-parse --show-toplevel 2>/dev/null || pwd)")" \
       || _refuse ac_substitute_unbound "$why" "aid-stand-in.sh ask --code ac_command_defective with kind ac_command"
     aid_stand_in_consume "$EVID" "$AUTH" "$expect" || _refuse ac_substitute_unbound "the use could not be recorded in the plan's ledger" "record again"
     by=stand_in; auth_rel="$(realpath "$AUTH")"
   elif [[ -n "$PMWORDS" ]]; then
     (( ${#PMWORDS} >= 20 )) || _refuse ac_substitute_pm_words "the PM's words are under 20 characters" "quote what the PM said"
+    # in an --auto run the stand-in decides, never words the controller types (security review 3.16.0)
+    source "${SCRIPT_DIR}/lib/aid-delegate.sh"
+    ! aid_delegate_in_force "$(aid_state_root "$(dirname "$(realpath -m "$plan")")")" "$(_aid_plan_id_of "$plan")" \
+      || _refuse ac_substitute_unbound "an --auto run: the substitute is the stand-in's decision, not a --pm entry" "aid-stand-in.sh ask --code ac_command_defective"
     [[ -f "$CMDFILE" ]] || _refuse ac_substitute_unbound "--pm needs --cmd-file with the new command" "write it to a file"
     new="$(cat "$CMDFILE")"; by=pm; words="$PMWORDS"
   else
@@ -88,6 +92,12 @@ cmd_add() {
      'map(select(.criterion != $c)) + [{criterion: $c, cmd_plan_sha256: $os, cmd_new: $n, cmd_new_sha256: $ns, by: $b,
         pm_words: (if $w == "" then null else $w end), auth: (if $a == "" then null else $a end), at: $at}]' "$f" > "${f}.tmp" \
     && mv "${f}.tmp" "$f" || _refuse ac_substitute_write "cannot write ${f}" "check the evidence directory"
+  # the plan's append-only ledger holds the binding; check trusts an entry only with its line there
+  source "${SCRIPT_DIR}/lib/aid-delegate.sh"
+  jq -nc --arg c "$CRIT" --arg os "$(_sha "$old")" --arg ns "$(_sha "$new")" --arg b "$by" --arg w "$words" --arg a "$auth_rel" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    '{checkpoint: "ac_substitute", criterion: $c, cmd_plan_sha256: $os, cmd_new_sha256: $ns, by: $b, pm_words: $w, auth: $a, at: $at}' \
+    >> "$(aid_delegate_ledger "$(aid_state_root "$(dirname "$(realpath -m "$plan")")")" "$(_aid_plan_id_of "$plan")")" \
+    || _refuse ac_substitute_write "cannot record the substitute in the plan's ledger" "check the evidence directory"
   echo "${CRIT}: measured by the substitute command from now on (${by}); the plan is unchanged — ${f}"
 }
 
@@ -100,12 +110,17 @@ cmd_check() {
   [[ -n "$e" ]] || exit 3
   local new; new="$(jq -r .cmd_new <<< "$e")"
   [[ "$(_sha "$new")" == "$(jq -r .cmd_new_sha256 <<< "$e")" ]] || { echo "ac-substitutes: ${CRIT}'s entry was edited (sha) — ignored" >&2; exit 3; }
+  source "${SCRIPT_DIR}/lib/aid-delegate.sh"
+  local ledger; ledger="$(aid_delegate_ledger "$(aid_state_root "$(dirname "$(realpath -m "$PLAN")")")" "$(_aid_plan_id_of "$PLAN")")"
+  jq -e -s --arg c "$CRIT" --arg os "$(_sha "$PLANCMD")" --arg ns "$(_sha "$new")" --arg b "$(jq -r .by <<< "$e")" \
+    'any(.[]; .checkpoint == "ac_substitute" and .criterion == $c and .cmd_plan_sha256 == $os and .cmd_new_sha256 == $ns and .by == $b)' \
+    "$ledger" >/dev/null 2>&1 || { echo "ac-substitutes: ${CRIT}: no record in the plan's ledger — ignored" >&2; exit 3; }
   case "$(jq -r .by <<< "$e")" in
     pm) [[ "$(jq -r '.pm_words // "" | length' <<< "$e")" -ge 20 ]] || { echo "ac-substitutes: ${CRIT}: a PM entry without the PM's words — ignored" >&2; exit 3; } ;;
     stand_in)
       local auth ev; auth="$(jq -r '.auth // ""' <<< "$e")"; ev="${auth%/stand-in/*}"
       source "${SCRIPT_DIR}/lib/aid-stand-in.sh"
-      aid_stand_in_record_ok "$ev" "$auth" ac_command "$(jq -nc --arg c "$CRIT" --arg n "$new" '{criterion: $c, cmd_new: $n}')" >/dev/null 2>&1 \
+      aid_stand_in_record_ok "$ev" "$auth" ac_command "$(jq -nc --arg c "$CRIT" --arg o "$PLANCMD" --arg n "$new" '{criterion: $c, cmd_old: $o, cmd_new: $n}')" >/dev/null 2>&1 \
         || { echo "ac-substitutes: ${CRIT}: the stand-in's permission does not hold — ignored" >&2; exit 3; } ;;
     *) exit 3 ;;
   esac

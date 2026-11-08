@@ -239,8 +239,8 @@ aid_hook_rule_turn_step_open() {
   local slim; slim="$(mktemp)" || { echo "no temp file for the transcript" >&2; return 3; }
   grep -F -e 'aid-emit-dispatch.sh' -e 'nonce=' -e 'aid-step-land.sh' -e 'Dispatch Contract (version' \
           -e '<tool-use-id>' -e 'Async agent launched' -e 'working in the background' "$transcript" > "$slim" 2>/dev/null || true
-  local rc=0; _aid_hrt_step_open_judge "$root" "$transcript" "$slim" "$sess" || rc=$?
-  rm -f "$slim"; return "$rc"
+  # a subshell with its own trap: the hook can be killed at its time limit, the slim copy (tens of MB) never stays
+  ( trap 'rm -f "$slim"' EXIT; _aid_hrt_step_open_judge "$root" "$transcript" "$slim" "$sess" )
 }
 
 # _aid_hrt_step_open_judge <root> <transcript> <slim transcript> <session> — the body of turn_step_open.

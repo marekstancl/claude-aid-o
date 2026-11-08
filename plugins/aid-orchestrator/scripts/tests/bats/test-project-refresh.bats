@@ -11,6 +11,9 @@ setup() {
   git init -q -b main "$R"
   source "$AID_PLUGIN_PATH/scripts/lib/aid-project-refresh.sh"
   VER="$(aid_plugin_version_loaded)"
+  # this checkout plays the installed plugin
+  jq -n --arg p "$AID_PLUGIN_PATH" '{plugins: {"aid-orchestrator@claude-aid-o": [{scope: "user", installPath: $p}]}}' > "$TEST_DIR/self.json"
+  export AID_INSTALLED_PLUGINS_JSON="$TEST_DIR/self.json"
   H="$R/.git/hooks"
   # an installed hook from an older plugin: a user line before the block, an older block body, a user line after it
   { echo '#!/usr/bin/env bash'; echo 'echo user-before'
@@ -24,7 +27,7 @@ setup() {
 teardown() { rm -rf "$TEST_DIR"; }
 
 @test "hooks: an older block is replaced by the plugin's, versioned; the lines around it and the mode stay" {
-  AID_REFRESH_TRUST_PLUGIN=1 run aid_hooks_refresh "$R"; echo "$output"
+  run aid_hooks_refresh "$R"; echo "$output"
   [[ "$output" == *"pre-commit refreshed to the plugin's ${VER} block"* ]]
   grep -qx 'echo user-before' "$H/pre-commit" && grep -qx 'echo user-after' "$H/pre-commit"
   ! grep -q 'old-aid-body' "$H/pre-commit"
@@ -35,13 +38,13 @@ teardown() { rm -rf "$TEST_DIR"; }
   [ "$(grep -c 'AID-ORCHESTRATOR-PREPUSH-END' "$H/pre-push")" = 1 ]
   # a second run changes nothing
   local before; before="$(sha256sum "$H/pre-commit")"
-  AID_REFRESH_TRUST_PLUGIN=1 run aid_hooks_refresh "$R"; [ -z "$output" ]
+  run aid_hooks_refresh "$R"; [ -z "$output" ]
   [ "$(sha256sum "$H/pre-commit")" = "$before" ]
 }
 
 @test "hooks: a block of a newer version is never lowered" {
   sed -i 's|^echo old-aid-body$|# aid-hook-version: 999.0.0\necho newer-body|' "$H/pre-commit"
-  AID_REFRESH_TRUST_PLUGIN=1 run aid_hooks_refresh "$R"
+  run aid_hooks_refresh "$R"
   grep -qx 'echo newer-body' "$H/pre-commit"
 }
 
@@ -53,12 +56,12 @@ teardown() { rm -rf "$TEST_DIR"; }
 
 @test "hooks: an AID hook without its markers is warned about, not rewritten" {
   printf '#!/bin/sh\necho "AID HOOK: old style"\n' > "$H/pre-commit"
-  AID_REFRESH_TRUST_PLUGIN=1 run aid_hooks_refresh "$R"
+  run aid_hooks_refresh "$R"
   [[ "$output" == *"without its block markers"* ]]
   grep -q 'old style' "$H/pre-commit"
 }
 
-@test "plugin.yaml: a plugin_path that is not on disk moves to the installed plugin; an existing newer pin stays" {
+@test "plugin.yaml: a plugin_path that is not on disk moves to the installed plugin; an existing pin stays, older or newer" {
   mkdir -p "$R/.aid-o/config" "$TEST_DIR/cache/9.9.9/.claude-plugin"
   echo '{"version": "9.9.9"}' > "$TEST_DIR/cache/9.9.9/.claude-plugin/plugin.json"
   jq -n --arg p "$TEST_DIR/cache/9.9.9" '{plugins: {"aid-orchestrator@claude-aid-o": [{scope: "user", installPath: $p, version: "9.9.9"}]}}' > "$TEST_DIR/inst.json"
@@ -68,7 +71,25 @@ teardown() { rm -rf "$TEST_DIR"; }
   [[ "$output" == *"(not on disk)"* ]]
   [ "$(yq -r .plugin_path "$R/.aid-o/config/plugin.yaml")" = "$TEST_DIR/cache/9.9.9" ]
   grep -q 'a comment that stays' "$R/.aid-o/config/plugin.yaml"
-  mkdir -p "$TEST_DIR/cache/10.0.0/.claude-plugin"; echo '{"version": "10.0.0"}' > "$TEST_DIR/cache/10.0.0/.claude-plugin/plugin.json"
-  P="$TEST_DIR/cache/10.0.0" yq -i '.plugin_path = strenv(P)' "$R/.aid-o/config/plugin.yaml"
-  run aid_plugin_path_refresh "$R"; [ -z "$output" ]
+  local v; for v in 10.0.0 1.0.0; do
+    mkdir -p "$TEST_DIR/cache/$v/.claude-plugin"; echo "{\"version\": \"$v\"}" > "$TEST_DIR/cache/$v/.claude-plugin/plugin.json"
+    P="$TEST_DIR/cache/$v" yq -i '.plugin_path = strenv(P)' "$R/.aid-o/config/plugin.yaml"
+    run aid_plugin_path_refresh "$R"; [ -z "$output" ]
+    [ "$(yq -r .plugin_path "$R/.aid-o/config/plugin.yaml")" = "$TEST_DIR/cache/$v" ]
+  done
+}
+
+@test "hooks: a start marker without its end, a hook the repository tracks and a symlinked hook are warned about, not rewritten" {
+  sed -i '/AID-ORCHESTRATOR-HOOK-END/d' "$H/pre-commit"
+  run aid_hooks_refresh "$R"; [[ "$output" == *"exactly one AID block"* ]]
+  grep -qx 'echo user-after' "$H/pre-commit"
+  mkdir -p "$R/.githooks"; cp "$AID_PLUGIN_PATH/defaults/hooks/pre-push" "$R/.githooks/pre-push"; sed -i 's/^set -/# old\nset -/' "$R/.githooks/pre-push"
+  git -C "$R" add .githooks; git -C "$R" -c user.email=t@t -c user.name=t commit -qm hooks; git -C "$R" config core.hooksPath .githooks
+  local before; before="$(sha256sum "$R/.githooks/pre-push")"
+  run aid_hooks_refresh "$R"; [[ "$output" == *"symlink or a file the repository tracks"* ]]
+  [ "$(sha256sum "$R/.githooks/pre-push")" = "$before" ]
+  git -C "$R" config --unset core.hooksPath
+  cp "$H/pre-push" "$TEST_DIR/shared-pre-push"; ln -sf "$TEST_DIR/shared-pre-push" "$H/pre-push"
+  run aid_hooks_refresh "$R"; [[ "$output" == *"symlink or a file the repository tracks"* ]]
+  [ -L "$H/pre-push" ]
 }

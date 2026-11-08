@@ -7,7 +7,8 @@
 #
 # WHY (3.16.0, rozbor plugin issues 8. 11. 2026): /aid-init installs the hooks once and nothing updates them.
 # All five projects ran hooks from July-October; the trailing-slash fix of 3.9.1 never reached any of them.
-# plugin.yaml pins a cache path; aidlab-apps and agents pointed at versions no longer on disk, silently.
+# plugin.yaml pins a cache path; aidlab-apps and agents pointed at versions no longer on disk, silently — such a
+# path moves to the installed plugin, an existing pin stays.
 #
 # Rules: only the installed plugin (a cache path, never a development AID_PLUGIN_PATH) refreshes; a block of a
 # newer version is never lowered; only the block between the markers changes, the rest of the hook and its mode
@@ -27,9 +28,9 @@ _aid_prf_installed_path() {
          | (($i | map(select(.scope == "user")) | .[0]) // $i[0] // {}) | .installPath // empty' "$f" 2>/dev/null
 }
 
-# _aid_prf_is_installed — 0 when this code runs from the installed plugin (or the caller says so for a test).
+# _aid_prf_is_installed — 0 when this code runs from the installed plugin (a test points AID_INSTALLED_PLUGINS_JSON
+# at its own record; there is no switch around this check).
 _aid_prf_is_installed() {
-  [[ -n "${AID_REFRESH_TRUST_PLUGIN:-}" ]] && return 0
   local p; p="$(_aid_prf_installed_path)"
   [[ -n "$p" && "$(realpath -m -- "$p")" == "$(realpath -m -- "$_AID_PRF_PLUGIN")" ]]
 }
@@ -50,6 +51,16 @@ aid_hooks_refresh() {
     read -r name start end <<< "$pair"
     hook="${hooks}/${name}"; src="${_AID_PRF_PLUGIN}/defaults/hooks/${name}"
     [[ -f "$hook" && -f "$src" ]] || continue
+    # a hook the repository tracks (core.hooksPath into the tree) or a link to a shared script is not ours to rewrite
+    if [[ -L "$hook" ]] || git -C "$repo" ls-files --error-unmatch -- "$hook" >/dev/null 2>&1; then
+      echo "WARNING: ${hook} is a symlink or a file the repository tracks — AID does not rewrite it; update its AID block by hand from ${src}" >&2
+      continue
+    fi
+    if grep -qF "$start" "$hook" && [[ "$(grep -cF "$start" "$hook")" != 1 || "$(grep -cF "$end" "$hook")" != 1 ]] \
+       || { grep -qF "$start" "$hook" && ! awk -v s="$start" -v e="$end" 'index($0, s) { a = NR } index($0, e) { b = NR } END { exit !(a && b > a) }' "$hook"; }; then
+      echo "WARNING: ${hook} does not have exactly one AID block (one start marker, one end marker after it) — not refreshed; run /aid-init" >&2
+      continue
+    fi
     if ! grep -qF "$start" "$hook"; then
       grep -q 'aid-orchestrator\|AID HOOK' "$hook" 2>/dev/null \
         && echo "WARNING: ${hook} is an AID hook without its block markers — not refreshed; run /aid-init to replace it" >&2
@@ -79,11 +90,8 @@ aid_plugin_path_refresh() {
   want="$(_aid_prf_installed_path)"; [[ -n "$want" && -d "$want" ]] || return 0
   cur="$(yq -r '.plugin_path // ""' "$f" 2>/dev/null)"
   [[ "$cur" == "$want" ]] && return 0
-  # a pinned path that still exists and is not older than the installed one stays (a deliberate pin)
-  if [[ -n "$cur" && -d "$cur" ]]; then
-    local cv wv; cv="$(jq -r '.version // ""' "${cur}/.claude-plugin/plugin.json" 2>/dev/null)"; wv="$(jq -r '.version // ""' "${want}/.claude-plugin/plugin.json" 2>/dev/null)"
-    [[ -n "$cv" && -n "$wv" ]] && ! _aid_prf_ver_lt "$cv" "$wv" && return 0
-  fi
+  # a pinned path that still exists stays (a deliberate pin, a testbed comparing versions): only a gone one moves
+  [[ -n "$cur" && -d "$cur" ]] && return 0
   WANT="$want" yq -i '.plugin_path = strenv(WANT)' "$f" 2>/dev/null || { echo "WARNING: could not update ${f}" >&2; return 0; }
   echo "AID: ${f} plugin_path ${cur:-<none>}$( [[ -n "$cur" && ! -d "$cur" ]] && echo ' (not on disk)') → ${want} (the installed plugin)" >&2
 }
