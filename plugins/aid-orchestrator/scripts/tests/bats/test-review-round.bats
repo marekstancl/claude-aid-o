@@ -365,7 +365,9 @@ _repo() {
   # The project keeps the pre-2.116.0 step budget (3B): threshold 1/50, two
   # rounds — the step-kind cases set the shipped defaults back.
   mkdir -p "$R/.aid-o/config/policies"
-  yq '.review_checkpoints.step_review.reviewers[1].when = "review+security"
+  # Round mechanics are tested with claude roles (dispatch brackets); the shipped Codex generalist (3.16.0) has its own case.
+  yq '.review_checkpoints.step_review.reviewers[0] |= (.provider = "claude" | .model = "opus")
+      | .review_checkpoints.step_review.reviewers[1].when = "review+security"
       | .review_checkpoints.step_review.skip_threshold = {"max_files": 1, "max_lines": 50}
       | .review_checkpoints.step_review.rounds_default = 2 | del(.review_checkpoints.step_review.second_round_when)' \
     "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
@@ -391,7 +393,8 @@ _bracket() {
 # pattern) and a step-0 commit of <files> new files under src/ (all in scope).
 _krepo() {
   _repo
-  cp "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  yq '.review_checkpoints.step_review.reviewers[0] |= (.provider = "claude" | .model = "opus")' \
+    "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" > "$R/.aid-o/config/policies/review-checkpoints.yaml"
   git -C "$R" reset -q --hard HEAD~1
   jq '.steps[0].outputs = [] | .steps[0].allowed_paths = ["src/**"]' "$E/plan.json" > "$E/p.tmp" && mv "$E/p.tmp" "$E/plan.json"
   local i
@@ -404,6 +407,14 @@ _kclose() {
   _sanswer "$1" step_generalist "$2"; _sanswer "$1" step_security "$2"
   _S collect --round "$1" >/dev/null; _bracket "$1" step_generalist; _bracket "$1" step_security
   _S close --round "$1" --tokens step_generalist=10 --tokens step_security=10 >/dev/null
+}
+@test "step-kind: the shipped step policy asks Codex as the generalist (3.16.0, PM 1A) and a claude light reviewer for security" {
+  _krepo 5 30
+  cp "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml" "$R/.aid-o/config/policies/review-checkpoints.yaml"
+  _sc; run _S prepare --round 1; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(yq -r '.review_checkpoints.step_review.reviewers[] | select(.role == "step_generalist") | .provider' "$AID_PLUGIN_PATH/defaults/policies/review-checkpoints.yaml")" = codex ]
+  [[ "$output" != *"focus cp2-step-0-step-generalist, agent"* ]]          # a codex role is run by the script, not dispatched
+  [ "$(jq -r .agents.step_security "$(D 1)/round.json")" = aid-orchestrator:reviewer-light ]
 }
 @test "step-kind: a 2-file/40-line step inside scope with no pattern is skip, and prepare refuses a round" {
   _krepo 2 20; _sc
@@ -1412,6 +1423,17 @@ _fix() { echo "fix $1" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review):
   _S standing --reason "PM: už se neptej a dodělej to" >/dev/null
   _fix 2; run _S prepare --round 3
   [ "$status" -ne 0 ]; [[ "$output" == *"re-opened the same findings"* ]]
+}
+
+@test "prompt: a generalist's prompt carries the behaviour trace rule and its shape when the step adds a handler, not otherwise (agents P017: 4 of 4 Codex findings trace_missing)" {
+  _repo
+  _sc; _S prepare --round 1 >/dev/null
+  ! grep -q 'behaviour_trace' "$(D 1)/prompt-step_generalist.md"
+  rm -rf "$E/cp2"
+  printf '@app.route("/x")\ndef x(request):\n    return 1\n' >> "$R/src/new.py"; git -C "$R" commit -qam handler
+  _sc; run _S prepare --round 1; [ "$status" -eq 0 ]
+  grep -q '^### The behaviour trace$' "$(D 1)/prompt-step_generalist.md"
+  grep -q '"behaviour_trace": \[{"request"' "$(D 1)/prompt-step_generalist.md"
 }
 
 @test "standing: a confirmation round that fixed one finding of two is progress, though collect rewrote the earlier round (agents P017 step 2)" {

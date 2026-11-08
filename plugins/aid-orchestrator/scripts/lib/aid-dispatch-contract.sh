@@ -175,7 +175,15 @@ aid_dispatch_contract_build() {
     _root="$(aid_run_checkout_root "$(dirname "$plan")/fsm-state.yaml" "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null)" || _root=""
     if [[ -n "$_root" ]] && git -C "$_root" rev-parse --verify -q HEAD >/dev/null 2>&1; then
       while IFS= read -r _dp; do
-        [[ -n "$_dp" && "$_dp" != /* ]] || continue
+        [[ -n "$_dp" ]] || continue
+        if [[ "$_dp" == /* ]]; then   # 3.16.0: a foreign repository's file, judged in its own tree (worktree after repo_roots)
+          local _ft _fr
+          IFS=$'\t' read -r _ft _fr < <(_aid_dc_abs_split "$_dp") || continue
+          [[ -n "$_ft" ]] || continue
+          git -C "$_ft" cat-file -e "HEAD:${_fr}" 2>/dev/null && git -C "$_ft" ls-files --error-unmatch -- "$_fr" >/dev/null 2>&1 \
+            && [[ -e "$_dp" ]] || _gone="$(jq -c --arg p "$_dp" '. + [$p]' <<< "$_gone")"
+          continue
+        fi
         git -C "$_root" cat-file -e "HEAD:${_dp}" 2>/dev/null || continue
         if ! git -C "$_root" ls-files --error-unmatch -- "$_dp" >/dev/null 2>&1 || [[ ! -e "${_root}/${_dp}" ]]; then
           _gone="$(jq -c --arg p "$_dp" '. + [$p]' <<< "$_gone")"
@@ -383,6 +391,15 @@ aid_dispatch_contract_validate() {
   local expected declared deleted a allowed evidence
   expected="$(jq -r '.expected_artifacts[]? // empty' "$c")"
   deleted="$(jq -r '.deleted_files[]? // empty' "$r")"
+  # 3.16.0: the plan.json beside the contract (repo_roots) — a foreign deletion named by its live path means the
+  # same file in the plan's worktree, as the contract's own paths were rewritten
+  local _dc_pj="" _dc_cand
+  for _dc_cand in "$(dirname "$c")/../../plan.json" "$(dirname "$c")/plan.json"; do [[ -f "$_dc_cand" ]] && { _dc_pj="$_dc_cand"; break; }; done
+  if [[ -n "$_dc_pj" && -n "$deleted" ]] && [[ "$(jq -r '.direct // false' "$_dc_pj" 2>/dev/null)" == true ]] \
+     && grep -q '^/' <<< "$deleted"; then
+    local _dc_rw; _dc_rw="$(aid_rr_rewrite_files "$_dc_pj" "$(jq -Rsc 'split("\n") | map(select(length > 0))' <<< "$deleted")" 2>/dev/null)" \
+      && deleted="$(jq -r '.[]' <<< "$_dc_rw")"
+  fi
   declared="$(jq -r '.changed_files[]? // empty' "$r")"$'\n'"$deleted"
   allowed="$(aid_dispatch_contract_allowed "$c")"
   evidence="steps/$(jq -r '.step_id // ""' "$c")"
@@ -404,7 +421,19 @@ aid_dispatch_contract_validate() {
   while IFS= read -r d; do
     [[ -n "$d" ]] || continue
     [[ "$d" == /* ]] && _d_path="$d" || _d_path="${root}/${d}"
+    local _ft="" _fr=""
+    [[ "$d" == /* ]] && IFS=$'\t' read -r _ft _fr < <(_aid_dc_abs_split "$d")
     if [[ -e "$_d_path" ]]; then gone+=("${d} (still on disk)")
+    elif [[ "$d" == /* ]]; then
+      # 3.16.0 (aidlab P002): a foreign deletion counts when this step's commits there deleted it, or it is still
+      # tracked there and gone from the tree (not yet committed) — never a file that was missing before the step
+      if [[ -z "$_ft" ]]; then gone+=("${d} (not inside a git repository)")
+      elif [[ $'\n'"$deleted"$'\n' != *$'\n'"$d"$'\n'* ]]; then gone+=("${d} (not in deleted_files)")
+      elif ! _aid_dc_foreign_deleted "$r" "$_dc_pj" "$_ft" "$_fr" \
+           && { jq -e --arg p "$d" '(.deleted_before_start // []) | index($p) != null' "$c" >/dev/null 2>&1 \
+                || ! git -C "$_ft" ls-files --error-unmatch -- "$_fr" >/dev/null 2>&1; }; then
+        gone+=("${d} (no commit of this step in ${_ft} deleted it — nothing was deleted by this step)")
+      fi
     elif jq -e --arg p "$d" '(.deleted_before_start // []) | index($p) != null' "$c" >/dev/null 2>&1 \
          && ! _aid_dc_deleted_by_step "$root" "$c" "$d"; then
       gone+=("${d} (already deleted when the step started — nothing was deleted by this step)")
@@ -514,6 +543,30 @@ _aid_dc_step_record() {
 
 # _aid_dc_deleted_by_step <root> <contract> <path> — the step's recorded commit deleted <path> and is on
 # the current branch.
+# _aid_dc_abs_split <absolute path> — "<repository top>\t<path inside it>" for a path in some git tree (the file
+# itself may be gone: the nearest existing parent decides), or nothing. 3.16.0: a deletion in a foreign repository.
+_aid_dc_abs_split() {
+  local d; d="$(dirname "$1")"
+  while [[ ! -d "$d" && "$d" != / ]]; do d="$(dirname "$d")"; done
+  local top; top="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [[ "$1" == "${top}/"* ]] || return 1
+  printf '%s\t%s\n' "$top" "${1#"${top}/"}"
+}
+# _aid_dc_foreign_deleted <return.json> <plan.json or ""> <repo top> <path inside> — 0 when one of the return's
+# repo_commits ranges in that repository deleted the path (what proves a foreign deletion was this step's).
+_aid_dc_foreign_deleted() {
+  local r="$1" pj="$2" top="$3" rel="$4" repo range wt br
+  while IFS=$'\t' read -r repo range; do
+    [[ -n "$repo" && "$range" == *..* ]] || continue
+    if [[ "$repo" != /* ]]; then
+      [[ -n "$pj" ]] && IFS=$'\t' read -r wt br < <(aid_rr_resolve "$pj" "$repo") || continue
+    else wt="$repo"; fi
+    [[ "$(git -C "$wt" rev-parse --show-toplevel 2>/dev/null)" == "$top" ]] || continue
+    git -C "$top" diff --name-only --diff-filter=D "$range" -- "$rel" 2>/dev/null | grep -qxF -- "$rel" && return 0
+  done < <(jq -r '.repo_commits[]? | [(.repo // ""), (.range // "")] | @tsv' "$r" 2>/dev/null)
+  return 1
+}
+
 _aid_dc_deleted_by_step() {
   local root="$1" rec; rec="$(_aid_dc_step_record "$1" "$2")"
   [[ -f "$rec" ]] || return 1

@@ -402,6 +402,26 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   [ "$(jq -c '.expected_deletions' rr-contract.json)" = "$(jq -nc --arg w "$WT" '["\($w)/page.md"]')" ]
 }
 
+@test "repo-roots: a foreign deletion is accepted when the step's commit there deleted it (named by its live path too), refused when the file was gone before the step" {
+  _rr_setup
+  local DEV=".aid-o/work/evidence/E-111-1_1/R-E111-1"; mkdir -p "$DEV/steps/step_1_docs"
+  jq --arg f "$F" '.steps[0].outputs = ["Delete: `\($f)/page.md` — gone"] | .steps[0].allowed_paths = ["\($f)/page.md"]' rr-plan.json > "$DEV/plan.json"
+  aid_dispatch_contract_build "$DEV/plan.json" 0 "$DEV/steps/step_1_docs/contract.json"
+  local C="$DEV/steps/step_1_docs/contract.json" base; base="$(git -C "$WT" rev-parse HEAD)"
+  [ "$(jq -c '.deleted_before_start // []' "$C")" = '[]' ]
+  git -C "$WT" rm -q page.md; git -C "$WT" commit -qm "foreign delete"
+  jq -n --arg v "$(jq -r .version "$C")" --arg r "${base}..$(git -C "$WT" rev-parse HEAD)" --arg d "$F/page.md" \
+    '{contract_version: $v, changed_files: [], deleted_files: [$d], gates: [], step_status: "done", repo_commits: [{repo: "docs", range: $r}]}' > ret.json
+  run aid_dispatch_contract_validate "$C" ret.json "$TEST_DIR"; echo "$output"
+  [ "$status" -eq 0 ]
+  # the same plan, the file already gone from the worktree when the contract is built: no deletion of this step
+  aid_dispatch_contract_build "$DEV/plan.json" 0 "$C"
+  [ "$(jq -c '.deleted_before_start' "$C")" = "$(jq -nc --arg w "$WT" '["\($w)/page.md"]')" ]
+  jq --arg v "$(jq -r .version "$C")" '.contract_version = $v | .repo_commits = []' ret.json > ret2.json
+  run aid_dispatch_contract_validate "$C" ret2.json "$TEST_DIR"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"nothing was deleted by this step"* ]]
+}
+
 @test "repo-roots: a symlinked or trailing-slash spelling of the declared path is rewritten too" {
   _rr_setup
   ln -s "$F" "$TEST_DIR/docs-link"

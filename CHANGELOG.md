@@ -3,6 +3,18 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.16.0] — nevydáno
+
+Uzávěr, který doběhne (rozbor plugin issues 8. 11. 2026, stavěno mimo AID). Zadání: `docs/plans/2026-11-08-3160-uzaver.md`.
+
+- **Odmítnutý commit kroku řekne proč.** Výstup gitu a jeho háků se už nezahazuje: celý je v `land-logs/commit.log` a důvod převzetí (`return_rejected`) cituje řádek háku, který commit zastavil (Trading P005 a agents P017: čtyřikrát „git commit refused" bez důvodu, ruční commit a `--recheck`).
+- **Verdikt posuzovatele „oprav" dá kolo navíc i po potvrzovacím kole.** Kolo navíc platí po kole, ve kterém ho posuzovatel dal; dřív se po implicitním druhém kole ztratilo a běh `--auto` se zastavil na PM (WAN P123, agents P017). Hláška rozpočtu zmíní trvalý pokyn PM jen, když existuje.
+- **Potvrzovací kolo, které něco opravilo, je pokrok.** Kontrola „kolo znovu otevřelo totéž" porovnávala stav, který sběr dalšího kola přepsal (opravené nálezy označí jako opravené), takže odmítla každé potvrzovací kolo bez nového nálezu (P017 krok 2: ze tří nálezů zbyl jeden). Teď počítá opravené nálezy; kolo povolené posuzovatelem se znovu nekontroluje. Opakování bez jediné opravy dál stojí.
+- **Plán přes víc repozitářů se dá uzavřít.** Brána `plan_diff` tiše skončila u bodu, který čte jen první z cizích repozitářů (aidlab P002); smazání souboru v cizím repu se hledalo v jeho živé kopii místo pracovní kopie plánu a ověřuje se commitem kroku v tom repu.
+- **Revizor dostane pravidlo stopy chování v zadání.** Závažný nález obecného revizora u kroku s obsluhou požadavku musí nést `behaviour_trace`, ale prompt to neříkal: v P017 se všechny 4 nálezy Codexu odmítly kvůli formě a každý šel ke zvláštnímu rozhodčímu.
+- **Revize kroků s Codexem.** Výchozí obecný revizor kroku (`step_generalist`) je Codex, bez Codexu automaticky Claude (PM 1A; v P017 se Codex objevil až na konci a našel čtyři věci naráz).
+- **Počítadlo uzávěru počítá i bez konečné revize prvního pokusu.** První pokus, který padl na bránách, už nedává `null` (P017).
+
 ## [3.15.0] — 2026-11-01
 
 Procesní mapy, mini verze (P118, stavěno mimo AID). Zadání: `.aid-o/plans/P118-zadani.md` (verze 2), standard `/ecosystem/specs/procesni-mapy`.

@@ -474,7 +474,9 @@ agent type. A project keeps the old budget (two rounds, 1/50) in its own
    `skills/communication.md` (built with `scripts/lib/aid-decision-card.sh`):
    what stayed open (from `merged.json`, blockers first), and the options —
    fix and confirm in a PM-granted round, or accept (with the PM's standing instruction
-   recorded — `aid-review-round.sh standing` — two such rounds need no card). `close` has already
+   recorded — `aid-review-round.sh standing` — two such rounds need no card; each needs progress: a blocker
+   or major of the round before fixed, or a different set open — a round that re-opens exactly the same and
+   fixed nothing stops, and in an `--auto` run the delegate decides it). `close` has already
    routed the open findings (`routed`) or carried them (`carried`), so nothing
    is lost whichever the PM picks. A third round, or only one, exists only as
    the PM's recorded words:
@@ -671,8 +673,9 @@ pending and prints the list):
 
 The verdict (`defaults/templates/adjudicator-delegated.md`): `accepted` /
 `rejected` for a dispute, `dismiss` / `fix` for a finding open after the rounds
-(`fix` grants one more fix-and-confirm round; a finding still open after it gets
-a second verdict, `dismiss` or class `brief`), a class and, for a technical
+(`fix` grants one more fix-and-confirm round after the round it was given in — also after the implicit
+second round, 3.16.0 — and that round is not checked for progress again: the verdict is the judgement;
+a finding still open after it gets a second verdict, `dismiss` or class `brief`), a class and, for a technical
 dispute about a check, the re-run command with its exit and output. Class
 `technical` is the delegate's to decide; **`brief`, `money` and `data` go to the
 PM's card** (`delegation_out_of_scope` — the brief, money and live data stay the
