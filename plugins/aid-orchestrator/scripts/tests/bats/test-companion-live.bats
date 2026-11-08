@@ -62,7 +62,7 @@ _get() { curl -s -H "Cookie: $(_ck)" "$@"; }
   [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: aid_t_$(_port)=000000000000000000000000000000000000000000000000" "$u/index.html")" = 403 ]
   [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: aid_t_1=$(_tok)" "$u/index.html")" = 403 ]                 # another proxy's cookie
   # a token of the right length in other characters is refused, the proxy stays up
-  [ "$(curl -s -o /dev/null -w '%{http_code}' "$u/index.html?aid_t=$(printf 'ž%.0s' $(seq 48))")" = 403 ]
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "$u/index.html?aid_t=$(printf '%%C5%%BE%.0s' $(seq 48))")" = 403 ]
   [ "$(curl -s -o /dev/null -w '%{http_code}' "$u/index.html")" = 403 ]
   # a cookie left from an earlier run on this port does not hide the valid token in the address (3.17.1, PM's try)
   [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: aid_t_$(_port)=000000000000000000000000000000000000000000000000" "$u/index.html?aid_t=$(_tok)")" = 302 ]
