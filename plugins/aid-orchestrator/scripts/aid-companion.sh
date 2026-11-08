@@ -17,8 +17,12 @@
 #   show     check <P>/navrh.json, build navrh-<kolo>.html from the fixed template,
 #            check the page itself (fits, controls reachable, images present),
 #            write proposal.json; prints the PM's address
+#   live     (3.17.0, the default for an existing application) the PM opens the real app: a proxy on a free port
+#            of the companion range (3930-3949, over the VPN) in front of the running `proto --live` copy (dev API
+#            from ui.live.env), with window.AID_VARIANT from ?v= and the AID panel (variants, choose, note, send)
+#            over every page; the agent writes <P>/live.json (kolo, body[] {bod, otazka, varianty[] {klic, popis, cesta}})
 #   answers  the PM's latest choices and notes for a round (--kolo N, --history)
-#   down     stop this plan's server and its verified prototype group (by group and start time)
+#   down     stop this plan's server, the live proxy and its verified prototype group (by group and start time)
 #
 # Usage: aid-companion.sh <step> --plan <P> [--project-dir <root>] [step options]
 # answers.jsonl is the agent's input, never proof of a PM choice (anyone with
@@ -35,9 +39,9 @@ source "$SCRIPT_DIR/lib/aid-roots.sh"
 
 die() { echo "aid-companion: $*" >&2; exit 1; }
 
-step="${1:-}"; [[ -n "$step" ]] || die "usage: aid-companion.sh up|proto|shots|show|answers|down --plan <P> [--project-dir <root>]"
+step="${1:-}"; [[ -n "$step" ]] || die "usage: aid-companion.sh up|proto|live|shots|show|answers|down --plan <P> [--project-dir <root>]"
 shift
-PLAN=""; PROJECT=""; KOLO=""; HISTORY=0; REFRESH=0; ONLY=""
+PLAN=""; PROJECT=""; KOLO=""; HISTORY=0; REFRESH=0; ONLY=""; LIVE=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --plan) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; PLAN="${2:-}"; shift 2 ;;
@@ -45,6 +49,7 @@ while [[ $# -gt 0 ]]; do
     --kolo) [[ $# -ge 2 ]] || { echo "${0##*/}: ${1:-} needs a value" >&2; return 2 2>/dev/null || exit 2; }; KOLO="${2:-}"; shift 2 ;;
     --history) HISTORY=1; shift ;;
     --refresh) [[ "$step" == proto ]] || die "--refresh belongs to proto"; REFRESH=1; shift ;;
+    --live) [[ "$step" == proto ]] || die "--live belongs to proto (the live preview's copy runs against ui.live.env)"; LIVE=1; shift ;;
     --only) [[ "$step" == shots ]] || die "--only belongs to shots"
             [[ $# -ge 2 && "$2" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*(,[A-Za-z0-9][A-Za-z0-9._-]*)*$ ]] || die "--only needs shot names separated by commas (letters, digits, . _ -)"
             ONLY="$2"; shift 2 ;;
@@ -96,8 +101,49 @@ cmd_up() {
      '{type, url, port, screen_dir, pid: $pid, starttime: $st, version: $v, reused: false}' <<< "$out" | tee "$rec"
 }
 
+# live: the proxy in front of the running live copy (lib/brainstorm-server/kit-live-server.mjs)
+cmd_live() {
+  local p="$DIR/proto.json" spec="$DIR/live.json" rec="$DIR/live-server.json" pid st pg pport port
+  [[ -s "$p" ]] || die "live: no running copy — first: aid-companion.sh proto --plan ${PLAN} --live"
+  read -r pid st pg pport < <(jq -r '[.pid, .starttime, .pgid, .port] | map(tostring) | join(" ")' "$p")
+  _proto_ours "$pid" "$st" "$pg" || die "live: the recorded copy (pid ${pid}) is not running — aid-companion.sh proto --plan ${PLAN} --live"
+  [[ "$(jq -r '.live_env // ""' "$p")" =~ ^[0-9a-f]{16}$ ]] || die "live: the copy runs without ui.live.env (on mocks) — restart it: aid-companion.sh proto --plan ${PLAN} --live"
+  [[ -s "$spec" ]] && jq -e '(.body | type == "array" and length > 0) and all(.body[]; (.otazka | type == "string") and (.varianty | type == "array" and length > 0)
+      and all(.varianty[]; (.klic | type == "string" and test("^[A-Za-z0-9_-]{1,32}$")) and ((.cesta // "/") | type == "string" and startswith("/") and (contains("//") | not) and (test("[?#]") | not))))' "$spec" >/dev/null 2>&1 \
+    || die "live: ${spec} must be {\"kolo\": 1, \"body\": [{\"bod\": 1, \"otazka\": \"…\", \"varianty\": [{\"klic\": \"A\", \"popis\": \"…\", \"cesta\": \"/obrazovka\"}]}]} (klic letters, digits, _ -; cesta a path of the app, no ? or #)"
+  if [[ -s "$rec" ]]; then
+    read -r pid st port < <(jq -r '[.pid, .starttime, .port] | map(tostring) | join(" ")' "$rec")
+    if _alive_as "$pid" "$st" "kit-live-server.mjs"; then jq -c '. + {reused: true}' "$rec"; return 0; fi
+    _alive_as "$pid" "$st" "kit-live-server.mjs" && kill "$pid" 2>/dev/null; rm -f "$rec"
+  fi
+  local lo="${AID_COMPANION_LIVE_PORTS%-*}" hi="${AID_COMPANION_LIVE_PORTS#*-}"; [[ -n "${AID_COMPANION_LIVE_PORTS:-}" ]] || { lo=3930; hi=3949; }
+  port=""; local c; for (( c = lo; c <= hi; c++ )); do [[ -z "$(ss -ltnH "sport = :$c" 2>/dev/null)" ]] && { port="$c"; break; }; done
+  [[ -n "$port" ]] || die "live: no free port in ${lo}-${hi} (the companion range) — stop an old companion (stop-server.sh --stale)"
+  local bind="${AID_COMPANION_BIND:-0.0.0.0}" token roots dir
+  # the run's access token: the PM's address carries it once, the proxy keeps it in a cookie; without it 403
+  token="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
+  dir="$(jq -r .dir "$p")"; roots="$(realpath -m "$dir")"
+  # the copy's node_modules are links into the app's own (kit-proto.mjs): that directory is the second root
+  local nm; nm="$(find "$dir/node_modules" -maxdepth 1 -type l -print -quit 2>/dev/null || true)"
+  [[ -n "$nm" ]] && roots+=":$(dirname "$(readlink -f "$nm")")"
+  AID_LIVE_TOKEN="$token" AID_LIVE_FS_ROOTS="$roots" setsid node "$SERVER_DIR/kit-live-server.mjs" "$DIR" "$bind" "$port" "$PLAN" >> "$DIR/live.log" 2>&1 < /dev/null &
+  pid=$!
+  local i; for i in $(seq 50); do [[ -n "$(ss -ltnH "sport = :$port" 2>/dev/null)" ]] && break; sleep 0.1; done
+  [[ -n "$(ss -ltnH "sport = :$port" 2>/dev/null)" ]] || die "live: the proxy did not start (log: ${DIR}/live.log)"
+  local first; first="$(jq -r '.body[0].varianty[0] | "\(.cesta // "/")?v=\(.klic)"' "$spec")&aid_t=${token}"
+  jq -n --argjson pid "$pid" --arg st "$(_starttime "$pid")" --argjson port "$port" --argjson pp "$pport" \
+     --arg url "http://$(url_host):${port}${first}" '{type: "live", pid: $pid, starttime: $st, port: $port, proto_port: $pp, url: $url, reused: false,
+       next: "give the PM the url (his own browser, his own screen; the panel switches variants and sends his choices); then aid-companion.sh answers"}' | tee "$rec"
+}
+
 cmd_down() {
   local rec="$DIR/server.json" p="$DIR/proto.json" pid st pg
+  local lr="$DIR/live-server.json"
+  if [[ -s "$lr" ]]; then
+    read -r pid st < <(jq -r '[.pid, .starttime] | map(tostring) | join(" ")' "$lr")
+    if _alive_as "$pid" "$st" "kit-live-server.mjs"; then kill "$pid" && echo "live proxy ${pid} stopped"; fi
+    rm -f "$lr"
+  fi
   if [[ -s "$rec" ]]; then
     read -r pid st < <(jq -r '[.pid, .starttime] | map(tostring) | join(" ")' "$rec")
     if _alive_as "$pid" "$st" "index.js"; then kill "$pid" && echo "server ${pid} stopped"
@@ -254,8 +300,9 @@ case "$step" in
   up) cmd_up ;;
   down) cmd_down ;;
   answers) cmd_answers ;;
-  proto) (( REFRESH )) && _refresh_proto; node_step proto ;;
+  proto) (( REFRESH )) && _refresh_proto; (( LIVE )) && export AID_COMPANION_LIVE=1; node_step proto ;;
+  live) cmd_live ;;
   shots) export AID_COMPANION_ONLY="$ONLY"; node_step shots ;;
   show) node_step show ;;
-  *) die "unknown step '${step}' (up|proto|shots|show|answers|down)" ;;
+  *) die "unknown step '${step}' (up|proto|live|shots|show|answers|down)" ;;
 esac

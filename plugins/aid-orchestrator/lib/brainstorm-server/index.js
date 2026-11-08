@@ -4,7 +4,6 @@ const WebSocket = require('ws');
 const chokidar = require('chokidar');
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const basisMod = require('./basis');   // 2.114.0: the real screen a UI brainstorm's proposal stands beside
 const lifetime = require('./lifetime');  // 2.114.0: ends itself when idle, unless kept; always after 60 days
 
@@ -68,6 +67,7 @@ const WAITING_PAGE = `<!DOCTYPE html>
 </body>
 </html>`;
 
+const ANSWERS = require('./answers.js');
 const app = express();
 const server = http.createServer(app);
 // Only the companion's own pages may talk to it: the server binds 0.0.0.0 for the VPN, so any page open in
@@ -91,11 +91,7 @@ wss.on('connection', (ws, req) => {
     }
     // Every page event, appended and never cleared: what `aid-companion.sh answers` reads.
     // An agent can write this file too, so it is the agent's input, never proof of a PM choice.
-    if (['choice', 'note', 'confirm'].includes(event.type)) {
-      const row = { ...event, v: 1, plan: META.plan || null, kolo: event.kolo ?? null, page: event.page || event.screen || null,
-        event_id: crypto.randomUUID(), at: new Date().toISOString() };   // server fields last: a page cannot set them
-      fs.appendFileSync(path.join(SCREEN_DIR, 'answers.jsonl'), JSON.stringify(row) + '\n');
-    }
+    ANSWERS.appendAnswer(SCREEN_DIR, event, { plan: META.plan });   // answers.js: one writer for the page and the live preview
   });
 });
 
@@ -143,17 +139,9 @@ app.get('/', BASIS ? (req, res) => res.type('html').send(basisMod.compose(BASIS,
 // one of the server's own names), like a confirm.
 // Host AND Origin must both be one of the server's own names (a foreign page
 // posting to the allowed address is refused, like a confirm; no Origin = refused).
-// Host part of an Origin header ("http://h:p" -> "h:p"); "" when absent or malformed.
-function originHost(origin) {
-  try { return new URL(origin).host; } catch (e) { return ''; }
-}
-function hostName(v) { return String(v || '').replace(/:\d+$/, '').replace(/^\[|\]$/g, ''); }
-function ownRequest(req) {
-  const o = originHost(req.headers.origin);
-  // the page that talks to us is served by us: the Origin's host AND port equal the request's Host (a page of
-  // another port on the same host is another site — Codex 19. 10. 2026); behind a port forward both carry it
-  return !!o && o === String(req.headers.host || '') && CONFIRM_HOSTS.includes(hostName(o));
-}
+// the page that talks to us is served by us: the Origin's host AND port equal the request's Host (a page of
+// another port on the same host is another site — Codex 19. 10. 2026); behind a port forward both carry it
+function ownRequest(req) { return ANSWERS.ownRequest(req, CONFIRM_HOSTS); }
 app.get('/aid/keep', (req, res) => res.json({ kept: LIFE.isKept(), ...LIFE.state() }));
 app.post('/aid/keep', (req, res) => {
   if (!ownRequest(req)) return res.status(403).json({ error: 'foreign origin or host' });

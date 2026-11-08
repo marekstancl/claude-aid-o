@@ -1,6 +1,6 @@
 ---
 name: visual-companion
-description: Proposing UI to the PM in the browser — variants built from the application's own shared components in a copy of the app, captured on invented data, shown on one fixed page where the PM picks and comments. One command (scripts/aid-companion.sh) does the server, the copy, the captures, the page and the answers; the agent writes the variants and three data files. Auto-loaded by /aid-plan brainstorm for a UI topic; /visual-companion on its own is a smoke test.
+description: Proposing UI to the PM in the browser — variants built from the application's own shared components in a copy of the app; for an EXISTING application the PM opens that copy live (dev data, his own browser and screen, an AID panel to switch, choose and comment), otherwise captured on invented data and shown on one fixed page where the PM picks and comments. One command (scripts/aid-companion.sh) does the server, the copy, the captures, the page and the answers; the agent writes the variants and three data files. Auto-loaded by /aid-plan brainstorm for a UI topic; /visual-companion on its own is a smoke test.
 user_invocable: true
 ---
 
@@ -44,6 +44,36 @@ reads to `copy_extra`. Only when the bundled loader cannot resolve the config fr
 (Vite 6.1 or newer). The runner gives the config no `__dirname`: a config that uses it (WAN's `releaseInfo(__dirname)`,
 an `@` alias) fails with "ReferenceError: __dirname is not defined" — stay on the default loader then. Still failing: write it to
 `aid-plugin-issues.md` with the dev server's log (`<P>/proto.log`).
+
+## An existing application: the live preview first (3.17.0, PM 1. 11. 2026)
+
+When the application exists and runs, the PM looks at the real thing, not at photographs: the copy of the app
+with your variants, on the dev API, in his own browser at his own resolution, with a small AID panel over every
+page (switch variant, „vybrat“, a note per point, „Odeslat volby“). Captures stay for a design from scratch or an
+attachment to the plan. Declare once in `project.yaml`:
+
+```yaml
+ui:
+  live:
+    env:                       # what points the copy at the DEV API (never a secret: VITE_* lands in the page)
+      VITE_API_TARGET: http://10.20.20.22:3501
+    allowed_api: [10.20.20.22] # the allowlist: every address in env must resolve to one of these
+```
+
+1. `bash $K proto --plan P --live` — the copy in a clean environment (no keys of yours) with `ui.live.env`;
+   its `.env*` files are removed, it must listen on loopback.
+2. Build the variants in `proto/` from `ui.components`, behind `window.AID_VARIANT` (the preview sets it from
+   `?v=<klic>`; `null` = today's screen).
+3. Write `<P>/live.json`: `{"kolo": 1, "body": [{"bod": 1, "otazka": "…", "varianty": [{"klic": "A", "popis": "…",
+   "cesta": "/provize"}]}]}` (`cesta` = the app's path where the variant shows).
+4. `bash $K live --plan P` prints the PM's address — it carries the run's access token once (`aid_t=`); without
+   it every request is 403. Give him exactly that address. Then `bash $K answers --plan P` (rows `page: live`).
+5. `bash $K down --plan P` when he has answered: proxy and copy stop.
+
+What the kit holds, not you: only the proxy is reachable (the copy stays on loopback); the dev server's file reader
+(`/@fs/`) only under the copy; the page may call only the proxy (CSP `connect-src 'self'`); the API only from
+`allowed_api`; answers only from the proxy's own page; no `shots` of a live copy (dev data holds real people) —
+for captures `down`, then `proto` without `--live`.
 
 ## The procedure (`P` = the brainstorm's plan id, `$K = $AID_PLUGIN_PATH/scripts/aid-companion.sh`)
 

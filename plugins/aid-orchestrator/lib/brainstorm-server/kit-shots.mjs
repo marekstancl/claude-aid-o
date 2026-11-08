@@ -14,6 +14,9 @@ function globRe(g) {   // a glob on a pathname: ** = any depth, * = one segment
 }
 
 export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
+  // 3.17.0: a copy running live (ui.live.env, dev data with real people in it) is never photographed — captures
+  // land in the plan's files; the live preview is looked at, not stored
+  try { if (JSON.parse(fs.readFileSync(path.join(DIR, 'proto.json'), 'utf8')).live_env) die('shots: the running copy is the live preview (dev data) — no captures of it; for captures run proto without --live (on mocks) after down'); } catch (e) { if (e && e.code !== 'ENOENT' && !(e instanceof SyntaxError)) throw e; }
   const read = (f, what) => { try { return JSON.parse(fs.readFileSync(path.join(DIR, f), 'utf8')); } catch (e) { die(`shots: ${what} (${path.join(DIR, f)}) is not readable JSON: ${e.message}`); } };
   const spec = read('shots.json', 'shots.json');
   const mocks = fs.existsSync(path.join(DIR, 'mocks.json')) ? read('mocks.json', 'mocks.json') : [];
