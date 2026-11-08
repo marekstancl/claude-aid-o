@@ -170,7 +170,7 @@ aid_dispatch_contract_build() {
   # A declared deletion already done in the run's checkout when the contract is built (staged or gone from the
   # tree) is no deletion of this step (AC2; Codex review 20. 10. 2026) — recorded here, refused by validate.
   if [[ "$deletions" != "[]" ]]; then
-    local _root _gone='[]' _dp
+    local _root _gone='[]' _dp _starts='{}'
     source "${_AID_DCT_LIB_DIR}/aid-roots.sh"
     _root="$(aid_run_checkout_root "$(dirname "$plan")/fsm-state.yaml" "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null)" || _root=""
     if [[ -n "$_root" ]] && git -C "$_root" rev-parse --verify -q HEAD >/dev/null 2>&1; then
@@ -180,6 +180,7 @@ aid_dispatch_contract_build() {
           local _ft _fr
           IFS=$'\t' read -r _ft _fr < <(_aid_dc_abs_split "$_dp") || continue
           [[ -n "$_ft" ]] || continue
+          _starts="$(jq -c --arg t "$_ft" --arg h "$(git -C "$_ft" rev-parse HEAD 2>/dev/null)" '.[$t] //= $h' <<< "$_starts")"
           git -C "$_ft" cat-file -e "HEAD:${_fr}" 2>/dev/null && git -C "$_ft" ls-files --error-unmatch -- "$_fr" >/dev/null 2>&1 \
             && [[ -e "$_dp" ]] || _gone="$(jq -c --arg p "$_dp" '. + [$p]' <<< "$_gone")"
           continue
@@ -191,6 +192,8 @@ aid_dispatch_contract_build() {
       done < <(jq -r '.[]' <<< "$deletions")
     fi
     [[ "$_gone" != "[]" ]] && body_json="$(jq -c --argjson g "$_gone" '. + {deleted_before_start: $g}' <<< "$body_json")"
+    # a foreign repository's HEAD when the step started: only a range from there proves a deletion was this step's
+    [[ "$_starts" != "{}" ]] && body_json="$(jq -c --argjson s "$_starts" '. + {foreign_heads_at_start: $s}' <<< "$body_json")"
   fi
 
   local version; version="$(_aid_dc_version "$body_json")"
@@ -429,7 +432,7 @@ aid_dispatch_contract_validate() {
       # tracked there and gone from the tree (not yet committed) — never a file that was missing before the step
       if [[ -z "$_ft" ]]; then gone+=("${d} (not inside a git repository)")
       elif [[ $'\n'"$deleted"$'\n' != *$'\n'"$d"$'\n'* ]]; then gone+=("${d} (not in deleted_files)")
-      elif ! _aid_dc_foreign_deleted "$r" "$_dc_pj" "$_ft" "$_fr" \
+      elif ! _aid_dc_foreign_deleted "$r" "$_dc_pj" "$_ft" "$_fr" "$(jq -r --arg t "$_ft" '.foreign_heads_at_start[$t] // ""' "$c")" \
            && { jq -e --arg p "$d" '(.deleted_before_start // []) | index($p) != null' "$c" >/dev/null 2>&1 \
                 || ! git -C "$_ft" ls-files --error-unmatch -- "$_fr" >/dev/null 2>&1; }; then
         gone+=("${d} (no commit of this step in ${_ft} deleted it — nothing was deleted by this step)")
@@ -552,16 +555,19 @@ _aid_dc_abs_split() {
   [[ "$1" == "${top}/"* ]] || return 1
   printf '%s\t%s\n' "$top" "${1#"${top}/"}"
 }
-# _aid_dc_foreign_deleted <return.json> <plan.json or ""> <repo top> <path inside> — 0 when one of the return's
-# repo_commits ranges in that repository deleted the path (what proves a foreign deletion was this step's).
+# _aid_dc_foreign_deleted <return.json> <plan.json or ""> <repo top> <path inside> <head at the step's start> — 0 when
+# one of the return's repo_commits ranges in that repository, starting at or after the step's start, deleted the path
+# (an older range that once deleted it proves nothing about this step).
 _aid_dc_foreign_deleted() {
-  local r="$1" pj="$2" top="$3" rel="$4" repo range wt br
+  local r="$1" pj="$2" top="$3" rel="$4" start="${5:-}" repo range wt br
+  [[ -n "$start" ]] || return 1
   while IFS=$'\t' read -r repo range; do
     [[ -n "$repo" && "$range" == *..* ]] || continue
     if [[ "$repo" != /* ]]; then
       [[ -n "$pj" ]] && IFS=$'\t' read -r wt br < <(aid_rr_resolve "$pj" "$repo") || continue
     else wt="$repo"; fi
     [[ "$(git -C "$wt" rev-parse --show-toplevel 2>/dev/null)" == "$top" ]] || continue
+    git -C "$top" merge-base --is-ancestor "$start" "${range%%..*}" 2>/dev/null || continue
     git -C "$top" diff --name-only --diff-filter=D "$range" -- "$rel" 2>/dev/null | grep -qxF -- "$rel" && return 0
   done < <(jq -r '.repo_commits[]? | [(.repo // ""), (.range // "")] | @tsv' "$r" 2>/dev/null)
   return 1
@@ -580,7 +586,9 @@ _aid_dc_deleted_by_step() {
 # that quotes the line saying why: the first naming a block, refusal or error (a hook's "guard skipped" notice comes
 # before it), else the last one printed. The caller logs the whole stderr; aid-step-land.sh quotes the last line.
 _aid_dc_git_refused() {
-  local first; first="$(grep -m1 -iE 'block|refus|reject|error|fatal|denied' "$3" 2>/dev/null || grep -v '^[[:space:]]*$' "$3" 2>/dev/null | tail -1 || true)"
+  # the reason line and the one after it (the AID hook lists the offending file on the next line)
+  local first; first="$(grep -m1 -A1 -iE 'block|refus|reject|error|fatal|denied' "$3" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//' || true)"
+  [[ -n "$first" ]] || first="$(grep -v '^[[:space:]]*$' "$3" 2>/dev/null | tail -1 || true)"
   cat "$3" >&2 2>/dev/null || true; rm -f "$3"
   echo "contract: git $1 refused in $2: ${first:-git and its hooks printed nothing} — your index is untouched" >&2
 }

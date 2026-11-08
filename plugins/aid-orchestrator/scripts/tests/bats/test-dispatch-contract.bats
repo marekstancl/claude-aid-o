@@ -414,6 +414,11 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
     '{contract_version: $v, changed_files: [], deleted_files: [$d], gates: [], step_status: "done", repo_commits: [{repo: "docs", range: $r}]}' > ret.json
   run aid_dispatch_contract_validate "$C" ret.json "$TEST_DIR"; echo "$output"
   [ "$status" -eq 0 ]
+  # a range that starts before the step's start (an old deletion) proves nothing
+  local C2="$DEV/steps/step_1_docs/contract2.json"
+  jq --arg h "$(git -C "$WT" rev-parse HEAD)" --arg t "$(git -C "$WT" rev-parse --show-toplevel)" '.foreign_heads_at_start[$t] = $h' "$C" > "$C2"
+  run aid_dispatch_contract_validate "$C2" ret.json "$TEST_DIR"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"nothing was deleted by this step"* ]]
   # the same plan, the file already gone from the worktree when the contract is built: no deletion of this step
   aid_dispatch_contract_build "$DEV/plan.json" 0 "$C"
   [ "$(jq -c '.deleted_before_start' "$C")" = "$(jq -nc --arg w "$WT" '["\($w)/page.md"]')" ]

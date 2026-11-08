@@ -247,9 +247,11 @@ _delegate_granted() {
 }
 # _budget_extra — how the budget grew past the base, in words, or nothing.
 _budget_extra() {
-  local f; f="$(_standing_file)" && [[ -f "$f" ]] && { echo " + 2 under the PM's standing instruction"; return 0; }
-  (( $(_allowed_rounds) > $(_base_rounds) )) && echo " + the delegate's fix rounds"
-  return 0
+  local f out="" g=0
+  [[ -f "${BASE}/delegate-rounds.json" ]] && g="$(jq -r '.grants // 0' "${BASE}/delegate-rounds.json" 2>/dev/null || echo 0)"
+  f="$(_standing_file)" && [[ -f "$f" ]] && out=" + 2 under the PM's standing instruction"
+  (( g > 0 )) && out+=" + ${g} granted by the delegate's fix"
+  printf '%s' "$out"
 }
 # _last_allowed — the round after which what stays open is routed (close and delegate agree).
 _last_allowed() {
@@ -1169,20 +1171,23 @@ _semantic_final_write() {
 # The summary line names the three numbers so a closing that feeds itself is
 # visible after every round, not after a day.
 _closing_measure() {
-  local dir="$1" measurement="$2" cur="$EVID" attempt=1 fc prev first_run first_cand="" first_at="" minutes=null
+  local dir="$1" measurement="$2" cur="$EVID" attempt=1 fc prev first_run first_cand="" first_at="" minutes=null succ_prev=""
   while fc="${cur}/fix-class.json"; [[ -f "$fc" ]]; do
     prev="$(jq -r '.previous_run_dir // ""' "$fc")"; [[ -n "$prev" ]] || break
     prev="$(dirname "$EVID")/$(basename "$prev")"; [[ -d "$prev" && "$prev" != "$cur" ]] || break
+    succ_prev="$(jq -r '.previous_candidate // ""' "$fc")"   # what the next attempt says this one froze
     cur="$prev"; attempt=$((attempt + 1))
   done
   first_run="$cur"
   first_cand="$(jq -r '.rounds[0].head_sha // .head_sha // ""' "${first_run}/cp7/rounds.json" 2>/dev/null)"
   # 3.16.0 (agents P017): a first attempt that failed its gates has no CP7 — its gate report and timeline still say
   # which candidate it froze and when
+  [[ -n "$first_cand" ]] || first_cand="$succ_prev"
   [[ -n "$first_cand" ]] || first_cand="$(jq -r '.revision.head_sha // ""' "${first_run}/gates_report.json" 2>/dev/null)"
   first_at="$(jq -rs 'map(.at // empty) | sort | first // ""' "${first_run}/stage-writes.jsonl" 2>/dev/null)"
   [[ -n "$first_at" ]] || first_at="$(jq -r '.rounds[0].prepared_at // ""' "${first_run}/cp7/rounds.json" 2>/dev/null)"
-  [[ -n "$first_at" ]] || first_at="$(head -1 "${first_run}/timeline.jsonl" 2>/dev/null | jq -r '.ts // ""' 2>/dev/null)"
+  # its gates' start, not the timeline's first line (freeze prepends an older forced action's events)
+  [[ -n "$first_at" ]] || first_at="$(jq -r 'select(.event == "gate_runner_start") | .ts // empty' "${first_run}/timeline.jsonl" 2>/dev/null | head -1)"
   if [[ -n "$first_at" ]]; then
     local t0; t0="$(date -u -d "$first_at" +%s 2>/dev/null || echo "")"
     [[ -n "$t0" ]] && minutes=$(( ( $(date -u +%s) - t0 ) / 60 ))
