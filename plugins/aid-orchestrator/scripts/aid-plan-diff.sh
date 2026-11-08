@@ -468,6 +468,16 @@ while IFS= read -r line; do
   ac_timeout=""
   IFS=$'\x1f' read -r ac_label ac_text pat_type cmd file regex expected_exit ac_timeout <<< "$line"
 
+  # 3.16.0 (K7): a cmd point measured by a substitute an independent stand-in (or the PM) approved — bound to the
+  # plan's command by sha256, so a changed plan or an edited entry falls back to the plan's own command
+  subnote="" subby=""
+  if [[ "$pat_type" == cmd && -n "$PLAN" ]]; then
+    if _sub="$(bash "${SCRIPT_DIR}/aid-ac-substitute.sh" check --plan "$PLAN" --criterion "$ac_label" --cmd "$cmd" 2>/dev/null)"; then
+      IFS=$'\x1f' read -r subby _subcmd <<< "$_sub"
+      subnote=" (measured by a substitute command approved by ${subby}; the plan's: ${cmd})"
+      cmd="$_subcmd"
+    fi
+  fi
   # P112: a declared foreign path → the plan's worktree; a worktree that is gone
   # is named, never replaced by a read of the live checkout.
   fw=0 fnote=""
@@ -485,7 +495,7 @@ while IFS= read -r line; do
     verdict=absent; evidence="the plan's foreign worktree is gone: ${file:-$cmd} (reason=foreign_worktree_missing)"; duration_ms=0
   else
     IFS=$'\x1f' read -r verdict evidence duration_ms <<< "$(run_pattern "$pat_type" "$cmd" "$file" "$regex" "$expected_exit" "$ac_timeout" "$ac_label")"
-    evidence+="$fnote"
+    evidence+="${fnote}${subnote}"
   fi
 
   [[ "$verdict" == "present" ]] && present_count=$((present_count + 1))
@@ -509,7 +519,9 @@ while IFS= read -r line; do
     --arg evidence "$evidence" \
     --argjson dur "$duration_ms" \
     --arg dts "$([[ "$pat_type" == deferred ]] && echo "$cmd")" \
+    --arg subby "$subby" \
     '{ac_label: $lbl, ac_text: $text, pattern_type: $ptype, verdict: $vrd, evidence: $evidence, duration_ms: $dur}
+     + (if $subby == "" then {} else {measured_with: "substitute", substitute_by: $subby} end)
      + (if $dts == "" then {} else {deferred_to_step: ($dts | tonumber)} end)
      + ([$evidence | capture("\\(reason=(?<r>[^)]+)\\)")] | if length > 0 then {reason: .[0].r} else {} end)
      | . + (if (.reason // "") == "timeout" then {unmeasured: true, timeout_s: ($evidence | capture("limit (?<s>[0-9]+) s").s | tonumber)}

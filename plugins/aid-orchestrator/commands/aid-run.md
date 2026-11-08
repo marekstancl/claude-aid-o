@@ -702,7 +702,7 @@ every refusal prints its class (`defaults/refusal-classes.yaml`): `stand_in` and
 `agent_fix_then_stand_in` (after the agent's own fix failed) are the stand-in's in
 an `--auto` run, `pm` stays the PM's, `incident` is fixed and run again. The loop:
 
-1. Write the proposal: `{"kind": "scope_extension|no_change_step|visual_check|measurement_failed|rename|blocked_step", "step": <0-based index>, …}`
+1. Write the proposal: `{"kind": "scope_extension|no_change_step|visual_check|measurement_failed|rename|blocked_step|ac_command", "step": <0-based index>, …}`
    (`paths` / `criterion` / `rename: {old, new}` / `action: "redispatch", return_sha256` — the action exactly).
 2. `aid-stand-in.sh ask --evidence-dir <run> --code <the refusal code> --proposal <file>`.
    **Exit 3 `PROTECTED`** — the brief, AID's config, a `protected_paths` path, another repository, an outside
@@ -714,6 +714,16 @@ an `--auto` run, `pm` stays the PM's, `incident` is fixed and run again. The loo
    `increment-step <state> --defer-criterion AC<n> --reason "…" --stand-in <auth.json>` (a point whose step
    measurement failed technically; the close measures it again), `amend-contract <state> --rename old=new --reason "…" --stand-in <auth.json>`,
    `step-redispatch <state> --stand-in <auth.json> --reason "…"`. A permission covers that one action, once.
+
+**A point whose measuring command is defective (3.16.0, `ac_command_defective`).** `plan_diff` fails a point that
+is met because its `cmd` cannot pass — quoting, a tool that differs in the isolated measurement (agents P017 AC13:
+`\`` is GNU grep's start of input). Never edit the approved plan for it: propose
+`{"kind": "ac_command", "criterion": "AC<n>", "cmd_old": "<the plan's cmd>", "cmd_new": "<one that measures the same>", "reason": "…"}`
+with `--evidence-dir <the direct run>` and `--code ac_command_defective`, then
+`aid-ac-substitute.sh add --evidence-dir <run> --criterion AC<n> --stand-in <auth.json>`. The next freeze measures the
+point by `cmd_new` (`measured_with: substitute` in `plan-diff.json`, both commands in the evidence) and the plan
+stays byte for byte; a changed plan command or an edited entry falls back to the plan's. Outside `--auto` the PM's
+card asks the same; his answer goes in with `--cmd-file <file> --pm "<his words>"`.
 
 
 ### State: READY

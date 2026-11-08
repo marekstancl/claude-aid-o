@@ -25,6 +25,12 @@ codes:
   release_prep_version_changed: {class: agent_fix, how: "verzi změnil commit po přípravě: prepare-plan --bump none (vydání) / rebind --adopt-version (bez vydání), nebo změnu vrátit"}
   plan_version_not_above_target: {class: agent_fix, how: "cíl má mezitím vyšší nebo stejný tag (souběžný plán): zvednout verzi prepare-plan --bump …"}
   step_test_named_after_plan: {class: agent_fix, how: "test pojmenovaný podle plánu, nálezu nebo backlogu: role kroku ho přejmenuje podle chování a kontrola kroku se pustí znovu"}
+  ac_command_defective: {class: stand_in, how: "plan_diff padl a vadí měřicí příkaz bodu, ne dodávka: aid-stand-in.sh ask s kind ac_command, pak aid-ac-substitute.sh add; plán se nemění (3.16.0)"}
+  ac_substitute_no_plan: {class: agent_fix, how: "spustit z přímého běhu plánu (jeho fsm-state.yaml jmenuje plán)"}
+  ac_substitute_not_cmd: {class: agent_fix, how: "nahradit jde jen měřicí příkaz bodu typu cmd"}
+  ac_substitute_unbound: {class: agent_fix, how: "povolení zástupce neodpovídá bodu nebo příkazu: zeptat se znovu s příkazem z plánu"}
+  ac_substitute_pm_words: {class: pm, how: "náhrada mimo --auto nese slova PM (aspoň 20 znaků)"}
+  ac_substitute_write: {class: incident, how: "složka důkazů plánu nejde zapsat"}
   roadmap_page_missing: {class: prevent, how: "kontrola plánu: zadání jmenuje roadmapu bez stránky průběhu - aid-roadmap-page.sh init"}
   roadmap_path_invalid: {class: prevent, how: "kontrola plánu: cesta k dokumentu roadmapy mimo projekt nebo přes odkaz"}
   roadmap_page_not_refreshed: {class: agent_fix, how: "agent zapíše změnu plánu do .prubeh.json roadmapy, pustí aid-roadmap-page.sh publish --plan a plan-close znovu"}
