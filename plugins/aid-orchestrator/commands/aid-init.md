@@ -93,6 +93,10 @@ document's own rules rather than convenience:
 upgrades, but owns only **within its own marker block** — see "Git Hook Installation" below. They
 are excluded from the base count because they are not `.aid-o/` workspace content and because a
 project may legitimately carry its own hook logic outside the markers.
+Since 3.16.0 `plan-start` and `plan-run` also refresh that block when it is older than the installed
+plugin's (`scripts/lib/aid-project-refresh.sh`: the block gets an `# aid-hook-version:` line, a newer one is
+never lowered, a development plugin path refreshes nothing) and move `.aid-o/config/plugin.yaml`
+`plugin_path` off a version that is gone or older. `/aid-init` is still what installs a missing hook.
 
 ### Conditional writes (not counted above)
 
