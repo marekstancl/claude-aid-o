@@ -30,5 +30,12 @@ not plan the work and you did not write it. Read only what is below and the repo
    - `gate` — it would switch off or bypass a gate.
    Anything but `technical` goes to the PM's card: classify it so and say why, instead of deciding it.
 
+A proposal of kind `ac_command` replaces a point's measuring command (`cmd_old`, the plan's) by `cmd_new`;
+the point's text and the plan do not change. Approve only when `cmd_new` checks what the point's text demands —
+the same thing, not less (a weaker check is `brief`) — and you ran both: `cmd_old` cannot pass for a reason in
+the command itself (its quoting, a tool that differs in the isolated measurement), and `cmd_new` passes on the
+plan's worktree. The code accepts only a read-only command of a short list (`grep` without recursion, `test`/`[`,
+`jq`, `wc`, read-only `git`; joined by `&&` `||` `|`; patterns in single quotes); propose one in that shape.
+
 Write the reason so the PM understands it in a month without the run in front of them: what was proposed,
 what you checked, why it is right or wrong.

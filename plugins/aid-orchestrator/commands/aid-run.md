@@ -474,7 +474,9 @@ agent type. A project keeps the old budget (two rounds, 1/50) in its own
    `skills/communication.md` (built with `scripts/lib/aid-decision-card.sh`):
    what stayed open (from `merged.json`, blockers first), and the options —
    fix and confirm in a PM-granted round, or accept (with the PM's standing instruction
-   recorded — `aid-review-round.sh standing` — two such rounds need no card). `close` has already
+   recorded — `aid-review-round.sh standing` — two such rounds need no card; each needs progress: a blocker
+   or major of the round before fixed, or a different set open — a round that re-opens exactly the same and
+   fixed nothing stops, and in an `--auto` run the delegate decides it). `close` has already
    routed the open findings (`routed`) or carried them (`carried`), so nothing
    is lost whichever the PM picks. A third round, or only one, exists only as
    the PM's recorded words:
@@ -671,8 +673,9 @@ pending and prints the list):
 
 The verdict (`defaults/templates/adjudicator-delegated.md`): `accepted` /
 `rejected` for a dispute, `dismiss` / `fix` for a finding open after the rounds
-(`fix` grants one more fix-and-confirm round; a finding still open after it gets
-a second verdict, `dismiss` or class `brief`), a class and, for a technical
+(`fix` grants one more fix-and-confirm round after the round it was given in — also after the implicit
+second round, 3.16.0 — and that round is not checked for progress again: the verdict is the judgement;
+a finding still open after it gets a second verdict, `dismiss` or class `brief`), a class and, for a technical
 dispute about a check, the re-run command with its exit and output. Class
 `technical` is the delegate's to decide; **`brief`, `money` and `data` go to the
 PM's card** (`delegation_out_of_scope` — the brief, money and live data stay the
@@ -699,7 +702,7 @@ every refusal prints its class (`defaults/refusal-classes.yaml`): `stand_in` and
 `agent_fix_then_stand_in` (after the agent's own fix failed) are the stand-in's in
 an `--auto` run, `pm` stays the PM's, `incident` is fixed and run again. The loop:
 
-1. Write the proposal: `{"kind": "scope_extension|no_change_step|visual_check|measurement_failed|rename|blocked_step", "step": <0-based index>, …}`
+1. Write the proposal: `{"kind": "scope_extension|no_change_step|visual_check|measurement_failed|rename|blocked_step|ac_command", "step": <0-based index>, …}`
    (`paths` / `criterion` / `rename: {old, new}` / `action: "redispatch", return_sha256` — the action exactly).
 2. `aid-stand-in.sh ask --evidence-dir <run> --code <the refusal code> --proposal <file>`.
    **Exit 3 `PROTECTED`** — the brief, AID's config, a `protected_paths` path, another repository, an outside
@@ -711,6 +714,16 @@ an `--auto` run, `pm` stays the PM's, `incident` is fixed and run again. The loo
    `increment-step <state> --defer-criterion AC<n> --reason "…" --stand-in <auth.json>` (a point whose step
    measurement failed technically; the close measures it again), `amend-contract <state> --rename old=new --reason "…" --stand-in <auth.json>`,
    `step-redispatch <state> --stand-in <auth.json> --reason "…"`. A permission covers that one action, once.
+
+**A point whose measuring command is defective (3.16.0, `ac_command_defective`).** `plan_diff` fails a point that
+is met because its `cmd` cannot pass — quoting, a tool that differs in the isolated measurement (agents P017 AC13:
+`\`` is GNU grep's start of input). Never edit the approved plan for it: propose
+`{"kind": "ac_command", "criterion": "AC<n>", "cmd_old": "<the plan's cmd>", "cmd_new": "<one that measures the same>", "reason": "…"}`
+with `--evidence-dir <the direct run>` and `--code ac_command_defective`, then
+`aid-ac-substitute.sh add --evidence-dir <run> --criterion AC<n> --stand-in <auth.json>`. The next freeze measures the
+point by `cmd_new` (`measured_with: substitute` in `plan-diff.json`, both commands in the evidence) and the plan
+stays byte for byte; a changed plan command or an edited entry falls back to the plan's. Outside `--auto` the PM's
+card asks the same; his answer goes in with `--cmd-file <file> --pm "<his words>"`.
 
 
 ### State: READY
@@ -1029,7 +1042,10 @@ findings written by the fixes). Three rules, and one number to watch:
   above zero for the third attempt in a row, do not fix: write the open
   findings to the backlog and show the PM a **Decision** card — close with the
   findings disputed and recorded / one more attempt / defer the plan. This is a
-  rule for you, not a gate: the plugin counts, you stop.
+  rule for you; since 3.16.0 the plugin also stops on its own: past four attempts
+  (`closing.max_attempts` in the project's `execution.yaml`) `freeze` refuses (`closing_attempts_exhausted`, class
+  `pm`), and the PM's "one more" (`--stage freeze --one-more-attempt "<his words>"`)
+  allows exactly that attempt.
 
 An ancillary-only move after the freeze (AID's own bookkeeping, e.g. the id
 counter) costs nothing: `freeze` names `--stage freeze --accept-ancillary`, which
@@ -1053,7 +1069,10 @@ page and the card from the two files it wrote (`aid-plan-close-summary.sh`, `com
 `<fsm> plan-record-decision <plan> MERGE --by pm` (it writes the decision into the
 attempt's directory and prints the path), then
 `<fsm> plan-merge-to-main <plan> --decision <that path>`; FIX is the fix path; ABORT is
-`plan-abort` with the PM's reason.
+`plan-abort` with the PM's reason. **Merged, not released** (the PM wants the version released later, 3.16.0):
+`plan-merge-to-main … --no-release "<his words>"` — no tag, the merge commit records `No-Release: <his words>`,
+`no-release.json` holds them and `plan-close` needs no tag; not with `--push` (the release guard keeps unreleased
+work off the remote — it is pushed with the release that tags it) and not in an `--auto` run (the PM's answer).
 
 **The close cleans up.** `plan-close` removes the plan's own worktree, the step
 trees and `step/*` branches its merge contains, and its `brainstorm-`/`generation-`

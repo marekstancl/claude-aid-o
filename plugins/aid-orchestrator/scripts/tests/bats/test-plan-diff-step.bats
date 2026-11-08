@@ -196,7 +196,7 @@ _unlisten() { kill "$LPID" 2>/dev/null || true; }
   _iplan '"curl -sf -o /dev/null \"$SVC_URL\""'
   _irun; _unlisten; echo "$output"
   [ "$(_v AC1)" = present ]
-  [ "$(jq -r .isolation.network "$EV/plan-diff.json")" = "host (verification_env)" ]
+  [ "$(jq -r .isolation.network "$EV/plan-diff.json")" = "host (verification_env; no pid isolation, the host's /proc)" ]
   [ "$(jq -c .isolation.env_keys "$EV/plan-diff.json")" = '["SVC_URL"]' ]
 }
 @test "isolation: without unshare on PATH every cmd is absent (reason=no_isolation), never present, with next:" {
@@ -251,6 +251,12 @@ _unlisten() { kill "$LPID" 2>/dev/null || true; }
   _iplan '"true"'; mkdir -p sub
   _irun --cwd "$ROOT/sub"; [ "$status" -eq 3 ]; [[ "$output" == *"cwd_not_worktree"* ]]
 }
+@test "isolation: a point sees /proc/<pid> of a process it started (its own /proc; agents P017 AC4)" {
+  _nsprobe
+  _iplan '"sleep 7 & tr \"\\\\0\" \" \" < /proc/$!/cmdline | grep -q \"sleep 7\""'
+  _irun; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_v AC1)" = present ]
+}
 @test "isolation: each point's command is kept as cmd-<label>.sh" {
   _nsprobe
   _iplan '"true"' '"test 1 = 1"'
@@ -294,6 +300,16 @@ _verdicts() { jq -c '[.results[] | .verdict]' "$1"; }
 }
 @test "foreign-read: the plan-scope measurement maps from the plan file's own repo_roots" {
   _foreign
+  run bash "$PD" --plan "$PLAN" --evidence-dir "$EV" --base-commit HEAD; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_verdicts "$EV/plan-diff.json")" = '["present","present","present"]' ]
+  rm -rf "$FAR"
+}
+@test "foreign-read: a cmd point that reads the first of two declared repositories is measured, not a silent exit (aidlab P002)" {
+  _foreign
+  G="$FAR/acta"; mkdir -p "$G"; git -C "$G" init -q -b main; git -C "$G" config user.email t@t; git -C "$G" config user.name t
+  echo g > "$G/g.md"; git -C "$G" add g.md; git -C "$G" commit -qm init
+  git -C "$G" worktree add -q -b "plan/P953-$(basename "$ROOT")" "$G/.aid-worktrees/plan-P953--acta" main
+  sed -i "s|^repo_roots: .*|repo_roots: [{name: docs, path: $F}, {name: acta, path: $G}]|" "$PLAN"
   run bash "$PD" --plan "$PLAN" --evidence-dir "$EV" --base-commit HEAD; echo "$output"; [ "$status" -eq 0 ]
   [ "$(_verdicts "$EV/plan-diff.json")" = '["present","present","present"]' ]
   rm -rf "$FAR"

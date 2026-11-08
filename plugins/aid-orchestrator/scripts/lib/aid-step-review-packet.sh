@@ -268,10 +268,25 @@ _aid_sr_patch() {
   fi
 }
 
+# aid_step_review_trace_rule — the skill's "The behaviour trace" section and the example answer that shows the field.
+aid_step_review_trace_rule() {
+  awk '$0 == "### The behaviour trace" { on = 1 } on && /^## / { exit } on { print }' "$AID_SR_ROLES_SKILL"
+  echo
+  echo "The field's shape, from the example answer:"
+  awk '$0 == "## The Output File" { on = 1; next } on && /^## / { exit } on && /^```json$/ { c = 1; print; next } c { print } c && /^```$/ { exit }' "$AID_SR_ROLES_SKILL"
+}
+
 aid_step_review_prompt_render() {
   local role="$1" round="$2" dir="$3" cp="$4" step="${5:-}" section vars out note=""
   section="$(aid_step_review_role_section "$role")"
   [[ -n "$section" ]] || { echo "prepare: role ${role} has no section in ${AID_SR_ROLES_SKILL}" >&2; return 1; }
+  # 3.16.0 (agents P017 CP7: 4 of 4 Codex findings form_invalid, trace_missing): collect demands a behaviour trace from a
+  # generalist's blocker or major when the step check names handler patterns — the prompt says so, or only an agent
+  # that happens to read the skill knows (aid-review-adjudicate.sh, trace_missing)
+  if [[ "$role" == *_generalist ]] \
+     && jq -e '(.handler_patterns // []) | length > 0' "${dir}/packet/step-check.json" >/dev/null 2>&1; then
+    section+=$'\n\n'"$(aid_step_review_trace_rule)"
+  fi
   vars="${dir}/vars-${role}.json"; out="${dir}/prompt-${role}.md"
   local what
   case "$cp" in

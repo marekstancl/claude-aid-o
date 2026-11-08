@@ -394,6 +394,43 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   [[ "$output" == *"work in ${WT}"*"never in ${F}"* ]]
 }
 
+@test "repo-roots: a Delete entry under the declared path is expected in the worktree, never in the live checkout (aidlab P002)" {
+  _rr_setup
+  jq --arg f "$F" '.steps[0].outputs += ["Delete: `\($f)/page.md` — gone"]' rr-plan.json > rr-del.json
+  run aid_dispatch_contract_build rr-del.json 0 rr-contract.json
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.expected_deletions' rr-contract.json)" = "$(jq -nc --arg w "$WT" '["\($w)/page.md"]')" ]
+}
+
+@test "repo-roots: a foreign deletion is accepted when the step's commit there deleted it (named by its live path too), refused when the file was gone before the step" {
+  _rr_setup
+  local DEV=".aid-o/work/evidence/E-111-1_1/R-E111-1"; mkdir -p "$DEV/steps/step_1_docs"
+  jq --arg f "$F" '.steps[0].outputs = ["Delete: `\($f)/page.md` — gone"] | .steps[0].allowed_paths = ["\($f)/page.md"]' rr-plan.json > "$DEV/plan.json"
+  aid_dispatch_contract_build "$DEV/plan.json" 0 "$DEV/steps/step_1_docs/contract.json"
+  local C="$DEV/steps/step_1_docs/contract.json" base; base="$(git -C "$WT" rev-parse HEAD)"
+  [ "$(jq -c '.deleted_before_start // []' "$C")" = '[]' ]
+  git -C "$WT" rm -q page.md; git -C "$WT" commit -qm "foreign delete"
+  jq -n --arg v "$(jq -r .version "$C")" --arg r "${base}..$(git -C "$WT" rev-parse HEAD)" --arg d "$F/page.md" \
+    '{contract_version: $v, changed_files: [], deleted_files: [$d], gates: [], step_status: "done", repo_commits: [{repo: "docs", range: $r}]}' > ret.json
+  run aid_dispatch_contract_validate "$C" ret.json "$TEST_DIR"; echo "$output"
+  [ "$status" -eq 0 ]
+  # a range that is not <rev>..<rev> never reaches git (the agent's text: no option, no output file)
+  jq '.repo_commits[0].range = "--output='"$TEST_DIR"'/pwned..HEAD"' ret.json > ret-bad.json
+  run aid_dispatch_contract_validate "$C" ret-bad.json "$TEST_DIR"
+  [ "$status" -eq 1 ]; [ ! -e "$TEST_DIR/pwned" ]
+  # a range that starts before the step's start (an old deletion) proves nothing
+  local C2="$DEV/steps/step_1_docs/contract2.json"
+  jq --arg h "$(git -C "$WT" rev-parse HEAD)" --arg t "$(git -C "$WT" rev-parse --show-toplevel)" '.foreign_heads_at_start[$t] = $h' "$C" > "$C2"
+  run aid_dispatch_contract_validate "$C2" ret.json "$TEST_DIR"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"nothing was deleted by this step"* ]]
+  # the same plan, the file already gone from the worktree when the contract is built: no deletion of this step
+  aid_dispatch_contract_build "$DEV/plan.json" 0 "$C"
+  [ "$(jq -c '.deleted_before_start' "$C")" = "$(jq -nc --arg w "$WT" '["\($w)/page.md"]')" ]
+  jq --arg v "$(jq -r .version "$C")" '.contract_version = $v | .repo_commits = []' ret.json > ret2.json
+  run aid_dispatch_contract_validate "$C" ret2.json "$TEST_DIR"; echo "$output"
+  [ "$status" -eq 1 ]; [[ "$output" == *"nothing was deleted by this step"* ]]
+}
+
 @test "repo-roots: a symlinked or trailing-slash spelling of the declared path is rewritten too" {
   _rr_setup
   ln -s "$F" "$TEST_DIR/docs-link"
@@ -561,16 +598,18 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   [ -z "$(git diff --cached --name-only)" ]
 }
 
-@test "contract: transaction — a commit the hook refuses leaves the index exactly as it was before the step's staging" {
+@test "contract: transaction — a commit the hook refuses leaves the index exactly as it was before the step's staging, and its last line quotes the hook" {
   git init -q -b main . 2>/dev/null || git init -q .
   git config user.email t@t; git config user.name T
   git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
   local before; before="$(git diff --cached --name-status)"
-  printf '#!/bin/sh\nexit 1\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
+  printf '#!/bin/sh\necho "AID pre-commit: guard skipped (fail-open)" >&2\necho "HOOK: blocked for a reason" >&2\nexit 1\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
   echo x > src/thing.sh; echo y > tests/test-thing.bats
   _return '{}'
   run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"
   echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"your index is untouched"* ]]
+  # aid-step-land.sh quotes the LAST line of the log as the refusal (Trading P005, agents P017: it said nothing)
+  [[ "$(tail -1 <<< "$output")" == *"git commit refused"*"HOOK: blocked for a reason"* ]]
   [ "$(git diff --cached --name-status)" = "$before" ]
 }
 

@@ -248,6 +248,8 @@ aid_plan_files() {
   for f in "$1/$2"-*.md; do
     [[ -f "$f" ]] || continue
     aid_is_brief_file "$f" && continue
+    # 3.16.0 (WAN P124): brainstorm approve writes P<NNN>-vision.md beside the plan; plan-run took it for the plan
+    [[ "${f##*/}" =~ ^P[A-Za-z0-9_]+-vision\.md$ ]] && continue
     printf '%s\n' "$f"
   done
 }

@@ -125,8 +125,8 @@ aid_dispatch_contract_build() {
   local step_id; step_id="$(jq -r '.id // ""' <<< "$step")"
 
   # P111 repo_roots — ONE mapping in plan.json: a path in a declared foreign
-  # repository is rewritten to that repository's worktree (allowed paths and
-  # expected artifacts alike), so the agent is never sent into the live
+  # repository is rewritten to that repository's worktree (allowed paths,
+  # expected artifacts and expected deletions alike), so the agent is never sent into the live
   # checkout. On a direct plan, a path in an undeclared foreign repository is
   # refused (exit 4); the EPIC path keeps today's absolute paths.
   local direct rr_out
@@ -136,6 +136,10 @@ aid_dispatch_contract_build() {
     step="$(jq -c --argjson a "$rr_out" '.allowed_paths = $a' <<< "$step")"
     if [[ "$artifacts" != "[]" ]]; then
       artifacts="$(aid_rr_rewrite_files "$plan" "$artifacts")" || return 4
+    fi
+    # 3.16.0 (aidlab P002): a deletion in a foreign repository is checked in its worktree too, never in the live checkout
+    if [[ "$deletions" != "[]" ]]; then
+      deletions="$(aid_rr_rewrite_files "$plan" "$deletions")" || return 4
     fi
   fi
 
@@ -166,12 +170,21 @@ aid_dispatch_contract_build() {
   # A declared deletion already done in the run's checkout when the contract is built (staged or gone from the
   # tree) is no deletion of this step (AC2; Codex review 20. 10. 2026) — recorded here, refused by validate.
   if [[ "$deletions" != "[]" ]]; then
-    local _root _gone='[]' _dp
+    local _root _gone='[]' _dp _starts='{}'
     source "${_AID_DCT_LIB_DIR}/aid-roots.sh"
     _root="$(aid_run_checkout_root "$(dirname "$plan")/fsm-state.yaml" "$(git rev-parse --show-toplevel 2>/dev/null)" 2>/dev/null)" || _root=""
     if [[ -n "$_root" ]] && git -C "$_root" rev-parse --verify -q HEAD >/dev/null 2>&1; then
       while IFS= read -r _dp; do
-        [[ -n "$_dp" && "$_dp" != /* ]] || continue
+        [[ -n "$_dp" ]] || continue
+        if [[ "$_dp" == /* ]]; then   # 3.16.0: a foreign repository's file, judged in its own tree (worktree after repo_roots)
+          local _ft _fr
+          IFS=$'\t' read -r _ft _fr < <(_aid_dc_abs_split "$_dp") || continue
+          [[ -n "$_ft" ]] || continue
+          _starts="$(jq -c --arg t "$_ft" --arg h "$(git -C "$_ft" rev-parse HEAD 2>/dev/null)" '.[$t] //= $h' <<< "$_starts")"
+          git -C "$_ft" cat-file -e "HEAD:${_fr}" 2>/dev/null && git -C "$_ft" ls-files --error-unmatch -- "$_fr" >/dev/null 2>&1 \
+            && [[ -e "$_dp" ]] || _gone="$(jq -c --arg p "$_dp" '. + [$p]' <<< "$_gone")"
+          continue
+        fi
         git -C "$_root" cat-file -e "HEAD:${_dp}" 2>/dev/null || continue
         if ! git -C "$_root" ls-files --error-unmatch -- "$_dp" >/dev/null 2>&1 || [[ ! -e "${_root}/${_dp}" ]]; then
           _gone="$(jq -c --arg p "$_dp" '. + [$p]' <<< "$_gone")"
@@ -179,6 +192,11 @@ aid_dispatch_contract_build() {
       done < <(jq -r '.[]' <<< "$deletions")
     fi
     [[ "$_gone" != "[]" ]] && body_json="$(jq -c --argjson g "$_gone" '. + {deleted_before_start: $g}' <<< "$body_json")"
+    # a foreign repository's HEAD when the step started: only a range from there proves a deletion was this step's
+    # a contract built again for the same step (a re-dispatch) keeps the heads of the first build: after the step's
+    # own commit there, today's head would hide that commit's deletion
+    [[ -f "$out" ]] && _starts="$(jq -c --argjson n "$_starts" '(.foreign_heads_at_start // {}) as $o | $n + $o' "$out" 2>/dev/null || echo "$_starts")"
+    [[ "$_starts" != "{}" ]] && body_json="$(jq -c --argjson s "$_starts" '. + {foreign_heads_at_start: $s}' <<< "$body_json")"
   fi
 
   local version; version="$(_aid_dc_version "$body_json")"
@@ -379,6 +397,15 @@ aid_dispatch_contract_validate() {
   local expected declared deleted a allowed evidence
   expected="$(jq -r '.expected_artifacts[]? // empty' "$c")"
   deleted="$(jq -r '.deleted_files[]? // empty' "$r")"
+  # 3.16.0: the plan.json beside the contract (repo_roots) — a foreign deletion named by its live path means the
+  # same file in the plan's worktree, as the contract's own paths were rewritten
+  local _dc_pj="" _dc_cand
+  for _dc_cand in "$(dirname "$c")/../../plan.json" "$(dirname "$c")/plan.json"; do [[ -f "$_dc_cand" ]] && { _dc_pj="$_dc_cand"; break; }; done
+  if [[ -n "$_dc_pj" && -n "$deleted" ]] && [[ "$(jq -r '.direct // false' "$_dc_pj" 2>/dev/null)" == true ]] \
+     && grep -q '^/' <<< "$deleted"; then
+    local _dc_rw; _dc_rw="$(aid_rr_rewrite_files "$_dc_pj" "$(jq -Rsc 'split("\n") | map(select(length > 0))' <<< "$deleted")" 2>/dev/null)" \
+      && deleted="$(jq -r '.[]' <<< "$_dc_rw")"
+  fi
   declared="$(jq -r '.changed_files[]? // empty' "$r")"$'\n'"$deleted"
   allowed="$(aid_dispatch_contract_allowed "$c")"
   evidence="steps/$(jq -r '.step_id // ""' "$c")"
@@ -400,7 +427,19 @@ aid_dispatch_contract_validate() {
   while IFS= read -r d; do
     [[ -n "$d" ]] || continue
     [[ "$d" == /* ]] && _d_path="$d" || _d_path="${root}/${d}"
+    local _ft="" _fr=""
+    [[ "$d" == /* ]] && IFS=$'\t' read -r _ft _fr < <(_aid_dc_abs_split "$d")
     if [[ -e "$_d_path" ]]; then gone+=("${d} (still on disk)")
+    elif [[ "$d" == /* ]]; then
+      # 3.16.0 (aidlab P002): a foreign deletion counts when this step's commits there deleted it, or it is still
+      # tracked there and gone from the tree (not yet committed) — never a file that was missing before the step
+      if [[ -z "$_ft" ]]; then gone+=("${d} (not inside a git repository)")
+      elif [[ $'\n'"$deleted"$'\n' != *$'\n'"$d"$'\n'* ]]; then gone+=("${d} (not in deleted_files)")
+      elif ! _aid_dc_foreign_deleted "$r" "$_dc_pj" "$_ft" "$_fr" "$(jq -r --arg t "$_ft" '.foreign_heads_at_start[$t] // ""' "$c")" \
+           && { jq -e --arg p "$d" '(.deleted_before_start // []) | index($p) != null' "$c" >/dev/null 2>&1 \
+                || ! git -C "$_ft" ls-files --error-unmatch -- "$_fr" >/dev/null 2>&1; }; then
+        gone+=("${d} (no commit of this step in ${_ft} deleted it — nothing was deleted by this step)")
+      fi
     elif jq -e --arg p "$d" '(.deleted_before_start // []) | index($p) != null' "$c" >/dev/null 2>&1 \
          && ! _aid_dc_deleted_by_step "$root" "$c" "$d"; then
       gone+=("${d} (already deleted when the step started — nothing was deleted by this step)")
@@ -510,6 +549,38 @@ _aid_dc_step_record() {
 
 # _aid_dc_deleted_by_step <root> <contract> <path> — the step's recorded commit deleted <path> and is on
 # the current branch.
+# _aid_dc_abs_split <absolute path> — "<repository top>\t<path inside it>" for a path in some git tree (the file
+# itself may be gone: the nearest existing parent decides), or nothing. 3.16.0: a deletion in a foreign repository.
+_aid_dc_abs_split() {
+  local p; p="$(realpath -m -- "$1")"   # a symlinked spelling: git names the real top
+  set -- "$p"
+  local d; d="$(dirname "$1")"
+  while [[ ! -d "$d" && "$d" != / ]]; do d="$(dirname "$d")"; done
+  local top; top="$(git -C "$d" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  [[ "$1" == "${top}/"* ]] || return 1
+  printf '%s\t%s\n' "$top" "${1#"${top}/"}"
+}
+# _aid_dc_foreign_deleted <return.json> <plan.json or ""> <repo top> <path inside> <head at the step's start> — 0 when
+# one of the return's repo_commits ranges in that repository, starting at or after the step's start, deleted the path
+# (an older range that once deleted it proves nothing about this step).
+_aid_dc_foreign_deleted() {
+  local r="$1" pj="$2" top="$3" rel="$4" start="${5:-}" repo range wt br
+  [[ -n "$start" ]] || return 1
+  while IFS=$'\t' read -r repo range; do
+    # the range is the agent's text: only <rev>..<rev> made of commit-ish characters reaches git (no option, no path)
+    [[ -n "$repo" && "$range" =~ ^[0-9A-Za-z][0-9A-Za-z._/~^-]*\.\.[0-9A-Za-z][0-9A-Za-z._/~^-]*$ ]] || continue
+    if [[ "$repo" != /* ]]; then
+      [[ -n "$pj" ]] && IFS=$'\t' read -r wt br < <(aid_rr_resolve "$pj" "$repo") || continue
+    else wt="$repo"; fi
+    [[ "$(git -C "$wt" rev-parse --show-toplevel 2>/dev/null)" == "$top" ]] || continue
+    git -C "$top" merge-base --is-ancestor "$start" "${range%%..*}" 2>/dev/null || continue
+    # and it ends on the worktree's own branch (HEAD there), not on a commit of another branch
+    git -C "$top" merge-base --is-ancestor "${range##*..}" HEAD 2>/dev/null || continue
+    git -C "$top" diff --name-only --diff-filter=D "$range" -- "$rel" 2>/dev/null | grep -qxF -- "$rel" && return 0
+  done < <(jq -r '.repo_commits[]? | [(.repo // ""), (.range // "")] | @tsv' "$r" 2>/dev/null)
+  return 1
+}
+
 _aid_dc_deleted_by_step() {
   local root="$1" rec; rec="$(_aid_dc_step_record "$1" "$2")"
   [[ -f "$rec" ]] || return 1
@@ -517,6 +588,17 @@ _aid_dc_deleted_by_step() {
   [[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 1
   git -C "$root" merge-base --is-ancestor "$sha" HEAD 2>/dev/null || return 1
   git -C "$root" show --format= --name-only --diff-filter=D "$sha" 2>/dev/null | grep -qxF -- "$3"
+}
+
+# _aid_dc_git_refused <add|commit> <root> <stderr file> — prints what git and its hooks said, then one summary line
+# that quotes the line saying why: the first naming a block, refusal or error (a hook's "guard skipped" notice comes
+# before it), else the last one printed. The caller logs the whole stderr; aid-step-land.sh quotes the last line.
+_aid_dc_git_refused() {
+  # the reason line and the one after it (the AID hook lists the offending file on the next line)
+  local first; first="$(grep -m1 -A1 -iE 'block|refus|reject|error|fatal|denied' "$3" 2>/dev/null | tr '\n' ' ' | sed 's/ *$//' || true)"
+  [[ -n "$first" ]] || first="$(grep -v '^[[:space:]]*$' "$3" 2>/dev/null | tail -1 || true)"
+  cat "$3" >&2 2>/dev/null || true; rm -f "$3"
+  echo "contract: git $1 refused in $2: ${first:-git and its hooks printed nothing} — your index is untouched" >&2
 }
 
 aid_dispatch_contract_commit() {
@@ -608,20 +690,22 @@ aid_dispatch_contract_commit() {
   # hooks see too); the user's index is never written while that happens and nothing the user staged rides along.
   # After the commit only the step's own paths are brought to the new HEAD in the real index (Codex, P117 A+C;
   # WAN P112: a refused commit left the step's files staged and the retry saw a rename as no deletion).
-  local tidx; tidx="$(mktemp)"; rm -f "$tidx"
-  if ! GIT_INDEX_FILE="$tidx" git -C "$root" read-tree HEAD 2>/dev/null \
-     || ! { { [[ "${#forced[@]}" -eq 0 ]] || GIT_INDEX_FILE="$tidx" git -C "$root" add -f -- "${forced[@]}"; } 2>/dev/null \
-            && { [[ "${#files[@]}" -eq 0 ]] || GIT_INDEX_FILE="$tidx" git -C "$root" add -A -- "${files[@]}"; } 2>/dev/null; }; then
-    rm -f "$tidx"; echo "contract: git add refused in ${root} — your index is untouched" >&2; return 1
+  # 3.16.0: what git and its hooks said is kept and shown (Trading P005, agents P017: a refusal with no reason
+  # cost a manual commit and a recheck four times); the last line still names the refusal for aid-step-land.sh.
+  local tidx gerr; tidx="$(mktemp)"; rm -f "$tidx"; gerr="$(mktemp)"
+  if ! GIT_INDEX_FILE="$tidx" git -C "$root" read-tree HEAD 2>"$gerr" \
+     || ! { { [[ "${#forced[@]}" -eq 0 ]] || GIT_INDEX_FILE="$tidx" git -C "$root" add -f -- "${forced[@]}"; } 2>>"$gerr" \
+            && { [[ "${#files[@]}" -eq 0 ]] || GIT_INDEX_FILE="$tidx" git -C "$root" add -A -- "${files[@]}"; } 2>>"$gerr"; }; then
+    _aid_dc_git_refused add "$root" "$gerr"; rm -f "$tidx"; return 1
   fi
   if GIT_INDEX_FILE="$tidx" git -C "$root" diff --cached --quiet; then
-    rm -f "$tidx"; echo "nothing to commit"
+    rm -f "$tidx" "$gerr"; echo "nothing to commit"
     return 0
   fi
-  if ! GIT_INDEX_FILE="$tidx" git -C "$root" commit -q -m "$msg" 2>/dev/null; then
-    rm -f "$tidx"; echo "contract: git commit refused in ${root} — your index is untouched" >&2; return 1
+  if ! GIT_INDEX_FILE="$tidx" git -C "$root" commit -q -m "$msg" 2>"$gerr"; then
+    _aid_dc_git_refused commit "$root" "$gerr"; rm -f "$tidx"; return 1
   fi
-  rm -f "$tidx"
+  rm -f "$tidx" "$gerr"
   local head _p; head="$(git -C "$root" rev-parse HEAD)"; local -a stale=()
   for _p in "${forced[@]}" "${files[@]}"; do git -C "$root" reset -q HEAD -- "$_p" >/dev/null 2>&1 || stale+=("$_p"); done
   local rec; rec="$(_aid_dc_step_record "$root" "$c")"; mkdir -p "${rec%/*}"

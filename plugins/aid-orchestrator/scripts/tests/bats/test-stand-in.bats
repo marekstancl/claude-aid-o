@@ -153,3 +153,18 @@ _verify() {
   _prop '{"kind": "scope_extension", "step": 1, "paths": ["src/new.py"]}'; _ask; [ "$status" -eq 3 ]; [[ "$output" == *"money"*"api.openai.com"* ]]
   _prop '{"kind": "scope_extension", "step": 0, "paths": ["src/new.py"]}'; _ask; [ "$status" -eq 4 ]
 }
+
+@test "stand-in: a defective measuring command in an --auto run — the stand-in approves ac_command, aid-ac-substitute adds it, plan_diff measures by it (3.16.0)" {
+  printf -- '---\nid: P950\nzadani: .aid-o/plans/P950-zadani.md\n---\n# Plan\n\n## Acceptance Criteria\n\n- [ ] AC1: a is there\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "grep -q a src/b.py"\n    expected_exit: 0\n  ```\n' > .aid-o/plans/P950-x.md
+  _prop '{"kind": "ac_command", "criterion": "AC1", "cmd_old": "grep -q a src/b.py", "cmd_new": "grep -q a src/a.py", "reason": "the point names a; the plan looked in the wrong file"}'
+  _ask ac_command_defective; echo "$output"; [ "$status" -eq 4 ]
+  _claude approve technical; _record; echo "$output"; [ "$status" -eq 0 ]
+  run bash "$AID_PLUGIN_PATH/scripts/aid-ac-substitute.sh" add --evidence-dir "$EV" --criterion AC1 --stand-in "$D/auth.json"; echo "$output"
+  [ "$status" -eq 0 ]
+  # the controller's own words are no substitute in an --auto run
+  echo 'grep -q a src/a.py' > "$BATS_TEST_TMPDIR/c"
+  run bash "$AID_PLUGIN_PATH/scripts/aid-ac-substitute.sh" add --evidence-dir "$EV" --criterion AC1 --cmd-file "$BATS_TEST_TMPDIR/c" --pm "PM: tohle napsal řadič sám za sebe"
+  [ "$status" -eq 1 ]; [[ "$output" == *"--auto run"* ]]
+  mkdir -p "$BATS_TEST_TMPDIR/pd"; run bash "$AID_PLUGIN_PATH/scripts/aid-plan-diff.sh" --plan "$R/.aid-o/plans/P950-x.md" --evidence-dir "$BATS_TEST_TMPDIR/pd" --base-commit HEAD; echo "$output"
+  [ "$(jq -r '.results[0] | "\(.verdict) \(.measured_with) \(.substitute_by)"' "$BATS_TEST_TMPDIR/pd/plan-diff.json")" = "present substitute stand_in" ]
+}

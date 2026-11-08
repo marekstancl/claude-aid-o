@@ -489,6 +489,35 @@ _FU_MINOR='.findings = [{id: "g-1", checkpoint: "cp7", step: null, severity: "mi
 }
 
 # ── 2.114.0: the closing measurement ─────────────────────────────────────────
+@test "closing brake: past the attempt limit freeze stops for the PM; his one more attempt passes exactly once (agents P017)" {
+  _project_closed "$_BLOCKER"
+  export AID_CLOSING_MAX_ATTEMPTS=1
+  echo 'print("hello!")' > "$R/app.py"; git -C "$R" commit -qam "fix(review): louder"
+  _stage freeze; echo "$output"; [ "$status" -ne 0 ]
+  [[ "$output" == *"closing_attempts_exhausted"*"--one-more-attempt"* ]]
+  _stage freeze --one-more-attempt "ok"; [ "$status" -ne 0 ]                      # the PM's words, not a token
+  _stage freeze --one-more-attempt "PM: ještě jeden pokus, pak karta"; echo "$output"; [ "$status" -eq 0 ]
+  echo 'print("hello!!")' > "$R/app.py"; git -C "$R" commit -qam "fix(review): louder still"
+  _stage freeze; [ "$status" -ne 0 ]; [[ "$output" == *"closing_attempts_exhausted"* ]]
+  # a receipt written by hand (no ledger line) is no PM answer
+  jq -n '{attempt: 3, pm_words: "PM: ještě jeden pokus, pak karta"}' > "$R/.aid-o/work/plan-final/${PLAN_ID}/one-more-attempt-3.json"
+  _stage freeze; [ "$status" -ne 0 ]; [[ "$output" == *"closing_attempts_exhausted"* ]]
+}
+
+@test "closing measure: a first attempt that stopped at its gates (no CP7) still names the first candidate and the minutes (agents P017)" {
+  _project_closed "$_BLOCKER"
+  local r1; r1="$(_run_dir)"
+  local c1; c1="$(jq -r .revision.head_sha "$r1/gates_report.json")"
+  rm -rf "$r1/cp7" "$r1/stage-writes.jsonl"                  # what a gate failure leaves: a report and a timeline
+  echo 'print("hello!")' > "$R/app.py"; git -C "$R" commit -qam "fix(review): louder"
+  _stage freeze; [ "$status" -eq 0 ]; _stage gates; _stage produce
+  run _round '.findings = [{id: "c-2", checkpoint: "cp7", step: null, severity: "major", claim: "the greeting is now too loud", command: "grep -n hello app.py", evidence: "app.py:1", fix: "quieter", rule: "greet once"}] | del(.no_findings_reason)'
+  [ "$status" -eq 0 ]
+  local m2="$(_run_dir)/cp7/round-1/measurement.json"
+  [ "$(jq -c '.closing | [.attempt, .findings_on_lines_changed_at_close, (.error // "none"), (.minutes_since_first_freeze | type)]' "$m2")" = '[2,1,"none","number"]' ]
+  [ "$(jq -r .closing.first_candidate "$m2")" = "$c1" ]
+}
+
 @test "closing measure: attempt 1 counts no line as written during the closing; a finding on a line the fix wrote counts in attempt 2, an uncited one is named" {
   _project_closed "$_BLOCKER"                                 # evidence app.py:1, a line of the base
   local m1="$(_run_dir)/cp7/round-1/measurement.json"
@@ -504,4 +533,14 @@ _FU_MINOR='.findings = [{id: "g-1", checkpoint: "cp7", step: null, severity: "mi
   [ "$(jq -r '.closing.minutes_since_first_freeze | type' "$m2")" = number ]
   grep -q '"review_closing_measure"' "$(_run_dir)/timeline.jsonl"
   [[ "$(jq -r 'select(.event == "review_closing_measure") | .findings_on_lines_changed_at_close' "$(_run_dir)/timeline.jsonl" | tail -1)" == 1 ]]
+}
+
+@test "freeze refreshes the project's old AID hook block from the installed plugin (a close begun on an older plugin, agents P017)" {
+  _project
+  local h; h="$(git -C "$R" rev-parse --path-format=absolute --git-path hooks)/pre-push"
+  printf '#!/usr/bin/env bash\n# AID-ORCHESTRATOR-PREPUSH-START (do not edit this block manually)\necho old\n# AID-ORCHESTRATOR-PREPUSH-END\n' > "$h"; chmod +x "$h"
+  jq -n --arg p "$AID_PLUGIN_PATH" '{plugins: {"aid-orchestrator@claude-aid-o": [{scope: "user", installPath: $p}]}}' > "$BATS_TEST_TMPDIR/inst.json"
+  AID_INSTALLED_PLUGINS_JSON="$BATS_TEST_TMPDIR/inst.json" _stage freeze; echo "$output"
+  [[ "$output" == *"pre-push refreshed to the plugin's"* ]]
+  grep -q '^# aid-hook-version: ' "$h"; ! grep -qx 'echo old' "$h"
 }

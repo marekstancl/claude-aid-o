@@ -169,17 +169,21 @@ _aid_hrt_step_call_pending() {
                      and .id != null) | "agent\t\(.id)"' 2>/dev/null
     fi; } )"
   answered="$(grep -o '<tool-use-id>[^<]*' "$t" | cut -d'>' -f2 | sort -u)"
+  # 3.16.0: one set difference and one pass for the background launches, not two processes and a transcript scan per
+  # earlier dispatch — a long session has hundreds (bench: 561 agents of one contract, 2.9 s on 200 MB)
+  local open_c launched
+  open_c="$(awk -F'\t' 'NR == FNR { if ($0 != "") a[$0] = 1; next } $2 != "" && !($2 in a)' <(printf '%s\n' "$answered") - <<< "$candidates")"
+  launched="$(grep -E 'Async agent launched|working in the background' "$t" 2>/dev/null | grep -oE '"tool_use_id":"[^"]+"' | cut -d'"' -f4 | sort -u)"
   local kind id
   while IFS=$'\t' read -r kind id; do
     [[ -n "$id" ]] || continue
-    grep -qxF "$id" <<< "$answered" && continue
     # an agent counts only once the harness said it went to the background (a foreground one is answered by its result)
-    [[ "$kind" == agent ]] && grep -F "\"tool_use_id\":\"${id}\"" "$t" 2>/dev/null | grep -qE 'Async agent launched|working in the background' && return 0
+    [[ "$kind" == agent ]] && grep -qxF -- "$id" <<< "$launched" && return 0
     if [[ "$kind" == land && -n "$sess" && "$(jq -r '"\(.status // "")\t\(.session_id // "")"' "$rec" 2>/dev/null)" == "running"$'\t'"$sess" ]]; then
       pid="$(jq -r '.pid // ""' "$rec" 2>/dev/null)"
       [[ "$pid" =~ ^[0-9]+$ ]] && tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null | grep -q 'aid-step-land\.sh' && return 0
     fi
-  done <<< "$candidates"
+  done <<< "$open_c"
   return 1
 }
 
@@ -229,8 +233,21 @@ aid_hook_rule_turn_step_open() {
   [[ -n "$transcript" && -r "$transcript" ]] \
     || { echo "no readable transcript — no step can be attributed to this turn" >&2; return 3; }
 
+  # 3.16.0 (WAN P123/P124: AID-WAIT refused about every second try, the rule over its 5 s budget): every question
+  # below is about a few kinds of line. One pass over the whole transcript (hundreds of MB) keeps them, and the
+  # rules read that — the last message alone is still read from the full file's end.
+  local slim; slim="$(mktemp)" || { echo "no temp file for the transcript" >&2; return 3; }
+  grep -F -e 'aid-emit-dispatch.sh' -e 'nonce=' -e 'aid-step-land.sh' -e 'Dispatch Contract (version' \
+          -e '<tool-use-id>' -e 'Async agent launched' -e 'working in the background' "$transcript" > "$slim" 2>/dev/null || true
+  # a subshell with its own trap: the hook can be killed at its time limit, the slim copy (tens of MB) never stays
+  ( trap 'rm -f "$slim"' EXIT; _aid_hrt_step_open_judge "$root" "$transcript" "$slim" "$sess" )
+}
+
+# _aid_hrt_step_open_judge <root> <transcript> <slim transcript> <session> — the body of turn_step_open.
+_aid_hrt_step_open_judge() {
+  local root="$1" transcript="$2" slim="$3" sess="$4"
   local line
-  line="$(aid_turn_open_steps "$root" "$transcript" | head -1)"
+  line="$(aid_turn_open_steps "$root" "$slim" | head -1)"
   [[ -n "$line" ]] || { echo "no step of this session is open" >&2; return 0; }
   local epic run idx sid
   IFS=$'\t' read -r epic run idx sid _ <<< "$line"
@@ -250,7 +267,7 @@ aid_hook_rule_turn_step_open() {
     # the agent dispatched with its packet still works — a declared wait on THAT, unanswered, ends the turn; the
     # notification starts the next one. Any other background call does not excuse an open step.
     if [[ "$(printf '%s' "$last" | grep -v '^[[:space:]]*$' | tail -1)" == AID-WAIT:* ]]; then
-      if _aid_hrt_step_call_pending "$transcript" "$(cut -f5 <<< "$line")" "$sess" "$idx"; then
+      if _aid_hrt_step_call_pending "$slim" "$(cut -f5 <<< "$line")" "$sess" "$idx"; then
         echo "step ${idx} (${sid}) of ${epic} is open; the turn waits on a background call (AID-WAIT)" >&2
         return 3
       fi

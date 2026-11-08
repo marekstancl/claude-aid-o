@@ -45,7 +45,7 @@
 #
 # The end of a plan is one subcommand in four stages, each bound to ONE frozen
 # candidate and each naming the next command in what it prints:
-#   aid-plan-fsm.sh plan-finalize <plan_id> --stage freeze [--accept-ancillary] [--frozen-at <rfc3339>]
+#   aid-plan-fsm.sh plan-finalize <plan_id> --stage freeze [--accept-ancillary] [--frozen-at <rfc3339>] [--one-more-attempt "<the PM's words>"]
 #       merges the target branch into plan/<id>, freezes the candidate and
 #       mints the run directory R-<plan>-final-<N>; after a fix it writes
 #       fix-class.json, which says what the fix invalidated
@@ -1046,8 +1046,12 @@ _pfsm_canonical_worktree_if_live() {
 # plan because a hook is old would be a worse failure than an unguarded commit.
 _pfsm_warn_stale_hooks() {
   local root="$1" common="" hook=""
-  common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" || return 0
-  hook="${common}/hooks/pre-commit"
+  # 3.16.0: first bring the hooks and plugin.yaml to the installed plugin (lib/aid-project-refresh.sh); what is
+  # still old after that (no block markers, a development plugin) is warned about below
+  source "${SCRIPT_DIR}/lib/aid-project-refresh.sh"
+  aid_hooks_refresh "$root"; aid_plugin_path_refresh "$root"
+  common="$(git -C "$root" rev-parse --path-format=absolute --git-path hooks 2>/dev/null)" || return 0
+  hook="${common}/pre-commit"   # the same place the refresh writes (core.hooksPath respected)
   [[ -f "$hook" ]] || return 0
   grep -q '_aid_state_root' "$hook" 2>/dev/null && return 0
   echo "WARNING: installed hooks predate worktree support — commits from the plan worktree are unguarded until you re-run /aid-init" >&2
@@ -3238,6 +3242,8 @@ _pfsm_foreign_verify() {
 
 _pfsm_finalize_freeze() {
   local root="$1" plan_id="$2" frozen_at="${3:-}" accept_ancillary="${4:-0}"
+  # 3.16.0: a close that started on an older plugin (agents P017) gets the current hooks and plugin path here too
+  _pfsm_warn_stale_hooks "$root"
   # P074 Step 8/10: the TREE this stage acts on is the plan's execution
   # worktree when it has one (`$root` stays the STATE root — `.aid-o` never
   # moves). Refs/objects are shared between worktrees, so only the
@@ -3384,6 +3390,45 @@ _pfsm_finalize_freeze() {
   # ── Allocate the next attempt and create its immutable run directory ─────
   local attempt run_dir_rel run_dir_abs run_id
   attempt="$(_pfsm_next_plan_final_attempt "$root" "$plan_id")"
+  # 3.16.0 (agents P017: six attempts and ten hours, the "three attempts feeding on themselves" rule a sentence
+  # nobody counted): past AID_CLOSING_MAX_ATTEMPTS (4) attempts the close stops for the PM. His "one more" is a
+  # receipt for exactly that attempt number; the next one stops again.
+  # the limit is the project's (execution.yaml closing.max_attempts, AID's protected config), never the environment
+  # a controller runs in — a test sets it only under bats
+  local _max; _max="$(yq -r '.closing.max_attempts // 4' "${root}/.aid-o/config/execution.yaml" 2>/dev/null || echo 4)"
+  [[ "$_max" =~ ^[0-9]+$ ]] || _max=4
+  [[ -n "${BATS_TEST_FILENAME:-}" && -n "${AID_CLOSING_MAX_ATTEMPTS:-}" ]] && _max="$AID_CLOSING_MAX_ATTEMPTS"
+  local _rcpt="${root}/.aid-o/work/plan-final/${plan_id}/one-more-attempt-${attempt}.json"
+  # the receipt counts only with its line in the plan's append-only ledger (as the stand-in's permissions and the
+  # substitutes do): a file written by hand is no PM answer
+  source "${SCRIPT_DIR}/lib/aid-delegate.sh"
+  local _ledger; _ledger="$(aid_delegate_ledger "$root" "$plan_id")"
+  _one_more_ok() { [[ -f "$_rcpt" ]] && jq -e -s --argjson a "$attempt" --arg s "$(sha256sum "$_rcpt" | cut -d' ' -f1)" \
+      'any(.[]; .checkpoint == "closing_one_more" and .attempt == $a and .receipt_sha256 == $s)' "$_ledger" >/dev/null 2>&1; }
+  if [[ "$attempt" =~ ^[0-9]+$ ]] && (( attempt > _max )) && ! _one_more_ok; then
+    if [[ -n "${_PFSM_ONE_MORE:-}" ]]; then
+      # in an --auto run the controller would type these words itself: the PM's card, never the controller
+      source "${SCRIPT_DIR}/lib/aid-delegate.sh"
+      if aid_delegate_in_force "$root" "$plan_id"; then
+        echo "PRECONDITION FAIL: --one-more-attempt is the PM's answer on a card; in an --auto run it is not taken from the controller. Stop the run (the PM answers, then: plan-finalize ${plan_id} --stage freeze --one-more-attempt \"<his words>\" outside --auto)." >&2
+        return 1
+      fi
+      (( ${#_PFSM_ONE_MORE} >= 20 )) || { echo "PRECONDITION FAIL: --one-more-attempt \"<the PM's words>\" needs 20+ characters." >&2; return 1; }
+      mkdir -p "$(dirname "$_rcpt")"
+      jq -n --argjson a "$attempt" --arg r "$_PFSM_ONE_MORE" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{attempt: $a, pm_words: $r, at: $at}' > "$_rcpt" || return 1
+      mkdir -p "$(dirname "$_ledger")"
+      jq -nc --argjson a "$attempt" --arg s "$(sha256sum "$_rcpt" | cut -d' ' -f1)" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        '{checkpoint: "closing_one_more", attempt: $a, receipt_sha256: $s, at: $at}' >> "$_ledger" || return 1
+      echo "plan-finalize --stage freeze: attempt ${attempt} allowed once by the PM (${_rcpt})." >&2
+    else
+      echo "PRECONDITION FAIL: closing_attempts_exhausted — ${plan_id}'s close has had $(( attempt - 1 )) attempts (limit ${_max}); another fix-and-freeze is not tried without the PM." >&2
+      echo "next: write the open findings to the backlog and show the PM a Decision card — close with the findings recorded / one more attempt (plan-finalize ${plan_id} --stage freeze --one-more-attempt \"<his words>\") / defer the plan" >&2
+      echo "class: pm" >&2
+      echo "(pipeline.md §When AID refuses: closing_attempts_exhausted)" >&2
+      return 1
+    fi
+  fi
   run_dir_rel="$(_pfsm_plan_final_run_dir_rel "$plan_id" "$attempt")"
   run_id="R-${plan_id}-final-${attempt}"
   run_dir_abs="${root}/${run_dir_rel}"
@@ -5510,6 +5555,9 @@ _pfsm_finalize_decide() {
   declare -F aid_follow_up_live >/dev/null || source "${SCRIPT_DIR}/lib/aid-follow-up.sh"
   local _fun; _fun="$(aid_follow_up_live "${run_dir_abs%/*}" | grep -c '' || true)"
   (( _fun > 0 )) && echo "FOLLOW-UPS: ${_fun} finding(s) a confirmation round left for after the close (${_fu#"${root}/"}) — write each into the project's backlog and name the count in the close message." >&2
+  # 3.16.0: a point measured by a substitute command is said to the PM, never shown as an ordinary pass
+  local _subs; _subs="$(jq -r '[.results[]? | select(.measured_with == "substitute") | "\(.ac_label) (approved by \(.substitute_by))"] | join(", ")' "${run_dir_abs}/plan-diff.json" 2>/dev/null || true)"
+  [[ -n "$_subs" ]] && echo "SUBSTITUTES: measured by a replacement command, not the plan's: ${_subs} — name them in the card and the close message (plan-diff.json carries both commands)." >&2
   return 0
 }
 
@@ -5556,6 +5604,9 @@ cmd_plan_finalize() {
         _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
         frozen_at="$2"; shift 2 ;;
       --accept-ancillary) accept_ancillary=1; shift ;;
+      --one-more-attempt)
+        _pfsm_require_optval "plan-finalize" "$1" "$#" || exit 2
+        _PFSM_ONE_MORE="$2"; shift 2 ;;
       --waive-final-review) waive_final_review=1; shift ;;
       # P073 Step 8 — see the note on plan-start's loop.
       --force) _PFSM_FORCE=1; shift ;;
@@ -5869,7 +5920,7 @@ cmd_plan_record_decision() {
 #                        [--op-id <id>] [--push]
 # ---------------------------------------------------------------------------
 cmd_plan_merge_to_main() {
-  local plan_id="" decision_file="" project_root_opt="" op_id_opt="" do_push=0
+  local plan_id="" decision_file="" project_root_opt="" op_id_opt="" do_push=0 no_release=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --decision)
@@ -5882,6 +5933,8 @@ cmd_plan_merge_to_main() {
         _pfsm_require_optval "plan-merge-to-main" "$1" "$#" || exit 2
         op_id_opt="$2"; shift 2 ;;
       --push) do_push=1; shift ;;
+      # 3.16.0 (WAN P124: the PM wanted the plan merged, its version released later with fixes made outside AID)
+      --no-release) [[ $# -ge 2 && ${#2} -ge 20 ]] || { echo "ERROR: plan-merge-to-main: --no-release needs the PM's words (20+ characters)" >&2; exit 2; }; no_release="$2"; shift 2 ;;
       # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
       # every state-TRANSITION command; what it can BYPASS is bounded by the
       # forceable/hard classification in _pfsm_precondition.
@@ -5917,6 +5970,15 @@ cmd_plan_merge_to_main() {
   fi
   command -v jq >/dev/null 2>&1 || {
     echo "PRECONDITION FAIL: plan-merge-to-main requires jq." >&2; exit 1; }
+  if [[ -n "$no_release" ]]; then
+    # the release guard (pre-push) blocks unreleased work reaching the remote by design: a merge without a release
+    # stays local until it ships, and in an --auto run the controller does not type the PM's words (3.16.0)
+    (( do_push )) && { echo "PRECONDITION FAIL: plan-merge-to-main: --no-release with --push — the release guard refuses unreleased work on the remote; merge without --push, push with the release that tags it." >&2; exit 1; }
+    source "${SCRIPT_DIR}/lib/aid-delegate.sh"
+    if aid_delegate_in_force "$(_pfsm_resolve_project_root "$project_root_opt" 2>/dev/null || pwd)" "$plan_id" 2>/dev/null; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: --no-release is the PM's answer; in an --auto run it is not taken from the controller — ask him on the card, then run it outside --auto." >&2; exit 1
+    fi
+  fi
 
   local root; root="$(_pfsm_resolve_project_root "$project_root_opt")"
   export AID_PLAN_STATE_PROJECT_ROOT="$root"
@@ -6324,6 +6386,8 @@ cmd_plan_merge_to_main() {
     fi
 
     local msg="merge(plan): ${plan_id} — ${plan_branch} into ${target_branch}"
+    # the release guard's own exception (pre-push: a commit with a No-Release: footer is no release)
+    [[ -n "$no_release" ]] && msg+=$'\n\n'"No-Release: ${no_release}"
     merge_commit="$(git -C "$root" commit-tree "$merged_tree" -p "$target_head" -p "$merged_head" -m "$msg" 2>/dev/null)" || merge_commit=""
     if [[ -z "$merge_commit" ]]; then
       echo "PRECONDITION FAIL: plan-merge-to-main: could not build the merge commit for ${plan_id} — no ref was moved and ${target_branch} is unchanged." >&2
@@ -6393,7 +6457,14 @@ cmd_plan_merge_to_main() {
   #    produce a tagged release with no closure path) ───────────────────────
   local version tag_status="none"
   version="$(_pfsm_release_prep_version "$root" "$plan_id" "$run_dir_rel")"
-  if [[ "$version" != "none" ]]; then
+  if [[ -n "$no_release" ]]; then
+    # the PM's merge without a release: no tag now; plan-close accepts it from the record below
+    tag_status="no_release"
+    jq -n --arg w "$no_release" --arg v "$version" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{pm_words: $w, prepared_version: $v, at: $at}' > "${root}/${run_dir_rel}/no-release.json" \
+      || { echo "PRECONDITION FAIL: plan-merge-to-main: the merge is published, but no-release.json could not be written — re-run this command." >&2; exit 1; }
+    echo "NO RELEASE: ${plan_id} merged without a tag at the PM's word (prepared version ${version} is not tagged; tag it when it is released)." >&2
+  elif [[ "$version" != "none" ]]; then
     local trc=0 tout=""
     tout="$(bash "${SCRIPT_DIR}/aid-release.sh" tag-plan "$plan_id" \
               --merge-sha "$merge_commit" --version "$version" --project-root "$root" 2>&1)" || trc=$?
@@ -9829,6 +9900,7 @@ _pr_main() {
 
   PR_PLAN_ID="$plan_id"
   PR_ROOT="$(_pfsm_resolve_project_root "$project_root_opt")"
+  _pfsm_warn_stale_hooks "$PR_ROOT"   # 3.16.0: hooks and plugin path before anything runs, a resumed run too
   export AID_PLAN_STATE_PROJECT_ROOT="$PR_ROOT" AID_PLAN_MANIFEST_PROJECT_ROOT="$PR_ROOT"
   _aid_pipeline_state_root="$PR_ROOT"
   PR_NNN="$(aid_gen_plan_num "$plan_id")"
@@ -10237,6 +10309,8 @@ _pr_repo_roots_worktrees() {
     br="$(jq -r --argjson i "$i" '.repo_roots[$i].branch' "$pj")"
     base="$(jq -r --argjson i "$i" '.repo_roots[$i].base' "$pj")"
     gitignore_exclude_append "$(git -C "$path" rev-parse --path-format=absolute --git-common-dir)/info/exclude" ".aid-worktrees/"
+    # 3.16.0: the foreign repository's hooks follow the installed plugin, its worktree new or kept
+    source "${SCRIPT_DIR}/lib/aid-project-refresh.sh"; aid_hooks_refresh "$path"
     if [[ -d "$wt" ]]; then
       cur="$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
       if [[ "$cur" == "$br" ]]; then _pr_stage_done "worktree:${name}" || _pr_stage_record "worktree:${name}"; continue; fi

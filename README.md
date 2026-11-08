@@ -122,7 +122,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v3.15.0** (current) — procesní mapy: proces jako klikací mapa v jednom vzhledu (BPMN nebo stavový diagram), označíš, co je špatně, agent to prověří; nabídka v brainstormingu, závazné v běhu
+- **v3.16.0** (current) — uzávěr, který doběhne: vadný měřicí příkaz nahradí posuzovatel bez změny plánu, brzda na pátý pokus, kolo navíc po verdiktu „oprav", obnova háků v projektech, revize kroků s Codexem
+- **v3.15.0** — procesní mapy: proces jako klikací mapa v jednom vzhledu (BPMN nebo stavový diagram), označíš, co je špatně, agent to prověří; nabídka v brainstormingu, závazné v běhu
 - **v3.14.1** — stránka průběhu roadmapy má pevnou strukturu: čeká na tebe, etapy, teď, čísla, co chybí od koho, rizika, hotovo, historie
 - **v3.14.0** — stránka průběhu roadmapy (povinná, plán ji obnoví před uzávěrem), companion nepředá uříznutý náhled (kontrola každého snímku), kopie aplikace drží krok s nastavením, snímky celé stránky a opakování po síťové chybě, `down` zastaví, co spustil; jména testů bez původu
 - **v3.13.0** — běh plánu bez ručních obchvatů: převzetí kroku s náhradním příkazem, prostředí pracovních stromů, spor po opravě jde do dalšího kola, obnova sloučení se nezacyklí, kontroly vydání před sloučením

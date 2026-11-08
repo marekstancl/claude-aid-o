@@ -213,7 +213,9 @@ run_gate() {
   # driver's stdin — in run_all_gates that stdin is the here-string of remaining
   # gate names, and eating it silently starves every subsequent gate while
   # overall still reports pass (OBS-20260708-07).
-  output=$(LC_ALL=C timeout "$timeout_s" bash -c "$command" </dev/null 2>&1) || exit_code=$?
+  # verification_env through the environment of a subshell, never argv (a database URL is a secret: ps, job.json)
+  output=$( if [[ -n "${AID_GATE_ENV[*]+x}" && ${#AID_GATE_ENV[@]} -gt 0 ]]; then export "${AID_GATE_ENV[@]}"; fi
+            LC_ALL=C timeout "$timeout_s" bash -c "$command" </dev/null 2>&1) || exit_code=$?
 
   local end_ms completed_at
   end_ms=$(date +%s%3N)
@@ -249,6 +251,15 @@ run_gate() {
   # compatibility field.
   local json
   json="$(gate_row_normalize "{\"gate\":\"${gate_name}\",\"result\":\"${result}\"${reason:+,\"reason\":\"${reason}\"},\"exit_code\":${exit_code},\"duration_ms\":${duration_ms},\"started_at\":\"${started_at}\",\"completed_at\":\"${completed_at}\",\"output\":\"${output_truncated}\"}")"
+  # 3.16.0 (agents P017 attempt 6: smoke at 300 s fell on its limit with a suite of ~225 s, which said nothing about
+  # the code): the row carries its limit, and a pass that used over 80 % of it says so before it becomes a failure
+  if [[ "$timeout_s" =~ ^[0-9]+$ ]] && (( timeout_s > 0 )); then
+    json="$(jq -c --argjson t "$timeout_s" '. + {timeout_s: $t}' <<< "$json")"
+    if [[ "$result" == pass ]] && (( duration_ms * 10 > timeout_s * 1000 * 8 )); then
+      json="$(jq -c '. + {near_timeout: true}' <<< "$json")"
+      echo "WARNING: gate ${gate_name} passed in $(( duration_ms / 1000 )) s of its ${timeout_s} s limit — raise timeout_seconds in execution.yaml (about $(( duration_ms * 2 / 1000 + 1 )) s) before it fails on time, not on the code" >&2
+    fi
+  fi
   echo "$json"
 
   # Log to file if provided
@@ -704,7 +715,9 @@ run_background_gate() {
     run_args+=(-- "${job_argv[@]}")
 
     local start_err start_rc=0
-    start_err="$(bash "$job_sh" "${run_args[@]}" 2>&1 >/dev/null)" || start_rc=$?
+    # 3.16.0: verification_env reaches the background job through its environment (never argv or job.json)
+    start_err="$( if [[ -n "${AID_GATE_ENV[*]+x}" && ${#AID_GATE_ENV[@]} -gt 0 ]]; then export "${AID_GATE_ENV[@]}"; fi
+                  bash "$job_sh" "${run_args[@]}" 2>&1 >/dev/null)" || start_rc=$?
     if (( start_rc != 0 )); then
       # A background declaration is a contract. The supervisor's own stderr is
       # surfaced verbatim; there is deliberately NO fallback to run_gate().
@@ -1236,6 +1249,19 @@ run_all_gates() {
   # job records, row checkpoints — hangs off this one
   # value, and the recovery ladder reads it by name from this scope.
   local _evidence_dir; _evidence_dir="$(_gates_evidence_dir "$epic_id" "$run_id")"
+
+  # 3.16.0 (WAN P123: the step's gates fell in 3 s on "service wan-api is not running", the close's wanted the same
+  # by hand): the project's verification_env (.aid-o/config/execution.yaml of the state root — the one reader the
+  # measurement uses, lib/aid-measure-env.sh) reaches every gate command and wins over the controller's environment,
+  # as in the measurement: a controller's DATABASE_URL must never point a gate's tests at the shared dev database.
+  # Only the gate commands get them (run_gate's env), never the runner's own tools (PATH, HOME stay the runner's).
+  local _ve_line _ve_key; AID_GATE_ENV=()
+  while IFS= read -r -d '' _ve_line; do
+    [[ "$_ve_line" == *=* ]] || continue
+    _ve_key="${_ve_line%%=*}"
+    [[ "$_ve_key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] && AID_GATE_ENV+=("$_ve_line")
+  done < <( STATE_ROOT="$(aid_state_root 2>/dev/null || pwd)"; source "${SCRIPT_DIR}/lib/aid-measure-env.sh"
+            PD_ENV=(); _pd_env_load >/dev/null 2>&1 || true; (( ${#PD_ENV[@]} )) && printf '%s\0' "${PD_ENV[@]}" )
 
   # Determine timeline_file: use positional $4 ONLY if it's not a flag.
   # Bug fix (PM-reported): the previous `${4:-default}` + unconditional

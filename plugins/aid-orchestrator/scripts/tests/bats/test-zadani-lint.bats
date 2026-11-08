@@ -151,9 +151,10 @@ EOF
   [ "$(jq -r '.results[0].verdict' "$T/ev/plan-diff.json")" = present ]
 }
 
-@test "zadani: the brief beside a plan is never taken for the plan" {
+@test "zadani: the brief or the approved vision beside a plan is never taken for the plan (vision: WAN P124)" {
   mkdir -p "$T/.aid-o/plans"
   cp "$GOOD" "$T/.aid-o/plans/P7-zadani.md"
+  echo "# vision" > "$T/.aid-o/plans/P7-vision.md"     # sorts before P7-zzz: once the first match
   echo "# plan" > "$T/.aid-o/plans/P7-zzz-plan.md"
   run bash -c "source '$AID_PLUGIN_PATH/scripts/lib/aid-roots.sh'; aid_plan_files '$T/.aid-o/plans' P7"
   [ "$output" = "$T/.aid-o/plans/P7-zzz-plan.md" ]

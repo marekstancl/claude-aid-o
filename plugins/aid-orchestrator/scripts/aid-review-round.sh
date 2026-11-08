@@ -229,10 +229,29 @@ _base_rounds() { local o; o="$(_override_rounds)"; [[ -n "$o" && "$o" -gt "$RC_R
 # under the PM's standing instruction (P103: "už se neptej a dodělej" could not
 # be recorded, so every finding after the last round cost a new card).
 _allowed_rounds() {
-  local f b g=0; b="$(_base_rounds)"
-  # P112: a delegate's `fix` grants one more fix-and-confirm round
+  local f b g=0 a=0 n; b="$(_base_rounds)"
+  # P112: a delegate's `fix` grants one more fix-and-confirm round — AFTER the round it was given in (3.16.0, WAN P123,
+  # agents P017: given after the implicit second round, base + grant was that same round and the grant was lost)
+  if [[ -f "${BASE}/delegate-rounds.json" ]]; then
+    g="$(jq -r '.grants // 0' "${BASE}/delegate-rounds.json" 2>/dev/null || echo 0)"
+    a="$(jq -r '((.after_rounds // []) | max // 0) + 1' "${BASE}/delegate-rounds.json" 2>/dev/null || echo 0)"
+  fi
+  if f="$(_standing_file)" && [[ -f "$f" ]]; then n=$(( b + 2 + g )); else n=$(( b + g )); fi
+  (( a > n )) && n="$a"
+  echo "$n"
+}
+# _delegate_granted <round> — 0 when the delegate's `fix` after round <round> - 1 is what allows <round>.
+_delegate_granted() {
+  [[ -f "${BASE}/delegate-rounds.json" ]] \
+    && jq -e --argjson r "$(( $1 - 1 ))" '(.after_rounds // []) | index($r) != null' "${BASE}/delegate-rounds.json" >/dev/null 2>&1
+}
+# _budget_extra — how the budget grew past the base, in words, or nothing.
+_budget_extra() {
+  local f out="" g=0
   [[ -f "${BASE}/delegate-rounds.json" ]] && g="$(jq -r '.grants // 0' "${BASE}/delegate-rounds.json" 2>/dev/null || echo 0)"
-  if f="$(_standing_file)" && [[ -f "$f" ]]; then echo $(( b + 2 + g )); else echo $(( b + g )); fi
+  f="$(_standing_file)" && [[ -f "$f" ]] && out=" + 2 under the PM's standing instruction"
+  (( g > 0 )) && out+=" + ${g} granted by the delegate's fix"
+  printf '%s' "$out"
 }
 # _last_allowed — the round after which what stays open is routed (close and delegate agree).
 _last_allowed() {
@@ -566,7 +585,7 @@ cmd_prepare() {
         [[ "$MODE" == plan && -n "${RC_SECOND_ROUND_WHEN:-}" ]] && (( ROUND == RC_ROUNDS_DEFAULT + 1 )) \
           && _die "round ${ROUND} needs a blocker found in round $((ROUND - 1)) and its fix passed by fix-check — or the PM's override.json (aid-review-round.sh override)
   next: bash aid-review-round.sh fix-check ${PLAN} --round $((ROUND - 1)) (after fixing the blocker), or the PM's override (pipeline.md §When AID refuses: second_round_needs_open_blocker)"
-        _die "round ${ROUND} exceeds the round budget ($(_base_rounds)$( (( $(_allowed_rounds) > $(_base_rounds) )) && echo " + 2 under the PM's standing instruction")); it needs the PM's override.json (aid-review-round.sh override) or a PM decision"
+        _die "round ${ROUND} exceeds the round budget ($(_base_rounds)$(_budget_extra)); it needs the PM's override.json (aid-review-round.sh override) or a PM decision"
       fi
       standing=true
       # A fix-and-confirm round must make progress: when the previous round
@@ -574,12 +593,17 @@ cmd_prepare() {
       # converging and the PM decides.
       # (a delta round confirms new commits after a pass: nothing is open, so
       # there is no chain to converge — P110 review)
-      if (( ROUND >= 3 && ! delta )); then
+      # 3.16.0: a round the delegate granted after judging the open finding is that judgement — not checked again
+      if (( ROUND >= 3 && ! delta )) && ! _delegate_granted "$ROUND"; then
         local open_now open_before
         open_now="$(jq -c '[.findings[] | select((.status | IN("fixed", "follow_up") | not) and (.severity == "blocker" or .severity == "major")) | (.match // .fingerprint)] | sort' "${prev}/merged.json")"
         open_before="$(jq -c '[.findings[] | select((.status | IN("fixed", "follow_up") | not) and (.severity == "blocker" or .severity == "major")) | (.match // .fingerprint)] | sort' "$(_round_dir $((ROUND - 2)))/merged.json" 2>/dev/null || echo '[]')"
-        [[ "$open_now" != "$open_before" ]] \
-          || _die "round $((ROUND - 1)) re-opened the same findings as round $((ROUND - 2)); a standing-instruction round needs progress — the PM decides"
+        # 3.16.0 (agents P017): collect of round N-1 rewrote round N-2's merged.json and marked what it no longer
+        # reports `fixed` — so open_before equals open_now whenever nothing new came up. A finding fixed there IS progress.
+        local fixed_before
+        fixed_before="$(jq '[.findings[] | select(.status == "fixed" and (.severity == "blocker" or .severity == "major"))] | length' "$(_round_dir $((ROUND - 2)))/merged.json" 2>/dev/null || echo 0)"
+        [[ "$open_now" != "$open_before" ]] || (( fixed_before > 0 )) \
+          || _die "round $((ROUND - 1)) re-opened the same findings as round $((ROUND - 2)); a standing-instruction round needs progress — the PM decides, or in an --auto run the delegate (aid-review-round.sh delegate … for the open finding: its fix grants this round)"
       fi
     fi
     if (( ROUND >= 2 && ! delta )); then
@@ -1147,16 +1171,23 @@ _semantic_final_write() {
 # The summary line names the three numbers so a closing that feeds itself is
 # visible after every round, not after a day.
 _closing_measure() {
-  local dir="$1" measurement="$2" cur="$EVID" attempt=1 fc prev first_run first_cand="" first_at="" minutes=null
+  local dir="$1" measurement="$2" cur="$EVID" attempt=1 fc prev first_run first_cand="" first_at="" minutes=null succ_prev=""
   while fc="${cur}/fix-class.json"; [[ -f "$fc" ]]; do
     prev="$(jq -r '.previous_run_dir // ""' "$fc")"; [[ -n "$prev" ]] || break
     prev="$(dirname "$EVID")/$(basename "$prev")"; [[ -d "$prev" && "$prev" != "$cur" ]] || break
+    succ_prev="$(jq -r '.previous_candidate // ""' "$fc")"   # what the next attempt says this one froze
     cur="$prev"; attempt=$((attempt + 1))
   done
   first_run="$cur"
   first_cand="$(jq -r '.rounds[0].head_sha // .head_sha // ""' "${first_run}/cp7/rounds.json" 2>/dev/null)"
+  # 3.16.0 (agents P017): a first attempt that failed its gates has no CP7 — its gate report and timeline still say
+  # which candidate it froze and when
+  [[ -n "$first_cand" ]] || first_cand="$succ_prev"
+  [[ -n "$first_cand" ]] || first_cand="$(jq -r '.revision.head_sha // ""' "${first_run}/gates_report.json" 2>/dev/null)"
   first_at="$(jq -rs 'map(.at // empty) | sort | first // ""' "${first_run}/stage-writes.jsonl" 2>/dev/null)"
   [[ -n "$first_at" ]] || first_at="$(jq -r '.rounds[0].prepared_at // ""' "${first_run}/cp7/rounds.json" 2>/dev/null)"
+  # its gates' start, not the timeline's first line (freeze prepends an older forced action's events)
+  [[ -n "$first_at" ]] || first_at="$(jq -r 'select(.event == "gate_runner_start") | .ts // empty' "${first_run}/timeline.jsonl" 2>/dev/null | head -1)"
   if [[ -n "$first_at" ]]; then
     local t0; t0="$(date -u -d "$first_at" +%s 2>/dev/null || echo "")"
     [[ -n "$t0" ]] && minutes=$(( ( $(date -u +%s) - t0 ) / 60 ))
@@ -1166,7 +1197,7 @@ _closing_measure() {
   # neither is mistaken for the other. No first candidate: the regression count
   # is null and `error` says so; nothing is counted as uncited for that reason.
   local regress=0 uncited=0 unblamed=0 measure_error="" ev first path line sha
-  [[ -n "$first_cand" ]] || measure_error="first candidate unknown: ${first_run}/cp7/rounds.json has no head_sha"
+  [[ -n "$first_cand" ]] || measure_error="first candidate unknown: neither ${first_run}/cp7/rounds.json nor its gates_report.json names a head_sha"
   while IFS= read -r ev; do
     first="$(aid_plan_review_citation_parts "$ev" 2>/dev/null | head -1)"
     if [[ "$first" =~ ^([^:]+):([0-9]+)$ ]]; then

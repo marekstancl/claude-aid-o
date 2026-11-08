@@ -555,3 +555,18 @@ _ac_cmd() { printf '\n## Acceptance Criteria\n\n- [ ] AC1: it is there\n  ```yam
   [[ "$output" == *"WARN ac_bare_name \`pytest\`"* ]]
   [ "$(grep -c 'ac_bare_name' <<< "$output")" -eq 1 ]
 }
+
+@test "lint-ac-command: a criterion's cmd with a backslash before a backtick warns (GNU grep reads it as the start of the input; agents P017 AC13)" {
+  _plan p.md legacy '- Modify: `src/a.ts` — edit'
+  printf '\n## Acceptance Criteria\n\n- [ ] AC1: the marker is quoted\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "grep -q \\"\\\\`x\\" src/a.ts"\n    expected_exit: 0\n  ```\n- [ ] AC2: plain\n  ```yaml\n  verification_pattern:\n    type: cmd\n    cmd: "grep -q x src/a.ts"\n    expected_exit: 0\n  ```\n' >> p.md
+  run bash "$LINT" p.md; echo "$output"
+  [[ "$output" == *"WARN ac_cmd_backslash_backtick AC1"* ]]
+  [ "$(grep -c 'ac_cmd_backslash_backtick' <<< "$output")" -eq 1 ]
+}
+
+@test "lint-files: a Files bullet naming .aid-o/config warns with the way that works, other paths do not (aidlab P002)" {
+  _plan p.md legacy '- Modify: `.aid-o/config/execution.yaml` — new gate' '- Modify: `src/a.ts` — edit'
+  run bash "$LINT" p.md; echo "$output"
+  [[ "$output" == *"WARN files_aid_config \`.aid-o/config/execution.yaml\`"*"primary checkout"* ]]
+  [ "$(grep -c 'files_aid_config' <<< "$output")" -eq 1 ]
+}

@@ -7,13 +7,14 @@
 #     the proposal is technical. Classes: brief, money, data, security, production, foreign_api, foreign_repo,
 #     gate, unevaluable. A proposal it cannot read, or a kind it does not know, is unevaluable (protected).
 #
-# Protected, from the brief: a point of the brief or its measurement; execution.yaml (gates, profiles,
+# Protected, from the brief: a point of the brief (its measuring COMMAND is not, since 3.16.0: kind ac_command
+# replaces it beside the plan, never in it); execution.yaml (gates, profiles,
 # waivers) and the rest of .aid-o/config; the project's protected_paths (execution.yaml; default .env*,
 # *secret*, *credential*, deploy/**, production compose and configuration); a repository outside repo_roots;
 # a paid service or a new foreign API the proposal declares (external[]).
 #
 # The proposal (written by the controller, checked by the stand-in, re-checked here by every consumer):
-#   {kind: scope_extension|no_change_step|visual_check|measurement_failed|rename,
+#   {kind: scope_extension|no_change_step|visual_check|measurement_failed|rename|ac_command (criterion, cmd_old, cmd_new),
 #    step: <0-based index>, paths: [..], criterion: "AC<n>", rename: {old, new}, external: [..], why: ".."}
 
 AID_PROTECTED_DEFAULT_PATHS='.env .env.* *secret* *credential* deploy/** **/deploy/** *.prod.yml *.prod.yaml docker-compose.prod* compose.prod* *production*'
@@ -31,9 +32,27 @@ aid_protected_impact() {
     || { echo "unevaluable: the proposal ${prop} is not a JSON object with a kind"; return 1; }
   kind="$(jq -r .kind "$prop")"
   case "$kind" in
-    scope_extension|no_change_step|visual_check|measurement_failed|rename|blocked_step) ;;
+    scope_extension|no_change_step|visual_check|measurement_failed|rename|blocked_step|ac_command) ;;
     *) echo "unevaluable: the proposal kind '${kind}' is not one the stand-in may decide"; return 1 ;;
   esac
+  # 3.16.0 (agents P017 AC13): a defective MEASURING command of a point is replaced by one that measures the same,
+  # the point's text and the plan stay byte for byte (aid-ac-substitute.sh binds both commands by sha256). What the
+  # point demands stays protected; how it is measured is technical. The stand-in judges that cmd_new measures the
+  # text, not a weaker thing — a weakening is class brief in its verdict, and the PM's.
+  if [[ "$kind" == ac_command ]]; then
+    jq -e '(.criterion | type == "string" and test("^AC[0-9]+$")) and (.cmd_old | type == "string" and length > 0)
+           and (.cmd_new | type == "string" and length > 0) and .cmd_new != .cmd_old' "$prop" >/dev/null 2>&1 \
+      || { echo "unevaluable: ac_command needs criterion AC<n>, cmd_old (the plan's) and a different cmd_new"; return 1; }
+    # the new command is code that runs in the measurement and lands in the evidence: it must be a read-only
+    # command of the allowlist in aid-protected-cmd.py (grep without recursion, test, jq, wc, read-only git; only
+    # && || | ! between them; nothing the shell expands outside single quotes) and name no protected path
+    # (normalised, at any depth). Anything else is the PM's, whatever the stand-in says (review of 3.16.0).
+    local eyaml="${sroot}/.aid-o/config/execution.yaml" gl verdict
+    gl="$AID_PROTECTED_DEFAULT_PATHS .aid-o/config/* $(yq -r '(.protected_paths // [])[]' "$eyaml" 2>/dev/null | tr '\n' ' ')"
+    verdict="$(jq -r '.cmd_new' "$prop" | GLOBS="$gl" python3 -I "$(dirname "${BASH_SOURCE[0]}")/aid-protected-cmd.py" 2>&1)"
+    [[ -z "$verdict" ]] || { echo "$verdict"; return 1; }
+    return 0
+  fi
   # what the proposal declares AND what the frozen plan says the step calls (the plan is not the proposer's) —
   # fail closed: the step must be a step of a readable plan.json (security review of P117)
   local si; si="$(jq -r '.step // ""' "$prop" 2>/dev/null)"
