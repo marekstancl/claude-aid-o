@@ -251,6 +251,12 @@ _unlisten() { kill "$LPID" 2>/dev/null || true; }
   _iplan '"true"'; mkdir -p sub
   _irun --cwd "$ROOT/sub"; [ "$status" -eq 3 ]; [[ "$output" == *"cwd_not_worktree"* ]]
 }
+@test "isolation: a point sees /proc/<pid> of a process it started (its own /proc; agents P017 AC4)" {
+  _nsprobe
+  _iplan '"sleep 7 & tr \"\\\\0\" \" \" < /proc/$!/cmdline | grep -q \"sleep 7\""'
+  _irun; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_v AC1)" = present ]
+}
 @test "isolation: each point's command is kept as cmd-<label>.sh" {
   _nsprobe
   _iplan '"true"' '"test 1 = 1"'

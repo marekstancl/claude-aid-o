@@ -13,9 +13,14 @@ PD_NET="" PD_NET_LABEL="null" PD_ENV=() PD_ENV_KEYS="[]" PD_NEXT=""  # shellchec
 # <timeout> <cmd file> — the namespace prefix: loopback up as root, then back to
 # the caller's uid. Its own pid namespace too: whatever the point starts in the
 # background (a listener) dies with it instead of outliving the measurer.
+# 3.16.0 (agents P017 AC4: a point read /proc/<pid> of a process it had started and found nothing — pokusy 3 a 4 of
+# the close fell on it): the namespace gets its own /proc (--mount-proc, a mount namespace with it) when the kernel
+# allows it; PD_MOUNT_PROC says which (the probe decides once).
+PD_MOUNT_PROC="${PD_MOUNT_PROC:-}"
 _pd_ns_run() {
+  local -a mp=(); [[ "$PD_MOUNT_PROC" == 1 ]] && mp=(--mount-proc)
   env -i PATH="$PATH" HOME="${HOME:-/tmp}" TMPDIR="${TMPDIR:-/tmp}" \
-    unshare -rn --pid --fork sh -c 'ip link set lo up 2>/dev/null; exec unshare --map-user="$1" --map-group="$2" timeout "$3" bash "$4"' \
+    unshare -rn --pid --fork "${mp[@]}" sh -c 'ip link set lo up 2>/dev/null; exec unshare --map-user="$1" --map-group="$2" timeout "$3" bash "$4"' \
     _ "$(id -u)" "$(id -g)" "$1" "$2"
 }
 # _pd_env_load — the project's verification_env (.aid-o/config/execution.yaml) into PD_ENV / PD_ENV_KEYS:
@@ -51,9 +56,13 @@ _pd_isolation_init() {
     return 0
   fi
   probe="$(mktemp)"; echo true > "$probe"
+  PD_MOUNT_PROC=1
   if command -v unshare >/dev/null 2>&1 && _pd_ns_run 10 "$probe" >/dev/null 2>&1; then
     PD_NET=unshare; PD_NET_LABEL=unshare
     command -v ip >/dev/null 2>&1 || PD_NET_LABEL="unshare (no loopback)"
+  elif PD_MOUNT_PROC=0; command -v unshare >/dev/null 2>&1 && _pd_ns_run 10 "$probe" >/dev/null 2>&1; then
+    PD_NET=unshare; PD_NET_LABEL="unshare (no own /proc: a point that reads /proc/<pid> of its own process sees the host's)"
+    command -v ip >/dev/null 2>&1 || PD_NET_LABEL+=" (no loopback)"
   else
     PD_NET=none
     PD_NEXT="next: install util-linux >= 2.38 (unshare --map-user) and allow user namespaces (sysctl kernel.unprivileged_userns_clone=1); until then no point is measured"

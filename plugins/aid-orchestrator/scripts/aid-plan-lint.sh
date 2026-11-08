@@ -233,6 +233,17 @@ _strict_finding() {
 # names a new suite, and the Reuse-check and documentation passes read it.
 _project_root="$(_aid_plan_project_root "$PLAN")" || _project_root=""
 
+# AID 3.16.0 (agents P017 AC13): a `\`` in a criterion's cmd is GNU grep's "start of the input" in the measurement's
+# isolation, while an interactive shell (grep as a function over ugrep) treats it otherwise — written and checked by
+# hand it passes, measured at the close it can never pass. Advisory.
+if [[ "$QUIET" -eq 0 ]]; then
+  declare -F _aid_vp_parse_ac >/dev/null || source "${SCRIPT_DIR}/lib/aid-verification-pattern.sh"
+  while IFS=$'\x1f' read -r _bt_label _ _bt_type _bt_cmd _; do
+    [[ "$_bt_type" == cmd && "$_bt_cmd" == *'\`'* ]] || continue
+    echo "${PLAN}: WARN ac_cmd_backslash_backtick ${_bt_label}: its cmd has \\\` — GNU grep (the isolated measurement) reads it as the start of the input, so the point cannot pass there; match a literal backtick with [\`] or drop the backslash" >&2
+  done < <(_aid_vp_parse_ac "$PLAN" "Acceptance Criteria" 2>/dev/null)
+fi
+
 # AID 3.13.0: a criterion that begins with ONE backticked word is a name, not a command (lib/aid-ac-command.sh):
 # the takeover will not run it. Advisory — say so where the plan is written, so a plan meaning a command writes one.
 if [[ "$QUIET" -eq 0 ]]; then
@@ -630,6 +641,16 @@ _plan_declared_paths() {
   done
   _AID_DECLARED_PATHS_DONE=1
 }
+
+# AID 3.16.0 (aidlab P002): a step that declares AID's own config is refused at its commit (aid_dispatch_contract_commit:
+# "AID's state … never committed by a step"). Advisory, with the way that works.
+if [[ "$QUIET" -eq 0 ]]; then
+  _plan_declared_paths
+  while IFS= read -r _cfg; do
+    [[ "$_cfg" == .aid-o/config/* || "$_cfg" == */.aid-o/config/* ]] || continue
+    echo "${PLAN}: WARN files_aid_config \`${_cfg}\` is AID's state — a step's commit refuses it; next: the controller changes it in the primary checkout (the state root) and commits it on main itself, and the step's criteria read it there" >&2
+  done < <(printf '%s\n' "$_AID_DECLARED_PATHS" | grep -v '^$' | sort -u)
+fi
 
 while IFS=$'\t' read -r _rs _re _rhead; do
   [[ -n "${_rs:-}" ]] || continue
