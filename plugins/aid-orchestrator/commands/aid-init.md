@@ -96,7 +96,7 @@ project may legitimately carry its own hook logic outside the markers.
 Since 3.16.0 `plan-start` and `plan-run` also refresh that block when it is older than the installed
 plugin's (`scripts/lib/aid-project-refresh.sh`: the block gets an `# aid-hook-version:` line, a newer one is
 never lowered, a development plugin path refreshes nothing) and move `.aid-o/config/plugin.yaml`
-`plugin_path` off a version that is gone or older. `/aid-init` is still what installs a missing hook.
+`plugin_path` off a version that is no longer on disk (an existing pin stays). A tracked or symlinked hook and one without exactly one block are only warned about. `/aid-init` is still what installs a missing hook.
 
 ### Conditional writes (not counted above)
 
