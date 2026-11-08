@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.17.1] — 2026-11-08
+
+Opravy živého náhledu z první ostré zkoušky PM na WANu.
+
+- **Přepnutí varianty bez načítání aplikace.** Dřív se po každém přepnutí 3-5 s načítala celá aplikace; teď panel změní variantu, adresu a cookie uvnitř stránky a aplikace se jen překreslí (filtry a stav zůstanou). Varianta čte `window.AID_VARIANT` při vykreslení; co se při změně adresy nepřekreslí, poslouchá událost `aid-variant`.
+- **Jedna jasná volba.** „Vybrat" bere variantu, kterou právě vidíš; vybraná je označená zvlášť („✓ vybráno: B"), dřív svítila zobrazená A a vybraná B zároveň. Panel bez „kola", poznámka se uloží sama při opuštění pole, skrytý panel je malý štítek, otevřený je poloprůhledný, dokud na něj nenajedeš.
+- **Platná adresa s klíčem už nekončí 403** kvůli cookie ze staršího běhu na stejném portu.
+- **`aid-companion.sh live` bez `AID_COMPANION_LIVE_PORTS` spadl** (`unbound variable`); testy proměnnou vždy nastavily, chybu ukázal až ostrý běh.
+
 ## [3.17.0] — 2026-11-08
 
 Živý náhled v companionu (volba PM 2A, přání z WAN P121, stavěno mimo AID). Zadání: `docs/plans/2026-11-08-3170-zivy-nahled.md`.

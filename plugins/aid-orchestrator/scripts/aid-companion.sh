@@ -116,7 +116,9 @@ cmd_live() {
     if _alive_as "$pid" "$st" "kit-live-server.mjs"; then jq -c '. + {reused: true}' "$rec"; return 0; fi
     _alive_as "$pid" "$st" "kit-live-server.mjs" && kill "$pid" 2>/dev/null; rm -f "$rec"
   fi
-  local lo="${AID_COMPANION_LIVE_PORTS%-*}" hi="${AID_COMPANION_LIVE_PORTS#*-}"; [[ -n "${AID_COMPANION_LIVE_PORTS:-}" ]] || { lo=3930; hi=3949; }
+  # the companion range (G-008 slots 3930-3949); a test narrows it. ${…:-} — unset under set -u (3.17.0 fell on it live)
+  local range="${AID_COMPANION_LIVE_PORTS:-3930-3949}" lo hi; lo="${range%-*}"; hi="${range#*-}"
+  [[ "$lo" =~ ^[0-9]+$ && "$hi" =~ ^[0-9]+$ ]] || die "live: AID_COMPANION_LIVE_PORTS must be <from>-<to> (got '${range}')"
   port=""; local c; for (( c = lo; c <= hi; c++ )); do [[ -z "$(ss -ltnH "sport = :$c" 2>/dev/null)" ]] && { port="$c"; break; }; done
   [[ -n "$port" ]] || die "live: no free port in ${lo}-${hi} (the companion range) — stop an old companion (stop-server.sh --stale)"
   local bind="${AID_COMPANION_BIND:-0.0.0.0}" token roots dir

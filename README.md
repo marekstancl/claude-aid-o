@@ -122,7 +122,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v3.17.0** (current) — živý náhled: PM otevře skutečnou aplikaci s variantami na vývojových datech a panelem pro volby, místo fotek
+- **v3.17.1** (current) — živý náhled po první ostré zkoušce: přepnutí varianty bez načítání, jedna jasná volba, skrývací panel
+- **v3.17.0** — živý náhled: PM otevře skutečnou aplikaci s variantami na vývojových datech a panelem pro volby, místo fotek
 - **v3.16.0** — uzávěr, který doběhne: vadný měřicí příkaz nahradí posuzovatel bez změny plánu, brzda na pátý pokus, kolo navíc po verdiktu „oprav", obnova háků v projektech, revize kroků s Codexem
 - **v3.15.0** — procesní mapy: proces jako klikací mapa v jednom vzhledu (BPMN nebo stavový diagram), označíš, co je špatně, agent to prověří; nabídka v brainstormingu, závazné v běhu
 - **v3.14.1** — stránka průběhu roadmapy má pevnou strukturu: čeká na tebe, etapy, teď, čísla, co chybí od koho, rizika, hotovo, historie

@@ -47,6 +47,7 @@ teardown() {
   [[ -n "${SP:-}" ]] && kill "$SP" 2>/dev/null || true
 }
 _live() { run bash "$C" live --plan P970 --project-dir "$R"; }
+# (the default range without AID_COMPANION_LIVE_PORTS is exercised by the PM's live run, 3.17.1: set -u had broken it)
 _port() { jq -r .port "$D/live-server.json"; }
 _tok() { jq -r .url "$D/live-server.json" | sed -E 's/.*aid_t=([0-9a-f]+).*/\1/'; }
 _ck() { printf 'aid_t_%s=%s' "$(_port)" "$(_tok)"; }
@@ -60,6 +61,11 @@ _get() { curl -s -H "Cookie: $(_ck)" "$@"; }
   [ "$(curl -s -o /dev/null -w '%{http_code}' "$u/__aid/live.json")" = 403 ]
   [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: aid_t_$(_port)=000000000000000000000000000000000000000000000000" "$u/index.html")" = 403 ]
   [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: aid_t_1=$(_tok)" "$u/index.html")" = 403 ]                 # another proxy's cookie
+  # a token of the right length in other characters is refused, the proxy stays up
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "$u/index.html?aid_t=$(printf '%%C5%%BE%.0s' $(seq 48))")" = 403 ]
+  [ "$(curl -s -o /dev/null -w '%{http_code}' "$u/index.html")" = 403 ]
+  # a cookie left from an earlier run on this port does not hide the valid token in the address (3.17.1, PM's try)
+  [ "$(curl -s -o /dev/null -w '%{http_code}' -H "Cookie: aid_t_$(_port)=000000000000000000000000000000000000000000000000" "$u/index.html?aid_t=$(_tok)")" = 302 ]
   run curl -s -D - -o /dev/null "$u/index.html?v=B&aid_t=$(_tok)"
   [[ "$output" == *"302"* ]]; [[ "$output" == *"set-cookie: aid_t_$(_port)=$(_tok); Path=/; HttpOnly; SameSite=Strict"* ]]   # the port in the name: two proxies on one IP keep their own
   [[ "$output" == *"location: /index.html?v=B"* ]]

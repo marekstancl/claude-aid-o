@@ -47,10 +47,9 @@ an `@` alias) fails with "ReferenceError: __dirname is not defined" — stay on 
 
 ## An existing application: the live preview first (3.17.0, PM 1. 11. 2026)
 
-When the application exists and runs, the PM looks at the real thing, not at photographs: the copy of the app
-with your variants, on the dev API, in his own browser at his own resolution, with a small AID panel over every
-page (switch variant, „vybrat“, a note per point, „Odeslat volby“). Captures stay for a design from scratch or an
-attachment to the plan. Declare once in `project.yaml`:
+When the application exists and runs, the PM looks at the real thing, not at photographs: the copy with your variants
+on the dev API, in his own browser, with a small AID panel over every page (switch variant, „Vybrat“, a note, „Odeslat
+volby“). Captures stay for a design from scratch or a plan attachment. Declare once in `project.yaml`:
 
 ```yaml
 ui:
@@ -63,7 +62,9 @@ ui:
 1. `bash $K proto --plan P --live` — the copy in a clean environment (no keys of yours) with `ui.live.env`;
    its `.env*` files are removed, it must listen on loopback.
 2. Build the variants in `proto/` from `ui.components`, behind `window.AID_VARIANT` (the preview sets it from
-   `?v=<klic>`; `null` = today's screen).
+   `?v=<klic>`; `null` = today's screen). Read it while rendering: the panel switches a variant WITHOUT reloading the
+   app (history + popstate, so the router renders again); a component the route change does not re-render listens
+   for the `aid-variant` event.
 3. Write `<P>/live.json`: `{"kolo": 1, "body": [{"bod": 1, "otazka": "…", "varianty": [{"klic": "A", "popis": "…",
    "cesta": "/provize"}]}]}` (`cesta` = the app's path where the variant shows).
 4. `bash $K live --plan P` prints the PM's address — it carries the run's access token once (`aid_t=`); without
