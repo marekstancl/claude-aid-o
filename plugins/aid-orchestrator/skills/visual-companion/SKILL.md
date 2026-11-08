@@ -47,11 +47,9 @@ an `@` alias) fails with "ReferenceError: __dirname is not defined" — stay on 
 
 ## An existing application: the live preview first (3.17.0, PM 1. 11. 2026)
 
-When the application exists and runs, the PM looks at the real thing, not at photographs: the copy of the app
-with your variants, on the dev API, in his own browser at his own resolution, with a small AID panel over every
-page (switch variant without a reload, „Vybrat“ the one on screen, a note per point saved by itself, „Odeslat
-volby“; hidden to a small tab, see-through until the pointer is over it). Captures stay for a design from scratch or an
-attachment to the plan. Declare once in `project.yaml`:
+When the application exists and runs, the PM looks at the real thing, not at photographs: the copy with your variants
+on the dev API, in his own browser, with a small AID panel over every page (switch variant, „Vybrat“, a note, „Odeslat
+volby“). Captures stay for a design from scratch or a plan attachment. Declare once in `project.yaml`:
 
 ```yaml
 ui:
