@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import net from 'node:net';
 import { spawn, execFileSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import { syncExtra, withKitBlock, manFiles, kitWrite, safeTarget, sha, giSha } from './kit-extra.mjs';
 
 const RUNTIME = new Set(['node_modules', 'dist', 'dev-dist', '.git', '.vite', 'vite-cache', '.next', '.turbo', 'coverage', 'storybook-static']);
@@ -24,7 +25,36 @@ function portOwners(port) {
   } catch { return []; }
 }
 
+// 3.17.0 live preview: the copy runs against the dev API the project ALLOWS (ui.live.allowed_api, an allowlist of
+// hosts/IPs; every URL in ui.live.env is resolved and each of its addresses must be one of theirs), in a clean
+// environment (never the agent's keys), and no value is a secret (VITE_* lands in the page). proto.json keeps the
+// digest, never the values.
+import dns from 'node:dns/promises';
+export async function liveEnv(UI, die) {
+  const live = UI.live || {}, env = live.env, allowed = (live.allowed_api || []).map(h => String(h).toLowerCase());
+  const example = `\n  ui:\n    live:\n      env:\n        VITE_API_TARGET: http://10.20.20.22:8000\n      allowed_api: [10.20.20.22]`;
+  if (!env || typeof env !== 'object' || !Object.keys(env).length) die(`proto --live: project.yaml has no ui.live.env — declare what points the copy at the DEV API, for example:${example}`);
+  if (!allowed.length) die(`proto --live: project.yaml has no ui.live.allowed_api — the hosts or IPs of the dev API the live copy may reach (an allowlist), for example:${example}`);
+  const ips = async h => { try { return (await dns.lookup(h, { all: true })).map(a => a.address); } catch { return []; } };
+  const okIps = new Set((await Promise.all(allowed.map(ips))).flat().concat(allowed));
+  for (const [k, v] of Object.entries(env)) {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) die(`proto --live: ui.live.env key '${k}' is not a variable name`);
+    if (/KEY|TOKEN|SECRET|PASS|CREDENTIAL|AUTH/i.test(k)) die(`proto --live: ui.live.env ${k} looks like a secret — the live copy's env reaches the page (VITE_*) and its log; give it no secret`);
+    const val = String(v);
+    for (const m of val.matchAll(/[a-z][a-z0-9+.-]*:\/\/[^\s'"]+/gi)) {
+      let host = ''; try { host = new URL(m[0]).hostname.toLowerCase().replace(/^\[|\]$/g, ''); } catch { die(`proto --live: ui.live.env ${k} holds an address that does not parse: ${m[0]}`); }
+      const addr = net.isIP(host) ? [host] : await ips(host);
+      if (!addr.length || !addr.every(a => okIps.has(a))) die(`proto --live: ui.live.env ${k} points at ${host} (${addr.join(', ') || 'does not resolve'}), not one of ui.live.allowed_api — the live preview reaches the dev API only`);
+    }
+  }
+  const digest = crypto.createHash('sha256').update(JSON.stringify(Object.entries(env).sort())).digest('hex').slice(0, 16);
+  // the dev server's whole environment: what a node toolchain needs, and the declared values — never the agent's keys
+  const keep = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(PATH|HOME|LANG|LC_[A-Z]+|TZ|TMPDIR|TERM|NODE_ENV|NODE_OPTIONS|npm_config_cache)$/.test(k)));
+  return { env: { ...keep, ...Object.fromEntries(Object.entries(env).map(([k, v]) => [k, String(v)])) }, digest };
+}
+
 export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
+  const LIVE = process.env.AID_COMPANION_LIVE === '1' ? await liveEnv(UI, die) : null;
   const need = k => die(`proto: project.yaml has no ui.${k} — add it, for example:\n  ui:\n    dir: ui\n    components: ui/src/components/shared\n    dev_cmd: ["npx", "vite", "--port", "{port}", "--host", "127.0.0.1", "--strictPort"]\n    ready_path: /\n    api_prefix: /api/`);
   if (!UI.dir) need('dir');
   if (!Array.isArray(UI.dev_cmd) || !UI.dev_cmd.length) need('dev_cmd (a list of arguments, one of them {port})');
@@ -64,6 +94,8 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
   if (fs.existsSync(rec)) {
     const r = JSON.parse(fs.readFileSync(rec, 'utf8'));
     let alive = startOf(r.pid) === r.starttime && pgrpOf(r.pid) === r.pgid;
+    // a copy started with another environment (mocks vs live, another dev API) is restarted, never reused
+    if (alive && (r.live_env || null) !== (LIVE ? LIVE.digest : null)) die(`proto: the running copy (pid ${r.pid}) runs ${r.live_env ? 'live (ui.live.env)' : 'on mocks'}, this asks for ${LIVE ? 'live' : 'mocks'} — the PM may be looking at it; stop it first: aid-companion.sh down --plan ${PLAN}`);
     if (alive) {   // ours, but still serving? the port must be the group's and answer
       const owners = portOwners(r.port);
       let up = false; try { up = (await fetch(r.url + (UI.ready_path || '/'))).status === 200; } catch {}
@@ -96,11 +128,16 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
     die(`proto: ${dest} exists without its manifest (${manFile}) — the copy's changes cannot be told from the app; run: aid-companion.sh proto --plan ${PLAN} --refresh`);
   }
   const state = settle();
+  if (LIVE) {   // a .env* of the app would point the dev server elsewhere than the declared dev API (Vite loads them)
+    for (const f of fs.readdirSync(dest)) if (/^\.env(\..*)?$/.test(f) && fs.lstatSync(path.join(dest, f)).isFile()) {
+      fs.rmSync(path.join(dest, f)); console.error(`proto --live: removed ${f} from the copy (the live copy takes its API from ui.live.env only)`);
+    }
+  }
 
   const port = await freePort();
   const args = UI.dev_cmd.map(a => String(a).replaceAll('{port}', String(port)));
   const log = fs.openSync(safeTarget(DIR, 'proto.log', die, { kit: true }), fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_APPEND | fs.constants.O_NOFOLLOW, 0o644);
-  const child = spawn(args[0], args.slice(1), { cwd: dest, detached: true, stdio: ['ignore', log, log], env: { ...process.env, BROWSER: 'none' } });
+  const child = spawn(args[0], args.slice(1), { cwd: dest, detached: true, stdio: ['ignore', log, log], env: LIVE ? { ...LIVE.env, BROWSER: 'none' } : { ...process.env, BROWSER: 'none' } });
   child.unref();
   const pgid = child.pid, url = `http://127.0.0.1:${port}`, ready = UI.ready_path || '/';
   const stop = why => { try { process.kill(-pgid, 'SIGTERM'); } catch {} die(`proto: ${why} (log: ${path.join(DIR, 'proto.log')})`); };
@@ -117,7 +154,13 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
   if (!ok) stop(`no HTTP 200 from ${url}${ready} within 90 s`);
   const owners = portOwners(port);
   if (!owners.length || !owners.every(p => pgrpOf(p) === pgid)) stop(`port ${port} answers, but not from the process group we started (owners: ${owners.join(', ') || 'unknown'}) — another process took it`);
-  const out = { pid: pgid, pgid, starttime: startOf(pgid), cmd: args[0], port, url, dir: dest, reused: false };
+  // the copy listens on loopback only: the live preview reaches the PM through the proxy alone (dev_cmd decides --host)
+  let listen = ''; try { listen = execFileSync('ss', ['-ltnH', `sport = :${port}`], { encoding: 'utf8' }); } catch {}
+  const addrs = [...listen.matchAll(/\s(\S+):\d+\s/g)].map(m => m[1]);
+  if (addrs.some(a => !/^(127\.0\.0\.1|\[::1\]|::1)$/.test(a))) stop(`the dev server listens on ${addrs.join(', ')}, not only on loopback — ui.dev_cmd must bind 127.0.0.1 (--host 127.0.0.1)`);
+  const out = { pid: pgid, pgid, starttime: startOf(pgid), cmd: args[0], port, url, dir: dest, reused: false, live_env: LIVE ? LIVE.digest : null };
   kitWrite(DIR, 'proto.json', JSON.stringify(out, null, 1), die);
-  console.log(JSON.stringify({ ...out, ...state, next: `build the variants in ${dest} behind ?v=<klic> from ui.components only; then write mocks.json and shots.json and run: aid-companion.sh shots --plan ${PLAN}` }));
+  console.log(JSON.stringify({ ...out, ...state, next: LIVE
+    ? `build the variants in ${dest} behind window.AID_VARIANT (the live preview sets it from ?v=<klic>) from ui.components only; write live.json (kolo, body[] {bod, otazka, varianty[] {klic, popis, cesta}}) and run: aid-companion.sh live --plan ${PLAN}`
+    : `build the variants in ${dest} behind ?v=<klic> from ui.components only; then write mocks.json and shots.json and run: aid-companion.sh shots --plan ${PLAN}` }));
 }

@@ -13,7 +13,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 
 // the names in the plan's directory that belong to the kit
-export const RESERVED = [/^proto$/, /^proto-manifest\.json$/, /^proto\.json$/, /^proto\.log$/, /^shots$/, /^mocks\.json$/,
+export const RESERVED = [/^live\.json$/, /^live-server\.json$/, /^live\.log$/, /^proto$/, /^proto-manifest\.json$/, /^proto\.json$/, /^proto\.log$/, /^shots$/, /^mocks\.json$/,
   /^shots\.json$/, /^navrh\.json$/, /^navrh-\d+\.html$/, /^check-\d+x\d+\.png$/, /^answers\.jsonl$/, /^server\.json$/,
   /^proposal\.json$/, /^\.server\.(log|log\.prev|pid)$/, /^\.events$/, /^\.started$/, /^\.keep$/, /^old$/];
 export const reserved = name => RESERVED.some(r => r.test(name));
