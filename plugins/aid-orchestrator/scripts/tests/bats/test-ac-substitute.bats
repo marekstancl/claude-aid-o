@@ -74,13 +74,16 @@ _v() { jq -r '.results[0].verdict' "$EV/plan-diff.json"; }
   run aid_protected_impact "$ROOT" "$ROOT" p3.json "$RUN"; [ "$status" -eq 1 ]
 }
 
-@test "protected: a substitute command naming a protected path (.env, a secret, AID's config) is the PM's" {
+@test "protected: a substitute is a read-only command from the allowlist naming no protected path, anything else is the PM's" {
   source "$AID_PLUGIN_PATH/scripts/lib/aid-protected.sh"
   local c
-  for c in 'cat .env' 'grep -q x config/secrets.yml' 'grep -q x .aid-o/config/execution.yaml' 'cat .e""nv' 'cat .e*v' 'cat $(echo .env)' 'bash -c "cat .env"' 'f=.env; cat $f'; do
+  for c in 'cat .env' 'grep -q x config/secrets.yml' 'grep -q x .aid-o/config/execution.yaml' 'grep -q x .e""nv' 'grep -q x .e*v' \
+           'grep -q x $(echo .env)' 'bash -c "cat .env"' 'f=.env; grep -q x $f' 'grep -q x .aid-o/./config/execution.yaml' \
+           'grep -q x .aid-o//config/execution.yaml' "python3 -c 'print(1)'" 'grep -r TOKEN .' "grep -q x \$'a'" 'grep -q x {a,b}' \
+           'git show HEAD:.env' 'sh -xc x' 'grep -q x a > out'; do
     jq -n --arg c "$c" '{kind: "ac_command", criterion: "AC1", cmd_old: "grep a", cmd_new: $c, reason: "x"}' > p.json
     run aid_protected_impact "$ROOT" "$ROOT" p.json "$RUN"; echo "$c → $output"
-    [ "$status" -eq 1 ]; [[ "$output" == security:* || "$output" == gate:* ]]
+    [ "$status" -eq 1 ]; [[ "$output" == security:* || "$output" == gate:* || "$output" == unevaluable:* ]]
   done
   # an ordinary measuring command with quotes and a regex stays technical
   jq -n '{kind: "ac_command", criterion: "AC1", cmd_old: "grep a", cmd_new: "grep -qE '"'"'foo.*bar|[`]x'"'"' src/a.txt", reason: "x"}' > p.json

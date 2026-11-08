@@ -43,10 +43,10 @@ aid_protected_impact() {
     jq -e '(.criterion | type == "string" and test("^AC[0-9]+$")) and (.cmd_old | type == "string" and length > 0)
            and (.cmd_new | type == "string" and length > 0) and .cmd_new != .cmd_old' "$prop" >/dev/null 2>&1 \
       || { echo "unevaluable: ac_command needs criterion AC<n>, cmd_old (the plan's) and a different cmd_new"; return 1; }
-    # the new command is code that runs in the measurement and lands in the evidence: a word of it naming a
-    # protected path (.env, a secret, deploy/, AID's config) is the PM's, whatever the stand-in says. The words are
-    # the shell's (shlex: quotes removed as bash removes them, so .e""nv is .env), a word with a glob is matched
-    # against the protected names (.e*v reaches .env), and expansion or a nested shell is never decided here.
+    # the new command is code that runs in the measurement and lands in the evidence: it must be a read-only
+    # command of the allowlist in aid-protected-cmd.py (grep without recursion, test, jq, wc, read-only git; only
+    # && || | ! between them; nothing the shell expands outside single quotes) and name no protected path
+    # (normalised, at any depth). Anything else is the PM's, whatever the stand-in says (review of 3.16.0).
     local eyaml="${sroot}/.aid-o/config/execution.yaml" gl verdict
     gl="$AID_PROTECTED_DEFAULT_PATHS .aid-o/config/* $(yq -r '(.protected_paths // [])[]' "$eyaml" 2>/dev/null | tr '\n' ' ')"
     verdict="$(jq -r '.cmd_new' "$prop" | GLOBS="$gl" python3 -I "$(dirname "${BASH_SOURCE[0]}")/aid-protected-cmd.py" 2>&1)"
