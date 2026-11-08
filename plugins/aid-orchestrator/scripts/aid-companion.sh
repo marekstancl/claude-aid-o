@@ -109,8 +109,8 @@ cmd_live() {
   _proto_ours "$pid" "$st" "$pg" || die "live: the recorded copy (pid ${pid}) is not running — aid-companion.sh proto --plan ${PLAN} --live"
   [[ "$(jq -r '.live_env // ""' "$p")" =~ ^[0-9a-f]{16}$ ]] || die "live: the copy runs without ui.live.env (on mocks) — restart it: aid-companion.sh proto --plan ${PLAN} --live"
   [[ -s "$spec" ]] && jq -e '(.body | type == "array" and length > 0) and all(.body[]; (.otazka | type == "string") and (.varianty | type == "array" and length > 0)
-      and all(.varianty[]; (.klic | type == "string" and test("^[A-Za-z0-9_-]{1,32}$")) and ((.cesta // "/") | type == "string" and startswith("/") and (contains("//") | not))))' "$spec" >/dev/null 2>&1 \
-    || die "live: ${spec} must be {\"kolo\": 1, \"body\": [{\"bod\": 1, \"otazka\": \"…\", \"varianty\": [{\"klic\": \"A\", \"popis\": \"…\", \"cesta\": \"/obrazovka\"}]}]} (klic letters, digits, _ -; cesta a path of the app)"
+      and all(.varianty[]; (.klic | type == "string" and test("^[A-Za-z0-9_-]{1,32}$")) and ((.cesta // "/") | type == "string" and startswith("/") and (contains("//") | not) and (test("[?#]") | not))))' "$spec" >/dev/null 2>&1 \
+    || die "live: ${spec} must be {\"kolo\": 1, \"body\": [{\"bod\": 1, \"otazka\": \"…\", \"varianty\": [{\"klic\": \"A\", \"popis\": \"…\", \"cesta\": \"/obrazovka\"}]}]} (klic letters, digits, _ -; cesta a path of the app, no ? or #)"
   if [[ -s "$rec" ]]; then
     read -r pid st port < <(jq -r '[.pid, .starttime, .port] | map(tostring) | join(" ")' "$rec")
     if _alive_as "$pid" "$st" "kit-live-server.mjs"; then jq -c '. + {reused: true}' "$rec"; return 0; fi
@@ -123,7 +123,9 @@ cmd_live() {
   # the run's access token: the PM's address carries it once, the proxy keeps it in a cookie; without it 403
   token="$(od -An -N24 -tx1 /dev/urandom | tr -d ' \n')"
   dir="$(jq -r .dir "$p")"; roots="$(realpath -m "$dir")"
-  [[ -d "$dir/node_modules" ]] && roots+=":$(realpath -m "$(readlink -f "$dir/node_modules/$(ls "$dir/node_modules" | head -1)" 2>/dev/null | sed -E 's#/node_modules/.*#/node_modules#')")"
+  # the copy's node_modules are links into the app's own (kit-proto.mjs): that directory is the second root
+  local nm; nm="$(find "$dir/node_modules" -maxdepth 1 -type l -print -quit 2>/dev/null || true)"
+  [[ -n "$nm" ]] && roots+=":$(dirname "$(readlink -f "$nm")")"
   AID_LIVE_TOKEN="$token" AID_LIVE_FS_ROOTS="$roots" setsid node "$SERVER_DIR/kit-live-server.mjs" "$DIR" "$bind" "$port" "$PLAN" >> "$DIR/live.log" 2>&1 < /dev/null &
   pid=$!
   local i; for i in $(seq 50); do [[ -n "$(ss -ltnH "sport = :$port" 2>/dev/null)" ]] && break; sleep 0.1; done

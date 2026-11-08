@@ -49,7 +49,7 @@
       });
       root.getElementById('send').onclick = async () => {
         for (const t of root.querySelectorAll('textarea')) if (t.value.trim()) await post({ type: 'note', bod: t.dataset.b, text: t.value.trim() });
-        const ok = await post({ type: 'confirm', volby: chosen });
+        const ok = await post({ type: 'confirm', selected: chosen });
         root.getElementById('st').innerHTML = ok ? '<span class="ok">Odesláno. Agent to uvidí.</span>' : 'Nepodařilo se odeslat — zkus to znovu.';
       };
     };

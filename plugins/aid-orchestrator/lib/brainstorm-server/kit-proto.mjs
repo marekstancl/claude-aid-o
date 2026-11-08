@@ -36,16 +36,19 @@ export async function liveEnv(UI, die) {
   if (!env || typeof env !== 'object' || !Object.keys(env).length) die(`proto --live: project.yaml has no ui.live.env — declare what points the copy at the DEV API, for example:${example}`);
   if (!allowed.length) die(`proto --live: project.yaml has no ui.live.allowed_api — the hosts or IPs of the dev API the live copy may reach (an allowlist), for example:${example}`);
   const ips = async h => { try { return (await dns.lookup(h, { all: true })).map(a => a.address); } catch { return []; } };
-  const okIps = new Set((await Promise.all(allowed.map(ips))).flat().concat(allowed));
+  const hosts = allowed.map(a => a.replace(/:\d+$/, '').replace(/^\[|\]$/g, ''));   // an entry may name host:port
+  const okIps = new Set((await Promise.all(hosts.map(ips))).flat().concat(hosts));
   for (const [k, v] of Object.entries(env)) {
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) die(`proto --live: ui.live.env key '${k}' is not a variable name`);
     if (/KEY|TOKEN|SECRET|PASS|CREDENTIAL|AUTH/i.test(k)) die(`proto --live: ui.live.env ${k} looks like a secret — the live copy's env reaches the page (VITE_*) and its log; give it no secret`);
+    // every value is ONE whole URL (http/https/ws/wss): a bare host or host:port could not be checked
     const val = String(v);
-    for (const m of val.matchAll(/[a-z][a-z0-9+.-]*:\/\/[^\s'"]+/gi)) {
-      let host = ''; try { host = new URL(m[0]).hostname.toLowerCase().replace(/^\[|\]$/g, ''); } catch { die(`proto --live: ui.live.env ${k} holds an address that does not parse: ${m[0]}`); }
-      const addr = net.isIP(host) ? [host] : await ips(host);
-      if (!addr.length || !addr.every(a => okIps.has(a))) die(`proto --live: ui.live.env ${k} points at ${host} (${addr.join(', ') || 'does not resolve'}), not one of ui.live.allowed_api — the live preview reaches the dev API only`);
-    }
+    let url; try { url = new URL(val); } catch {}
+    if (!url || !/^(https?|wss?):$/.test(url.protocol) || /\s/.test(val)) die(`proto --live: ui.live.env ${k} must be one whole URL (http://host:port/…) — '${val}' is not; a bare host or a template cannot be checked against ui.live.allowed_api`);
+    const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, ''), port = url.port || (/^(https|wss):$/.test(url.protocol) ? '443' : '80');
+    const addr = net.isIP(host) ? [host] : await ips(host);
+    const portOk = allowed.filter(a => /:\d+$/.test(a)).length === 0 || allowed.some(a => a.endsWith(':' + port));
+    if (!addr.length || !addr.every(a => okIps.has(a)) || !portOk) die(`proto --live: ui.live.env ${k} points at ${host}:${port} (${addr.join(', ') || 'does not resolve'}), not one of ui.live.allowed_api — the live preview reaches the dev API only`);
   }
   const digest = crypto.createHash('sha256').update(JSON.stringify(Object.entries(env).sort())).digest('hex').slice(0, 16);
   // the dev server's whole environment: what a node toolchain needs, and the declared values — never the agent's keys
@@ -95,7 +98,7 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
     const r = JSON.parse(fs.readFileSync(rec, 'utf8'));
     let alive = startOf(r.pid) === r.starttime && pgrpOf(r.pid) === r.pgid;
     // a copy started with another environment (mocks vs live, another dev API) is restarted, never reused
-    if (alive && (r.live_env || null) !== (LIVE ? LIVE.digest : null)) die(`proto: the running copy (pid ${r.pid}) runs ${r.live_env ? 'live (ui.live.env)' : 'on mocks'}, this asks for ${LIVE ? 'live' : 'mocks'} — the PM may be looking at it; stop it first: aid-companion.sh down --plan ${PLAN}`);
+    if (alive && (r.live_env || null) !== (LIVE ? LIVE.digest : null)) die(`proto: the running copy (pid ${r.pid}) runs ${r.live_env ? 'live' : 'on mocks'}, this asks for ${LIVE ? (r.live_env ? 'live with another ui.live.env' : 'live') : 'mocks'} — the PM may be looking at it; stop it first: aid-companion.sh down --plan ${PLAN}`);
     if (alive) {   // ours, but still serving? the port must be the group's and answer
       const owners = portOwners(r.port);
       let up = false; try { up = (await fetch(r.url + (UI.ready_path || '/'))).status === 200; } catch {}
@@ -154,8 +157,8 @@ export async function run({ DIR, PLAN, PROJECT, UI, die, manifest }) {
   if (!ok) stop(`no HTTP 200 from ${url}${ready} within 90 s`);
   const owners = portOwners(port);
   if (!owners.length || !owners.every(p => pgrpOf(p) === pgid)) stop(`port ${port} answers, but not from the process group we started (owners: ${owners.join(', ') || 'unknown'}) — another process took it`);
-  // the copy listens on loopback only: the live preview reaches the PM through the proxy alone (dev_cmd decides --host)
-  let listen = ''; try { listen = execFileSync('ss', ['-ltnH', `sport = :${port}`], { encoding: 'utf8' }); } catch {}
+  // the live copy listens on loopback only: the PM reaches it through the proxy alone (dev_cmd decides --host)
+  let listen = ''; if (LIVE) { try { listen = execFileSync('ss', ['-ltnH', `sport = :${port}`], { encoding: 'utf8' }); } catch { stop('cannot tell where the dev server listens (ss failed) — the live preview needs it on loopback'); } }
   const addrs = [...listen.matchAll(/\s(\S+):\d+\s/g)].map(m => m[1]);
   if (addrs.some(a => !/^(127\.0\.0\.1|\[::1\]|::1)$/.test(a))) stop(`the dev server listens on ${addrs.join(', ')}, not only on loopback — ui.dev_cmd must bind 127.0.0.1 (--host 127.0.0.1)`);
   const out = { pid: pgid, pgid, starttime: startOf(pgid), cmd: args[0], port, url, dir: dest, reused: false, live_env: LIVE ? LIVE.digest : null };
