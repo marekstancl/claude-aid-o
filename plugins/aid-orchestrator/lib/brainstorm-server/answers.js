@@ -5,13 +5,27 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-function appendAnswer(dir, event, meta) {
-  if (!['choice', 'note', 'confirm'].includes(event.type)) return false;
+// types: what this caller may write — the companion page only choice/note/confirm, the live preview also `mark`
+// (3.18.0). Returns the written row (its event_id is the mark's id), or null.
+function appendAnswer(dir, event, meta, types = ['choice', 'note', 'confirm']) {
+  if (!types.includes(event.type)) return null;
   const row = { ...event, v: 1, plan: meta.plan || null, kolo: event.kolo ?? meta.kolo ?? null,
     page: meta.page || event.page || event.screen || null, zdroj: meta.zdroj || 'page',
     event_id: crypto.randomUUID(), at: new Date().toISOString() };
   fs.appendFileSync(path.join(dir, 'answers.jsonl'), JSON.stringify(row) + '\n');
-  return true;
+  return row;
+}
+
+// marks(dir) — the live marks: `mark` rows folded by id (a row with `id` and `smazano: true` removes the one it names)
+function marks(dir) {
+  let lines = []; try { lines = fs.readFileSync(path.join(dir, 'answers.jsonl'), 'utf8').split('\n'); } catch { return []; }
+  const out = new Map();
+  for (const l of lines) {
+    let r; try { r = JSON.parse(l); } catch { continue; }
+    if (!r || r.type !== 'mark') continue;
+    if (r.smazano && r.id) out.delete(r.id); else if (!r.smazano) out.set(r.event_id, r);
+  }
+  return [...out.values()];
 }
 
 // a request from a page this server served: the Origin's host:port is the request's Host (a page of another port on
@@ -24,4 +38,4 @@ function ownRequest(req, names) {
   return names.includes(h);
 }
 
-module.exports = { appendAnswer, ownRequest };
+module.exports = { appendAnswer, ownRequest, marks };

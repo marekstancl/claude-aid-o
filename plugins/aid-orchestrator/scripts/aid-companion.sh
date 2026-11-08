@@ -274,6 +274,9 @@ cmd_answers() {
         volby: ($e | map(select(.type == "choice")) | group_by(.bod) | map({(.[-1].bod | tostring): .[-1].volba}) | add // {}),
         poznamky: ($e | map(select(.type == "note")) | group_by(.bod) | map({(.[-1].bod | tostring): .[-1].text}) | add // {}),
         odeslano: ($e | map(select(.type == "confirm")) | last // null),
+        # 3.18.0: marks of the PM over the live app — anchored to an element (kotva.selector + x/y[/w/h] in percent of it)
+        znacky: ($e | map(select(.type == "mark")) | reduce .[] as $m ({}; if $m.smazano then del(.[$m.id]) else .[$m.event_id] = $m end)
+                 | [.[] | {id: .event_id, druh, text, varianta, cesta: .cesta_path, viewport, kotva, rect, prvek, at}]),
         upozorneni: "podklad pro agenta, ne důkaz volby PM" }' "$f"
 }
 

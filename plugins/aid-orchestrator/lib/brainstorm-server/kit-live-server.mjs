@@ -61,6 +61,26 @@ const variantOf = req => {
   return v !== null && VKEY.test(v) && keys().has(v) ? v : null;
 };
 
+// a mark (3.18.0): anchored to an element (selector + where inside it, in percent), never to document pixels — WAN
+// scrolls inside <main>. Every field is checked here; what the panel sends is the page's word, not the server's.
+const str = (v, n) => typeof v === 'string' && v.length <= n;
+const pct = v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100;
+const px = v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100000;
+function markOf(ev) {
+  if (ev.smazano === true) return str(ev.id, 64) && ANSWERS.marks(DIR).some(m => m.event_id === ev.id) ? { type: 'mark', id: ev.id, smazano: true } : null;
+  const k = ev.kotva || {}, r = ev.rect || {}, p = ev.prvek || {};
+  if (!['bod', 'oblast'].includes(ev.druh) || !str(ev.text, 4000) || !ev.text.trim() || !str(ev.cesta_path, 500) || !ev.cesta_path.startsWith('/')) return null;
+  if (!str(k.selector, 500) || !k.selector || !pct(k.x) || !pct(k.y)) return null;
+  if (ev.druh === 'oblast' && !(pct(k.w) && pct(k.h))) return null;
+  if (![r.x, r.y, r.w, r.h].every(px)) return null;
+  if (ev.varianta !== null && ev.varianta !== undefined && !(str(ev.varianta, 32) && VKEY.test(ev.varianta))) return null;
+  const short = (v, n) => (typeof v === 'string' ? v.slice(0, n) : null);
+  return { type: 'mark', druh: ev.druh, text: ev.text, varianta: ev.varianta ?? null, cesta_path: ev.cesta_path,
+    kotva: { selector: k.selector, x: k.x, y: k.y, ...(ev.druh === 'oblast' ? { w: k.w, h: k.h } : {}) },
+    rect: { x: r.x, y: r.y, w: r.w, h: r.h },
+    prvek: { tag: short(p.tag, 20), role: short(p.role, 40), label: short(p.label, 120), placeholder: short(p.placeholder, 120) } };
+}
+
 function answer(req, res) {
   if (req.method !== 'POST' || !ANSWERS.ownRequest(req)) { res.writeHead(403, { 'content-type': 'application/json' }); return res.end('{"error":"foreign origin or host"}'); }
   let body = '';
@@ -68,13 +88,22 @@ function answer(req, res) {
   req.on('end', () => {
     let ev; try { ev = JSON.parse(body); } catch { res.writeHead(400); return res.end('{"error":"not JSON"}'); }
     const spec = liveSpec() || {};
-    const bod = /^\d+$/.test(String(ev.bod ?? '')) ? Number(ev.bod) : (ev.bod ?? null);   // the page's numbers, not strings
-    const sel = ev.selected && typeof ev.selected === 'object' && !Array.isArray(ev.selected)
-      ? Object.fromEntries(Object.entries(ev.selected).slice(0, 50).map(([k, v]) => [String(k).slice(0, 20), String(v).slice(0, 32)])) : null;
-    const clean = { type: ev.type, bod, volba: ev.volba ?? null, ...(sel ? { selected: sel } : {}), text: typeof ev.text === 'string' ? ev.text.slice(0, 4000) : null,
-      cesta: typeof ev.cesta === 'string' ? ev.cesta.slice(0, 500) : null, viewport: typeof ev.viewport === 'string' ? ev.viewport.slice(0, 40) : null };
-    if (!ANSWERS.appendAnswer(DIR, clean, { plan: PLAN, kolo: spec.kolo ?? null, page: 'live', zdroj: 'live' })) { res.writeHead(400); return res.end('{"error":"type is choice, note or confirm"}'); }
-    res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}');
+    const meta = { plan: PLAN, kolo: spec.kolo ?? null, page: 'live', zdroj: 'live' };
+    const extra = { cesta: typeof ev.cesta === 'string' ? ev.cesta.slice(0, 500) : null, viewport: typeof ev.viewport === 'string' ? ev.viewport.slice(0, 40) : null };
+    let clean;
+    if (ev.type === 'mark') {
+      const m = markOf(ev);
+      if (!m) { res.writeHead(400, { 'content-type': 'application/json' }); return res.end('{"error":"not a mark this panel writes (druh, kotva, rect, text, or an id that does not exist)"}'); }
+      clean = { ...m, ...extra };
+    } else {
+      const bod = /^\d+$/.test(String(ev.bod ?? '')) ? Number(ev.bod) : (ev.bod ?? null);   // the page's numbers, not strings
+      const sel = ev.selected && typeof ev.selected === 'object' && !Array.isArray(ev.selected)
+        ? Object.fromEntries(Object.entries(ev.selected).slice(0, 50).map(([k, v]) => [String(k).slice(0, 20), String(v).slice(0, 32)])) : null;
+      clean = { type: ev.type, bod, volba: ev.volba ?? null, ...(sel ? { selected: sel } : {}), text: typeof ev.text === 'string' ? ev.text.slice(0, 4000) : null, ...extra };
+    }
+    const row = ANSWERS.appendAnswer(DIR, clean, meta, ['choice', 'note', 'confirm', 'mark']);
+    if (!row) { res.writeHead(400); return res.end('{"error":"type is choice, note, confirm or mark"}'); }
+    res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ ok: true, id: row.event_id }));
   });
 }
 
@@ -104,6 +133,12 @@ const server = http.createServer((req, res) => {
   if (u.pathname === '/__aid/panel.js') { res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store' }); return res.end(PANEL); }
   if (u.pathname === '/__aid/live.json') { res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end(JSON.stringify(liveSpec() || {})); }
   if (u.pathname === '/__aid/answer') return answer(req, res);
+  if (u.pathname === '/__aid/marks') {   // the marks of one screen and variant, for the panel to draw again
+    const p = u.searchParams.get('p') || '', v = u.searchParams.get('v') || null;
+    const list = ANSWERS.marks(DIR).filter(m => m.cesta_path === p && (m.varianta ?? null) === v)
+      .map(m => ({ id: m.event_id, druh: m.druh, text: m.text, kotva: m.kotva }));
+    res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' }); return res.end(JSON.stringify(list));
+  }
   const variant = variantOf(req);
   const headers = { ...req.headers, host: `127.0.0.1:${PROTO_PORT}`, 'accept-encoding': 'identity' };
   delete headers.origin; delete headers.referer;
