@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [3.16.0] — nevydáno
+## [3.16.0] — 2026-11-08
 
 Uzávěr, který doběhne (rozbor plugin issues 8. 11. 2026, stavěno mimo AID). Zadání: `docs/plans/2026-11-08-3160-uzaver.md`.
 
