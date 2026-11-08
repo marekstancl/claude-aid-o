@@ -1857,6 +1857,19 @@ _merge() {
   [ "$(git -C "$TEST_PROJECT_ROOT" tag -l)" = "v9.9.9" ]
 }
 
+@test "AC5: --no-release merges a prepared version without a tag, the merge carries No-Release:, and the plan closes (WAN P124)" {
+  _seed_merge_project
+  jq -n '{schema_version:"aid-release-prep-1.0", version:"9.9.9"}' > "$(_run_dir)/release-prep.json"
+  _merge "$(_decision_file)" --no-release "ok"; [ "$status" -eq 2 ]                 # the PM's words, not a token
+  _merge "$(_decision_file)" --no-release "PM 6. 11.: sloučit, vydání až s opravami"; echo "$output"
+  [ "$status" -eq 0 ]; [[ "$output" == *"NO RELEASE"* ]]
+  [ "$(git -C "$TEST_PROJECT_ROOT" tag -l | wc -l)" -eq 0 ]
+  git -C "$TEST_PROJECT_ROOT" log -1 --format=%B "$(_merge_commit)" | grep -q '^No-Release: PM 6. 11.'
+  _close; echo "$output"
+  [ "$status" -eq 0 ]
+  [ "$(plan_state_get "$PLAN_ID" plan_state)" = "CLOSED" ]
+}
+
 @test "AC5: a resumed run after full success creates no duplicate merge, no duplicate lifecycle commit and no duplicate tag" {
   _seed_merge_project
   jq -n '{schema_version:"aid-release-prep-1.0", version:"9.9.9"}' \

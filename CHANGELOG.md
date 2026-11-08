@@ -22,6 +22,7 @@ Uzávěr, který doběhne (rozbor plugin issues 8. 11. 2026, stavěno mimo AID).
 - **Brána blízko limitu se ozve dřív, než na něm padne.** Řádek brány nese svůj limit (`timeout_s`); prošlá brána, která spotřebovala víc než 80 % limitu, má `near_timeout: true` a varování s doporučeným limitem (P017 pokus 6: smoke s limitem 300 s a sadou kolem 225 s spadl na čase, ne na kódu).
 - **Brány kroku i uzávěru dostanou `verification_env` projektu.** Proměnné, které měření bere z `.aid-o/config/execution.yaml`, teď dostane každý příkaz brány; co nastavil volající, vyhrává (WAN P123: brány kroku padly za 3 s na nedostupné službě, proměnné se exportovaly ručně).
 - **`plan-run` nevezme soubor vize za plán.** `P<NNN>-vision.md`, který zapisuje schválení brainstormingu, se při hledání plánu přeskočí jako zadání (WAN P124: start běhu padl na „dependency grammar is invalid").
+- **Sloučit bez vydání.** `plan-merge-to-main … --no-release "<slova PM>"` sloučí plán bez tagu, sloučovací commit nese `No-Release:` a `plan-close` tag nevyžaduje (WAN P124: PM chtěl sloučit, vydat až s opravami; tag se mazal ručně dvakrát).
 - **Počítadlo uzávěru počítá i bez konečné revize prvního pokusu.** První pokus, který padl na bránách, už nedává `null` (P017).
 
 ## [3.15.0] — 2026-11-01

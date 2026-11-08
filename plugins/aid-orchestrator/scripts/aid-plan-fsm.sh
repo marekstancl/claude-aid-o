@@ -5895,7 +5895,7 @@ cmd_plan_record_decision() {
 #                        [--op-id <id>] [--push]
 # ---------------------------------------------------------------------------
 cmd_plan_merge_to_main() {
-  local plan_id="" decision_file="" project_root_opt="" op_id_opt="" do_push=0
+  local plan_id="" decision_file="" project_root_opt="" op_id_opt="" do_push=0 no_release=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --decision)
@@ -5908,6 +5908,8 @@ cmd_plan_merge_to_main() {
         _pfsm_require_optval "plan-merge-to-main" "$1" "$#" || exit 2
         op_id_opt="$2"; shift 2 ;;
       --push) do_push=1; shift ;;
+      # 3.16.0 (WAN P124: the PM wanted the plan merged, its version released later with fixes made outside AID)
+      --no-release) [[ $# -ge 2 && ${#2} -ge 20 ]] || { echo "ERROR: plan-merge-to-main: --no-release needs the PM's words (20+ characters)" >&2; exit 2; }; no_release="$2"; shift 2 ;;
       # P073 Step 8 — the universal, audited PM backdoor. The flag is parsed on
       # every state-TRANSITION command; what it can BYPASS is bounded by the
       # forceable/hard classification in _pfsm_precondition.
@@ -6350,6 +6352,8 @@ cmd_plan_merge_to_main() {
     fi
 
     local msg="merge(plan): ${plan_id} — ${plan_branch} into ${target_branch}"
+    # the release guard's own exception (pre-push: a commit with a No-Release: footer is no release)
+    [[ -n "$no_release" ]] && msg+=$'\n\n'"No-Release: ${no_release}"
     merge_commit="$(git -C "$root" commit-tree "$merged_tree" -p "$target_head" -p "$merged_head" -m "$msg" 2>/dev/null)" || merge_commit=""
     if [[ -z "$merge_commit" ]]; then
       echo "PRECONDITION FAIL: plan-merge-to-main: could not build the merge commit for ${plan_id} — no ref was moved and ${target_branch} is unchanged." >&2
@@ -6419,7 +6423,14 @@ cmd_plan_merge_to_main() {
   #    produce a tagged release with no closure path) ───────────────────────
   local version tag_status="none"
   version="$(_pfsm_release_prep_version "$root" "$plan_id" "$run_dir_rel")"
-  if [[ "$version" != "none" ]]; then
+  if [[ -n "$no_release" ]]; then
+    # the PM's merge without a release: no tag now; plan-close accepts it from the record below
+    tag_status="no_release"
+    jq -n --arg w "$no_release" --arg v "$version" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+      '{pm_words: $w, prepared_version: $v, at: $at}' > "${root}/${run_dir_rel}/no-release.json" \
+      || { echo "PRECONDITION FAIL: plan-merge-to-main: the merge is published, but no-release.json could not be written — re-run this command." >&2; exit 1; }
+    echo "NO RELEASE: ${plan_id} merged without a tag at the PM's word (prepared version ${version} is not tagged; tag it when it is released)." >&2
+  elif [[ "$version" != "none" ]]; then
     local trc=0 tout=""
     tout="$(bash "${SCRIPT_DIR}/aid-release.sh" tag-plan "$plan_id" \
               --merge-sha "$merge_commit" --version "$version" --project-root "$root" 2>&1)" || trc=$?

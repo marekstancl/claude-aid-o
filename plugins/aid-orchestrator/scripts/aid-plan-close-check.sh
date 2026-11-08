@@ -547,6 +547,14 @@ check5_plan_branch_boundary() {
   local _rec_tag; _rec_tag="$(_pbm '.plan_boundary_manifest.plan_final_merge.tag')"
   if [[ "$CLOSE_MODE" == "abort" ]]; then
     _info "check5" "abort close: no tag assertion is made (nothing was released)"
+  elif [[ "$_rec_tag" == "no_release" ]]; then
+    # 3.16.0: merged without a release at the PM's word (plan-merge-to-main --no-release, WAN P124)
+    local _nr="${run_dir}/no-release.json"
+    if [[ -f "$_nr" && "$(jq -r '.pm_words // "" | length' "$_nr" 2>/dev/null)" -ge 20 ]]; then
+      _pass "check5" "merged without a release at the PM's word ($(jq -r .pm_words "$_nr")) — no tag is required"
+    else
+      _fail "check5" "the merge recorded no_release, but no no-release.json with the PM's words is in the attempt's evidence"
+    fi
   elif [[ -z "$_rec_tag" ]]; then
     _fail "check5" "the manifest records no tag status for the plan merge (plan_final_merge.tag is absent) — whether a tag was required cannot be established, so close is blocked rather than assumed"
   elif [[ -n "$_relprep" && "$version" != "none" && "$_rec_tag" != "v${version}" ]]; then
