@@ -54,7 +54,8 @@
     #layer{position:fixed;inset:0;pointer-events:none}
     .pin{position:fixed;transform:translate(-50%,-50%);background:#ff9f0a;color:#fff;border:2px solid #fff;border-radius:999px;min-width:22px;height:22px;font-size:12px;font-weight:700;line-height:18px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.3);pointer-events:auto;cursor:default}
     .area{position:fixed;border:2px solid #ff9f0a;background:rgba(255,159,10,.12);border-radius:4px;pointer-events:none}
-    .hl{position:fixed;outline:2px dashed #0a84ff;background:rgba(10,132,255,.08);pointer-events:none}
+    .hl{position:fixed;outline:2px solid rgba(10,132,255,.9);outline-offset:1px;background:rgba(10,132,255,.07);border-radius:3px;pointer-events:none;transition:all .06s}
+    .hl span{position:absolute;left:-2px;top:-20px;background:#0a84ff;color:#fff;font-size:11px;line-height:16px;padding:1px 6px;border-radius:4px;white-space:nowrap}
     .drag{position:fixed;border:2px dashed #ff9f0a;background:rgba(255,159,10,.1);pointer-events:none}
     .bubble{position:fixed;width:min(280px,calc(100vw - 24px));background:#fff;border:1px solid #c7c7cc;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.2);padding:8px;pointer-events:auto}
     .bubble .row{margin:6px 0 0;justify-content:flex-end}
@@ -208,13 +209,38 @@
       if (r.ok) { closeBubble(); await loadMarks(); } else { ok.textContent = 'Nepovedlo se — znovu'; }
     };
   }
-  const target = e => { const el = document.elementFromPoint(e.clientX, e.clientY); return el && el !== host ? el : null; };
+  // 3.18.0 (PM: "the picking is twitchy"): not the deepest node under the pointer but the nearest thing one talks about
+  // (a button, a field, a cell, a row, a heading, an image, a card); icons, bits of text and tiny wrappers are skipped.
+  // The wheel climbs to the enclosing whole and back (`up` levels above that element).
+  const KIND = [['button,[role=button]', 'tlačítko'], ['a[href]', 'odkaz'], ['input,select,textarea,[contenteditable=true]', 'pole'],
+    ['label', 'popisek'], ['th,td,[role=cell],[role=gridcell]', 'buňka'], ['tr,[role=row]', 'řádek'], ['li,[role=listitem]', 'položka seznamu'],
+    ['h1,h2,h3,h4,h5,h6', 'nadpis'], ['img,picture,video,canvas', 'obrázek'], ['table,[role=table],[role=grid]', 'tabulka'],
+    ['nav', 'navigace'], ['header', 'hlavička'], ['form', 'formulář'], ['dialog,[role=dialog]', 'okno'], ['section,article,aside', 'oddíl'], ['p', 'odstavec']];
+  const kindOf = el => { for (const [q, n] of KIND) if (el.matches(q)) return n; return null; };
+  const card = el => { const cs = getComputedStyle(el), r = el.getBoundingClientRect();   // a box with its own frame reads as a card
+    return r.width >= 120 && r.height >= 40 && (parseFloat(cs.borderTopWidth) > 0 || cs.boxShadow !== 'none' || (cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== getComputedStyle(el.parentElement || el).backgroundColor)); };
+  const meaningful = el => {
+    for (let n = el; n && n !== document.body && n !== document.documentElement; n = n.parentElement) {
+      const r = n.getBoundingClientRect();
+      if (r.width < 16 || r.height < 12) continue;
+      if (kindOf(n) || card(n)) return n;
+    }
+    return el;
+  };
+  let up = 0, lastBase = null;
+  const lift = el => { let n = el; for (let i = 0; i < up && n.parentElement && n.parentElement !== document.body; i++) { n = n.parentElement; while (n.parentElement && n.parentElement !== document.body && !(kindOf(n) || card(n))) n = n.parentElement; } return n; };
+  const target = e => { const raw = document.elementFromPoint(e.clientX, e.clientY); if (!raw || raw === host) return null;
+    const base = meaningful(raw); if (base !== lastBase) { lastBase = base; up = 0; } return lift(base); };
+  const label = el => kindOf(el) || (card(el) ? 'karta' : el.tagName.toLowerCase());
   const swallow = e => { if (!commenting || ours(e)) return; e.preventDefault(); e.stopPropagation(); e.stopImmediatePropagation(); };
   const handlers = {
     pointermove: e => { if (ours(e)) return; const el = target(e); if (drag && e.pointerType === 'mouse') {
         const x = Math.min(drag.x, e.clientX), y = Math.min(drag.y, e.clientY), w = Math.abs(e.clientX - drag.x), h = Math.abs(e.clientY - drag.y);
         dragNode.hidden = !(w > 8 || h > 8); at(dragNode, { left: x, top: y, width: w, height: h }); }
-      hlNode.hidden = !el || !!bubble; if (el && !bubble) at(hlNode, el.getBoundingClientRect()); },
+      hlNode.hidden = !el || !!bubble; if (el && !bubble) { at(hlNode, el.getBoundingClientRect());
+        if (!hlNode.firstChild) hlNode.appendChild(document.createElement('span')); hlNode.firstChild.textContent = label(el) + (up ? ' (o ' + up + ' výš)' : ''); } },
+    wheel: e => { if (ours(e) || bubble) return; e.preventDefault(); e.stopImmediatePropagation(); up = Math.max(0, up + (e.deltaY < 0 ? 1 : -1));
+      const el = target(e); hlNode.hidden = !el; if (el) { at(hlNode, el.getBoundingClientRect()); hlNode.firstChild && (hlNode.firstChild.textContent = label(el) + (up ? ' (o ' + up + ' výš)' : '')); } },
     pointerdown: e => { swallow(e); if (ours(e) || bubble || e.button !== 0) return; drag = { x: e.clientX, y: e.clientY }; },
     pointerup: e => { swallow(e); if (ours(e) || !drag || bubble) return; const d = drag; drag = null; dragNode.hidden = true;
       const x0 = Math.min(d.x, e.clientX), y0 = Math.min(d.y, e.clientY), w = Math.abs(e.clientX - d.x), h = Math.abs(e.clientY - d.y);
@@ -238,7 +264,8 @@
   };
   function setCommenting(on) {   // outside the mode no listener and no layer catches anything of the app
     commenting = on; drag = null; hlNode.hidden = dragNode.hidden = true; if (!on) closeBubble();
-    for (const [k, f] of Object.entries(handlers)) (on ? window.addEventListener : window.removeEventListener).call(window, k, f, true);
+    // passive: false — the wheel climbs levels in the mode instead of scrolling the page
+    for (const [k, f] of Object.entries(handlers)) on ? window.addEventListener(k, f, { capture: true, passive: false }) : window.removeEventListener(k, f, { capture: true });
     document.documentElement.style.cursor = on ? 'crosshair' : '';
     place(); draw();
   }
