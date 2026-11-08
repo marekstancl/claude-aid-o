@@ -249,6 +249,15 @@ run_gate() {
   # compatibility field.
   local json
   json="$(gate_row_normalize "{\"gate\":\"${gate_name}\",\"result\":\"${result}\"${reason:+,\"reason\":\"${reason}\"},\"exit_code\":${exit_code},\"duration_ms\":${duration_ms},\"started_at\":\"${started_at}\",\"completed_at\":\"${completed_at}\",\"output\":\"${output_truncated}\"}")"
+  # 3.16.0 (agents P017 attempt 6: smoke at 300 s fell on its limit with a suite of ~225 s, which said nothing about
+  # the code): the row carries its limit, and a pass that used over 80 % of it says so before it becomes a failure
+  if [[ "$timeout_s" =~ ^[0-9]+$ ]] && (( timeout_s > 0 )); then
+    json="$(jq -c --argjson t "$timeout_s" '. + {timeout_s: $t}' <<< "$json")"
+    if [[ "$result" == pass ]] && (( duration_ms * 10 > timeout_s * 1000 * 8 )); then
+      json="$(jq -c '. + {near_timeout: true}' <<< "$json")"
+      echo "WARNING: gate ${gate_name} passed in $(( duration_ms / 1000 )) s of its ${timeout_s} s limit — raise timeout_seconds in execution.yaml (about $(( duration_ms * 2 / 1000 + 1 )) s) before it fails on time, not on the code" >&2
+    fi
+  fi
   echo "$json"
 
   # Log to file if provided

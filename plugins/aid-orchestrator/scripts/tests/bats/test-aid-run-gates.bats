@@ -1861,3 +1861,12 @@ _ptrow() { jq -r ".gates.project_tests.$1 // empty" "$REPORT"; }
   run "$RUN_GATES" record-tests --evidence-file "$ev" -- true npx jest -t login; [ "$status" -eq 2 ]
   run "$RUN_GATES" record-tests --evidence-file "$ev" -- true python -m pytest -q; [ "$status" -eq 0 ]
 }
+
+@test "run_gate: a pass over 80 % of its limit is marked near_timeout and warns; the row carries its limit (agents P017 smoke 300 s)" {
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/aid-run-gates.sh' >/dev/null 2>&1; set +e; run_gate g 'sleep 0.9' 1 2>&1"
+  echo "$output"
+  [[ "$output" == *"WARNING: gate g passed in"*"of its 1 s limit"* ]]
+  [ "$(tail -1 <<< "$output" | jq -r '"\(.near_timeout) \(.timeout_s)"')" = "true 1" ]
+  run bash -c "source '$AID_PLUGIN_PATH/scripts/aid-run-gates.sh' >/dev/null 2>&1; set +e; run_gate g 'true' 5 2>&1"
+  [[ "$output" != *WARNING* ]]; [ "$(tail -1 <<< "$output" | jq -r '.near_timeout // "none"')" = none ]
+}
