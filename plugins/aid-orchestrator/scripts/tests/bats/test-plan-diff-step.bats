@@ -298,6 +298,16 @@ _verdicts() { jq -c '[.results[] | .verdict]' "$1"; }
   [ "$(_verdicts "$EV/plan-diff.json")" = '["present","present","present"]' ]
   rm -rf "$FAR"
 }
+@test "foreign-read: a cmd point that reads the first of two declared repositories is measured, not a silent exit (aidlab P002)" {
+  _foreign
+  G="$FAR/acta"; mkdir -p "$G"; git -C "$G" init -q -b main; git -C "$G" config user.email t@t; git -C "$G" config user.name t
+  echo g > "$G/g.md"; git -C "$G" add g.md; git -C "$G" commit -qm init
+  git -C "$G" worktree add -q -b "plan/P953-$(basename "$ROOT")" "$G/.aid-worktrees/plan-P953--acta" main
+  sed -i "s|^repo_roots: .*|repo_roots: [{name: docs, path: $F}, {name: acta, path: $G}]|" "$PLAN"
+  run bash "$PD" --plan "$PLAN" --evidence-dir "$EV" --base-commit HEAD; echo "$output"; [ "$status" -eq 0 ]
+  [ "$(_verdicts "$EV/plan-diff.json")" = '["present","present","present"]' ]
+  rm -rf "$FAR"
+}
 @test "foreign-read: at the close (--isolated --cwd <candidate>) the points read the foreign worktree too" {
   _nsprobe; _foreign
   git worktree add -q -b cand "$ROOT/cand"

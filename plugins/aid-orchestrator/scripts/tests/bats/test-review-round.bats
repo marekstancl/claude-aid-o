@@ -1414,6 +1414,33 @@ _fix() { echo "fix $1" >> "$R/src/app.py"; git -C "$R" commit -qam "fix(review):
   [ "$status" -ne 0 ]; [[ "$output" == *"re-opened the same findings"* ]]
 }
 
+@test "standing: a confirmation round that fixed one finding of two is progress, though collect rewrote the earlier round (agents P017 step 2)" {
+  _repo
+  printf -- '---\nid: P905\ntype: regular\n---\n# Plan\n' > "$ROOT/plan.md"
+  printf 'plan_path: %s\n' "$ROOT/plan.md" >> "$E/fsm-state.yaml"
+  _sc; _S prepare --round 1 >/dev/null
+  _sanswer 1 step_generalist '.findings[0].claim = "the new file is never imported, variant keep" | .findings += [(.findings[0] | .id = "step_generalist-2" | .claim = "the second helper is dead code too" | .evidence = "src/app.py:1")]'
+  _S collect --round 1 >/dev/null; _bracket 1 step_generalist; _S close --round 1 --tokens step_generalist=1 >/dev/null
+  _fix 1; _round_fail 2 keep >/dev/null                     # round 2 reports only the first: collect marks the second fixed in round 1
+  _S standing --reason "PM: už se neptej a dodělej to" >/dev/null
+  _fix 2; run _S prepare --round 3; echo "$output"
+  [ "$status" -eq 0 ]
+}
+
+@test "delegate grant after the implicit second round: round 3 is prepared, the repeat check defers to it, the next refusal names no standing instruction (WAN P123, agents P017)" {
+  _repo
+  printf -- '---\nid: P904\ntype: regular\n---\n# Plan\n' > "$ROOT/plan.md"
+  printf 'plan_path: %s\n' "$ROOT/plan.md" >> "$E/fsm-state.yaml"
+  _sc; _round_fail 1 same >/dev/null
+  _fix 1; _round_fail 2 same >/dev/null                       # the implicit confirmation round, the same finding open
+  # what `delegate` records for a `fix` answer after round 2 (case "delegate: a fix answer grants one more round")
+  jq -n '{grants: 1, after_rounds: [2], by: "delegate"}' > "$E/cp2/step-0/delegate-rounds.json"
+  _fix 2; run _round_fail 3 same; echo "$output"; [ "$status" -eq 0 ]
+  _fix 3; run _S prepare --round 4
+  [ "$status" -ne 0 ]; [[ "$output" == *"exceeds the round budget"* ]]
+  [[ "$output" != *"standing instruction"* ]]
+}
+
 @test "standing recorded BEFORE the base budget's last close: that close routes nothing, the extended last one does" {
   _repo
   printf -- '---\nid: P903\ntype: regular\n---\n# Plan\n' > "$ROOT/plan.md"

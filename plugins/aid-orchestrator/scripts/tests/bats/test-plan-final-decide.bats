@@ -489,6 +489,20 @@ _FU_MINOR='.findings = [{id: "g-1", checkpoint: "cp7", step: null, severity: "mi
 }
 
 # ── 2.114.0: the closing measurement ─────────────────────────────────────────
+@test "closing measure: a first attempt that stopped at its gates (no CP7) still names the first candidate and the minutes (agents P017)" {
+  _project_closed "$_BLOCKER"
+  local r1; r1="$(_run_dir)"
+  local c1; c1="$(jq -r .revision.head_sha "$r1/gates_report.json")"
+  rm -rf "$r1/cp7" "$r1/stage-writes.jsonl"                  # what a gate failure leaves: a report and a timeline
+  echo 'print("hello!")' > "$R/app.py"; git -C "$R" commit -qam "fix(review): louder"
+  _stage freeze; [ "$status" -eq 0 ]; _stage gates; _stage produce
+  run _round '.findings = [{id: "c-2", checkpoint: "cp7", step: null, severity: "major", claim: "the greeting is now too loud", command: "grep -n hello app.py", evidence: "app.py:1", fix: "quieter", rule: "greet once"}] | del(.no_findings_reason)'
+  [ "$status" -eq 0 ]
+  local m2="$(_run_dir)/cp7/round-1/measurement.json"
+  [ "$(jq -c '.closing | [.attempt, .findings_on_lines_changed_at_close, (.error // "none"), (.minutes_since_first_freeze | type)]' "$m2")" = '[2,1,"none","number"]' ]
+  [ "$(jq -r .closing.first_candidate "$m2")" = "$c1" ]
+}
+
 @test "closing measure: attempt 1 counts no line as written during the closing; a finding on a line the fix wrote counts in attempt 2, an uncited one is named" {
   _project_closed "$_BLOCKER"                                 # evidence app.py:1, a line of the base
   local m1="$(_run_dir)/cp7/round-1/measurement.json"

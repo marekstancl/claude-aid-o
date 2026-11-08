@@ -125,8 +125,8 @@ aid_dispatch_contract_build() {
   local step_id; step_id="$(jq -r '.id // ""' <<< "$step")"
 
   # P111 repo_roots — ONE mapping in plan.json: a path in a declared foreign
-  # repository is rewritten to that repository's worktree (allowed paths and
-  # expected artifacts alike), so the agent is never sent into the live
+  # repository is rewritten to that repository's worktree (allowed paths,
+  # expected artifacts and expected deletions alike), so the agent is never sent into the live
   # checkout. On a direct plan, a path in an undeclared foreign repository is
   # refused (exit 4); the EPIC path keeps today's absolute paths.
   local direct rr_out
@@ -136,6 +136,10 @@ aid_dispatch_contract_build() {
     step="$(jq -c --argjson a "$rr_out" '.allowed_paths = $a' <<< "$step")"
     if [[ "$artifacts" != "[]" ]]; then
       artifacts="$(aid_rr_rewrite_files "$plan" "$artifacts")" || return 4
+    fi
+    # 3.16.0 (aidlab P002): a deletion in a foreign repository is checked in its worktree too, never in the live checkout
+    if [[ "$deletions" != "[]" ]]; then
+      deletions="$(aid_rr_rewrite_files "$plan" "$deletions")" || return 4
     fi
   fi
 
@@ -519,6 +523,14 @@ _aid_dc_deleted_by_step() {
   git -C "$root" show --format= --name-only --diff-filter=D "$sha" 2>/dev/null | grep -qxF -- "$3"
 }
 
+# _aid_dc_git_refused <add|commit> <root> <stderr file> — prints what git and its hooks said, then one summary line
+# that carries the first of it (the caller logs the whole stderr, aid-step-land.sh quotes the last line). Removes the file.
+_aid_dc_git_refused() {
+  local first; first="$(grep -m1 -v '^[[:space:]]*$' "$3" 2>/dev/null || true)"
+  cat "$3" >&2 2>/dev/null || true; rm -f "$3"
+  echo "contract: git $1 refused in $2: ${first:-git and its hooks printed nothing} — your index is untouched" >&2
+}
+
 aid_dispatch_contract_commit() {
   local root="${1:?contract: tree root required}" c="${2:?contract: contract file required}" r="${3:?contract: return file required}" msg="${4:?contract: commit message required}"
   # A step commit lands on the run's task branch, or on its own step/<id> branch
@@ -608,20 +620,22 @@ aid_dispatch_contract_commit() {
   # hooks see too); the user's index is never written while that happens and nothing the user staged rides along.
   # After the commit only the step's own paths are brought to the new HEAD in the real index (Codex, P117 A+C;
   # WAN P112: a refused commit left the step's files staged and the retry saw a rename as no deletion).
-  local tidx; tidx="$(mktemp)"; rm -f "$tidx"
-  if ! GIT_INDEX_FILE="$tidx" git -C "$root" read-tree HEAD 2>/dev/null \
-     || ! { { [[ "${#forced[@]}" -eq 0 ]] || GIT_INDEX_FILE="$tidx" git -C "$root" add -f -- "${forced[@]}"; } 2>/dev/null \
-            && { [[ "${#files[@]}" -eq 0 ]] || GIT_INDEX_FILE="$tidx" git -C "$root" add -A -- "${files[@]}"; } 2>/dev/null; }; then
-    rm -f "$tidx"; echo "contract: git add refused in ${root} — your index is untouched" >&2; return 1
+  # 3.16.0: what git and its hooks said is kept and shown (Trading P005, agents P017: a refusal with no reason
+  # cost a manual commit and a recheck four times); the last line still names the refusal for aid-step-land.sh.
+  local tidx gerr; tidx="$(mktemp)"; rm -f "$tidx"; gerr="$(mktemp)"
+  if ! GIT_INDEX_FILE="$tidx" git -C "$root" read-tree HEAD 2>"$gerr" \
+     || ! { { [[ "${#forced[@]}" -eq 0 ]] || GIT_INDEX_FILE="$tidx" git -C "$root" add -f -- "${forced[@]}"; } 2>>"$gerr" \
+            && { [[ "${#files[@]}" -eq 0 ]] || GIT_INDEX_FILE="$tidx" git -C "$root" add -A -- "${files[@]}"; } 2>>"$gerr"; }; then
+    _aid_dc_git_refused add "$root" "$gerr"; rm -f "$tidx"; return 1
   fi
   if GIT_INDEX_FILE="$tidx" git -C "$root" diff --cached --quiet; then
-    rm -f "$tidx"; echo "nothing to commit"
+    rm -f "$tidx" "$gerr"; echo "nothing to commit"
     return 0
   fi
-  if ! GIT_INDEX_FILE="$tidx" git -C "$root" commit -q -m "$msg" 2>/dev/null; then
-    rm -f "$tidx"; echo "contract: git commit refused in ${root} — your index is untouched" >&2; return 1
+  if ! GIT_INDEX_FILE="$tidx" git -C "$root" commit -q -m "$msg" 2>"$gerr"; then
+    _aid_dc_git_refused commit "$root" "$gerr"; rm -f "$tidx"; return 1
   fi
-  rm -f "$tidx"
+  rm -f "$tidx" "$gerr"
   local head _p; head="$(git -C "$root" rev-parse HEAD)"; local -a stale=()
   for _p in "${forced[@]}" "${files[@]}"; do git -C "$root" reset -q HEAD -- "$_p" >/dev/null 2>&1 || stale+=("$_p"); done
   local rec; rec="$(_aid_dc_step_record "$root" "$c")"; mkdir -p "${rec%/*}"

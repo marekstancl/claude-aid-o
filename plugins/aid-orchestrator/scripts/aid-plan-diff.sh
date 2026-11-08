@@ -476,7 +476,7 @@ while IFS= read -r line; do
       must_contain|must_not_exist) f2="$(aid_rr_path "$RR_SRC" "$file")" || fw=1; [[ "$f2" == "$file" ]] || fnote=" (foreign: read ${f2}, the plan's worktree)"; file="$f2" ;;
       cmd) c2="$(aid_rr_text "$RR_SRC" "$cmd")" || fw=1
            if [[ "$c2" != "$cmd" ]]; then
-             fnote=" (foreign paths read in:$(cut -f3 <<< "$_AID_RR_CACHE" | while IFS= read -r w; do [[ -n "$w" && "$c2" == *"$w"* ]] && printf ' %s' "$w"; done))"
+             fnote=" (foreign paths read in:$(cut -f3 <<< "$_AID_RR_CACHE" | while IFS= read -r w; do if [[ -n "$w" && "$c2" == *"$w"* ]]; then printf ' %s' "$w"; fi; done))"
            fi
            cmd="$c2" ;;
     esac

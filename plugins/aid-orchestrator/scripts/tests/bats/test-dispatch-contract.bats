@@ -394,6 +394,14 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   [[ "$output" == *"work in ${WT}"*"never in ${F}"* ]]
 }
 
+@test "repo-roots: a Delete entry under the declared path is expected in the worktree, never in the live checkout (aidlab P002)" {
+  _rr_setup
+  jq --arg f "$F" '.steps[0].outputs += ["Delete: `\($f)/page.md` — gone"]' rr-plan.json > rr-del.json
+  run aid_dispatch_contract_build rr-del.json 0 rr-contract.json
+  [ "$status" -eq 0 ]
+  [ "$(jq -c '.expected_deletions' rr-contract.json)" = "$(jq -nc --arg w "$WT" '["\($w)/page.md"]')" ]
+}
+
 @test "repo-roots: a symlinked or trailing-slash spelling of the declared path is rewritten too" {
   _rr_setup
   ln -s "$F" "$TEST_DIR/docs-link"
@@ -561,16 +569,18 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   [ -z "$(git diff --cached --name-only)" ]
 }
 
-@test "contract: transaction — a commit the hook refuses leaves the index exactly as it was before the step's staging" {
+@test "contract: transaction — a commit the hook refuses leaves the index exactly as it was before the step's staging, and its last line quotes the hook" {
   git init -q -b main . 2>/dev/null || git init -q .
   git config user.email t@t; git config user.name T
   git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
   local before; before="$(git diff --cached --name-status)"
-  printf '#!/bin/sh\nexit 1\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
+  printf '#!/bin/sh\necho "HOOK: blocked for a reason" >&2\nexit 1\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
   echo x > src/thing.sh; echo y > tests/test-thing.bats
   _return '{}'
   run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"
   echo "$output"; [ "$status" -eq 1 ]; [[ "$output" == *"your index is untouched"* ]]
+  # aid-step-land.sh quotes the LAST line of the log as the refusal (Trading P005, agents P017: it said nothing)
+  [[ "$(tail -1 <<< "$output")" == *"git commit refused"*"HOOK: blocked for a reason"* ]]
   [ "$(git diff --cached --name-status)" = "$before" ]
 }
 
