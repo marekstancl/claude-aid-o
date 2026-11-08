@@ -574,7 +574,7 @@ _rr_setup() {   # a direct plan.json whose step names a file in the declared for
   git config user.email t@t; git config user.name T
   git add -A; git commit -q -m seed; git checkout -q -b task/E-1/main
   local before; before="$(git diff --cached --name-status)"
-  printf '#!/bin/sh\necho "HOOK: blocked for a reason" >&2\nexit 1\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
+  printf '#!/bin/sh\necho "AID pre-commit: guard skipped (fail-open)" >&2\necho "HOOK: blocked for a reason" >&2\nexit 1\n' > .git/hooks/pre-commit; chmod +x .git/hooks/pre-commit
   echo x > src/thing.sh; echo y > tests/test-thing.bats
   _return '{}'
   run aid_dispatch_contract_commit "$TEST_DIR" contract.json .aid-o/return.json "step 1"

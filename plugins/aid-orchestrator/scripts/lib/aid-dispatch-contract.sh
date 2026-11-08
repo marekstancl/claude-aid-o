@@ -524,9 +524,10 @@ _aid_dc_deleted_by_step() {
 }
 
 # _aid_dc_git_refused <add|commit> <root> <stderr file> — prints what git and its hooks said, then one summary line
-# that carries the first of it (the caller logs the whole stderr, aid-step-land.sh quotes the last line). Removes the file.
+# that quotes the line saying why: the first naming a block, refusal or error (a hook's "guard skipped" notice comes
+# before it), else the last one printed. The caller logs the whole stderr; aid-step-land.sh quotes the last line.
 _aid_dc_git_refused() {
-  local first; first="$(grep -m1 -v '^[[:space:]]*$' "$3" 2>/dev/null || true)"
+  local first; first="$(grep -m1 -iE 'block|refus|reject|error|fatal|denied' "$3" 2>/dev/null || grep -v '^[[:space:]]*$' "$3" 2>/dev/null | tail -1 || true)"
   cat "$3" >&2 2>/dev/null || true; rm -f "$3"
   echo "contract: git $1 refused in $2: ${first:-git and its hooks printed nothing} — your index is untouched" >&2
 }
