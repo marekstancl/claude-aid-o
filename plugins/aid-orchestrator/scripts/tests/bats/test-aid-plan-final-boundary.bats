@@ -1861,6 +1861,8 @@ _merge() {
   _seed_merge_project
   jq -n '{schema_version:"aid-release-prep-1.0", version:"9.9.9"}' > "$(_run_dir)/release-prep.json"
   _merge "$(_decision_file)" --no-release "ok"; [ "$status" -eq 2 ]                 # the PM's words, not a token
+  _merge "$(_decision_file)" --no-release "PM 6. 11.: sloučit, vydání až s opravami" --push
+  [ "$status" -eq 1 ]; [[ "$output" == *"release guard refuses unreleased work"* ]]   # it stays local until it ships
   _merge "$(_decision_file)" --no-release "PM 6. 11.: sloučit, vydání až s opravami"; echo "$output"
   [ "$status" -eq 0 ]; [[ "$output" == *"NO RELEASE"* ]]
   [ "$(git -C "$TEST_PROJECT_ROOT" tag -l | wc -l)" -eq 0 ]

@@ -93,3 +93,4 @@
 0	plan_lint	roadmap_page_missing
 0	plan_lint	roadmap_path_invalid
 0	plan_close_refused	roadmap_page_not_refreshed
+0	fsm_precondition_fail	closing_attempts_exhausted

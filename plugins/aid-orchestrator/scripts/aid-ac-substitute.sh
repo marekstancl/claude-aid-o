@@ -25,15 +25,13 @@ CMD="${1:-}"; shift || true
 EVID="" CRIT="" AUTH="" CMDFILE="" PMWORDS="" PLAN="" PLANCMD=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --evidence-dir|--criterion|--stand-in|--cmd-file|--pm|--plan|--cmd)
-      [[ $# -ge 2 ]] || { echo "${0##*/}: $1 needs a value" >&2; exit 2; } ;;&
-    --evidence-dir) EVID="$2"; shift 2 ;;
-    --criterion)    CRIT="$2"; shift 2 ;;
-    --stand-in)     AUTH="$2"; shift 2 ;;
-    --cmd-file)     CMDFILE="$2"; shift 2 ;;
-    --pm)           PMWORDS="$2"; shift 2 ;;
-    --plan)         PLAN="$2"; shift 2 ;;
-    --cmd)          PLANCMD="$2"; shift 2 ;;
+    --evidence-dir) [[ $# -ge 2 ]] || { echo "${0##*/}: $1 needs a value" >&2; exit 2; }; EVID="$2"; shift 2 ;;
+    --criterion) [[ $# -ge 2 ]] || { echo "${0##*/}: $1 needs a value" >&2; exit 2; }; CRIT="$2"; shift 2 ;;
+    --stand-in) [[ $# -ge 2 ]] || { echo "${0##*/}: $1 needs a value" >&2; exit 2; }; AUTH="$2"; shift 2 ;;
+    --cmd-file) [[ $# -ge 2 ]] || { echo "${0##*/}: $1 needs a value" >&2; exit 2; }; CMDFILE="$2"; shift 2 ;;
+    --pm) [[ $# -ge 2 ]] || { echo "${0##*/}: $1 needs a value" >&2; exit 2; }; PMWORDS="$2"; shift 2 ;;
+    --plan) [[ $# -ge 2 ]] || { echo "${0##*/}: $1 needs a value" >&2; exit 2; }; PLAN="$2"; shift 2 ;;
+    --cmd) [[ $# -ge 2 ]] || { echo "${0##*/}: $1 needs a value" >&2; exit 2; }; PLANCMD="$2"; shift 2 ;;
     *) echo "${0##*/}: unknown argument $1" >&2; exit 2 ;;
   esac
 done

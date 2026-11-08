@@ -472,11 +472,15 @@ while IFS= read -r line; do
   # plan's command by sha256, so a changed plan or an edited entry falls back to the plan's own command
   subnote="" subby=""
   if [[ "$pat_type" == cmd && -n "$PLAN" ]]; then
-    if _sub="$(bash "${SCRIPT_DIR}/aid-ac-substitute.sh" check --plan "$PLAN" --criterion "$ac_label" --cmd "$cmd" 2>/dev/null)"; then
+    _suberr="$(mktemp)"
+    if _sub="$(bash "${SCRIPT_DIR}/aid-ac-substitute.sh" check --plan "$PLAN" --criterion "$ac_label" --cmd "$cmd" 2>"$_suberr")"; then
       IFS=$'\x1f' read -r subby _subcmd <<< "$_sub"
       subnote=" (measured by a substitute command approved by ${subby}; the plan's: ${cmd})"
       cmd="$_subcmd"
+    elif [[ -s "$_suberr" ]]; then
+      subnote=" ($(head -1 "$_suberr"))"   # an entry exists but does not hold: say why the plan's command ran
     fi
+    rm -f "$_suberr"
   fi
   # P112: a declared foreign path → the plan's worktree; a worktree that is gone
   # is named, never replaced by a read of the live checkout.

@@ -73,3 +73,20 @@ _v() { jq -r '.results[0].verdict' "$EV/plan-diff.json"; }
   jq 'del(.criterion)' p.json > p3.json
   run aid_protected_impact "$ROOT" "$ROOT" p3.json "$RUN"; [ "$status" -eq 1 ]
 }
+
+@test "protected: a substitute command naming a protected path (.env, a secret, AID's config) is the PM's" {
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-protected.sh"
+  local c
+  for c in 'cat .env' 'grep -q x config/secrets.yml' 'grep -q x .aid-o/config/execution.yaml'; do
+    jq -n --arg c "$c" '{kind: "ac_command", criterion: "AC1", cmd_old: "grep a", cmd_new: $c, reason: "x"}' > p.json
+    run aid_protected_impact "$ROOT" "$ROOT" p.json "$RUN"; echo "$c → $output"
+    [ "$status" -eq 1 ]; [[ "$output" == security:* || "$output" == gate:* ]]
+  done
+}
+
+@test "substitute: an entry that does not hold says why in the point's evidence" {
+  bash "$SUB" add --evidence-dir "$RUN" --criterion AC1 --cmd-file "$ROOT/new.cmd" --pm "PM 8. 11.: měř to tím opraveným grepem" >/dev/null
+  : > "$ROOT/.aid-o/work/evidence/P960/delegated-disputes.jsonl"
+  _pd; [ "$(_v)" = absent ]
+  [[ "$(jq -r '.results[0].evidence' "$EV/plan-diff.json")" == *"no record in the plan's ledger"* ]]
+}

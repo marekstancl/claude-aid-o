@@ -43,6 +43,18 @@ aid_protected_impact() {
     jq -e '(.criterion | type == "string" and test("^AC[0-9]+$")) and (.cmd_old | type == "string" and length > 0)
            and (.cmd_new | type == "string" and length > 0) and .cmd_new != .cmd_old' "$prop" >/dev/null 2>&1 \
       || { echo "unevaluable: ac_command needs criterion AC<n>, cmd_old (the plan's) and a different cmd_new"; return 1; }
+    # the new command is code that runs in the measurement and lands in the evidence: a word of it naming a
+    # protected path (.env, a secret, deploy/) is the PM's, whatever the stand-in says (review of 3.16.0)
+    local w lw g2 eyaml="${sroot}/.aid-o/config/execution.yaml" gl
+    gl="$AID_PROTECTED_DEFAULT_PATHS $(yq -r '(.protected_paths // [])[]' "$eyaml" 2>/dev/null | tr '\n' ' ')"
+    for w in $(jq -r '.cmd_new' "$prop" | tr -s " \t\"'<>|;&()=" '\n'); do
+      lw="$(tr '[:upper:]' '[:lower:]' <<< "${w#./}")"; lw="${lw##*/.aid-o/../}"
+      case "$lw" in .aid-o/config/*|*/.aid-o/config/*) echo "gate: the new command reads ${w}, AID's configuration"; return 1 ;; esac
+      for g2 in $(tr '[:upper:]' '[:lower:]' <<< "$gl"); do
+        { _aid_prot_glob "$lw" "$g2" || _aid_prot_glob "${lw##*/}" "$g2" || { [[ "$g2" != */* ]] && _aid_prot_glob "$lw" "**/$g2"; }; } \
+          && { echo "security: the new command names ${w}, which matches the protected path ${g2}"; return 1; }
+      done
+    done
     return 0
   fi
   # what the proposal declares AND what the frozen plan says the step calls (the plan is not the proposer's) —

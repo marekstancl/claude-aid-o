@@ -3391,9 +3391,20 @@ _pfsm_finalize_freeze() {
   # 3.16.0 (agents P017: six attempts and ten hours, the "three attempts feeding on themselves" rule a sentence
   # nobody counted): past AID_CLOSING_MAX_ATTEMPTS (4) attempts the close stops for the PM. His "one more" is a
   # receipt for exactly that attempt number; the next one stops again.
-  local _max="${AID_CLOSING_MAX_ATTEMPTS:-4}" _rcpt="${root}/.aid-o/work/plan-final/${plan_id}/one-more-attempt-${attempt}.json"
+  # the limit is the project's (execution.yaml closing.max_attempts, AID's protected config), never the environment
+  # a controller runs in — a test sets it only under bats
+  local _max; _max="$(yq -r '.closing.max_attempts // 4' "${root}/.aid-o/config/execution.yaml" 2>/dev/null || echo 4)"
+  [[ "$_max" =~ ^[0-9]+$ ]] || _max=4
+  [[ -n "${BATS_TEST_FILENAME:-}" && -n "${AID_CLOSING_MAX_ATTEMPTS:-}" ]] && _max="$AID_CLOSING_MAX_ATTEMPTS"
+  local _rcpt="${root}/.aid-o/work/plan-final/${plan_id}/one-more-attempt-${attempt}.json"
   if [[ "$attempt" =~ ^[0-9]+$ ]] && (( attempt > _max )) && [[ ! -f "$_rcpt" ]]; then
     if [[ -n "${_PFSM_ONE_MORE:-}" ]]; then
+      # in an --auto run the controller would type these words itself: the PM's card, never the controller
+      source "${SCRIPT_DIR}/lib/aid-delegate.sh"
+      if aid_delegate_in_force "$root" "$plan_id"; then
+        echo "PRECONDITION FAIL: --one-more-attempt is the PM's answer on a card; in an --auto run it is not taken from the controller. Stop the run (the PM answers, then: plan-finalize ${plan_id} --stage freeze --one-more-attempt \"<his words>\" outside --auto)." >&2
+        return 1
+      fi
       (( ${#_PFSM_ONE_MORE} >= 20 )) || { echo "PRECONDITION FAIL: --one-more-attempt \"<the PM's words>\" needs 20+ characters." >&2; return 1; }
       mkdir -p "$(dirname "$_rcpt")"
       jq -n --argjson a "$attempt" --arg r "$_PFSM_ONE_MORE" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -5533,6 +5544,9 @@ _pfsm_finalize_decide() {
   declare -F aid_follow_up_live >/dev/null || source "${SCRIPT_DIR}/lib/aid-follow-up.sh"
   local _fun; _fun="$(aid_follow_up_live "${run_dir_abs%/*}" | grep -c '' || true)"
   (( _fun > 0 )) && echo "FOLLOW-UPS: ${_fun} finding(s) a confirmation round left for after the close (${_fu#"${root}/"}) — write each into the project's backlog and name the count in the close message." >&2
+  # 3.16.0: a point measured by a substitute command is said to the PM, never shown as an ordinary pass
+  local _subs; _subs="$(jq -r '[.results[]? | select(.measured_with == "substitute") | "\(.ac_label) (approved by \(.substitute_by))"] | join(", ")' "${run_dir_abs}/plan-diff.json" 2>/dev/null || true)"
+  [[ -n "$_subs" ]] && echo "SUBSTITUTES: measured by a replacement command, not the plan's: ${_subs} — name them in the card and the close message (plan-diff.json carries both commands)." >&2
   return 0
 }
 
@@ -5945,6 +5959,15 @@ cmd_plan_merge_to_main() {
   fi
   command -v jq >/dev/null 2>&1 || {
     echo "PRECONDITION FAIL: plan-merge-to-main requires jq." >&2; exit 1; }
+  if [[ -n "$no_release" ]]; then
+    # the release guard (pre-push) blocks unreleased work reaching the remote by design: a merge without a release
+    # stays local until it ships, and in an --auto run the controller does not type the PM's words (3.16.0)
+    (( do_push )) && { echo "PRECONDITION FAIL: plan-merge-to-main: --no-release with --push — the release guard refuses unreleased work on the remote; merge without --push, push with the release that tags it." >&2; exit 1; }
+    source "${SCRIPT_DIR}/lib/aid-delegate.sh"
+    if aid_delegate_in_force "$(_pfsm_resolve_project_root "$project_root_opt" 2>/dev/null || pwd)" "$plan_id" 2>/dev/null; then
+      echo "PRECONDITION FAIL: plan-merge-to-main: --no-release is the PM's answer; in an --auto run it is not taken from the controller — ask him on the card, then run it outside --auto." >&2; exit 1
+    fi
+  fi
 
   local root; root="$(_pfsm_resolve_project_root "$project_root_opt")"
   export AID_PLAN_STATE_PROJECT_ROOT="$root"
