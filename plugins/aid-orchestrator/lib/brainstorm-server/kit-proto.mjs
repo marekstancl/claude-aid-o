@@ -44,7 +44,8 @@ export async function liveEnv(UI, die) {
     // every value is ONE whole URL (http/https/ws/wss): a bare host or host:port could not be checked
     const val = String(v);
     let url; try { url = new URL(val); } catch {}
-    if (!url || !/^(https?|wss?):$/.test(url.protocol) || /\s/.test(val)) die(`proto --live: ui.live.env ${k} must be one whole URL (http://host:port/…) — '${val}' is not; a bare host or a template cannot be checked against ui.live.allowed_api`);
+    if (url && (url.username || url.password)) die(`proto --live: ui.live.env ${k} carries a user or password in its URL — the live copy's env reaches the page and its log; give the dev API's address only`);
+    if (!url || !/^(https?|wss?):$/.test(url.protocol) || /\s/.test(val)) die(`proto --live: ui.live.env ${k} must be one whole URL (http://host:port/…) — it is not (the value is not printed: it may carry a secret); a bare host or a template cannot be checked against ui.live.allowed_api`);
     const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, ''), port = url.port || (/^(https|wss):$/.test(url.protocol) ? '443' : '80');
     const addr = net.isIP(host) ? [host] : await ips(host);
     const portOk = allowed.filter(a => /:\d+$/.test(a)).length === 0 || allowed.some(a => a.endsWith(':' + port));

@@ -276,14 +276,21 @@ All mockup references are collected and processed in Step 8 before delegating to
 **Visual Companion offer:** After analysis, if the topic involves UI, visual design,
 or layout decisions, offer the browser companion:
 "This topic involves visual decisions. Want to use the Visual Companion?
-It shows interactive mockups in your browser during design.
-  (Y) Yes — start companion server (requires Node.js)
-  (N) No — text-only brainstorming (default)"
+For a screen of the running application you open the application itself with the variants (live preview);
+otherwise it shows the variants as pictures.
+  (Y) Yes — start it (recommended for a screen of an existing application)
+  (N) No — text-only brainstorming"
 
 If PM accepts:
-1. Follow `skills/visual-companion/SKILL.md` — one procedure: `bash {plugin_path}/scripts/aid-companion.sh up --plan P{NNN}`,
-   `proto`, the variants from the shared components, `shots`, `navrh.json`, `show`, `answers`. Never build a page,
-   capture script or start script of your own.
+1. Follow `skills/visual-companion/SKILL.md` — `bash {plugin_path}/scripts/aid-companion.sh up --plan P{NNN}` first; it
+   says which way (3.18.1):
+   - **an existing screen and `ui.live` set** → the live preview: `proto --live`, the variants, `live.json`, `live`,
+     `answers` (`live` also writes the design gate's basis);
+   - **an existing screen without `ui.live`** → show the PM the block `aid_ui_live_detect` proposes (a comment instead
+     = ask him for the dev API's address), write it into `project.yaml` on his yes, then the live preview;
+   - **he declines, `proto --live` refuses, an app without a dev server (a widget, a build only), or a design from
+     scratch** → captures: `proto`, the variants, `shots`, `navrh.json`, `show`, `answers` — and tell him why.
+   Never build a page, capture script or start script of your own.
 2. Note `visual_companion: active` in the interim document
 
 If PM declines or topic is non-visual: skip. No re-asking.

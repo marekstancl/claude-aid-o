@@ -6,7 +6,7 @@
 #
 #   up       start the companion server for the plan (slot 3930-3949, reachable
 #            over the VPN), or reuse its own running one from the same plugin
-#            version; prints the PM's address
+#            version; prints the PM's address; says on stderr whether ui.live lets the PM see the real app (3.18.1)
 #   proto    copy ui.dir into <P>/proto (outside the repo), start ui.dev_cmd on a
 #            free loopback port in its own process group, wait for ui.ready_path; a reused
 #            copy gets the copy_extra files and says how stale it is; --refresh sets the copy,
@@ -21,6 +21,7 @@
 #            of the companion range (3930-3949, over the VPN) in front of the running `proto --live` copy (dev API
 #            from ui.live.env), with window.AID_VARIANT from ?v= and the AID panel (variants, choose, note, send)
 #            over every page; the agent writes <P>/live.json (kolo, body[] {bod, otazka, varianty[] {klic, popis, cesta}})
+#            and live writes the brainstorm design gate's basis (brainstorm/<P>/proposal.json, marked, no captures)
 #   answers  the PM's latest choices and notes for a round (--kolo N, --history)
 #   down     stop this plan's server, the live proxy and its verified prototype group (by group and start time)
 #
@@ -79,8 +80,24 @@ url_host() {
   printf '%s' "${ip:-localhost}"
 }
 
+# 3.18.1: the kit says itself whether the PM can see the real application (stderr; stdout stays the JSON record)
+_live_hint() {
+  local cfg="$ROOT/.aid-o/config/project.yaml" ui
+  [[ -f "$cfg" ]] || return 0
+  ui="$(yq -o=json -I=0 '.ui // {}' "$cfg" 2>/dev/null)" || return 0
+  [[ "$(jq -r '.dir // ""' <<< "$ui" 2>/dev/null)" != "" ]] || return 0
+  if jq -e '(.live.env | type == "object" and length > 0) and (.live.allowed_api | type == "array" and length > 0)' <<< "$ui" >/dev/null 2>&1; then
+    echo "aid-companion: ui.live is set — an EXISTING screen goes to the live preview (proto --live, live.json, live); captures only for a design from scratch" >&2
+  elif jq -e '.live != null' <<< "$ui" >/dev/null 2>&1; then
+    echo "aid-companion: ui.live is incomplete (needs env AND allowed_api) — the PM sees an existing screen only as captures until it is; the block: source \$AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh && aid_ui_live_detect <project root> $(jq -r .dir <<< "$ui")" >&2
+  else
+    echo "aid-companion: no ui.live — the PM sees an existing screen only as captures; propose the live preview to the PM: source \$AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh && aid_ui_live_detect <project root> $(jq -r .dir <<< "$ui")" >&2
+  fi
+}
+
 cmd_up() {
   local rec="$DIR/server.json" pid st ver port
+  _live_hint
   if [[ -s "$rec" ]]; then
     read -r pid st ver port < <(jq -r '[.pid, .starttime, .version, .port] | map(tostring) | join(" ")' "$rec")
     if _alive_as "$pid" "$st" "$SERVER_DIR/index.js" || _alive_as "$pid" "$st" "index.js"; then
@@ -101,6 +118,23 @@ cmd_up() {
      '{type, url, port, screen_dir, pid: $pid, starttime: $st, version: $v, reused: false}' <<< "$out" | tee "$rec"
 }
 
+# 3.18.1: the brainstorm's design gate wants a proposal basis (aid_ui_proposal_basis_check); the live preview takes no
+# captures of live data, so its basis is the marked design-system one. Written only when the brainstorm exists and
+# never over a basis the captures made (show).
+_live_proposal() {
+  local spec="$1" st="$ROOT/.aid-o/work/brainstorm/$PLAN" vps
+  [[ -d "$st" ]] || return 0
+  [[ -f "$st/proposal.json" ]] && ! jq -e '.companion_kit.live' "$st/proposal.json" >/dev/null 2>&1 && return 0
+  # shellcheck source=lib/aid-ui-proposal.sh
+  source "$SCRIPT_DIR/lib/aid-ui-proposal.sh"
+  vps="$(aid_ui_proposal_viewports "$ROOT" | jq -Rn '[inputs | select(length > 0) | split(" ") | {name: .[0], width: (.[1] | tonumber), height: (.[2] | tonumber), baseline: null, page: null, proposed: null}]')"
+  jq -n --argjson vps "$vps" --arg spec "$spec" --argjson kolo "$(jq '.kolo // 1' "$spec")" --arg at "$(date -u +%FT%TZ)" \
+    '{basis: "design-system", live_baseline: false,
+      marked: "NO LIVE BASELINE — live preview: the PM judges the variants in the running application over the dev API; live data is never captured",
+      screen: null, fixture_data: null, production_data_used: false, responsive: ($vps | length > 1), viewports: $vps,
+      design_system: {}, brief: null, companion_kit: {live: $spec, kolo: $kolo}, created_at: $at}' > "$st/proposal.json"
+}
+
 # live: the proxy in front of the running live copy (lib/brainstorm-server/kit-live-server.mjs)
 cmd_live() {
   local p="$DIR/proto.json" spec="$DIR/live.json" rec="$DIR/live-server.json" pid st pg pport port
@@ -111,6 +145,7 @@ cmd_live() {
   [[ -s "$spec" ]] && jq -e '(.body | type == "array" and length > 0) and all(.body[]; (.otazka | type == "string") and (.varianty | type == "array" and length > 0)
       and all(.varianty[]; (.klic | type == "string" and test("^[A-Za-z0-9_-]{1,32}$")) and ((.cesta // "/") | type == "string" and startswith("/") and (contains("//") | not) and (test("[?#]") | not))))' "$spec" >/dev/null 2>&1 \
     || die "live: ${spec} must be {\"kolo\": 1, \"body\": [{\"bod\": 1, \"otazka\": \"…\", \"varianty\": [{\"klic\": \"A\", \"popis\": \"…\", \"cesta\": \"/obrazovka\"}]}]} (klic letters, digits, _ -; cesta a path of the app, no ? or #)"
+  _live_proposal "$spec"
   if [[ -s "$rec" ]]; then
     read -r pid st port < <(jq -r '[.pid, .starttime, .port] | map(tostring) | join(" ")' "$rec")
     if _alive_as "$pid" "$st" "kit-live-server.mjs"; then jq -c '. + {reused: true}' "$rec"; return 0; fi

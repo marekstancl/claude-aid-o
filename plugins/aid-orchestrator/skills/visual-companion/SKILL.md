@@ -45,11 +45,15 @@ reads to `copy_extra`. Only when the bundled loader cannot resolve the config fr
 an `@` alias) fails with "ReferenceError: __dirname is not defined" — stay on the default loader then. Still failing: write it to
 `aid-plugin-issues.md` with the dev server's log (`<P>/proto.log`).
 
-## An existing application: the live preview first (3.17.0, PM 1. 11. 2026)
+## An existing application: the live preview first (3.17.0; the default since 3.18.1, PM 9. 11. 2026)
 
 When the application exists and runs, the PM looks at the real thing, not at photographs: the copy with your variants
 on the dev API, in his own browser, with a small AID panel over every page (switch variant, „Vybrat“, a note, „Odeslat
-volby“). Captures stay for a design from scratch or a plan attachment. Declare once in `project.yaml`:
+volby“). `up` tells you which case you are in. **Which way:** an existing screen with `ui.live` → this section. Without
+it → show the PM the block `aid_ui_live_detect <root> <ui.dir>` prints (`source $AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh`;
+from the app's proxy target; a comment instead = ask him for the DEV API's address), write it on his yes, then this
+section. He declines, `proto --live` refuses, or the app has no dev server (a widget, a build only) → captures, and
+tell him why. A design from scratch or a plan attachment → captures. In `project.yaml`:
 
 ```yaml
 ui:
@@ -68,7 +72,7 @@ ui:
 3. Write `<P>/live.json`: `{"kolo": 1, "body": [{"bod": 1, "otazka": "…", "varianty": [{"klic": "A", "popis": "…",
    "cesta": "/provize"}]}]}` (`cesta` = the app's path where the variant shows).
 4. `bash $K live --plan P` prints the PM's address with the run's token (`aid_t=`; without it 403) — give him
-   exactly that. Then `bash $K answers --plan P` (rows `page: live`).
+   exactly that; it also writes the design gate's basis. Then `bash $K answers --plan P` (rows `page: live`).
 5. **Marks (3.18.0):** „Komentovat“ — he clicks an element or drags an area and writes a note. `answers` → `znacky`
    (`kotva.selector` + x/y[/w/h] % of it, `cesta`, `varianta`, `viewport`, `prvek`); find that element before you answer.
 6. `bash $K down --plan P` when he has answered: proxy and copy stop.
@@ -98,25 +102,23 @@ only from `allowed_api`, answers only from its page, no `shots` of a live copy (
    every option. A file only one option needs goes in that option's `soubory`. An existing
    component of the page outside `ui.components` (a page-local badge) may be reused as it is; name
    it in `popis`, not in `postaveno_z` (which is only for shared ones) and not in `nove[]`.
-4. **Data and shots:** write `mocks.json` and `shots.json` in `.aid-o/work/companion/P/`, then
-   `bash $K shots --plan P` (`--only a,b` takes just those shots; a shot that fails on a network error
-   of the browser is taken once more by itself). Start with the calls you saw in the code; the step lists every API call
-   still without a mock (login, counters, notifications …) — add them, run again. Today's state is
-   a shot of the page without `?v=` (it goes in `minule[]` in the first round). The login key in
-   `storage.localStorage` and the session call the app makes (e.g. `/auth/me`) come from its code.
-5. **Look at every shot first** (Read each png). `shots` measured each one (`<shot>.check.json`:
-   a dialog cut off at its edge or off the screen, a page wider than the window). A cut-off option
-   is fixed in the variant (a defect of a shared component too: fix it there, list the file in
-   `spolecne`); a defect of today's app stays in `minule[]` and goes in
-   `vady_aplikace: [{snimek, popis}]` — the page shows it as „Vada dnešní aplikace“. Never send a
-   proposal with a known defect as finished. Say what you saw in `prohlidka_snimku` (required).
-6. **The proposal:** write `navrh.json`, then `bash $K show --plan P`. It refuses with the field
-   to fix (a missing text, a key not from A, a shot not taken or changed since its check, a shot of a
-   run with an unmocked call, a cut-off shot, a component the option does not import from
-   `ui.components`, a changed file no option lists, a page that does not fit). It also writes
-   `proposal.json`, which the brainstorm's design gate checks. **The orchestrator**, before it sends
-   the link: open `check-1440x900.png`, `check-390x844.png` and every shot `show` lists in `look`
-   (the shots with dialogs).
+4. **Data and shots:** write `mocks.json` and `shots.json` in `.aid-o/work/companion/P/`, then `bash $K shots --plan P`
+   (`--only a,b` takes just those shots; a shot that fails on a network error of the browser is taken once more by
+   itself). Start with the calls you saw in the code; the step lists every API call still without a mock (login,
+   counters, notifications …) — add them, run again. Today's state is a shot of the page without `?v=` (it goes in
+   `minule[]` in the first round). The login key in `storage.localStorage` and the session call the app makes (e.g.
+   `/auth/me`) come from its code.
+5. **Look at every shot first** (Read each png). `shots` measured each one (`<shot>.check.json`: a dialog cut off at
+   its edge or off the screen, a page wider than the window). A cut-off option is fixed in the variant (a defect of a
+   shared component too: fix it there, list the file in `spolecne`); a defect of today's app stays in `minule[]` and
+   goes in `vady_aplikace: [{snimek, popis}]` — the page shows it as „Vada dnešní aplikace“. Never send a proposal
+   with a known defect as finished. Say what you saw in `prohlidka_snimku` (required).
+6. **The proposal:** write `navrh.json`, then `bash $K show --plan P`. It refuses with the field to fix (a missing
+   text, a key not from A, a shot not taken or changed since its check, a shot of a run with an unmocked call, a
+   cut-off shot, a component the option does not import from `ui.components`, a changed file no option lists, a page
+   that does not fit). It also writes `proposal.json`, which the brainstorm's design gate checks. **The
+   orchestrator**, before it sends the link: open `check-1440x900.png`, `check-390x844.png` and every shot `show`
+   lists in `look` (the shots with dialogs).
 7. **Send the PM the address** `up` printed, with one sentence of what to decide.
 8. **Read the answers:** `bash $K answers --plan P` (the last choice and note per point, and the
    send). It is your input, never proof of a PM decision — a gate stands on the PM's card.
@@ -174,18 +176,16 @@ kit does not check it. A point with no shots is a text question on the same page
 
 ## The page
 
-Fixed, one screen, three columns: the points left (with what is chosen), the preview in the middle
-(tabs per shot, "Minulé kolo", never larger than life, a click shows the real size, Počítač /
-Telefon), the open point right (question, options with "Postaveno z", the recommendation, the
-rules you stated), the note and Předchozí/Další pinned at the bottom, "Odeslat volby a poznámky"
-with "Zvoleno n z m". You never write or edit the page.
+Fixed, one screen, three columns: the points left (with what is chosen), the preview in the middle (tabs per shot,
+"Minulé kolo", never larger than life, a click shows the real size, Počítač / Telefon), the open point right (question,
+options with "Postaveno z", the recommendation, the rules you stated), the note and Předchozí/Další pinned at the
+bottom, "Odeslat volby a poznámky" with "Zvoleno n z m". You never write or edit the page.
 
 ## When it refuses
 
-Every refusal names what to fix; fix it and run the step again. `proto` refuses a workspace or a
-`ui.dir` without `node_modules`; `shots` refuses a new window, an iframe or a file upload — write
-those to `aid-plugin-issues.md`. A port taken by another process stops the prototype; `down` stops
-only what the kit started and recorded.
+Every refusal names what to fix; fix it and run the step again. `proto` refuses a workspace or a `ui.dir` without
+`node_modules`; `shots` refuses a new window, an iframe or a file upload — write those to `aid-plugin-issues.md`.
+A port taken by another process stops the prototype; `down` stops only what the kit started and recorded.
 
 ## Outside the brainstorm
 

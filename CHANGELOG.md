@@ -3,6 +3,16 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.18.1] — 2026-11-09
+
+Živý náhled zadrátovaný jako výchozí (volba PM 1A: „všude, nativně, agent ví, co dělat"). Zadání: `docs/plans/2026-11-09-3181-zivy-nahled-vsude.md`.
+
+- **`/aid-init` živý náhled navrhne sám.** Zjištění nastavení obrazovek přidá `ui.live`: adresu vývojového API, kam aplikaci přeposílá její vlastní server (Vite `server.proxy` `target:` / Next `rewrites` `destination:` ve tvaru `process.env.X ?? '<url>'`). Navrhne ji, jen když se z hostitele přeloží a nenese heslo ani dotaz; jinak napíše komentář, na co se PM zeptat (WAN: výchozí `wan-api-dev` je jméno kontejneru). Adresu nikdy neodhaduje. U projektu, který `ui.dir` už má, navrhne jen chybějící `ui.live` (`aid_ui_live_detect <kořen> <ui.dir>`). Zapíše se jen na ano PM.
+- **Kit řekne, jestli PM uvidí skutečnou aplikaci.** `aid-companion.sh up` napíše jednou větou, zda `ui.live` chybí, je neúplné, nebo je nastavené a existující obrazovka jde do živého náhledu. Dřív agent bez `ui.live` tiše skončil u fotek.
+- **Agent ví, kudy jít.** Brainstorming i skill visual-companion mají jedno rozcestí: existující obrazovka s `ui.live` = živý náhled; bez něj navrhnout blok PM a po jeho ano živý náhled; PM odmítne, kopie se nespustí, aplikace bez vývojového serveru (widget) nebo návrh od nuly = fotky a říct proč. Nabídka companionu u obrazovky existující aplikace doporučuje ano.
+- **Živý náhled projde bránou brainstormingu.** `live` zapíše podklad návrhu (`proposal.json`, označený „bez snímku dnešního stavu", živá data se nefotí), který brána návrhu u obrazovky vyžaduje; dřív ho psal jen krok `show` s fotkami. Podklad z fotek nepřepíše.
+- **Heslo v adrese API se nikam nedostane.** Kit odmítne `ui.live.env` s uživatelem nebo heslem v URL a v chybové hlášce adresu nevypíše.
+
 ## [3.18.0] — 2026-11-08
 
 Značky a komentáře nad živou aplikací (přání PM z WAN P121, volba 2A po ověření 3.17). Zadání: `docs/plans/2026-11-08-3180-kresleni.md`.
