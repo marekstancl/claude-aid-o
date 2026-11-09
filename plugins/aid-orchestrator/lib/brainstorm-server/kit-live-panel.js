@@ -4,7 +4,8 @@
 // window.AID_VARIANT, the aid_v_<port> cookie and ?v= are set, the address changes by history.pushState and a
 // popstate event makes the app's router render again; an 'aid-variant' event goes to code that listens for it.
 // One choice per point: "Vybrat" takes the variant on screen; the chosen one is marked apart from the one shown.
-// The panel stays out of the way: a small tab when hidden, see-through until the pointer is over it.
+// 3.19.0 (PM 9. 11. 2026): one question at a time, the parts always in the same place, no see-through; whole texts,
+// a tall panel, and only the question's part scrolls when a text is longer.
 (() => {
   if (window.__AID_LIVE_PANEL__) return; window.__AID_LIVE_PANEL__ = true;
   const host = document.createElement('div'); host.id = 'aid-live-panel';
@@ -32,19 +33,16 @@
 
   root.innerHTML = `<style>
     :host{all:initial} *{box-sizing:border-box;font:13px/1.4 system-ui,sans-serif;color:#1d1d1f}
-    .wrap{opacity:.6;transition:opacity .15s} .wrap:hover,.wrap:focus-within{opacity:1}
-    .tab{background:#1d1d1f;color:#fff;border:0;border-radius:999px;padding:6px 12px;cursor:pointer;font-weight:600}
+        .tab{background:#1d1d1f;color:#fff;border:0;border-radius:999px;padding:6px 12px;cursor:pointer;font-weight:600}
     /* 3.19.0 (PM 9. 11. 2026): one question at a time, every part always in the same place, no scrolling */
-    .box{width:min(340px,calc(100vw - 24px));height:min(580px,calc(100vh - 24px));display:flex;flex-direction:column;background:#fff;
+    .box{width:min(340px,calc(100vw - 24px));height:min(780px,calc(100vh - 24px));display:flex;flex-direction:column;background:#fff;
       border:1px solid #c7c7cc;border-radius:12px;box-shadow:0 6px 22px rgba(0,0,0,.16);overflow:hidden}
     .head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid #e5e5ea;flex:none}
     .head b{font-size:12px;color:#6e6e73;font-weight:600;letter-spacing:.02em}
     .x{border:0;background:none;cursor:pointer;color:#6e6e73}
     .sec{padding:8px 12px;border-bottom:1px solid #e5e5ea}
-    .top{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:6px;overflow:hidden} .top>*{flex:none} .top.exp{overflow:auto}
-    .q{font-weight:600;flex:none} .clamp{display:-webkit-box;-webkit-box-orient:vertical;overflow:hidden}
-    .q.clamp{-webkit-line-clamp:3} .desc.clamp{-webkit-line-clamp:7} .rec.clamp{-webkit-line-clamp:2}
-    .more{border:0;background:none;color:#0a84ff;cursor:pointer;padding:0;font-size:12px;align-self:flex-start}
+    .top{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:6px;overflow:auto} .top>*{flex:none}
+    .q{font-weight:600}
     .seg{display:flex;gap:4px;flex-wrap:wrap;flex:none}
     .seg button{position:relative;border:1px solid #c7c7cc;background:#f5f5f7;border-radius:8px;padding:4px 12px;cursor:pointer;font-weight:600}
     .seg button.on{background:#0a84ff;border-color:#0a84ff;color:#fff}
@@ -86,10 +84,10 @@
   const w = root.getElementById('w');
   let body = [];
 
-  let qi = store('aid_q') || 0, expanded = false;
+  let qi = store('aid_q') || 0;
   const varOf = (b, k) => (b.varianty || []).find(v => v.klic === k);
   function goQ(i) {   // a question is a page: its chosen (or recommended, or first) variant on its own screen
-    qi = Math.max(0, Math.min(body.length - 1, i)); store('aid_q', qi); expanded = false;
+    qi = Math.max(0, Math.min(body.length - 1, i)); store('aid_q', qi);
     const b = body[qi]; if (!b) return draw();
     const k = chosen[b.bod] || (varOf(b, b.doporuceni) ? b.doporuceni : (b.varianty || [])[0]?.klic);
     const v = varOf(b, k); if (!v) return draw();
@@ -101,15 +99,14 @@
     const cur = window.AID_VARIANT || null;
     if (!open) { w.innerHTML = `<button class="tab" id="t" title="Návrh AID">AID${cur ? ' · ' + esc(cur) : ''}</button>`; root.getElementById('t').onclick = () => { open = true; draw(); }; return; }
     const b = body[qi] || { varianty: [] }, vs = b.varianty || [], shown = varOf(b, cur), pick = chosen[b.bod];
-    const nChosen = body.filter(x => chosen[x.bod]).length, cl = expanded ? '' : ' clamp';
+    const nChosen = body.filter(x => chosen[x.bod]).length;
     w.innerHTML = `<div class="box">
       <div class="head"><b>NÁVRH AID · OTÁZKA ${qi + 1} Z ${body.length}</b><button class="x" id="min" title="Skrýt">skrýt ✕</button></div>
-      <div class="sec top${expanded ? ' exp' : ''}">
-        <div class="q${cl}">${esc(b.otazka)}</div>
+      <div class="sec top">
+        <div class="q">${esc(b.otazka)}</div>
         <div class="seg">${vs.map(v => `<button class="${v.klic === cur ? 'on' : ''}${v.klic === pick ? ' picked' : ''}" data-k="${esc(v.klic)}" title="${esc(v.popis)}">${esc(v.klic)}${v.klic === b.doporuceni ? '<span class="star">★</span>' : ''}</button>`).join('')}</div>
-        <div class="desc${cl}">${shown ? '<b>' + esc(shown.klic) + '</b> — ' + esc(shown.popis) : 'Vidíš dnešní stav. Přepni variantu.'}</div>
-        ${b.doporuceni ? `<div class="rec${cl}"><b>★ Doporučuji ${esc(b.doporuceni)}</b>${b.proc ? ' — ' + esc(b.proc) : ''}</div>` : ''}
-        <button class="more" id="more">${expanded ? 'méně' : 'celý text'}</button>
+        <div class="desc">${shown ? '<b>' + esc(shown.klic) + '</b> — ' + esc(shown.popis) : 'Vidíš dnešní stav. Přepni variantu.'}</div>
+        ${b.doporuceni ? `<div class="rec"><b>★ Doporučuji ${esc(b.doporuceni)}</b>${b.proc ? ' — ' + esc(b.proc) : ''}</div>` : ''}
         <div class="row">${pick ? `<span class="picked-l">✓ vybráno: ${esc(pick)}</span>` : '<span class="none">zatím nevybráno</span>'}
           ${shown && pick !== shown.klic ? `<button class="pick" data-k="${esc(shown.klic)}">Vybrat ${esc(shown.klic)}</button>` : ''}</div>
       </div>
@@ -124,7 +121,6 @@
         <button class="send" id="send">Odeslat volby · vybráno ${nChosen} z ${body.length}</button><div id="st" class="st"></div></div>
     </div>`;
     root.getElementById('min').onclick = () => { open = false; draw(); };
-    root.getElementById('more').onclick = () => { expanded = !expanded; draw(); };
     root.getElementById('kom').onclick = () => setCommenting(!commenting);
     root.getElementById('vis').onclick = () => { showMarks = !showMarks; store('aid_marks_show', showMarks); place(); draw(); };
     root.getElementById('prev').onclick = async () => { await saveNote(); goQ(qi - 1); };
