@@ -22,6 +22,7 @@
 #            from ui.live.env), with window.AID_VARIANT from ?v= and the AID panel (variants, choose, note, send)
 #            over every page; the agent writes <P>/live.json (kolo, body[] {bod, otazka, varianty[] {klic, popis, cesta}})
 #            and live writes the brainstorm design gate's basis (brainstorm/<P>/proposal.json, marked, no captures)
+#            and (3.19.0) looks at every variant on every viewport through the proxy, logged in by ui.live.login: look + check
 #   answers  the PM's latest choices and notes for a round (--kolo N, --history)
 #   down     stop this plan's server, the live proxy and its verified prototype group (by group and start time)
 #
@@ -140,6 +141,8 @@ _live_proposal() {
 # (kit-shots.mjs live mode), and hands the agent the pictures; one failing picture does not stop the others
 cmd_live() {
   local out; out="$(_live_proxy)" || exit 1
+  # the suites of the proxy itself skip the look (a browser per call); the look has its own case
+  [[ "${AID_COMPANION_LIVE_LOOK:-1}" == 0 ]] && { printf '%s\n' "$out"; return 0; }
   _live_check "$out"
 }
 

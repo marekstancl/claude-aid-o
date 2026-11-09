@@ -32,19 +32,21 @@ class H(http.server.SimpleHTTPRequestHandler):
     def do_GET(s):
         if s.path.startswith("/echo"):
             b = (s.headers.get("Cookie") or "-").encode(); s.send_response(200); s.send_header("Content-Type", "text/plain"); s.send_header("Content-Length", str(len(b))); s.end_headers(); s.wfile.write(b); return
+        if s.path.startswith("/seen"):   # what the page saw (the look's case): token, variant, panel
+            open(os.environ.get("SEEN", "/dev/null"), "a").write(s.path + "\n"); s.send_response(204); s.end_headers(); return
         if s.path.startswith("/gz.html"):
             b = gzip.compress(b"<html><head></head><body>gz</body></html>"); s.send_response(200); s.send_header("Content-Type", "text/html"); s.send_header("Content-Encoding", "gzip"); s.send_header("Content-Length", str(len(b))); s.end_headers(); s.wfile.write(b); return
         super().do_GET()
     def log_message(s, *a): pass
 http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
 PY
-  setsid python3 "$BATS_TEST_TMPDIR/app.py" "$PP" "$R/web" >/dev/null 2>&1 &
+  SEEN="$BATS_TEST_TMPDIR/seen" setsid python3 "$BATS_TEST_TMPDIR/app.py" "$PP" "$R/web" >/dev/null 2>&1 &
   SP=$!
   for i in $(seq 50); do curl -sf "http://127.0.0.1:$PP/" >/dev/null && break; sleep 0.1; done
   jq -n --argjson pid "$SP" --arg st "$(sed -E 's/^.*\) //' /proc/$SP/stat | awk '{print $20}')" --argjson port "$PP" \
     '{pid: $pid, pgid: $pid, starttime: $st, port: $port, url: "http://127.0.0.1:\($port)", live_env: "0123456789abcdef"}' > "$D/proto.json"
   jq -n '{kolo: 1, body: [{bod: 1, otazka: "Jak ukázat provize", varianty: [{klic: "A", popis: "tabulka", cesta: "/index.html"}, {klic: "B", popis: "karty", cesta: "/index.html"}]}]}' > "$D/live.json"
-  export AID_COMPANION_BIND=127.0.0.1 AID_COMPANION_URL_HOST=127.0.0.1 AID_COMPANION_LIVE_PORTS="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); p=s.getsockname()[1]; print(f"{p}-{p}")')"
+  export AID_COMPANION_LIVE_LOOK=0 AID_COMPANION_BIND=127.0.0.1 AID_COMPANION_URL_HOST=127.0.0.1 AID_COMPANION_LIVE_PORTS="$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); p=s.getsockname()[1]; print(f"{p}-{p}")')"
 }
 teardown() {
   bash "$C" down --plan P970 --project-dir "$R" >/dev/null 2>&1 || true
@@ -297,4 +299,87 @@ _live_ok() {  # the proposed block passes the kit's own check (liveEnv)
   [ "$(jq -r '.viewports | map(.name) | join(",")' "$B/proposal.json")" = "desktop,mobile" ]
   jq -n '{basis: "live-screen", companion_kit: {navrh: "x"}}' > "$B/proposal.json"
   _live; [ "$status" -eq 0 ]; [ "$(jq -r .reused <<< "$output")" = true ]; [ "$(jq -r .basis "$B/proposal.json")" = live-screen ]
+}
+
+_chrome() {
+  local lib="$AID_PLUGIN_PATH/lib/ui-fidelity"
+  [[ -f "$lib/node_modules/.aid-installed" ]] || (cd "$lib" && npm ci --no-audit --no-fund >/dev/null 2>&1 && sha256sum package-lock.json | cut -d' ' -f1 > node_modules/.aid-installed)
+  CHROME="$(ls -d "$HOME"/.cache/ms-playwright/chromium-*/chrome-linux*/chrome 2>/dev/null | sort -V | tail -1)"
+  [[ -n "$CHROME" ]] || { echo "no chromium for the browser case (the kit's own tools)"; false; }
+}
+_seenpage() {   # a page that reports what it saw: the login token, the variant, whether the panel came in
+  printf '<html><head></head><body><main>look</main><script>setTimeout(() => fetch("/seen?tok=" + (localStorage.getItem("tok") || "none") + "&v=" + window.AID_VARIANT + "&panel=" + !!document.getElementById("aid-live-panel")), 200)</script></body></html>' > "$R/web/$1"
+}
+
+@test "live looks at every variant as the PM will see it: through the proxy, logged in by ui.live.login, without the panel; a failing login is said, not fatal; a reused proxy looks again (3.19.0)" {
+  _chrome; _seenpage look.html; unset AID_COMPANION_LIVE_LOOK
+  jq -n '{kolo: 1, body: [{bod: 1, otazka: "a", doporuceni: "B", varianty: [{klic: "A", popis: "a", cesta: "/look.html"}, {klic: "B", popis: "b", cesta: "/look.html"}]},
+    {bod: 2, otazka: "b", varianty: [{klic: "C", popis: "c", cesta: "/look.html"}]}]}' > "$D/live.json"
+  printf 'echo %s\n' "'{\"localStorage\": {\"tok\": \"x1\"}}'" > "$BATS_TEST_TMPDIR/login.sh"
+  printf 'ui:\n  live:\n    login: ["bash", "%s"]\n' "$BATS_TEST_TMPDIR/login.sh" > "$R/.aid-o/config/project.yaml"
+  _live; echo "$output" | tail -c 2000; [ "$status" -eq 0 ]
+  local out; out="$(tail -1 <<< "$output")"
+  [ "$(jq -r .check.complete <<< "$out")" = true ]; [ "$(jq -r .check.login.ok <<< "$out")" = true ]
+  [ "$(jq -r '.look | length' <<< "$out")" = 6 ]                                # 3 variants x desktop, mobile
+  [[ "$(jq -r .url <<< "$out")" == *"/look.html?v=B&aid_t="* ]]                 # the PM's link opens the recommended one
+  cat "$BATS_TEST_TMPDIR/seen"
+  for v in A B C; do grep -q "tok=x1&v=${v}&panel=false" "$BATS_TEST_TMPDIR/seen"; done
+  : > "$BATS_TEST_TMPDIR/seen"
+  printf 'ui:\n  live:\n    login: ["false"]\n' > "$R/.aid-o/config/project.yaml"
+  _live; [ "$status" -eq 0 ]; out="$(tail -1 <<< "$output")"
+  [ "$(jq -r .reused <<< "$out")" = true ]; [ "$(jq -r .check.login.ok <<< "$out")" = false ]; [ "$(jq -r .check.complete <<< "$out")" = true ]
+  grep -q "tok=none&v=A&panel=false" "$BATS_TEST_TMPDIR/seen"
+}
+
+@test "live.json: a point is unique, a key is unique in its point and on its screen, doporuceni is one of the point's keys" {
+  local bad
+  for bad in '[{bod: 1, otazka: "a", varianty: [{klic: "A", cesta: "/x"}]}, {bod: 1, otazka: "b", varianty: [{klic: "B", cesta: "/y"}]}]' \
+             '[{bod: 1, otazka: "a", varianty: [{klic: "A", cesta: "/x"}, {klic: "A", cesta: "/y"}]}]' \
+             '[{bod: 1, otazka: "a", varianty: [{klic: "A", cesta: "/x"}]}, {bod: 2, otazka: "b", varianty: [{klic: "A", cesta: "/x"}]}]' \
+             '[{bod: 1, otazka: "a", doporuceni: "Z", varianty: [{klic: "A", cesta: "/x"}]}]'; do
+    jq -n "{kolo: 1, body: $bad}" > "$D/live.json"; _live; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"bod must be unique"* ]]
+  done
+  jq -n '{kolo: 1, body: [{bod: 1, otazka: "a", varianty: [{klic: "A", cesta: "/x"}]}, {bod: 2, otazka: "b", varianty: [{klic: "A", cesta: "/y"}]}]}' > "$D/live.json"
+  _live; [ "$status" -eq 0 ]                                                     # the same key on another screen is fine
+}
+
+@test "the panel: one question a page, its parts in fixed places, no see-through; next goes to the next question's screen and variant and sends the note (3.19.0)" {
+  _chrome; _seenpage two.html
+  jq -n --arg long "$(printf 'dlouhy popis %.0s' $(seq 200))" '{kolo: 1, body: [{bod: 1, otazka: "Prvni otazka", doporuceni: "A", proc: "protoze", varianty: [{klic: "A", popis: $long, cesta: "/index.html"}, {klic: "B", popis: "b", cesta: "/index.html"}]},
+    {bod: 2, otazka: "Druha otazka", varianty: [{klic: "C", popis: "c", cesta: "/two.html"}]}]}' > "$D/live.json"
+  _live; [ "$status" -eq 0 ]
+  run env CHROME="$CHROME" node --input-type=module -e "
+    import { createRequire } from 'node:module';
+    const { chromium } = createRequire('$AID_PLUGIN_PATH/lib/ui-fidelity/package.json')('@playwright/test');
+    const b = await chromium.launch({ executablePath: process.env.CHROME }); const p = await b.newPage({ viewport: { width: 1200, height: 800 } });
+    await p.goto('$(jq -r .url "$D/live-server.json")');
+    const sr = () => p.evaluateHandle(() => document.getElementById('aid-live-panel').shadowRoot);
+    await p.waitForFunction(() => document.getElementById('aid-live-panel')?.shadowRoot.querySelector('.box'));
+    const geo = () => p.evaluate(() => { const r = document.getElementById('aid-live-panel').shadowRoot; const q = s => r.querySelector(s);
+      return { head: q('.head').textContent, op: getComputedStyle(q('#w')).opacity, box: q('.box').scrollHeight - q('.box').clientHeight,
+        top: q('.top').scrollHeight > q('.top').clientHeight, foot: Math.round(q('.foot').getBoundingClientRect().bottom), rec: q('.rec')?.textContent }; });
+    await p.mouse.move(5, 5); const g1 = await geo();
+    await p.locator('#aid-live-panel textarea').fill('poznamka jedna');
+    await p.locator('#aid-live-panel #next').click(); await p.waitForTimeout(500);
+    const g2 = await geo(); const at = await p.evaluate(() => location.pathname + location.search + ' ' + window.AID_VARIANT);
+    console.log(JSON.stringify({ g1, g2, at })); await b.close();"
+  echo "$output"; [ "$status" -eq 0 ]
+  local r; r="$(tail -1 <<< "$output")"
+  [[ "$(jq -r .g1.head <<< "$r")" == *"OTÁZKA 1 Z 2"* ]]; [[ "$(jq -r .g2.head <<< "$r")" == *"OTÁZKA 2 Z 2"* ]]
+  [ "$(jq -r .g1.op <<< "$r")" = 1 ]                                              # no see-through away from the pointer
+  [ "$(jq -r .g1.box <<< "$r")" = 0 ]; [ "$(jq -r .g1.top <<< "$r")" = true ]     # the long text scrolls in the top part only
+  [ "$(jq -r .g1.foot <<< "$r")" = "$(jq -r .g2.foot <<< "$r")" ]                 # the bottom stays where it was
+  [[ "$(jq -r .g1.rec <<< "$r")" == *"Doporučuji A"*"protoze"* ]]
+  [ "$(jq -r .at <<< "$r")" = "/two.html?v=C C" ]
+  grep -q '"type":"note".*"bod":1.*poznamka jedna\|poznamka jedna.*"bod":1' "$D/answers.jsonl"
+}
+
+@test "shots over the live copy go through the proxy logged in, with no mocks and no panel (3.19.0)" {
+  _chrome; _seenpage look.html; unset AID_COMPANION_LIVE_LOOK
+  printf 'echo %s\n' "'{\"localStorage\": {\"tok\": \"x2\"}}'" > "$BATS_TEST_TMPDIR/login.sh"
+  printf 'ui:\n  responsive: false\n  live:\n    login: ["bash", "%s"]\n' "$BATS_TEST_TMPDIR/login.sh" > "$R/.aid-o/config/project.yaml"
+  AID_COMPANION_LIVE_LOOK=0 _live; [ "$status" -eq 0 ]
+  jq -n '{shots: [{name: "dlg", path: "/look.html?v=B", steps: [{wait: 400}], capture: "viewport"}]}' > "$D/shots.json"
+  run bash "$C" shots --plan P970 --project-dir "$R"; echo "$output"; [ "$status" -eq 0 ]
+  [ -s "$D/shots/desktop/dlg.png" ]; grep -q "tok=x2&v=B&panel=false" "$BATS_TEST_TMPDIR/seen"
 }

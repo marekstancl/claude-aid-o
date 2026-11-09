@@ -3,6 +3,15 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.19.0] — 2026-11-09
+
+Panel po otázkách a agent vidí živý náhled sám (PM 9. 11. 2026 po živé ukázce na kopii WANu; hlášení WAN P126). Zadání: `docs/plans/2026-11-09-3190-panel-a-pohled-agenta.md`.
+
+- **Panel živého náhledu: jedna otázka na stránku, nic se neposouvá.** Každá část je vždy na stejném místě: nahoře otázka, varianty (★ doporučená, ✓ vybraná), popis zobrazené varianty, „★ Doporučuji X - proč" a „Vybrat"; pod tím značky; pod nimi poznámka k otázce; u spodní hrany „‹ předchozí · tečky · další ›" a „Odeslat volby · vybráno n z m". Text celý; když je dlouhý, posouvá se jen horní část. Bez průhlednosti. Přechod na otázku přepne její obrazovku a variantu (vybranou, jinak doporučenou); poznámka se odešle i při přechodu.
+- **Agent si každou variantu prohlédne sám, přihlášený, dřív než ti pošle odkaz.** `aid-companion.sh live` po startu projde všechny varianty na počítači i telefonu stejně, jak je uvidíš ty (přes proxy, bez panelu), vyfotí je a změří oříznutá okna a přetékající stránku; agent dostane `look` a `check`. Přihlášení zařídí kit podle `ui.live.login` (příkaz projektu, který vypíše token; WAN: testovací účet z testů v prohlížeči). Na kopii WANu P126 hned našel variantu, která je na telefonu o 134 px širší než obrazovka.
+- **`shots` funguje i nad živou kopií** (přes proxy, přihlášený, bez mocků) - na dialogy a kliky, které automatická prohlídka nedělá. Dřív ji kit odmítal.
+- **`live.json`:** `doporuceni` a `proc` u otázky; kit odmítne dvojí `bod`, dvojí klíč v otázce a stejný klíč na stejné obrazovce ve dvou otázkách (proměnná varianty je jedna na stránku). Odkaz pro PM otevře doporučenou variantu.
+
 ## [3.18.1] — 2026-11-09
 
 Živý náhled zadrátovaný jako výchozí (volba PM 1A: „všude, nativně, agent ví, co dělat"). Zadání: `docs/plans/2026-11-09-3181-zivy-nahled-vsude.md`.

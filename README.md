@@ -122,7 +122,8 @@ every change after that. Both live in `.aid-o/config/`:
 
 ## Changelog
 
-- **v3.18.1** (current) — živý náhled jako výchozí: /aid-init ho navrhne, kit řekne, kdy chybí, agent ví, kudy jít
+- **v3.19.0** (current) — panel živého náhledu po otázkách bez posouvání; agent si každou variantu sám prohlédne přihlášený
+- **v3.18.1** — živý náhled jako výchozí: /aid-init ho navrhne, kit řekne, kdy chybí, agent ví, kudy jít
 - **v3.18.0** — značky a komentáře přímo v živé aplikaci: klikni nebo označ oblast, napiš poznámku, agent ví, o který prvek jde
 - **v3.17.1** — živý náhled po první ostré zkoušce: přepnutí varianty bez načítání, jedna jasná volba, skrývací panel
 - **v3.17.0** — živý náhled: PM otevře skutečnou aplikaci s variantami na vývojových datech a panelem pro volby, místo fotek

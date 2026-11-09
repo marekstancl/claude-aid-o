@@ -113,7 +113,10 @@ export async function run({ DIR, PLAN, PROJECT, UI, VIEWPORTS, die, browser }) {
     await ctx.route('**/*', route => {
       const req = route.request(), u = new URL(req.url());
       if (req.isNavigationRequest() && u.origin !== origin) { unknown.add(`navigation to ${u.origin} (another origin)`); return route.abort(); }
-      if (LIVE) return route.continue();   // the dev API answers, no mocks
+      if (LIVE) {   // the dev API answers through the copy, no mocks; data to another origin stops as for the PM (CSP)
+        if (u.origin !== origin && ['xhr', 'fetch', 'websocket', 'eventsource'].includes(req.resourceType())) { unknown.add(`${req.method()} ${u.origin}${u.pathname} (another origin)`); return route.abort(); }
+        return route.continue();
+      }
       if (!isApi(u)) {
         // a data request to another origin would reach a live service: refused and listed like an unmocked call
         if (u.origin !== new URL(base).origin && ['xhr', 'fetch'].includes(req.resourceType())) { unknown.add(`${req.method()} ${u.origin}${u.pathname} (another origin)`); return route.abort(); }
