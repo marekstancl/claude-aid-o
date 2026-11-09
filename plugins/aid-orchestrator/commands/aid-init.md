@@ -397,7 +397,11 @@ aid_ui_config_detect <project root>` prints (`ui.dir`, `ui.components`, `ui.dev_
 `ui.api_prefix` — detected from `vite.config.*` / `next.config.*` and the sources; what it cannot find is a
 comment, never a guess; `ui.rules[]` (the files with the project's UI rules) and `ui.api_origins[]` (an API
 on another origin) are asked for, never detected) and merge it into `project.yaml` only on the PM's yes. A project without UI is
-not asked.
+not asked. The block includes `ui.live` (the live preview, the default way the PM sees an existing screen, 3.18.1): the
+dev API the app's own proxy forwards to, proposed only when its default address resolves from this host, otherwise a
+comment — then ask the PM for the dev API's address, never guess it. **A project that already has `ui.dir` and no
+`ui.live`** (an upgrade): propose only that part, `aid_ui_live_detect <project root> <ui.dir>`, merged on the PM's yes;
+an app without a dev server (a widget, a build only) gets none.
 
 ### What the project has to document with
 

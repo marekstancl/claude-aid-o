@@ -1,11 +1,15 @@
 #!/usr/bin/env bats
 # aid-tier: t1
-# aid-subject: scripts/aid-companion.sh live (lib/brainstorm-server/kit-live-server.mjs, kit-live-panel.js, kit-proto.mjs liveEnv)
+# aid-subject: scripts/aid-companion.sh live (lib/brainstorm-server/kit-live-server.mjs, kit-live-panel.js, kit-proto.mjs liveEnv; scripts/lib/aid-ui-config.sh aid_ui_live_detect)
 # test-companion-live.bats — the live preview (3.17.0, PM 2A after WAN P121): the PM opens the real application
 # through a proxy with the AID panel instead of captures. Proves: the copy needs ui.live.env and never a production
 # host; HTML gets window.AID_VARIANT from ?v= and the panel, other responses pass as they are; the panel's answers
 # land in answers.jsonl only from the proxy's own page; down stops the proxy. No browser, no real app: a python
-# HTTP server stands in for the copy's dev server.
+# HTTP server stands in for the copy's dev server. 3.18.1 (PM 1A: the live preview everywhere, wired): /aid-init
+# proposes ui.live from the app's proxy target and never guesses an address; up tells the agent whether the PM can
+# see the real app; live writes the brainstorm gate's basis.
+
+bats_require_minimum_version 1.5.0
 
 setup() {
   command -v node >/dev/null || skip "node not installed"
@@ -227,4 +231,70 @@ _get() { curl -s -H "Cookie: $(_ck)" "$@"; }
   [ "$(jq -c '.errs' <<< "$r")" = '[]' ]; [ "$(jq -c '.druhy' <<< "$r")" = '["oblast"]' ]
   [ "$(jq -r 'select(.type == "confirm") | .type' "$D/answers.jsonl" | wc -l)" -ge 1 ]
   [ "$(jq -r 'select(.type == "note") | .bod' "$D/answers.jsonl" | grep -c null || true)" = 0 ]   # the bubble text never became a note
+}
+
+_detect() { printf 'export default { server: { proxy: { "/api": {\n%s\n} } } }\n' "$1" > "$R/web/vite.config.ts"; run bash -c "set -euo pipefail; source '$AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh' && aid_ui_live_detect '$R' web"; echo "$output"; }
+_live_ok() {  # the proposed block passes the kit's own check (liveEnv)
+  local ui; ui="$(yq -o=json -I=0 '.ui' <<< "$output")"
+  run node --input-type=module -e "import { liveEnv } from '$AID_PLUGIN_PATH/lib/brainstorm-server/kit-proto.mjs'; await liveEnv($ui, m => { console.log('DIE ' + m); process.exit(1); }); console.log('OK')"
+  echo "$output"; [ "$status" -eq 0 ]
+}
+
+@test "ui.live is proposed from the app's proxy target only when its default resolves; otherwise a comment, never a guessed address" {
+  _detect "server: { proxy: { '/api': { target: process.env.VITE_API_TARGET ?? 'http://127.0.0.1:3501' } } }"
+  [ "$(yq '.ui.live.env.VITE_API_TARGET' <<< "$output")" = "http://127.0.0.1:3501" ]
+  [ "$(yq -o=json -I=0 '.ui.live.allowed_api' <<< "$output")" = '["127.0.0.1"]' ]
+  _live_ok
+  _detect "target: process.env.VITE_API_TARGET ?? 'http://127.1:3501'"; [ "$(yq -o=json -I=0 '.ui.live.allowed_api' <<< "$output")" = '["127.0.0.1"]' ]; _live_ok
+  _detect "destination: process.env.API_URL || \"http://localhost:8000/v1\""
+  [ "$(yq '.ui.live.env.API_URL' <<< "$output")" = "http://localhost:8000/v1" ]; _live_ok
+  local c; for c in "target: process.env.VITE_API ?? 'http://no-such-api.invalid:3501'" \
+      "target: process.env.VITE_API" "target: process.env.VITE_API ?? 'http://u:p@127.0.0.1:1'" \
+      "target: process.env.VITE_API ?? 'http://127.0.0.1:1/?key=x'" \
+      "target: process.env.VITE_A ?? 'http://127.0.0.1:1', target: process.env.VITE_B ?? 'http://127.0.0.1:2'" \
+      "target: process.env.API_TOKEN ?? 'http://127.0.0.1:1'" "'/x': 'http://127.0.0.1:3287'" \
+      "// target: process.env.VITE_API ?? 'http://127.0.0.1:1'" "target: process.env.VITE_API ?? 'http://u:p@127.0.0.1:99999'"; do
+    _detect "$c"; [ "$status" -eq 0 ]; [ "$(yq '.ui.live' <<< "$output")" = null ]; [[ "$output" == *"# live:"* ]]
+    [[ "$output" != *"u:p@"* && "$output" != *"key=x"* ]]
+  done
+  _detect "target: process.env.VITE_A ?? 'http://127.0.0.1:1', target: process.env.VITE_B ?? 'http://127.0.0.1:2'"; [[ "$output" == *"VITE_A,VITE_B"* ]]
+  # the kit refuses credentials in a URL without printing them
+  run node --input-type=module -e "import { liveEnv } from '$AID_PLUGIN_PATH/lib/brainstorm-server/kit-proto.mjs'; await liveEnv({ live: { env: { VITE_API: 'http://u:secretpw@127.0.0.1:1' }, allowed_api: ['127.0.0.1'] } }, m => { console.log('DIE ' + m); process.exit(1); })"
+  [ "$status" -eq 1 ]; [[ "$output" == *"user or password"* ]]; [[ "$output" != *secretpw* ]]
+  run node --input-type=module -e "import { liveEnv } from '$AID_PLUGIN_PATH/lib/brainstorm-server/kit-proto.mjs'; await liveEnv({ live: { env: { VITE_API: 'http://u:secretpw@127.0.0.1:99999' }, allowed_api: ['127.0.0.1'] } }, m => { console.log('DIE ' + m); process.exit(1); })"
+  [ "$status" -eq 1 ]; [[ "$output" != *secretpw* ]]
+  _detect "target: process.env.api_token ?? 'http://127.0.0.1:1'"; [ "$(yq '.ui.live' <<< "$output")" = null ]   # a secret in any case
+  # a target outside the proxy block is not the app's API
+  printf 'export default {\n  server: { proxy: { "/api": "http://127.0.0.1:3287" } },\n  define: { x: { target: process.env.OTHER_URL ?? "http://127.0.0.1:9999" } },\n}\n' > "$R/web/vite.config.ts"
+  run bash -c "set -euo pipefail; source '$AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh' && aid_ui_live_detect '$R' web"; echo "$output"
+  [ "$status" -eq 0 ]; [ "$(yq '.ui.live' <<< "$output")" = null ]; [[ "$output" != *OTHER_URL* ]]
+  # a config with no proxy at all, and no config, are a comment too (under set -euo pipefail)
+  printf 'export default { define: { x: { target: process.env.VITE_API ?? "http://127.0.0.1:1" } } }\n' > "$R/web/vite.config.ts"
+  run bash -c "set -euo pipefail; source '$AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh' && aid_ui_live_detect '$R' web"; [ "$status" -eq 0 ]; [[ "$output" == *"# live:"* ]]
+  rm "$R/web/vite.config.ts"
+  run bash -c "set -euo pipefail; source '$AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh' && aid_ui_live_detect '$R' web"; [ "$status" -eq 0 ]; [[ "$output" == *"# live:"* ]]
+}
+
+@test "up tells the agent whether the PM can see the real application (missing, incomplete, set ui.live), also when it reuses its server; stdout stays JSON" {
+  (cd "$R" && bash "$AID_PLUGIN_PATH/scripts/aid-brainstorm-state.sh" init P970 --scope user_visible --topic-kind ui --no-worktree >/dev/null)
+  _up() { run --separate-stderr bash "$C" up --plan P970 --project-dir "$R"; echo "$output / $stderr"; [ "$status" -eq 0 ]; jq -e .url <<< "$output" >/dev/null; }
+  printf 'ui:\n  responsive: false\n' > "$R/.aid-o/config/project.yaml"
+  _up; [[ "$stderr" != *"ui.live"* ]]                                                  # no ui.dir: not an app the kit copies
+  printf 'ui:\n  dir: web\n' > "$R/.aid-o/config/project.yaml"
+  _up; [[ "$stderr" == *"no ui.live"*"aid_ui_live_detect"*" web"* ]]
+  printf 'ui:\n  dir: web\n  live:\n    env: {VITE_API: "http://127.0.0.1:1"}\n' > "$R/.aid-o/config/project.yaml"
+  _up; [[ "$stderr" == *"ui.live is incomplete"* ]]; [ "$(jq -r .reused <<< "$output")" = true ]
+  printf 'ui:\n  dir: web\n  live:\n    env: {VITE_API: "http://127.0.0.1:1"}\n    allowed_api: [127.0.0.1]\n' > "$R/.aid-o/config/project.yaml"
+  _up; [[ "$stderr" == *"ui.live is set"*"proto --live"* ]]
+}
+
+@test "live writes the brainstorm gate's basis (marked, the project's viewports) and never overwrites one the captures made" {
+  local B="$R/.aid-o/work/brainstorm/P970"; mkdir -p "$B"
+  _live; [ "$status" -eq 0 ]
+  source "$AID_PLUGIN_PATH/scripts/lib/aid-ui-proposal.sh"
+  run aid_ui_proposal_basis_check "$B/proposal.json" "$R"; echo "$output"; [ "$status" -eq 0 ]
+  [[ "$(jq -r .marked "$B/proposal.json")" == "NO LIVE BASELINE — live preview"* ]]
+  [ "$(jq -r '.viewports | map(.name) | join(",")' "$B/proposal.json")" = "desktop,mobile" ]
+  jq -n '{basis: "live-screen", companion_kit: {navrh: "x"}}' > "$B/proposal.json"
+  _live; [ "$status" -eq 0 ]; [ "$(jq -r .reused <<< "$output")" = true ]; [ "$(jq -r .basis "$B/proposal.json")" = live-screen ]
 }

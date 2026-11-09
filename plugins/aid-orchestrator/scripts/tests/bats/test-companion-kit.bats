@@ -7,6 +7,8 @@
 # and a real browser. Defects they catch: the server that did not start from 2.118.0 to 3.6.0 (its tests
 # replaced index.js), PM notes and sends that never reached the agent, a page the agent had to build.
 
+bats_require_minimum_version 1.5.0
+
 setup() {
   AID_PLUGIN_PATH="$(cd "$BATS_TEST_DIRNAME/../../.." && pwd)"; export AID_PLUGIN_PATH
   KIT="$AID_PLUGIN_PATH/scripts/aid-companion.sh"
@@ -45,7 +47,7 @@ _ws() {
 }
 
 @test "AC1 up/answers/down: the real server starts, keeps every choice, note and send, is reused while it runs and keeps the answers over a restart" {
-  run _k up; echo "$output"; [ "$status" -eq 0 ]
+  run --separate-stderr _k up; echo "$output"; [ "$status" -eq 0 ]
   local port pid; port="$(jq -r .port <<< "$output")"; pid="$(jq -r .pid <<< "$output")"
   _ws "$port" '{"type":"choice","kolo":1,"bod":"1","volba":"B"}' '{"type":"choice","kolo":1,"bod":"1","volba":"A"}' \
     '{"type":"note","kolo":1,"bod":"2","text":"je to hnus"}' '{"type":"confirm","kolo":1,"selected":[{"bod":"1","volba":"B"}]}' '{"type":"confirm","kolo":1,"selected":[{"bod":"1","volba":"A"}],"event_id":"forged"}'
@@ -59,14 +61,14 @@ _ws() {
   run _k answers; [ "$(jq -r .kolo <<< "$output")" = 2 ]; [ "$(jq -r '.volby["1"]' <<< "$output")" = B ]
   run _k answers --kolo 1; [ "$(jq -r '.volby["1"]' <<< "$output")" = A ]
   run _k answers --history; [ "$(wc -l <<< "$output")" -eq 6 ]
-  run _k up; [ "$(jq -r .reused <<< "$output")" = true ]; [ "$(jq -r .pid <<< "$output")" = "$pid" ]
+  run --separate-stderr _k up; [ "$(jq -r .reused <<< "$output")" = true ]; [ "$(jq -r .pid <<< "$output")" = "$pid" ]
   _k down
-  run _k up; [ "$(jq -r .reused <<< "$output")" = false ]; [ "$(jq -r .pid <<< "$output")" != "$pid" ]
+  run --separate-stderr _k up; [ "$(jq -r .reused <<< "$output")" = false ]; [ "$(jq -r .pid <<< "$output")" != "$pid" ]
   [ "$(wc -l < "$D/answers.jsonl")" -eq 6 ]
 }
 
 @test "AC1 security: a page of another origin cannot open the websocket (no planted answers)" {
-  run _k up; local port; port="$(jq -r .port <<< "$output")"
+  run --separate-stderr _k up; local port; port="$(jq -r .port <<< "$output")"
   run bash -c "cd '$AID_PLUGIN_PATH/lib/brainstorm-server' && node -e '
     const W = require(\"ws\"); const w = new W(\"ws://127.0.0.1:$port\", { origin: \"http://evil.example\" });
     w.on(\"open\", () => { console.log(\"open\"); process.exit(0); }); w.on(\"error\", e => { console.log(e.message); process.exit(0); });'"
@@ -213,7 +215,7 @@ EOF
 
 @test "AC2/AC6 show: a valid proposal builds the page, the page checks itself (fits, controls reachable), and proposal.json passes the brainstorm's check" {
   _proposal
-  run _k up; [ "$status" -eq 0 ]
+  run --separate-stderr _k up; [ "$status" -eq 0 ]
   run _k show; echo "$output"; [ "$status" -eq 0 ]
   [ -s "$D/navrh-1.html" ] && [ -s "$D/check-1440x900.png" ] && [ -s "$D/check-390x844.png" ]
   grep -q 'Agent uvádí, z jakých pravidel vychází' "$D/navrh-1.html"
@@ -409,7 +411,7 @@ _gone() {  # <pgid> <port>: no member left and the port closed (a failing pgrep 
 }
 
 @test "proto says how stale the copy is; --refresh stops it, sets the copy, manifest and shots aside, twice without collision, and show works after" {
-  _proposal; run _k up; [ "$status" -eq 0 ]
+  _proposal; run --separate-stderr _k up; [ "$status" -eq 0 ]
   echo "/* changed */" >> "$P/ui/index.html"
   run _k proto; echo "$output"; [ "$status" -eq 0 ]; [ "$(jq -r .stale <<< "$output")" = 1 ]; [[ "$(jq -r .refresh <<< "$output")" == *"--refresh"* ]]
   local pg; pg="$(jq -r .pgid "$D/proto.json")"
@@ -571,7 +573,7 @@ J
 }
 
 @test "every shot is checked for a cut-off dialog and a page wider than the window; show refuses one in an option, shows one of today's app as its defect" {
-  _dialog_pages; run _k proto; [ "$status" -eq 0 ]; run _k up; [ "$status" -eq 0 ]; echo '[]' > "$D/mocks.json"
+  _dialog_pages; run _k proto; [ "$status" -eq 0 ]; run --separate-stderr _k up; [ "$status" -eq 0 ]; echo '[]' > "$D/mocks.json"
   echo '{"base": "proto", "shots": [{"name": "ok", "path": "/ok.html"}, {"name": "hidden", "path": "/hidden.html"}, {"name": "scroll", "path": "/scroll.html"}, {"name": "clip", "path": "/clip.html"}, {"name": "wide", "path": "/wide.html"}, {"name": "offscreen", "path": "/offscreen.html", "only": ["desktop"]}, {"name": "cell", "path": "/cell.html", "only": ["desktop"]}, {"name": "selfscroll", "path": "/selfscroll.html", "only": ["desktop"]}]}' > "$D/shots.json"
   run _k shots; echo "$output"; [ "$status" -eq 0 ]
   local c=$D/shots
