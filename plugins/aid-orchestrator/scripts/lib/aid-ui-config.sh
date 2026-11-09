@@ -53,12 +53,15 @@ aid_ui_live_detect() {
 _aid_ui_live_lines() {
   local root="$1" dir="$2" cfgs=() f cands n var url host ips a
   for f in "$root/$dir"/vite.config.* "$root/$dir"/next.config.*; do [[ -f "$f" ]] && cfgs+=("$f"); done
-  # only a config that has a proxy (Vite server.proxy) or rewrites (Next); comment lines are not code
-  # ponytail: a text match, not a parse — a target: in an unrelated object of the same config is still a candidate;
-  # the PM confirms the address before it is written
+  # only inside the proxy (Vite server.proxy) or rewrites (Next) block — from the line naming it until its brackets
+  # close; comment lines are not code
+  # ponytail: brackets counted per line, not parsed — a bracket inside a string can end the block early (then a
+  # comment, never a wrong address); the PM confirms the address before it is written
   cands=""
-  if (( ${#cfgs[@]} )) && grep -qE '(proxy|rewrites)' "${cfgs[@]}"; then
+  if (( ${#cfgs[@]} )); then
     cands="$(grep -vhE '^[[:space:]]*(//|\*|/\*)' "${cfgs[@]}" \
+      | awk '!inb && /(proxy|rewrites)/ { inb = 1; d = 0; op = 0 }
+             inb { l = $0; o = gsub(/[{[]/, "&", l); c = gsub(/[]}]/, "&", l); d += o - c; if (o) op = 1; print; if (op && d <= 0) inb = 0 }' \
       | { grep -oE "(target|destination)[\"']?[[:space:]]*:[[:space:]]*process\.env\.[A-Za-z_][A-Za-z0-9_]*([[:space:]]*(\?\?|\|\|)[[:space:]]*['\"\`][^'\"\`]*['\"\`])?" || true; } \
       | sed -E "s/^.*process\.env\.([A-Za-z_][A-Za-z0-9_]*)([^'\"\`]*['\"\`]([^'\"\`]*))?.*$/\1 \3/" | sort -u)"
   fi
@@ -70,7 +73,7 @@ _aid_ui_live_lines() {
     echo "  # live: <the live preview> — ${dir} forwards its API from several variables ($(cut -d' ' -f1 <<< "$cands" | sort -u | paste -sd, -)); ask the PM which one is the dev API and its address"; return 0
   fi
   read -r var url <<< "$(head -1 <<< "$cands")"
-  if [[ "$var" =~ (KEY|TOKEN|SECRET|PASS|CREDENTIAL|AUTH) ]]; then
+  if [[ "${var^^}" =~ (KEY|TOKEN|SECRET|PASS|CREDENTIAL|AUTH) ]]; then   # as the kit reads it: any case
     echo "  # live: <the live preview> — the API variable ${var} looks like a secret; the live copy takes none (declare ui.live by hand)"; return 0
   fi
   # the URL as the kit reads it (node's URL, kit-proto.mjs liveEnv): one whole http/ws URL, no user:password@,

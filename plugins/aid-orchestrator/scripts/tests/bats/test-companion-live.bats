@@ -263,6 +263,11 @@ _live_ok() {  # the proposed block passes the kit's own check (liveEnv)
   [ "$status" -eq 1 ]; [[ "$output" == *"user or password"* ]]; [[ "$output" != *secretpw* ]]
   run node --input-type=module -e "import { liveEnv } from '$AID_PLUGIN_PATH/lib/brainstorm-server/kit-proto.mjs'; await liveEnv({ live: { env: { VITE_API: 'http://u:secretpw@127.0.0.1:99999' }, allowed_api: ['127.0.0.1'] } }, m => { console.log('DIE ' + m); process.exit(1); })"
   [ "$status" -eq 1 ]; [[ "$output" != *secretpw* ]]
+  _detect "target: process.env.api_token ?? 'http://127.0.0.1:1'"; [ "$(yq '.ui.live' <<< "$output")" = null ]   # a secret in any case
+  # a target outside the proxy block is not the app's API
+  printf 'export default {\n  server: { proxy: { "/api": "http://127.0.0.1:3287" } },\n  define: { x: { target: process.env.OTHER_URL ?? "http://127.0.0.1:9999" } },\n}\n' > "$R/web/vite.config.ts"
+  run bash -c "set -euo pipefail; source '$AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh' && aid_ui_live_detect '$R' web"; echo "$output"
+  [ "$status" -eq 0 ]; [ "$(yq '.ui.live' <<< "$output")" = null ]; [[ "$output" != *OTHER_URL* ]]
   # a config with no proxy at all, and no config, are a comment too (under set -euo pipefail)
   printf 'export default { define: { x: { target: process.env.VITE_API ?? "http://127.0.0.1:1" } } }\n' > "$R/web/vite.config.ts"
   run bash -c "set -euo pipefail; source '$AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh' && aid_ui_live_detect '$R' web"; [ "$status" -eq 0 ]; [[ "$output" == *"# live:"* ]]

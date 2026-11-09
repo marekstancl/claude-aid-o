@@ -288,8 +288,10 @@ If PM accepts:
      `answers` (`live` also writes the design gate's basis);
    - **an existing screen without `ui.live`** → show the PM the block `aid_ui_live_detect` proposes (a comment instead
      = ask him for the dev API's address), write it into `project.yaml` on his yes, then the live preview;
-   - **he declines, `proto --live` refuses, an app without a dev server (a widget, a build only), or a design from
-     scratch** → captures: `proto`, the variants, `shots`, `navrh.json`, `show`, `answers` — and tell him why.
+   - **he declines, `proto --live` refuses, or a design from scratch** → captures: `proto`, the variants, `shots`,
+     `navrh.json`, `show`, `answers` — and tell him why;
+   - **an app without a dev server (a widget, a build only)** → the companion cannot show it (`proto` needs
+     `ui.dev_cmd`): tell him, and propose in text or with the `frontend-design` skill.
    Never build a page, capture script or start script of your own.
 2. Note `visual_companion: active` in the interim document
 

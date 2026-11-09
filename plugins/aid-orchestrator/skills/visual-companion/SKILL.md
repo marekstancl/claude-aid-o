@@ -52,8 +52,8 @@ on the dev API, in his own browser, with a small AID panel over every page (swit
 volby“). `up` tells you which case you are in. **Which way:** an existing screen with `ui.live` → this section. Without
 it → show the PM the block `aid_ui_live_detect <root> <ui.dir>` prints (`source $AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh`;
 from the app's proxy target; a comment instead = ask him for the DEV API's address), write it on his yes, then this
-section. He declines, `proto --live` refuses, or the app has no dev server (a widget, a build only) → captures, and
-tell him why. A design from scratch or a plan attachment → captures. In `project.yaml`:
+section. He declines or `proto --live` refuses → captures, and tell him why; no dev server (a widget, a build only) →
+the kit cannot show it, say so. A design from scratch or a plan attachment → captures. In `project.yaml`:
 
 ```yaml
 ui:
