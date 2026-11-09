@@ -136,7 +136,25 @@ _live_proposal() {
 }
 
 # live: the proxy in front of the running live copy (lib/brainstorm-server/kit-live-server.mjs)
+# 3.19.0: every `live` (a reused proxy too) looks at every variant as the PM will see it, logged in by ui.live.login
+# (kit-shots.mjs live mode), and hands the agent the pictures; one failing picture does not stop the others
 cmd_live() {
+  local out; out="$(_live_proxy)" || exit 1
+  _live_check "$out"
+}
+
+_live_check() {
+  local rec="$1" res
+  jq '{shots: [.body[] | .bod as $b | .varianty[] | {name: "b\($b)-\(.klic)", path: "\(.cesta // "/")?v=\(.klic)", capture: "full"}]}' "$DIR/live.json" > "$DIR/live-check.json"
+  rm -rf -- "${DIR:?}/live-check"
+  res="$( (export AID_COMPANION_SHOTS_FILE=live-check.json AID_COMPANION_SHOTS_OUT=live-check AID_COMPANION_SHOTS_KEEPGOING=1; node_step shots) 2> "$DIR/live-check.log")" || res=""
+  jq -e 'type == "object" and (.results | type == "array")' <<< "$res" >/dev/null 2>&1 \
+    || res="$(jq -n --arg e "$(tail -3 "$DIR/live-check.log")" '{complete: false, error: $e, results: []}')"
+  jq -c --argjson c "$res" '. + {check: $c, look: [$c.results[] | select(.png) | .png],
+    next: "Read every png in look (what the PM will see; check.complete false or a clipped entry = fix it first), then give the PM the url; then aid-companion.sh answers"}' <<< "$rec"
+}
+
+_live_proxy() {
   local p="$DIR/proto.json" spec="$DIR/live.json" rec="$DIR/live-server.json" pid st pg pport port
   [[ -s "$p" ]] || die "live: no running copy — first: aid-companion.sh proto --plan ${PLAN} --live"
   read -r pid st pg pport < <(jq -r '[.pid, .starttime, .pgid, .port] | map(tostring) | join(" ")' "$p")
@@ -144,7 +162,13 @@ cmd_live() {
   [[ "$(jq -r '.live_env // ""' "$p")" =~ ^[0-9a-f]{16}$ ]] || die "live: the copy runs without ui.live.env (on mocks) — restart it: aid-companion.sh proto --plan ${PLAN} --live"
   [[ -s "$spec" ]] && jq -e '(.body | type == "array" and length > 0) and all(.body[]; (.otazka | type == "string") and (.varianty | type == "array" and length > 0)
       and all(.varianty[]; (.klic | type == "string" and test("^[A-Za-z0-9_-]{1,32}$")) and ((.cesta // "/") | type == "string" and startswith("/") and (contains("//") | not) and (test("[?#]") | not))))' "$spec" >/dev/null 2>&1 \
-    || die "live: ${spec} must be {\"kolo\": 1, \"body\": [{\"bod\": 1, \"otazka\": \"…\", \"varianty\": [{\"klic\": \"A\", \"popis\": \"…\", \"cesta\": \"/obrazovka\"}]}]} (klic letters, digits, _ -; cesta a path of the app, no ? or #)"
+    || die "live: ${spec} must be {\"kolo\": 1, \"body\": [{\"bod\": 1, \"otazka\": \"…\", \"doporuceni\": \"A\", \"proc\": \"…\", \"varianty\": [{\"klic\": \"A\", \"popis\": \"…\", \"cesta\": \"/obrazovka\"}]}]} (klic letters, digits, _ -; cesta a path of the app, no ? or #)"
+  # one variable per page (window.AID_VARIANT): a key names one variant of one point on a screen
+  jq -e '([.body[].bod] | length == (unique | length))
+      and all(.body[]; ([.varianty[].klic] | length == (unique | length)) and ((.doporuceni // null) as $d | $d == null or any(.varianty[]; .klic == $d))
+              and ((.proc // "") | type == "string"))
+      and ([.body[] | .bod as $b | .varianty[] | {k: .klic, c: (.cesta // "/"), b: $b}] | group_by([.k, .c]) | all(map(.b) | unique | length == 1))' "$spec" >/dev/null 2>&1 \
+    || die "live: ${spec}: bod must be unique, klic unique within a point, doporuceni one of its keys, proc text — and one key on one screen belongs to ONE point (window.AID_VARIANT is one per page: give the second point's variants other keys, C, D …)"
   _live_proposal "$spec"
   if [[ -s "$rec" ]]; then
     read -r pid st port < <(jq -r '[.pid, .starttime, .port] | map(tostring) | join(" ")' "$rec")
@@ -167,7 +191,7 @@ cmd_live() {
   pid=$!
   local i; for i in $(seq 50); do [[ -n "$(ss -ltnH "sport = :$port" 2>/dev/null)" ]] && break; sleep 0.1; done
   [[ -n "$(ss -ltnH "sport = :$port" 2>/dev/null)" ]] || die "live: the proxy did not start (log: ${DIR}/live.log)"
-  local first; first="$(jq -r '.body[0].varianty[0] | "\(.cesta // "/")?v=\(.klic)"' "$spec")&aid_t=${token}"
+  local first; first="$(jq -r '.body[0] as $b | (($b.varianty | map(select(.klic == $b.doporuceni)) | first) // $b.varianty[0]) | "\(.cesta // "/")?v=\(.klic)"' "$spec")&aid_t=${token}"
   jq -n --argjson pid "$pid" --arg st "$(_starttime "$pid")" --argjson port "$port" --argjson pp "$pport" \
      --arg url "http://$(url_host):${port}${first}" '{type: "live", pid: $pid, starttime: $st, port: $port, proto_port: $pp, url: $url, reused: false,
        next: "give the PM the url (his own browser, his own screen; the panel switches variants and sends his choices); then aid-companion.sh answers"}' | tee "$rec"

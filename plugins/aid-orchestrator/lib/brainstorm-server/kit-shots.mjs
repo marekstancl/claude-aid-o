@@ -4,6 +4,7 @@
 // gets 404 and is listed; any such call fails the step, so a shot never shows an empty screen by accident.
 import fs from 'node:fs';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { safeTarget, sha, shotSha, kitWrite } from './kit-extra.mjs';
 
 const STEPS = new Set(['goto', 'click', 'fill', 'select', 'hover', 'press', 'wait']);
@@ -13,20 +14,42 @@ function globRe(g) {   // a glob on a pathname: ** = any depth, * = one segment
   return new RegExp('^' + re + '$');
 }
 
-export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
-  // 3.17.0: a copy running live (ui.live.env, dev data with real people in it) is never photographed — captures
-  // land in the plan's files; the live preview is looked at, not stored
-  try { if (JSON.parse(fs.readFileSync(path.join(DIR, 'proto.json'), 'utf8')).live_env) die('shots: the running copy is the live preview (dev data) — no captures of it; for captures run proto without --live (on mocks) after down'); } catch (e) { if (e && e.code !== 'ENOENT' && !(e instanceof SyntaxError)) throw e; }
+// 3.19.0 (PM 9. 11. 2026: the agent building a UI proposal must not deal with security, it builds fast; WAN P126):
+// over a LIVE copy the shots go through the live proxy exactly as the PM sees the page (the variant from ?v= and
+// the proxy's cookie, the panel left out), the API reaches the dev API instead of mocks, and the agent's browser is
+// logged in by the project's ui.live.login (run once per run). `live` uses the same step for its look at every
+// variant (AID_COMPANION_SHOTS_FILE / _OUT / _KEEPGOING): one failing shot does not stop the others there.
+function liveLogin(UI, PROJECT) {   // {ok, localStorage, cookies} | {ok: false, error}; never throws
+  const cmd = UI.live && UI.live.login;
+  if (cmd === undefined) return { ok: false, error: 'no ui.live.login in project.yaml — the pages are seen logged out' };
+  if (!Array.isArray(cmd) || !cmd.length || !cmd.every(x => typeof x === 'string')) return { ok: false, error: 'ui.live.login must be a command as a list, like dev_cmd' };
+  const r = spawnSync(cmd[0], cmd.slice(1), { cwd: PROJECT, encoding: 'utf8', timeout: 20000, maxBuffer: 1 << 20 });
+  if (r.error || r.status !== 0) return { ok: false, error: `ui.live.login failed (${r.error ? r.error.code || r.error.message : 'exit ' + r.status}): ${String(r.stderr || '').trim().slice(-300)}` };
+  let j; try { j = JSON.parse(r.stdout); } catch { return { ok: false, error: 'ui.live.login printed no JSON {"localStorage": {...}, "cookies": [...]}' }; }
+  if (!j || typeof j !== 'object' || (j.localStorage && typeof j.localStorage !== 'object') || (j.cookies && !Array.isArray(j.cookies))) return { ok: false, error: 'ui.live.login JSON must be {"localStorage": {...}, "cookies": [...]}' };
+  return { ok: true, localStorage: j.localStorage || {}, cookies: j.cookies || [] };
+}
+
+export async function run({ DIR, PLAN, PROJECT, UI, VIEWPORTS, die, browser }) {
   const read = (f, what) => { try { return JSON.parse(fs.readFileSync(path.join(DIR, f), 'utf8')); } catch (e) { die(`shots: ${what} (${path.join(DIR, f)}) is not readable JSON: ${e.message}`); } };
-  const spec = read('shots.json', 'shots.json');
-  const mocks = fs.existsSync(path.join(DIR, 'mocks.json')) ? read('mocks.json', 'mocks.json') : [];
+  let LIVE = null;   // {port, token} of the live proxy when the running copy is the live one
+  try { if (JSON.parse(fs.readFileSync(path.join(DIR, 'proto.json'), 'utf8')).live_env) {
+    const ls = read('live-server.json', 'live-server.json (the live proxy: aid-companion.sh live)');
+    const token = (String(ls.url || '').match(/[?&]aid_t=([0-9a-f]+)/) || [])[1];
+    if (!Number.isInteger(ls.port) || !token) die(`shots: the copy runs live but its proxy record is not usable — run: aid-companion.sh live --plan ${PLAN}`);
+    LIVE = { port: ls.port, token };
+  } } catch (e) { if (e && e.code !== 'ENOENT' && !(e instanceof SyntaxError)) throw e; }
+  const SPEC = process.env.AID_COMPANION_SHOTS_FILE || 'shots.json', OUT = process.env.AID_COMPANION_SHOTS_OUT || 'shots';
+  const KEEPGOING = process.env.AID_COMPANION_SHOTS_KEEPGOING === '1';
+  const spec = read(SPEC, SPEC);
+  const mocks = !LIVE && fs.existsSync(path.join(DIR, 'mocks.json')) ? read('mocks.json', 'mocks.json') : [];
   if (!Array.isArray(mocks)) die('shots: mocks.json must be a list of {method?, path, query?, status?, body, headers?}');
   const compiled = mocks.map((m, i) => {
     if (typeof m.path !== 'string') die(`shots: mocks[${i}].path must be a glob on the pathname, e.g. "/api/v1/clients/*"`);
     return { ...m, re: globRe(m.path), method: m.method ? String(m.method).toUpperCase() : null };
   });
-  if (!UI.api_prefix && !(UI.api_origins || []).length) die('shots: project.yaml has no ui.api_prefix (e.g. "/api/") — the step must know which requests are the API');
-  let base = spec.base || 'proto';
+  if (!LIVE && !UI.api_prefix && !(UI.api_origins || []).length) die('shots: project.yaml has no ui.api_prefix (e.g. "/api/") — the step must know which requests are the API');
+  let base = LIVE ? `http://127.0.0.1:${LIVE.port}` : spec.base || 'proto';
   if (base === 'proto') {
     try { base = JSON.parse(fs.readFileSync(path.join(DIR, 'proto.json'), 'utf8')).url; } catch { die(`shots: base "proto" but no prototype runs — aid-companion.sh proto --plan ${PLAN}`); }
   }
@@ -51,6 +74,8 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
       if (kind.length !== 1) die(`shots: shots[${i}].steps[${k}] must be exactly one of ${[...STEPS].join(', ')} — a new window, an iframe or a file upload is not supported; write the case to aid-plugin-issues.md`);
     });
   });
+  const login = LIVE ? liveLogin(UI, PROJECT) : null;
+  if (login && !login.ok) console.error(`aid-companion: ${login.error}`);
   const isApi = u => (UI.api_origins || []).some(o => u.origin === new URL(o).origin) || (u.origin === new URL(base).origin && UI.api_prefix && u.pathname.startsWith(UI.api_prefix));
   const unknown = new Set();
   const b = await browser();
@@ -67,7 +92,7 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
     if (n !== 1) throw new Error(`${where}: the selector ${JSON.stringify(sel)} finds ${n} elements, it must find exactly one`);
     return l;
   };
-  const written = [];
+  const written = [], failed = [];
   // the first page of a run waits longer: a dev server compiles on its first request (P117 (20), WAN P112)
   const first = UI.first_shot_timeout_s === undefined ? 15 : Number(UI.first_shot_timeout_s);
   if (!Number.isInteger(first) || first < 1 || first > 120) die(`shots: ui.first_shot_timeout_s must be whole seconds from 1 to 120 (got ${UI.first_shot_timeout_s})`);
@@ -77,12 +102,18 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
   for (const n of only) if (!names.has(n)) die(`shots: --only ${n}: no such shot in shots.json (${[...names].join(', ')})`);
   const newContext = async vp => {
     const ctx = await b.newContext({ viewport: { width: vp.width, height: vp.height }, deviceScaleFactor: 1 });
-    const st = spec.storage || {};
-    if (st.localStorage) await ctx.addInitScript(o => { for (const [k, v] of Object.entries(o)) localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); }, st.localStorage);
-    if (Array.isArray(st.cookies) && st.cookies.length) await ctx.addCookies(st.cookies.map(c => ({ url: base, ...c })));
+    const st = spec.storage || {}, lg = login && login.ok ? login : { localStorage: {}, cookies: [] };
+    const ls = { ...lg.localStorage, ...(st.localStorage || {}) }, cookies = [...lg.cookies, ...(Array.isArray(st.cookies) ? st.cookies : [])];
+    if (Object.keys(ls).length) await ctx.addInitScript(o => { for (const [k, v] of Object.entries(o)) localStorage.setItem(k, typeof v === 'string' ? v : JSON.stringify(v)); }, ls);
+    if (LIVE) {   // the proxy's own key, and the panel left out of the agent's pictures
+      cookies.push({ name: `aid_t_${LIVE.port}`, value: LIVE.token });
+      await ctx.addInitScript(() => { window.__AID_LIVE_PANEL__ = true; });
+    }
+    if (cookies.length) await ctx.addCookies(cookies.map(c => ({ url: base, ...c })));
     await ctx.route('**/*', route => {
       const req = route.request(), u = new URL(req.url());
       if (req.isNavigationRequest() && u.origin !== origin) { unknown.add(`navigation to ${u.origin} (another origin)`); return route.abort(); }
+      if (LIVE) return route.continue();   // the dev API answers, no mocks
       if (!isApi(u)) {
         // a data request to another origin would reach a live service: refused and listed like an unmocked call
         if (u.origin !== new URL(base).origin && ['xhr', 'fetch'].includes(req.resourceType())) { unknown.add(`${req.method()} ${u.origin}${u.pathname} (another origin)`); return route.abort(); }
@@ -160,13 +191,13 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
     return { dialogs: dialogs.length, clipped: out.filter(c => { const k = c.pravidlo + c.prvek; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 20) };
   });
   // a shot's files go through the kit's path check; written to a temporary name and renamed into place
-  const shotPath = (vp, s, ext) => safeTarget(DIR, `shots/${vp.name}/${s.name}${ext}`, die, { kit: true });
+  const shotPath = (vp, s, ext) => safeTarget(DIR, `${OUT}/${vp.name}/${s.name}${ext}`, die, { kit: true });
   const dropShot = (vp, s) => { for (const ext of ['.png', '.check.json']) { try { fs.rmSync(shotPath(vp, s, ext)); } catch {} } };
   // the shots of a run with an unmocked API call may show an empty screen: their checks say so and show refuses them
   // (K1) — also when the run then stops on another error
   const markMocksMissing = () => {
     for (const w of written) {
-      const rel = `shots/${w.vp.name}/${w.s.name}.check.json`;
+      const rel = `${OUT}/${w.vp.name}/${w.s.name}.check.json`;
       try { kitWrite(DIR, rel, JSON.stringify({ ...JSON.parse(fs.readFileSync(path.join(DIR, rel), 'utf8')), mocks_missing: true }, null, 1), die); } catch {}
     }
   };
@@ -208,16 +239,16 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
     } finally { await restore(page); }
     fs.renameSync(file, shotPath(vp, s, '.png'));
     const rec = { png_sha256: sha(shotPath(vp, s, '.png')), viewport: vp.name, shot_sha256: shotSha(s), mocks_missing: false, ...check };
-    kitWrite(DIR, `shots/${vp.name}/${s.name}.check.json`, JSON.stringify(rec, null, 1), die);
-    return { vp, s, file: shotPath(vp, s, '.png') };
+    kitWrite(DIR, `${OUT}/${vp.name}/${s.name}.check.json`, JSON.stringify(rec, null, 1), die);
+    return { vp, s, file: shotPath(vp, s, '.png'), check };
   };
   try {
     for (const vp of VIEWPORTS) {
       const ctx = await newContext(vp);
       const page = await ctx.newPage();
-      safeTarget(DIR, `shots/${vp.name}`, die, { kit: true });
-      fs.mkdirSync(path.join(DIR, 'shots', vp.name), { recursive: true });
-      safeTarget(DIR, `shots/${vp.name}`, die, { kit: true });
+      safeTarget(DIR, `${OUT}/${vp.name}`, die, { kit: true });
+      fs.mkdirSync(path.join(DIR, OUT, vp.name), { recursive: true });
+      safeTarget(DIR, `${OUT}/${vp.name}`, die, { kit: true });
       for (const s of shots) {
         if (s.only && !s.only.includes(vp.name)) continue;
         if (only.length && !only.includes(s.name)) continue;
@@ -226,6 +257,7 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
         dropShot(vp, s);                         // an old shot never outlives a failed new one (K1)
         try { file = await takeShot(page, s, vp); }
         catch (e) {
+          if (KEEPGOING) { failed.push({ shot: s.name, viewport: vp.name, error: String(e.message || e).split('\n')[0] }); isFirst = false; continue; }
           // one retry of this shot on this viewport, for a network error of the browser only (C7, WAN P113: a
           // changing network failed the whole set) — in a new context with the storage of shots.json, so nothing
           // the first try changed (a cookie, local storage) carries over; the unmocked calls it listed are dropped
@@ -244,9 +276,15 @@ export async function run({ DIR, PLAN, UI, VIEWPORTS, die, browser }) {
     await b.close(); if (unknown.size) markMocksMissing(); die(`shots: ${e.message}`);
   }
   await b.close();
-  if (unknown.size) {
+  if (unknown.size && KEEPGOING) for (const x of unknown) failed.push({ shot: null, viewport: null, error: x });
+  else if (unknown.size) {
     markMocksMissing();
     die(`shots: API calls with no mock (answered 404, the screen may be empty): ${[...unknown].join(', ')} — add them to mocks.json and run shots again`);
   }
-  console.log(JSON.stringify({ shots: written.length, dir: path.join(DIR, 'shots'), next: `write navrh.json (shot names: ${[...names].join(', ')}) and run: aid-companion.sh show --plan ${PLAN}` }));
+  if (KEEPGOING) {
+    const results = [...written.map(w => ({ shot: w.s.name, viewport: w.vp.name, png: w.file, clipped: w.check.clipped })), ...failed];
+    console.log(JSON.stringify({ complete: !failed.length, login: login && (login.ok ? { ok: true } : login), results }));
+    return;
+  }
+  console.log(JSON.stringify({ shots: written.length, dir: path.join(DIR, OUT), login: login ? (login.ok ? { ok: true } : login) : undefined, next: `write navrh.json (shot names: ${[...names].join(', ')}) and run: aid-companion.sh show --plan ${PLAN}` }));
 }
