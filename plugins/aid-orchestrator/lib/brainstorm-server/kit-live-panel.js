@@ -53,7 +53,7 @@
     .row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex:none;margin-top:auto}
     .pick{border:1px solid #34c759;background:#fff;color:#248a3d;border-radius:8px;padding:4px 10px;cursor:pointer;font-weight:600}
     .picked-l{color:#248a3d;font-weight:600} .none{color:#6e6e73}
-    .mk-sec{flex:none} .mk-head{display:flex;align-items:center;gap:6px}
+    .mk-sec{flex:none;height:118px;overflow:hidden} .mk-head{display:flex;align-items:center;gap:6px}
     .mk-head .lbl{flex:1;font-weight:600}
     .tools button{border:1px solid #c7c7cc;background:#f5f5f7;border-radius:8px;padding:3px 8px;cursor:pointer;font-size:12px}
     .tools button.on{background:#ff9f0a;border-color:#ff9f0a;color:#fff}
@@ -91,8 +91,8 @@
     const b = body[qi]; if (!b) return draw();
     const k = chosen[b.bod] || (varOf(b, b.doporuceni) ? b.doporuceni : (b.varianty || [])[0]?.klic);
     const v = varOf(b, k); if (!v) return draw();
-    const same = !v.cesta || new URL(v.cesta, location.origin).pathname === location.pathname;
-    show(k, same ? null : v.cesta);
+    const to = v.cesta || '/', same = new URL(to, location.origin).pathname === location.pathname;
+    show(k, same ? null : to);
   }
   function draw() {
     store('aid_panel_open', open);
@@ -128,9 +128,8 @@
     root.querySelectorAll('.dots i').forEach(d => d.onclick = async () => { await saveNote(); goQ(+d.dataset.q); });
     drawMarks();
     root.querySelectorAll('.seg button').forEach(btn => btn.onclick = () => {
-      const v = varOf(b, btn.dataset.k) || {};
-      const sameScreen = !v.cesta || new URL(v.cesta, location.origin).pathname === location.pathname;
-      show(btn.dataset.k, sameScreen ? null : v.cesta);
+      const v = varOf(b, btn.dataset.k) || {}, to = v.cesta || '/';
+      show(btn.dataset.k, new URL(to, location.origin).pathname === location.pathname ? null : to);
     });
     w.querySelectorAll('button.pick').forEach(btn => btn.onclick = async () => {
       if (await post({ type: 'choice', bod: b.bod, volba: btn.dataset.k })) { chosen[b.bod] = btn.dataset.k; store('aid_chosen', chosen); draw(); }
@@ -139,20 +138,23 @@
     t.oninput = () => store('aid_note_' + t.dataset.b, t.value);
     t.onblur = saveNote;   // a note is never lost to a forgotten "Odeslat": it is sent when the PM leaves the field
     root.getElementById('send').onclick = async () => {
-      await saveNote();
-      const ok = await post({ type: 'confirm', selected: chosen });
-      root.getElementById('st').textContent = ok ? 'Odesláno. Agent to uvidí.' : 'Nepodařilo se odeslat, zkus to znovu.';
+      const notes = await saveNote(), ok = notes && await post({ type: 'confirm', selected: chosen });
+      root.getElementById('st').textContent = ok ? 'Odesláno. Agent to uvidí.' : notes ? 'Nepodařilo se odeslat, zkus to znovu.' : 'Poznámka se neodeslala, zkus to znovu (text zůstal).';
     };
   }
-  async function saveNote() {   // the open question's note, and every note left unsent (stored per question)
+  async function saveNote() {   // every note left unsent (stored per question); true = all of them arrived
+    let ok = true;
     for (const x of body) {
       const v = String(store('aid_note_' + x.bod) || '').trim(); if (!v || store('aid_note_sent_' + x.bod) === v) continue;
-      if (await post({ type: 'note', bod: x.bod, text: v })) store('aid_note_sent_' + x.bod, v);
+      if (await post({ type: 'note', bod: x.bod, text: v })) store('aid_note_sent_' + x.bod, v); else ok = false;
     }
+    return ok;
   }
   window.addEventListener('popstate', () => {   // back / forward in the browser: the variant follows the address
     const v = new URL(location.href).searchParams.get('v');
-    if (v && v !== window.AID_VARIANT && body.some(b => (b.varianty || []).some(x => x.klic === v))) { window.AID_VARIANT = v; draw(); }
+    // the question whose variant is this key on this screen (one key on one screen belongs to one point)
+    const i = body.findIndex(b => (b.varianty || []).some(x => x.klic === v && new URL(x.cesta || '/', location.origin).pathname === location.pathname));
+    if (i >= 0 && (v !== window.AID_VARIANT || i !== qi)) { window.AID_VARIANT = v; qi = i; store('aid_q', qi); draw(); }
   });
   // ── 3.18.0 marks: the PM points at an element (click) or an area (mouse drag) and writes a note ──────────────
   const layer = root.getElementById('layer');

@@ -109,7 +109,10 @@ export async function run({ DIR, PLAN, PROJECT, UI, VIEWPORTS, die, browser }) {
       cookies.push({ name: `aid_t_${LIVE.port}`, value: LIVE.token });
       await ctx.addInitScript(() => { window.__AID_LIVE_PANEL__ = true; });
     }
-    if (cookies.length) await ctx.addCookies(cookies.map(c => ({ url: base, ...c })));
+    // a cookie goes to the page's origin (the proxy) whatever domain/path it was exported with
+    const own = cookies.map(({ domain, path: _p, url, ...c }) => ({ ...c, url: base }));
+    try { if (own.length) await ctx.addCookies(own); }
+    catch (e) { if (!login || !login.ok) throw e; login.ok = false; login.error = `ui.live.login cookies refused by the browser: ${e.message.split('\n')[0]}`; await ctx.clearCookies(); if (LIVE) await ctx.addCookies([{ name: `aid_t_${LIVE.port}`, value: LIVE.token, url: base }]); }
     await ctx.route('**/*', route => {
       const req = route.request(), u = new URL(req.url());
       if (req.isNavigationRequest() && u.origin !== origin) { unknown.add(`navigation to ${u.origin} (another origin)`); return route.abort(); }
@@ -285,7 +288,9 @@ export async function run({ DIR, PLAN, PROJECT, UI, VIEWPORTS, die, browser }) {
     die(`shots: API calls with no mock (answered 404, the screen may be empty): ${[...unknown].join(', ')} — add them to mocks.json and run shots again`);
   }
   if (KEEPGOING) {
-    const results = [...written.map(w => ({ shot: w.s.name, viewport: w.vp.name, png: w.file, clipped: w.check.clipped })), ...failed];
+    const id = n => { const x = shots.find(s => s.name === n) || {}; return { bod: x.bod ?? null, klic: x.klic ?? null }; };
+    const results = [...written.map(w => ({ shot: w.s.name, ...id(w.s.name), viewport: w.vp.name, png: w.file, clipped: w.check.clipped })),
+      ...failed.map(f => ({ ...f, ...id(f.shot) }))];
     console.log(JSON.stringify({ complete: !failed.length, login: login && (login.ok ? { ok: true } : login), results }));
     return;
   }

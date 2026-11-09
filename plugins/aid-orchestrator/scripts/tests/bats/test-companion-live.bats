@@ -308,7 +308,7 @@ _chrome() {
   [[ -n "$CHROME" ]] || { echo "no chromium for the browser case (the kit's own tools)"; false; }
 }
 _seenpage() {   # a page that reports what it saw: the login token, the variant, whether the panel came in
-  printf '<html><head></head><body><main>look</main><script>setTimeout(() => fetch("/seen?tok=" + (localStorage.getItem("tok") || "none") + "&v=" + window.AID_VARIANT + "&panel=" + !!document.getElementById("aid-live-panel")), 200)</script></body></html>' > "$R/web/$1"
+  printf '<html><head></head><body><main>look</main><script>setTimeout(() => fetch("/seen?tok=" + (localStorage.getItem("tok") || "none") + "&v=" + window.AID_VARIANT + "&panel=" + !!document.getElementById("aid-live-panel") + "&ck=" + document.cookie.includes("ck=1")), 200)</script></body></html>' > "$R/web/$1"
 }
 
 @test "live looks at every variant as the PM will see it: through the proxy, logged in by ui.live.login, without the panel; a failing login is said, not fatal; a reused proxy looks again (3.19.0)" {
@@ -324,6 +324,14 @@ _seenpage() {   # a page that reports what it saw: the login token, the variant,
   [[ "$(jq -r .url <<< "$out")" == *"/look.html?v=B&aid_t="* ]]                 # the PM's link opens the recommended one
   cat "$BATS_TEST_TMPDIR/seen"
   for v in A B C; do grep -q "tok=x1&v=${v}&panel=false" "$BATS_TEST_TMPDIR/seen"; done
+  [ "$(jq -c '[.check.results[] | select(.viewport == "desktop") | [.bod, .klic]]' <<< "$out")" = '[[1,"A"],[1,"B"],[2,"C"]]' ]
+  # a reused proxy: the link follows the changed recommendation; cookies exported with a domain and path log in too
+  jq '.body[0].doporuceni = "A"' "$D/live.json" > "$D/l.t" && mv "$D/l.t" "$D/live.json"
+  printf 'echo %s\n' "'{\"cookies\": [{\"name\": \"ck\", \"value\": \"1\", \"domain\": \"app.example\", \"path\": \"/x\"}]}'" > "$BATS_TEST_TMPDIR/login.sh"
+  : > "$BATS_TEST_TMPDIR/seen"
+  _live; [ "$status" -eq 0 ]; out="$(tail -1 <<< "$output")"
+  [ "$(jq -r .reused <<< "$out")" = true ]; [[ "$(jq -r .url <<< "$out")" == *"/look.html?v=A&aid_t="* ]]
+  [ "$(jq -r .check.login.ok <<< "$out")" = true ]; grep -q "v=A&panel=false&ck=true" "$BATS_TEST_TMPDIR/seen"
   : > "$BATS_TEST_TMPDIR/seen"
   printf 'ui:\n  live:\n    login: ["false"]\n' > "$R/.aid-o/config/project.yaml"
   _live; [ "$status" -eq 0 ]; out="$(tail -1 <<< "$output")"
@@ -362,7 +370,14 @@ _seenpage() {   # a page that reports what it saw: the login token, the variant,
     await p.locator('#aid-live-panel textarea').fill('poznamka jedna');
     await p.locator('#aid-live-panel #next').click(); await p.waitForTimeout(500);
     const g2 = await geo(); const at = await p.evaluate(() => location.pathname + location.search + ' ' + window.AID_VARIANT);
-    console.log(JSON.stringify({ g1, g2, at })); await b.close();"
+    const mk = await p.evaluate(() => document.getElementById('aid-live-panel').shadowRoot.querySelector('.mk-sec').getBoundingClientRect().height);
+    await p.goBack(); await p.waitForTimeout(300); const back = (await geo()).head;     // back in the browser: question 1 again
+    // a note that does not arrive: the send says so and keeps the text
+    await p.route('**/__aid/answer', r => JSON.parse(r.request().postData()).type === 'note' ? r.fulfill({ status: 500 }) : r.continue());
+    await p.locator('#aid-live-panel textarea').fill('poznamka dva');
+    await p.locator('#aid-live-panel button', { hasText: 'Odeslat volby' }).click(); await p.waitForTimeout(400);
+    const st = await p.evaluate(() => document.getElementById('aid-live-panel').shadowRoot.getElementById('st').textContent);
+    console.log(JSON.stringify({ g1, g2, at, mk, back, st })); await b.close();"
   echo "$output"; [ "$status" -eq 0 ]
   local r; r="$(tail -1 <<< "$output")"
   [[ "$(jq -r .g1.head <<< "$r")" == *"OTÁZKA 1 Z 2"* ]]; [[ "$(jq -r .g2.head <<< "$r")" == *"OTÁZKA 2 Z 2"* ]]
@@ -371,6 +386,9 @@ _seenpage() {   # a page that reports what it saw: the login token, the variant,
   [ "$(jq -r .g1.foot <<< "$r")" = "$(jq -r .g2.foot <<< "$r")" ]                 # the bottom stays where it was
   [[ "$(jq -r .g1.rec <<< "$r")" == *"Doporučuji A"*"protoze"* ]]
   [ "$(jq -r .at <<< "$r")" = "/two.html?v=C C" ]
+  [ "$(jq -r .mk <<< "$r")" = 118 ]                                              # the marks' part keeps its height
+  [[ "$(jq -r .back <<< "$r")" == *"OTÁZKA 1 Z 2"* ]]
+  [[ "$(jq -r .st <<< "$r")" == "Poznámka se neodeslala"* ]]
   grep -q '"type":"note".*"bod":1.*poznamka jedna\|poznamka jedna.*"bod":1' "$D/answers.jsonl"
 }
 

@@ -148,7 +148,7 @@ cmd_live() {
 
 _live_check() {
   local rec="$1" res
-  jq '{shots: [.body[] | .bod as $b | .varianty[] | {name: "b\($b)-\(.klic)", path: "\(.cesta // "/")?v=\(.klic)", capture: "full"}]}' "$DIR/live.json" > "$DIR/live-check.json"
+  jq '{shots: [.body[] | .bod as $b | .varianty[] | {name: "b\($b)-\(.klic)", bod: $b, klic, path: "\(.cesta // "/")?v=\(.klic)", capture: "full"}]}' "$DIR/live.json" > "$DIR/live-check.json"
   rm -rf -- "${DIR:?}/live-check"
   res="$( (export AID_COMPANION_SHOTS_FILE=live-check.json AID_COMPANION_SHOTS_OUT=live-check AID_COMPANION_SHOTS_KEEPGOING=1; node_step shots) 2> "$DIR/live-check.log")" || res=""
   jq -e 'type == "object" and (.results | type == "array")' <<< "$res" >/dev/null 2>&1 \
@@ -175,7 +175,10 @@ _live_proxy() {
   _live_proposal "$spec"
   if [[ -s "$rec" ]]; then
     read -r pid st port < <(jq -r '[.pid, .starttime, .port] | map(tostring) | join(" ")' "$rec")
-    if _alive_as "$pid" "$st" "kit-live-server.mjs"; then jq -c '. + {reused: true}' "$rec"; return 0; fi
+    if _alive_as "$pid" "$st" "kit-live-server.mjs"; then   # the link follows the current live.json (its first point's recommended variant)
+      local tok; tok="$(jq -r '.url' "$rec" | sed -E 's/.*[?&]aid_t=([0-9a-f]+).*/\1/')"
+      jq -c --arg e "$(jq -r '.body[0] as $b | (($b.varianty | map(select(.klic == $b.doporuceni)) | first) // $b.varianty[0]) | "\(.cesta // "/")?v=\(.klic)"' "$spec")&aid_t=${tok}" \
+        '. + {reused: true, url: ((.url | sub("^(?<o>https?://[^/]+).*$"; "\(.o)")) + $e)}' "$rec"; return 0; fi
     _alive_as "$pid" "$st" "kit-live-server.mjs" && kill "$pid" 2>/dev/null; rm -f "$rec"
   fi
   # the companion range (G-008 slots 3930-3949); a test narrows it. ${…:-} — unset under set -u (3.17.0 fell on it live)
