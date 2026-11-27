@@ -70,11 +70,13 @@ cmd_start() {
   [[ -z "$focus" || -z "$agent_id" || -z "$evidence_dir" ]] && usage
   [[ ! -d "$evidence_dir" ]] && { echo "ERROR: evidence_dir does not exist: $evidence_dir" >&2; exit 1; }
 
-  # Enforce agent_id invariant from Data Model line 440 (^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$).
+  # Enforce agent_id invariant from Data Model line 440 (^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$), the role part also
+  # with dots: the critic names its Codex model there (codex:gpt-6.2-sol, 3.19.0 - without the dot the bracket was
+  # refused and, behind the caller's `|| true`, silently missing).
   # Empirical anchor: P052 fabrication used agent_id strings that did not match
   # any real subagent type. Without regex enforcement the Data Model invariant is
   # decoration — see AID-v3-principles.md §1 (Detector without Enforcement is Decoration).
-  if [[ ! "$agent_id" =~ ^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$ ]]; then
+  if [[ ! "$agent_id" =~ ^[a-z][a-z0-9-]*:[a-z][a-z0-9.-]*$ ]]; then
     echo "ERROR: agent_id does not match required format <plugin>:<role> (got: $agent_id)" >&2
     exit 1
   fi

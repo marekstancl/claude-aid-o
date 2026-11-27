@@ -124,6 +124,13 @@ teardown() {
   [ ! -f "$PENDING" ]
 }
 
+@test "a model name with a dot is a valid role (codex:gpt-6.2-sol); a dot never starts the role" {
+  run bash "$SCRIPT" start --focus critic-plan --agent-id codex:gpt-6.2-sol --evidence-dir "$EVID"
+  [ "$status" -eq 0 ]
+  run bash "$SCRIPT" start --focus critic-brainstorm --agent-id codex:.x --evidence-dir "$EVID"
+  [ "$status" -eq 1 ]
+}
+
 # 8. concurrent start + complete survives inode swap (H11 race)
 @test "concurrent start + complete survives inode rotation" {
   touch "${TMPDIR_TEST}/out.md"

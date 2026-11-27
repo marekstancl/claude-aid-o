@@ -114,6 +114,8 @@ function shotChecks(v, spec) {
       if (c.mocks_missing) { fail(`${where}: shot '${name}' (${vp}) comes from a run with API calls without a mock — the screen may be empty; fix mocks.json and run shots again`); continue; }
       if (c.dialogs) look.add(rel);
       if (!c.clipped || !c.clipped.length) continue;
+      const err = c.clipped.find(x => x.pravidlo === 'dev_server_error');
+      if (err) { fail(`${where}: shot '${name}' (${vp}) shows the dev server's error page, not the app — ${err.zprava || err.prvek}. Fix the copy (a missing file: ui.copy_extra) and run shots again`); continue; }
       const what = c.clipped.map(x => `${x.pravidlo} ${x.prvek} (+${x.presah_px} px)`).join('; ');
       if (!today) fail(`${where}: shot '${name}' (${vp}) is cut off — ${what}. Fix the variant (a defect of a shared component: fix it in the variant and list the file in spolecne) and run shots again`);
       else if (!vady.has(name)) fail(`${where}: today's shot '${name}' (${vp}) is cut off — ${what}. It is a defect of today's app: list it in vady_aplikace [{snimek: "${name}", popis}] so the PM sees it`);
