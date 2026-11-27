@@ -10,7 +10,7 @@
 # only. A change of the five-argument signature is checked against all of them.
 
 # The model is configuration: a caller may repoint CODEX_MODEL before the call.
-CODEX_MODEL="${CODEX_MODEL:-${AID_C3_CODEX_MODEL:-gpt-6-sol}}"
+CODEX_MODEL="${CODEX_MODEL:-${AID_C3_CODEX_MODEL:-gpt-6.2-sol}}"
 
 # aid_codex_binary — the highest-version `codex` on $PATH, not the first one.
 # Two installs coexist on the dev host (/usr/local/bin/codex 0.149.1 shadows

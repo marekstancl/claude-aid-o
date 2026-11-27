@@ -5050,6 +5050,18 @@ enforcements:
     tier: t2
     description: "P117 (20, WAN P112): ui.copy_extra copies repository files beside the copy, never a secret in any path component, never outside the repository, through no link, never over the kit's files; capture {scroll} shoots a scrolling container whole; ui.first_shot_timeout_s (1..120) governs the first shot's waits."
     test: "scripts/tests/bats/test-companion-kit.bats (grep: 'kit F')"
+  - id: companion_live_look
+    type: 1
+    source: "lib/brainstorm-server/kit-shots.mjs (KEEPGOING look, measure: dev_server_error) + scripts/aid-companion.sh live"
+    instruction: "skills/visual-companion/SKILL.md (live preview, step 4)"
+    severity: blocking
+    surface: llm-facing
+    status: active
+    verdict: ALIGNED
+    tier: t1
+    description: "3.19.0 (WAN P126): `live` looks at every variant of live.json on every viewport through the proxy as the PM will see it, logged in by ui.live.login (a failing login is reported, not fatal), and returns look[] and check {complete, login, results}; a shot that failed, or a page showing the dev server's error overlay instead of the app (dev_server_error, 27. 11. 2026), makes check.complete false, so the agent fixes the copy before the PM gets the link."
+    not_guaranteed: "That the agent reads the pngs in look; that a page with no overlay is the screen the PM expects (a login page with a valid session cookie missing is still a page)."
+    test: "scripts/tests/bats/test-companion-live.bats (grep: 'looks at every variant', 'error page')"
   - id: process_map_check
     type: 1
     source: "scripts/aid-process-map.py (check_rules, schema_errors) + defaults/schemas/process-map.schema.json"

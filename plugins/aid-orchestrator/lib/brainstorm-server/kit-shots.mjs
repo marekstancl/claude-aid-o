@@ -173,6 +173,11 @@ export async function run({ DIR, PLAN, PROJECT, UI, VIEWPORTS, die, browser }) {
       + (el.getAttribute('aria-label') ? ` "${el.getAttribute('aria-label').slice(0, 40)}"` : '')
       + (el.id ? `#${el.id}` : '') + (typeof el.className === 'string' && el.className.trim() ? '.' + el.className.trim().split(/\s+/).slice(0, 3).join('.') : '');
     const out = [], se = document.scrollingElement;
+    // the dev server's error page in place of the app (27. 11. 2026, a WAN copy without pyproject.toml: Vite's overlay
+    // was captured and reported complete) - the screen the PM would get is not the app
+    const ov = document.querySelector('vite-error-overlay');
+    if (ov) out.push({ pravidlo: 'dev_server_error', prvek: 'vite-error-overlay',
+      zprava: ((ov.shadowRoot && ov.shadowRoot.querySelector('.message')) || ov).textContent.trim().slice(0, 300) });
     if (se.scrollWidth > innerWidth + 1) out.push({ pravidlo: 'page_wider_than_window', prvek: 'page', presah_px: se.scrollWidth - innerWidth });
     const dialogs = [...document.querySelectorAll('[role=dialog],[role=alertdialog],dialog[open]')].filter(vis);
     for (const d of dialogs) {
@@ -291,7 +296,8 @@ export async function run({ DIR, PLAN, PROJECT, UI, VIEWPORTS, die, browser }) {
     const id = n => { const x = shots.find(s => s.name === n) || {}; return { bod: x.bod ?? null, klic: x.klic ?? null }; };
     const results = [...written.map(w => ({ shot: w.s.name, ...id(w.s.name), viewport: w.vp.name, png: w.file, clipped: w.check.clipped })),
       ...failed.map(f => ({ ...f, ...id(f.shot) }))];
-    console.log(JSON.stringify({ complete: !failed.length, login: login && (login.ok ? { ok: true } : login), results }));
+    const broken = written.some(w => w.check.clipped.some(c => c.pravidlo === 'dev_server_error'));
+    console.log(JSON.stringify({ complete: !failed.length && !broken, login: login && (login.ok ? { ok: true } : login), results }));
     return;
   }
   console.log(JSON.stringify({ shots: written.length, dir: path.join(DIR, OUT), login: login ? (login.ok ? { ok: true } : login) : undefined, next: `write navrh.json (shot names: ${[...names].join(', ')}) and run: aid-companion.sh show --plan ${PLAN}` }));

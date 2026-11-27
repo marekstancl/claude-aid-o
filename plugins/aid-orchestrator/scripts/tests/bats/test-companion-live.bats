@@ -339,6 +339,17 @@ _seenpage() {   # a page that reports what it saw: the login token, the variant,
   grep -q "tok=none&v=A&panel=false" "$BATS_TEST_TMPDIR/seen"
 }
 
+@test "live: the dev server's error page in place of the app makes the look incomplete and names the message" {
+  _chrome; unset AID_COMPANION_LIVE_LOOK
+  printf '<html><body><script>customElements.define("vite-error-overlay", class extends HTMLElement { constructor() { super(); this.attachShadow({mode: "open"}).innerHTML = "<pre class=message>pyproject.toml nenalezen</pre>"; } }); document.body.appendChild(document.createElement("vite-error-overlay"));</script></body></html>' > "$R/web/broken.html"
+  _seenpage ok.html
+  jq -n '{kolo: 1, body: [{bod: 1, otazka: "a", varianty: [{klic: "A", popis: "a", cesta: "/broken.html"}, {klic: "B", popis: "b", cesta: "/ok.html"}]}]}' > "$D/live.json"
+  _live; [ "$status" -eq 0 ]; local out; out="$(tail -1 <<< "$output")"
+  [ "$(jq -r .check.complete <<< "$out")" = false ]
+  [ "$(jq -r '[.check.results[] | select(.klic == "A") | .clipped[0].zprava] | unique[0]' <<< "$out")" = "pyproject.toml nenalezen" ]
+  [ "$(jq -r '[.check.results[] | select(.klic == "B") | .clipped | length] | add' <<< "$out")" = 0 ]
+}
+
 @test "live.json: a point is unique, a key is unique in its point and on its screen, doporuceni is one of the point's keys" {
   local bad
   for bad in '[{bod: 1, otazka: "a", varianty: [{klic: "A", cesta: "/x"}]}, {bod: 1, otazka: "b", varianty: [{klic: "B", cesta: "/y"}]}]' \

@@ -3,7 +3,7 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
-## [3.19.0] — 2026-11-09
+## [3.19.0] — 2026-11-27
 
 Panel po otázkách a agent vidí živý náhled sám (PM 9. 11. 2026 po živé ukázce na kopii WANu; hlášení WAN P126). Zadání: `docs/plans/2026-11-09-3190-panel-a-pohled-agenta.md`.
 
@@ -11,6 +11,8 @@ Panel po otázkách a agent vidí živý náhled sám (PM 9. 11. 2026 po živé 
 - **Agent si každou variantu prohlédne sám, přihlášený, dřív než ti pošle odkaz.** `aid-companion.sh live` po startu projde všechny varianty na počítači i telefonu stejně, jak je uvidíš ty (přes proxy, bez panelu), vyfotí je a změří oříznutá okna a přetékající stránku; agent dostane `look` a `check`. Přihlášení zařídí kit podle `ui.live.login` (příkaz projektu, který vypíše token; WAN: testovací účet z testů v prohlížeči). Na kopii WANu P126 hned našel variantu, která je na telefonu o 134 px širší než obrazovka.
 - **`shots` funguje i nad živou kopií** (přes proxy, přihlášený, bez mocků) - na dialogy a kliky, které automatická prohlídka nedělá. Dřív ji kit odmítal.
 - **`live.json`:** `doporuceni` a `proc` u otázky; kit odmítne dvojí `bod`, dvojí klíč v otázce a stejný klíč na stejné obrazovce ve dvou otázkách (proměnná varianty je jedna na stránku). Odkaz pro PM otevře doporučenou variantu.
+- **Chybová stránka vývojového serveru se nepočítá jako hotová prohlídka.** Když místo aplikace naskočí chyba Vite (`vite-error-overlay`), prohlídka vrátí `check.complete: false` a u snímku `dev_server_error` s textem chyby. Dřív ji hlásila jako v pořádku (zjištěno 27. 11. 2026 při ověření na kopii WANu bez `pyproject.toml`).
+- **Codex revizor na `gpt-6.2-sol`** (PM 27. 11. 2026, volba 3A). Revize plánu, kroku i konce plánu dřív běžely na `gpt-6-sol`, který Codex vede jako „Legacy“. Cena `gpt-6.2-sol` je v `defaults/prices.yaml` (2 / 10 USD za milion, cache 0,10). Ceník Claude odpovídá tomu, kam dnes vedou jména `opus` a `sonnet`: Opus 5.5 (4 / 20 USD, cache 0,20; směs 13,1 odhadem z naměřených 16,4 u Opusu 5) a Sonnet 5.5 (cache 0,10). Projekt, který si model revizora přepsal ve vlastním `.aid-o/config/policies/review-checkpoints.yaml`, si ho změní sám. Na novější model Codexu upozorní každé pondělí úloha ekosystému `agent-tools-update` (`services/scripts/novejsi-model-codexu.sh`).
 
 ## [3.18.1] — 2026-11-09
 
