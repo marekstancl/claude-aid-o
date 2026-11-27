@@ -47,13 +47,12 @@ an `@` alias) fails with "ReferenceError: __dirname is not defined" — stay on 
 
 ## An existing application: the live preview first (3.17.0; the default since 3.18.1, PM 9. 11. 2026)
 
-When the application exists and runs, the PM looks at the real thing, not at photographs: the copy with your variants
-on the dev API, in his own browser, with a small AID panel over every page (switch variant, „Vybrat“, a note, „Odeslat
-volby“). `up` tells you which case you are in. **Which way:** an existing screen with `ui.live` → this section. Without
-it → show the PM the block `aid_ui_live_detect <root> <ui.dir>` prints (`source $AID_PLUGIN_PATH/scripts/lib/aid-ui-config.sh`;
-from the app's proxy target; a comment instead = ask him for the DEV API's address), write it on his yes, then this
-section. He declines or `proto --live` refuses → captures, and tell him why; no dev server (a widget, a build only) →
-the kit cannot show it, say so. A design from scratch or a plan attachment → captures. In `project.yaml`:
+When the application exists and runs, the PM sees the real thing: your variants in a copy on the dev API, in his own
+browser, with an AID panel (one question a page: variants, choice, marks, a note, send). `up` says which case you are
+in. Without `ui.live` → show the PM the block `aid_ui_live_detect <root> <ui.dir>` prints (lib
+`scripts/lib/aid-ui-config.sh`; a comment = ask him for the DEV API's address), write it on his yes. He declines or
+`proto --live` refuses → captures, say why; no dev server (a widget) → the kit cannot show it, say so; a design from
+scratch → captures. In `project.yaml`:
 
 ```yaml
 ui:
@@ -61,24 +60,27 @@ ui:
     env:                       # what points the copy at the DEV API (never a secret: VITE_* lands in the page)
       VITE_API_TARGET: http://10.20.20.22:3501
     allowed_api: [10.20.20.22] # the allowlist: every address in env must resolve to one of these
+    login: ["bash", "scripts/dev-login.sh"]  # prints {"localStorage": {…}, "cookies": […]} - logs YOUR browser in (3.19.0)
 ```
 
-1. `bash $K proto --plan P --live` — the copy in a clean environment (no keys of yours) with `ui.live.env`;
-   its `.env*` files are removed, it must listen on loopback.
-2. Build the variants in `proto/` from `ui.components`, behind `window.AID_VARIANT` (the preview sets it from
-   `?v=<klic>`; `null` = today's screen). Read it while rendering: the panel switches a variant WITHOUT reloading the
-   app (history + popstate, so the router renders again); a component the route change does not re-render listens
-   for the `aid-variant` event.
-3. Write `<P>/live.json`: `{"kolo": 1, "body": [{"bod": 1, "otazka": "…", "varianty": [{"klic": "A", "popis": "…",
-   "cesta": "/provize"}]}]}` (`cesta` = the app's path where the variant shows).
-4. `bash $K live --plan P` prints the PM's address with the run's token (`aid_t=`; without it 403) — give him
-   exactly that; it also writes the design gate's basis. Then `bash $K answers --plan P` (rows `page: live`).
-5. **Marks (3.18.0):** „Komentovat“ — he clicks an element or drags an area and writes a note. `answers` → `znacky`
-   (`kotva.selector` + x/y[/w/h] % of it, `cesta`, `varianta`, `viewport`, `prvek`); find that element before you answer.
+1. `bash $K proto --plan P --live` — the copy in a clean environment (no keys of yours) with `ui.live.env`; its `.env*`
+   files are removed, it must listen on loopback.
+2. Build the variants in `proto/` from `ui.components`, behind `window.AID_VARIANT` (set from `?v=<klic>`; `null` =
+   today's screen), read while rendering: the panel switches without a reload (history + popstate); a component the
+   route change does not re-render listens for `aid-variant`.
+3. Write `<P>/live.json`: `{"kolo": 1, "body": [{"bod": 1, "otazka": "…", "doporuceni": "A", "proc": "…", "varianty":
+   [{"klic": "A", "popis": "…", "cesta": "/provize"}]}]}` (`cesta` = the app's path; the panel shows one point a page;
+   one key on one screen belongs to one point — the second point's variants are C, D …).
+4. `bash $K live --plan P` starts the proxy AND looks at every variant on every viewport as the PM will see it, logged
+   in by `ui.live.login` (every run, a reused proxy too). **Read every png in `look`** first; `check.complete` false or
+   a `clipped` entry = fix it, run `live` again. Then give the PM `url` exactly; `answers` (rows `page: live`). A
+   dialog or a click to look at: `shots` works on the live copy too (through the proxy, logged in, no mocks).
+5. **Marks:** „+ Značka“ — he clicks an element or drags an area and writes a note. `answers` → `znacky`
+   (`kotva.selector` + x/y[/w/h] % of it, `cesta`, `varianta`, `viewport`, `prvek`); find that element first.
 6. `bash $K down --plan P` when he has answered: proxy and copy stop.
 
 The kit holds (not you): only the proxy is reachable, `/@fs/` only under the copy, CSP `connect-src 'self'`, the API
-only from `allowed_api`, answers only from its page, no `shots` of a live copy (for captures `down`, then `proto`).
+only from `allowed_api`, answers only from its page, the token on the PM's link, your browser's login.
 
 ## The procedure (`P` = the brainstorm's plan id, `$K = $AID_PLUGIN_PATH/scripts/aid-companion.sh`)
 
@@ -183,18 +185,16 @@ bottom, "Odeslat volby a poznámky" with "Zvoleno n z m". You never write or edi
 
 ## When it refuses
 
-Every refusal names what to fix; fix it and run the step again. `proto` refuses a workspace or a `ui.dir` without
-`node_modules`; `shots` refuses a new window, an iframe or a file upload — write those to `aid-plugin-issues.md`.
-A port taken by another process stops the prototype; `down` stops only what the kit started and recorded.
+Every refusal names what to fix; fix it, run again. `proto`: no `node_modules` in `ui.dir`; `shots`: a new window, an
+iframe or an upload → `aid-plugin-issues.md`. `down` stops only what the kit started.
 
 ## Outside the brainstorm
 
 - **`/visual-companion` alone** (a smoke test): `bash $AID_PLUGIN_PATH/lib/brainstorm-server/start-server.sh --host 0.0.0.0 --url-host <the address the PM reaches>`,
-  write one HTML file into the printed `screen_dir`, send the address; clicks land in `.events`.
-  A fragment (no `<html>`) is wrapped in `frame-template.html` — fine for a diagram, never for UI.
-- **Implementation of an `existing_ui` step** (EXECUTE, not the brainstorm): the implementer
-  captures the real screen with `lib/ui-fidelity/ui-capture.mjs`, compares it with
-  `ui-compare.mjs` and records `gestalt_approval` (skills/agent-protocol.md); `unverifiable` means
-  no visual-fidelity claim.
+  write one HTML file into the printed `screen_dir`, send the address; clicks land in `.events`. A fragment (no
+  `<html>`) is wrapped in `frame-template.html` — fine for a diagram, never for UI.
+- **Implementation of an `existing_ui` step** (EXECUTE, not the brainstorm): the implementer captures the real screen
+  with `lib/ui-fidelity/ui-capture.mjs`, compares it with `ui-compare.mjs` and records `gestalt_approval`
+  (skills/agent-protocol.md); `unverifiable` means no visual-fidelity claim.
 
-**Last Updated:** 2026-11-01
+**Last Updated:** 2026-11-09

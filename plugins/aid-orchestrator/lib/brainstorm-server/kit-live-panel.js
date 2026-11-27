@@ -4,7 +4,8 @@
 // window.AID_VARIANT, the aid_v_<port> cookie and ?v= are set, the address changes by history.pushState and a
 // popstate event makes the app's router render again; an 'aid-variant' event goes to code that listens for it.
 // One choice per point: "Vybrat" takes the variant on screen; the chosen one is marked apart from the one shown.
-// The panel stays out of the way: a small tab when hidden, see-through until the pointer is over it.
+// 3.19.0 (PM 9. 11. 2026): one question at a time, the parts always in the same place, no see-through; whole texts,
+// a tall panel, and only the question's part scrolls when a text is longer.
 (() => {
   if (window.__AID_LIVE_PANEL__) return; window.__AID_LIVE_PANEL__ = true;
   const host = document.createElement('div'); host.id = 'aid-live-panel';
@@ -32,25 +33,44 @@
 
   root.innerHTML = `<style>
     :host{all:initial} *{box-sizing:border-box;font:13px/1.4 system-ui,sans-serif;color:#1d1d1f}
-    .wrap{opacity:.55;transition:opacity .15s} .wrap:hover,.wrap:focus-within{opacity:1}
-    .box{width:min(320px,calc(100vw - 24px));max-height:60vh;overflow:auto;background:#fff;border:1px solid #c7c7cc;border-radius:12px;box-shadow:0 6px 22px rgba(0,0,0,.16);padding:10px 12px}
-    .tab{background:#1d1d1f;color:#fff;border:0;border-radius:999px;padding:6px 12px;cursor:pointer;font-weight:600}
-    .head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}
-    .head b{font-size:13px} .bod{border-top:1px solid #e5e5ea;padding-top:8px;margin-top:8px}
-    .q{font-weight:600;margin-bottom:6px} .seg{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
-    .seg button{border:1px solid #c7c7cc;background:#f5f5f7;border-radius:8px;padding:4px 10px;cursor:pointer}
+        .tab{background:#1d1d1f;color:#fff;border:0;border-radius:999px;padding:6px 12px;cursor:pointer;font-weight:600}
+    /* 3.19.0 (PM 9. 11. 2026): one question at a time, every part always in the same place, no scrolling */
+    .box{width:min(340px,calc(100vw - 24px));height:min(780px,calc(100vh - 24px));display:flex;flex-direction:column;background:#fff;
+      border:1px solid #c7c7cc;border-radius:12px;box-shadow:0 6px 22px rgba(0,0,0,.16);overflow:hidden}
+    .head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid #e5e5ea;flex:none}
+    .head b{font-size:12px;color:#6e6e73;font-weight:600;letter-spacing:.02em}
+    .x{border:0;background:none;cursor:pointer;color:#6e6e73}
+    .sec{padding:8px 12px;border-bottom:1px solid #e5e5ea}
+    .top{flex:1 1 auto;min-height:0;display:flex;flex-direction:column;gap:6px;overflow:auto} .top>*{flex:none}
+    .q{font-weight:600}
+    .seg{display:flex;gap:4px;flex-wrap:wrap;flex:none}
+    .seg button{position:relative;border:1px solid #c7c7cc;background:#f5f5f7;border-radius:8px;padding:4px 12px;cursor:pointer;font-weight:600}
     .seg button.on{background:#0a84ff;border-color:#0a84ff;color:#fff}
-    .desc{color:#3a3a3c;margin-bottom:6px} .row{display:flex;gap:8px;align-items:center;justify-content:space-between;margin-bottom:6px}
+    .seg button .star{position:absolute;top:-7px;right:-5px;font-size:11px;color:#ff9f0a}
+    .seg button.picked::after{content:'✓';margin-left:4px;color:#34c759}
+    .seg button.on.picked::after{color:#fff}
+    .desc{color:#3a3a3c} .rec{color:#6e6e73;font-size:12px} .rec b{color:#1d1d1f;font-size:12px}
+    .row{display:flex;gap:8px;align-items:center;justify-content:space-between;flex:none;margin-top:auto}
     .pick{border:1px solid #34c759;background:#fff;color:#248a3d;border-radius:8px;padding:4px 10px;cursor:pointer;font-weight:600}
-    .picked{color:#248a3d;font-weight:600} .none{color:#6e6e73}
-    textarea{width:100%;min-height:40px;border:1px solid #c7c7cc;border-radius:8px;padding:6px;resize:vertical}
-    .send{width:100%;margin-top:8px;background:#1d1d1f;color:#fff;border:0;border-radius:8px;padding:7px;font-weight:600;cursor:pointer}
-    .x{border:0;background:none;cursor:pointer;color:#6e6e73} .st{font-size:12px;color:#6e6e73;margin-top:4px}
-    .tools{display:flex;gap:6px;margin-bottom:6px} .tools button{border:1px solid #c7c7cc;background:#f5f5f7;border-radius:8px;padding:4px 8px;cursor:pointer}
+    .picked-l{color:#248a3d;font-weight:600} .none{color:#6e6e73}
+    .mk-sec{flex:none;height:118px;overflow:hidden} .mk-head{display:flex;align-items:center;gap:6px}
+    .mk-head .lbl{flex:1;font-weight:600}
+    .tools button{border:1px solid #c7c7cc;background:#f5f5f7;border-radius:8px;padding:3px 8px;cursor:pointer;font-size:12px}
     .tools button.on{background:#ff9f0a;border-color:#ff9f0a;color:#fff}
-    .marks{border-top:1px solid #e5e5ea;margin-top:8px;padding-top:6px} .mk{display:flex;gap:6px;align-items:flex-start;margin:3px 0}
-    .mk .n{background:#ff9f0a;color:#fff;border-radius:999px;min-width:18px;height:18px;text-align:center;font-size:11px;line-height:18px;font-weight:700}
-    .mk .t{flex:1;white-space:pre-wrap;word-break:break-word} .mk .gone{color:#6e6e73;font-style:italic}
+    .mk{display:flex;gap:6px;align-items:center;margin-top:4px}
+    .mk .n{flex:none;background:#ff9f0a;color:#fff;border-radius:999px;min-width:18px;height:18px;text-align:center;font-size:11px;line-height:18px;font-weight:700}
+    .mk .t{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis} .mk .gone{color:#6e6e73;font-style:italic}
+    .mk-more{font-size:12px;color:#6e6e73;margin-top:2px}
+    .note{flex:none} textarea{width:100%;height:58px;border:1px solid #c7c7cc;border-radius:8px;padding:6px;resize:none}
+    .foot{flex:none;padding:8px 12px;background:#f5f5f7}
+    .nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+    .nav button{border:1px solid #c7c7cc;background:#fff;border-radius:8px;padding:3px 10px;cursor:pointer}
+    .nav button:disabled{opacity:.35;cursor:default}
+    .dots{display:flex;gap:5px;align-items:center}
+    .dots i{width:9px;height:9px;border-radius:999px;background:#c7c7cc;cursor:pointer;display:block}
+    .dots i.done{background:#34c759} .dots i.cur{outline:2px solid #0a84ff;outline-offset:1px}
+    .send{width:100%;background:#1d1d1f;color:#fff;border:0;border-radius:8px;padding:7px;font-weight:600;cursor:pointer}
+    .st{font-size:12px;color:#6e6e73;margin-top:4px} .st:empty{display:none}
     #layer{position:fixed;inset:0;pointer-events:none}
     .pin{position:fixed;transform:translate(-50%,-50%);background:#ff9f0a;color:#fff;border:2px solid #fff;border-radius:999px;min-width:22px;height:22px;font-size:12px;font-weight:700;line-height:18px;text-align:center;box-shadow:0 2px 6px rgba(0,0,0,.3);pointer-events:auto;cursor:default}
     .area{position:fixed;border:2px solid #ff9f0a;background:rgba(255,159,10,.12);border-radius:4px;pointer-events:none}
@@ -64,52 +84,77 @@
   const w = root.getElementById('w');
   let body = [];
 
+  let qi = store('aid_q') || 0;
+  const varOf = (b, k) => (b.varianty || []).find(v => v.klic === k);
+  function goQ(i) {   // a question is a page: its chosen (or recommended, or first) variant on its own screen
+    qi = Math.max(0, Math.min(body.length - 1, i)); store('aid_q', qi);
+    const b = body[qi]; if (!b) return draw();
+    const k = chosen[b.bod] || (varOf(b, b.doporuceni) ? b.doporuceni : (b.varianty || [])[0]?.klic);
+    const v = varOf(b, k); if (!v) return draw();
+    const to = v.cesta || '/', same = new URL(to, location.origin).pathname === location.pathname;
+    show(k, same ? null : to);
+  }
   function draw() {
     store('aid_panel_open', open);
     const cur = window.AID_VARIANT || null;
     if (!open) { w.innerHTML = `<button class="tab" id="t" title="Návrh AID">AID${cur ? ' · ' + esc(cur) : ''}</button>`; root.getElementById('t').onclick = () => { open = true; draw(); }; return; }
-    w.innerHTML = `<div class="box"><div class="head"><b>Návrh AID</b><button class="x" id="min" title="Skrýt">skrýt ✕</button></div>
-      <div class="tools"><button id="kom" class="${commenting ? 'on' : ''}">${commenting ? 'Komentuji… (Esc)' : 'Komentovat'}</button>
-        <button id="vis">${showMarks ? 'Skrýt značky' : 'Ukázat značky'}</button></div>
-      ${body.map((b, i) => {
-        const vs = b.varianty || [], shown = vs.find(v => v.klic === cur), pick = chosen[b.bod];
-        return `<div class="bod"><div class="q">${esc(b.otazka)}</div>
-          <div class="seg">${vs.map(v => `<button class="${v.klic === cur ? 'on' : ''}" data-i="${i}" data-k="${esc(v.klic)}" title="${esc(v.popis)}">${esc(v.klic)}</button>`).join('')}</div>
-          <div class="desc">${shown ? 'Vidíš: <b>' + esc(shown.klic) + '</b> — ' + esc(shown.popis) : 'Vidíš dnešní stav. Přepni variantu nahoře.'}</div>
-          <div class="row">${pick ? `<span class="picked">✓ vybráno: ${esc(pick)}</span>` : '<span class="none">zatím nevybráno</span>'}
-            ${shown && pick !== shown.klic ? `<button class="pick" data-b="${esc(b.bod)}" data-k="${esc(shown.klic)}">Vybrat ${esc(shown.klic)}</button>` : ''}</div>
-          <textarea data-b="${esc(b.bod)}" placeholder="Poznámka (uloží se sama)">${esc(store('aid_note_' + b.bod) || '')}</textarea></div>`;
-      }).join('')}
-      <div class="marks" id="mlist"></div>
-      <button class="send" id="send">Odeslat volby</button><div id="st" class="st"></div></div>`;
+    const b = body[qi] || { varianty: [] }, vs = b.varianty || [], shown = varOf(b, cur), pick = chosen[b.bod];
+    const nChosen = body.filter(x => chosen[x.bod]).length;
+    w.innerHTML = `<div class="box">
+      <div class="head"><b>NÁVRH AID · OTÁZKA ${qi + 1} Z ${body.length}</b><button class="x" id="min" title="Skrýt">skrýt ✕</button></div>
+      <div class="sec top">
+        <div class="q">${esc(b.otazka)}</div>
+        <div class="seg">${vs.map(v => `<button class="${v.klic === cur ? 'on' : ''}${v.klic === pick ? ' picked' : ''}" data-k="${esc(v.klic)}" title="${esc(v.popis)}">${esc(v.klic)}${v.klic === b.doporuceni ? '<span class="star">★</span>' : ''}</button>`).join('')}</div>
+        <div class="desc">${shown ? '<b>' + esc(shown.klic) + '</b> — ' + esc(shown.popis) : 'Vidíš dnešní stav. Přepni variantu.'}</div>
+        ${b.doporuceni ? `<div class="rec"><b>★ Doporučuji ${esc(b.doporuceni)}</b>${b.proc ? ' — ' + esc(b.proc) : ''}</div>` : ''}
+        <div class="row">${pick ? `<span class="picked-l">✓ vybráno: ${esc(pick)}</span>` : '<span class="none">zatím nevybráno</span>'}
+          ${shown && pick !== shown.klic ? `<button class="pick" data-k="${esc(shown.klic)}">Vybrat ${esc(shown.klic)}</button>` : ''}</div>
+      </div>
+      <div class="sec mk-sec"><div class="mk-head tools"><span class="lbl" id="mcount">Značky</span>
+        <button id="kom" class="${commenting ? 'on' : ''}">${commenting ? 'Komentuji… (Esc)' : '+ Značka'}</button>
+        <button id="vis" title="${showMarks ? 'Skrýt značky na stránce' : 'Ukázat značky na stránce'}">${showMarks ? '👁' : '—'}</button></div>
+        <div id="mlist"></div></div>
+      <div class="sec note"><textarea data-b="${esc(b.bod)}" placeholder="Poznámka k otázce ${qi + 1} (uloží se sama)">${esc(store('aid_note_' + b.bod) || '')}</textarea></div>
+      <div class="foot"><div class="nav"><button id="prev" ${qi ? '' : 'disabled'}>‹ předchozí</button>
+        <div class="dots">${body.map((x, i) => `<i class="${chosen[x.bod] ? 'done' : ''}${i === qi ? ' cur' : ''}" data-q="${i}" title="Otázka ${i + 1}"></i>`).join('')}</div>
+        <button id="next" ${qi < body.length - 1 ? '' : 'disabled'}>další ›</button></div>
+        <button class="send" id="send">Odeslat volby · vybráno ${nChosen} z ${body.length}</button><div id="st" class="st"></div></div>
+    </div>`;
     root.getElementById('min').onclick = () => { open = false; draw(); };
     root.getElementById('kom').onclick = () => setCommenting(!commenting);
     root.getElementById('vis').onclick = () => { showMarks = !showMarks; store('aid_marks_show', showMarks); place(); draw(); };
+    root.getElementById('prev').onclick = async () => { await saveNote(); goQ(qi - 1); };
+    root.getElementById('next').onclick = async () => { await saveNote(); goQ(qi + 1); };
+    root.querySelectorAll('.dots i').forEach(d => d.onclick = async () => { await saveNote(); goQ(+d.dataset.q); });
     drawMarks();
     root.querySelectorAll('.seg button').forEach(btn => btn.onclick = () => {
-      const v = (body[+btn.dataset.i].varianty || []).find(x => x.klic === btn.dataset.k) || {};
-      const sameScreen = !v.cesta || new URL(v.cesta, location.origin).pathname === location.pathname;
-      show(btn.dataset.k, sameScreen ? null : v.cesta);
+      const v = varOf(b, btn.dataset.k) || {}, to = v.cesta || '/';
+      show(btn.dataset.k, new URL(to, location.origin).pathname === location.pathname ? null : to);
     });
     w.querySelectorAll('button.pick').forEach(btn => btn.onclick = async () => {
-      if (await post({ type: 'choice', bod: btn.dataset.b, volba: btn.dataset.k })) { chosen[btn.dataset.b] = btn.dataset.k; store('aid_chosen', chosen); draw(); }
+      if (await post({ type: 'choice', bod: b.bod, volba: btn.dataset.k })) { chosen[b.bod] = btn.dataset.k; store('aid_chosen', chosen); draw(); }
     });
-    w.querySelectorAll('textarea').forEach(t => {   // the panel's notes only, never the mark bubble in the layer
-      t.oninput = () => store('aid_note_' + t.dataset.b, t.value);
-      t.onblur = async () => {   // a note is never lost to a forgotten "Odeslat": it is sent when the PM leaves the field
-        const v = t.value.trim(); if (!v || store('aid_note_sent_' + t.dataset.b) === v) return;
-        if (await post({ type: 'note', bod: t.dataset.b, text: v })) store('aid_note_sent_' + t.dataset.b, v);
-      };
-    });
+    const t = w.querySelector('.note textarea');
+    t.oninput = () => store('aid_note_' + t.dataset.b, t.value);
+    t.onblur = saveNote;   // a note is never lost to a forgotten "Odeslat": it is sent when the PM leaves the field
     root.getElementById('send').onclick = async () => {
-      for (const t of w.querySelectorAll('textarea')) await t.onblur();
-      const ok = await post({ type: 'confirm', selected: chosen });
-      root.getElementById('st').textContent = ok ? 'Odesláno. Agent to uvidí.' : 'Nepodařilo se odeslat, zkus to znovu.';
+      const notes = await saveNote(), ok = notes && await post({ type: 'confirm', selected: chosen });
+      root.getElementById('st').textContent = ok ? 'Odesláno. Agent to uvidí.' : notes ? 'Nepodařilo se odeslat, zkus to znovu.' : 'Poznámka se neodeslala, zkus to znovu (text zůstal).';
     };
+  }
+  async function saveNote() {   // every note left unsent (stored per question); true = all of them arrived
+    let ok = true;
+    for (const x of body) {
+      const v = String(store('aid_note_' + x.bod) || '').trim(); if (!v || store('aid_note_sent_' + x.bod) === v) continue;
+      if (await post({ type: 'note', bod: x.bod, text: v })) store('aid_note_sent_' + x.bod, v); else ok = false;
+    }
+    return ok;
   }
   window.addEventListener('popstate', () => {   // back / forward in the browser: the variant follows the address
     const v = new URL(location.href).searchParams.get('v');
-    if (v && v !== window.AID_VARIANT && body.some(b => (b.varianty || []).some(x => x.klic === v))) { window.AID_VARIANT = v; draw(); }
+    // the question whose variant is this key on this screen (one key on one screen belongs to one point)
+    const i = body.findIndex(b => (b.varianty || []).some(x => x.klic === v && new URL(x.cesta || '/', location.origin).pathname === location.pathname));
+    if (i >= 0 && (v !== window.AID_VARIANT || i !== qi)) { window.AID_VARIANT = v; qi = i; store('aid_q', qi); draw(); }
   });
   // ── 3.18.0 marks: the PM points at an element (click) or an area (mouse drag) and writes a note ──────────────
   const layer = root.getElementById('layer');
@@ -176,19 +221,20 @@
     if (seq !== loadSeq) return;
     marks = Array.isArray(got) ? got : []; place(); drawMarks();
   }
-  function drawMarks() {
+  function drawMarks() {   // a fixed place: the count, then at most three one-line marks and "+N"
     const host2 = root.getElementById('mlist'); if (!host2) return;
+    const lbl = root.getElementById('mcount'); if (lbl) lbl.textContent = `Značky na obrazovce (${marks.length})`;
     host2.replaceChildren();
-    const head = document.createElement('div'); head.className = 'q'; head.textContent = `Značky na této obrazovce (${marks.length})`; host2.appendChild(head);
-    marks.forEach((m, i) => {
+    marks.slice(0, 3).forEach((m, i) => {
       const row = document.createElement('div'); row.className = 'mk';
       const n = document.createElement('span'); n.className = 'n'; n.textContent = String(i + 1);
-      const t = document.createElement('span'); t.className = 't'; t.textContent = m.text;   // the PM's words, as text only
-      if (m.gone) { const g = document.createElement('div'); g.className = 'gone'; g.textContent = 'prvek už na stránce není'; t.appendChild(g); }
+      const t = document.createElement('span'); t.className = 't' + (m.gone ? ' gone' : ''); t.textContent = m.text;   // the PM's words, as text only
+      t.title = m.gone ? 'prvek už na stránce není: ' + m.text : m.text;
       const x = document.createElement('button'); x.className = 'x'; x.textContent = '×'; x.title = 'Smazat značku';
       x.onclick = async () => { if (await post({ type: 'mark', smazano: true, id: m.id })) loadMarks(); };
       row.append(n, t, x); host2.appendChild(row);
     });
+    if (marks.length > 3) { const more = document.createElement('div'); more.className = 'mk-more'; more.textContent = `+ ${marks.length - 3} další (čísla na stránce)`; host2.appendChild(more); }
   }
 
   function ask(druh, el, kotva, rect, at) {   // the note bubble next to the point
@@ -276,6 +322,9 @@
   window.addEventListener('aid-variant', () => setTimeout(reloadOnMove));
   window.__AID_MARKS__ = { setCommenting, loadMarks, get marks() { return marks; } };   // for the kit's own browser test
 
-  fetch('/__aid/live.json').then(r => r.json()).then(spec => { body = Array.isArray(spec.body) ? spec.body : []; draw(); loadMarks(); })
+  fetch('/__aid/live.json').then(r => r.json()).then(spec => { body = Array.isArray(spec.body) ? spec.body : [];
+    if (qi >= body.length) qi = 0;
+    if (!window.AID_VARIANT || !varOf(body[qi] || {}, window.AID_VARIANT)) goQ(qi); else draw();
+    loadMarks(); })
     .catch(() => { w.innerHTML = '<div class="box">AID: návrh se nenačetl (live.json).</div>'; });
 })();

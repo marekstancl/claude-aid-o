@@ -35,7 +35,7 @@ review_checkpoints:
     stand_in_model: opus       # a codex role unreachable: a claude agent answers the same brief
     reviewers:
       - {role: generalist_a,      provider: claude, model: opus}
-      - {role: generalist_b,      provider: codex,  model: gpt-6-sol, effort: medium}
+      - {role: generalist_b,      provider: codex,  model: gpt-6.2-sol, effort: medium}
       - {role: behaviour_edges,   provider: claude, model: opus}
       - {role: feasibility_deps,  provider: claude, model: opus}
       - {role: reuse,             provider: claude, model: opus}
@@ -69,7 +69,7 @@ review_checkpoints:
     stand_in_model: opus       # a codex role unreachable: a claude agent answers the same brief
     reviewers:
       # 3.16.0 (PM 1A, agents P017: Codex only at CP7 found four things at once): the generalist is Codex; unreachable → the claude stand-in
-      - {role: step_generalist, provider: codex,  model: gpt-6-sol, effort: low}
+      - {role: step_generalist, provider: codex,  model: gpt-6.2-sol, effort: low}
       - {role: step_security,   provider: claude, model: opus, effort: low, full_when: review+security}
       # P117 (18): a step that changes documentation (CHANGELOG, README, docs/, help_paths) has its claims checked here
       - {role: final_claims,    provider: claude, model: opus, effort: low, when: docs_surface}
@@ -88,7 +88,7 @@ review_checkpoints:
     stand_in_model: opus
     reviewers:
       - {role: final_criteria,   provider: claude, model: opus}
-      - {role: final_generalist, provider: codex,  model: gpt-6-sol, effort: medium}
+      - {role: final_generalist, provider: codex,  model: gpt-6.2-sol, effort: medium}
 
   # The fix loop, the trivial-skip thresholds and the pre-filter left with
   # P094: a step is skipped by aid-step-check.sh (size, scope, no pattern), the

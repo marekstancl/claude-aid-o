@@ -3,6 +3,18 @@
 All notable changes to the AID Orchestrator plugin are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/).
 
+## [3.19.0] — 2026-11-27
+
+Panel po otázkách a agent vidí živý náhled sám (PM 9. 11. 2026 po živé ukázce na kopii WANu; hlášení WAN P126). Zadání: `docs/plans/2026-11-09-3190-panel-a-pohled-agenta.md`.
+
+- **Panel živého náhledu: jedna otázka na stránku, nic se neposouvá.** Každá část je vždy na stejném místě: nahoře otázka, varianty (★ doporučená, ✓ vybraná), popis zobrazené varianty, „★ Doporučuji X - proč" a „Vybrat"; pod tím značky; pod nimi poznámka k otázce; u spodní hrany „‹ předchozí · tečky · další ›" a „Odeslat volby · vybráno n z m". Text celý; když je dlouhý, posouvá se jen horní část. Bez průhlednosti. Přechod na otázku přepne její obrazovku a variantu (vybranou, jinak doporučenou); poznámka se odešle i při přechodu.
+- **Agent si každou variantu prohlédne sám, přihlášený, dřív než ti pošle odkaz.** `aid-companion.sh live` po startu projde všechny varianty na počítači i telefonu stejně, jak je uvidíš ty (přes proxy, bez panelu), vyfotí je a změří oříznutá okna a přetékající stránku; agent dostane `look` a `check`. Přihlášení zařídí kit podle `ui.live.login` (příkaz projektu, který vypíše token; WAN: testovací účet z testů v prohlížeči). Na kopii WANu P126 hned našel variantu, která je na telefonu o 134 px širší než obrazovka.
+- **`shots` funguje i nad živou kopií** (přes proxy, přihlášený, bez mocků) - na dialogy a kliky, které automatická prohlídka nedělá. Dřív ji kit odmítal.
+- **`live.json`:** `doporuceni` a `proc` u otázky; kit odmítne dvojí `bod`, dvojí klíč v otázce a stejný klíč na stejné obrazovce ve dvou otázkách (proměnná varianty je jedna na stránku). Odkaz pro PM otevře doporučenou variantu.
+- **Chybová stránka vývojového serveru se nepočítá jako hotová prohlídka.** Když místo aplikace naskočí chyba Vite (`vite-error-overlay`), prohlídka vrátí `check.complete: false` a u snímku `dev_server_error` s textem chyby; `show` takový snímek odmítne s touž větou. Dřív ji hlásila jako v pořádku (zjištěno 27. 11. 2026 při ověření na kopii WANu bez `pyproject.toml`).
+- **Kritik na Codexu zase zapisuje, kdy běžel.** Označení `codex:<model>` s tečkou v názvu (`gpt-6.2-sol`) dřív kontrola záznamu odmítla a záznam tiše chyběl; tečka je teď povolená (ne na začátku role).
+- **Codex revizor na `gpt-6.2-sol`** (PM 27. 11. 2026, volba 3A). Revize plánu, kroku i konce plánu dřív běžely na `gpt-6-sol`, který Codex vede jako „Legacy“. Cena `gpt-6.2-sol` je v `defaults/prices.yaml` (2 / 10 USD za milion, cache 0,10). Ceník Claude odpovídá tomu, kam dnes vedou jména `opus` a `sonnet`: Opus 5.5 (4 / 20 USD, cache 0,20; směs 13,1 odhadem z naměřených 16,4 u Opusu 5) a Sonnet 5.5 (cache 0,10). Projekt, který si model revizora přepsal ve vlastním `.aid-o/config/policies/review-checkpoints.yaml`, si ho změní sám. Na novější model Codexu u revizorů AID i ve výchozím Codexu upozorní týdenní hlídka modelů ekosystému (`model-watch` v repu services).
+
 ## [3.18.1] — 2026-11-09
 
 Živý náhled zadrátovaný jako výchozí (volba PM 1A: „všude, nativně, agent ví, co dělat"). Zadání: `docs/plans/2026-11-09-3181-zivy-nahled-vsude.md`.

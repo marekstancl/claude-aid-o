@@ -284,8 +284,8 @@ otherwise it shows the variants as pictures.
 If PM accepts:
 1. Follow `skills/visual-companion/SKILL.md` — `bash {plugin_path}/scripts/aid-companion.sh up --plan P{NNN}` first; it
    says which way (3.18.1):
-   - **an existing screen and `ui.live` set** → the live preview: `proto --live`, the variants, `live.json`, `live`,
-     `answers` (`live` also writes the design gate's basis);
+   - **an existing screen and `ui.live` set** → the live preview: `proto --live`, the variants, `live.json`, `live`
+     (it looks at every variant for you: read its `look` pictures before you send the PM the link), `answers`;
    - **an existing screen without `ui.live`** → show the PM the block `aid_ui_live_detect` proposes (a comment instead
      = ask him for the dev API's address), write it into `project.yaml` on his yes, then the live preview;
    - **he declines, `proto --live` refuses, or a design from scratch** → captures: `proto`, the variants, `shots`,

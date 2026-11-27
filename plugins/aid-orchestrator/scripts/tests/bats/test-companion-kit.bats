@@ -596,6 +596,17 @@ J
   run _k show; [ "$status" -ne 0 ]; [[ "$output" == *"prohlidka_snimku"* ]]
 }
 
+@test "show refuses a shot of the dev server's error page with its message, even as today's app" {
+  _dialog_pages
+  echo '<html><body><script>customElements.define("vite-error-overlay", class extends HTMLElement { constructor() { super(); this.attachShadow({mode: "open"}).innerHTML = "<pre class=message>soubor chybi</pre>"; } }); document.body.appendChild(document.createElement("vite-error-overlay"));</script></body></html>' > "$P/ui/broken.html"
+  run _k proto; [ "$status" -eq 0 ]; run --separate-stderr _k up; [ "$status" -eq 0 ]; echo '[]' > "$D/mocks.json"
+  echo '{"base": "proto", "shots": [{"name": "ok", "path": "/ok.html", "only": ["desktop"]}, {"name": "broken", "path": "/broken.html", "only": ["desktop"]}]}' > "$D/shots.json"
+  run _k shots; [ "$status" -eq 0 ]
+  jq -e '.clipped[0] | select(.pravidlo == "dev_server_error" and .zprava == "soubor chybi")' "$D/shots/desktop/broken.check.json"
+  _navrh broken ok '[{"snimek": "broken", "popis": "x"}]'
+  run _k show; echo "$output"; [ "$status" -ne 0 ]; [[ "$output" == *"shot 'broken' (desktop) shows the dev server's error page, not the app — soubor chybi"* ]]
+}
+
 @test "show refuses a shot without its check, one whose png or shots.json entry changed since, and the shots of a run with an unmocked call" {
   _dialog_pages; run _k proto; [ "$status" -eq 0 ]; echo '[]' > "$D/mocks.json"
   echo '{"base": "proto", "shots": [{"name": "ok", "path": "/ok.html"}, {"name": "scroll", "path": "/scroll.html"}]}' > "$D/shots.json"
